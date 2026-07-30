@@ -23,7 +23,7 @@ type model struct {
 	preflight     string // non-empty when qemu or /dev/kvm is unusable
 	width         int
 	height        int
-	pendingDelete string // name of the VM awaiting delete confirmation
+	pendingDelete *config.VM // VM awaiting delete confirmation
 
 	form      formModel
 	detail    detailModel

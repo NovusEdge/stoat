@@ -44,14 +44,14 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The delete confirmation prompt owns all keys while pending: "y"
 	// confirms, anything else cancels. This must run before the normal
 	// switch below because "n" is otherwise bound to "new VM".
-	if m.pendingDelete != "" {
+	if m.pendingDelete != nil {
 		if key.String() == "y" {
-			name := m.pendingDelete
-			m.pendingDelete = ""
+			v := m.pendingDelete
+			m.pendingDelete = nil
 			m.status = ""
-			return m, tea.Sequence(deleteVM(name), loadVMs)
+			return m, tea.Sequence(deleteVM(v), loadVMs)
 		}
-		m.pendingDelete = ""
+		m.pendingDelete = nil
 		m.status = ""
 		return m, nil
 	}
@@ -101,21 +101,18 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.status = "delete " + v.Name + "? y/N"
 			m.screen = screenList
-			m.pendingDelete = v.Name
+			m.pendingDelete = v
 		}
 	case "esc":
-		m.pendingDelete = ""
+		m.pendingDelete = nil
 		m.status = ""
 	}
 	return m, nil
 }
 
-func deleteVM(name string) tea.Cmd {
+func deleteVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
-		v, err := config.Load(name)
-		if err != nil {
-			return statusMsg(err.Error())
-		}
+		name := v.Name
 		if err := v.Delete(); err != nil {
 			return statusMsg(err.Error())
 		}
