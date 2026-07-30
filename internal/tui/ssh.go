@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/keys"
 )
 
 // sshInto suspends the TUI and hands the terminal to a real ssh process.
@@ -22,7 +23,7 @@ import (
 // never answers (no sshd yet, still booting) fails fast instead of hanging
 // the terminal forever.
 func sshInto(v *config.VM) tea.Cmd {
-	key := config.Root() + "/id_stoat"
+	key := keys.PrivatePath()
 	args := []string{
 		"-p", fmt.Sprint(v.SSHPort),
 		"-o", "StrictHostKeyChecking=no",

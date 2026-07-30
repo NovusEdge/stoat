@@ -25,8 +25,8 @@ func TestFormTabOrder(t *testing.T) {
 		mode  string
 		order []int // visual/traversal order, starting from the initial focus (fName)
 	}{
-		{"live", "live", []int{fName, fISO, fMode, fRAM, fCPUs, fShare}},
-		{"disk", "disk", []int{fName, fISO, fMode, fRAM, fCPUs, fDisk, fShare}},
+		{"live", "live", []int{fName, fISO, fMode, fRAM, fCPUs, fShare, fRecipes}},
+		{"disk", "disk", []int{fName, fISO, fMode, fRAM, fCPUs, fDisk, fShare, fRecipes}},
 	}
 
 	for _, c := range cases {
@@ -125,4 +125,48 @@ func TestBuildVMFailedDiskCreationLeavesNoTrace(t *testing.T) {
 	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
 		t.Fatalf("VM directory %q survived a failed disk creation: %v", dir, statErr)
 	}
+}
+
+// TestBuildAssignsSelectedRecipes is the required regression test for C2:
+// nothing ever assigned config.VM.Recipes, so "p" was a guaranteed no-op.
+// build() must carry exactly the checked recipe names into the VM, in
+// recipeNames order, and an empty selection must build fine with an empty
+// (not nil-panicking) Recipes slice rather than blocking VM creation.
+func TestBuildAssignsSelectedRecipes(t *testing.T) {
+	newBuildableForm := func(t *testing.T, name string) formModel {
+		t.Helper()
+		t.Setenv("STOAT_HOME", t.TempDir())
+		f := newForm()
+		f.inputs[fName].SetValue(name)
+		f.isos = []string{"alpine-standard-3.20.0-x86_64.iso"}
+		f.isoIdx = 0
+		f.recipeNames = []string{"alpha", "beta", "gamma"}
+		return f
+	}
+
+	t.Run("selected recipes carried through", func(t *testing.T) {
+		f := newBuildableForm(t, "withrecipes")
+		f.recipeSel = map[string]bool{"gamma": true, "alpha": true}
+
+		vm, err := f.build()
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		want := []string{"alpha", "gamma"} // recipeNames order, not selection order
+		if !reflect.DeepEqual(vm.Recipes, want) {
+			t.Fatalf("Recipes = %v, want %v", vm.Recipes, want)
+		}
+	})
+
+	t.Run("no recipes selected still builds", func(t *testing.T) {
+		f := newBuildableForm(t, "norecipes")
+
+		vm, err := f.build()
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		if len(vm.Recipes) != 0 {
+			t.Fatalf("Recipes = %v, want empty", vm.Recipes)
+		}
+	})
 }

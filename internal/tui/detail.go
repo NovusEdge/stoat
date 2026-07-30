@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ func tick(gen int) tea.Cmd {
 
 // tailLog reads the last n lines of the most recent provision run.
 func tailLog(v *config.VM, n int) string {
-	b, err := os.ReadFile(v.Dir + "/last-provision.log")
+	b, err := os.ReadFile(filepath.Join(v.Dir, "last-provision.log"))
 	if err != nil {
 		return ""
 	}
@@ -80,7 +81,7 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if editor == "" {
 				editor = "vi"
 			}
-			c := exec.Command(editor, m.detail.vm.Dir+"/vm.toml")
+			c := exec.Command(editor, filepath.Join(m.detail.vm.Dir, "vm.toml"))
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				v, lerr := config.Load(m.detail.vm.Name)
 				if lerr != nil {
@@ -112,16 +113,7 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.status = "not running"
 		case "p":
-			v := m.detail.vm
-			if m.provisioning[v.Name] {
-				return m, nil
-			}
-			if m.provisioning == nil {
-				m.provisioning = map[string]bool{}
-			}
-			m.provisioning[v.Name] = true
-			m.status = "provisioning " + v.Name + "…"
-			return m, provision(v)
+			return m, m.startProvision(m.detail.vm)
 		}
 	case vmReloadedMsg:
 		m.detail.vm = msg.vm

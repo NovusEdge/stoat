@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -19,14 +20,16 @@ const (
 )
 
 type model struct {
-	screen        screen
-	vms           []*config.VM
-	cursor        int
-	status        string // transient message shown under the list
-	preflight     string // non-empty when qemu or /dev/kvm is unusable
-	width         int
-	height        int
-	pendingDelete *config.VM // VM awaiting delete confirmation
+	screen              screen
+	vms                 []*config.VM
+	broken              []config.Broken // VMs whose vm.toml exists but fails to parse
+	cursor              int
+	status              string // transient message shown under the list
+	preflight           string // non-empty when qemu or /dev/kvm is unusable
+	width               int
+	height              int
+	pendingDelete       *config.VM // VM awaiting delete confirmation
+	pendingDeleteBroken string     // name of a broken VM dir awaiting delete confirmation; mutually exclusive with pendingDelete
 
 	// provisioning tracks VMs with a provision run in flight, keyed by
 	// name, so a second "p" press on the same VM can't start a second ssh
@@ -38,8 +41,14 @@ type model struct {
 	detailGen int // bumped every time the detail screen is entered; identifies the live tick chain
 }
 
-// vmsLoadedMsg carries a refreshed VM list.
-type vmsLoadedMsg []*config.VM
+// vmsLoadedMsg carries a refreshed VM list, alongside any VM directories
+// whose vm.toml exists but failed to parse — config.List silently omits
+// those, so they're fetched separately and surfaced rather than made to
+// look deleted.
+type vmsLoadedMsg struct {
+	vms    []*config.VM
+	broken []config.Broken
+}
 
 // statusMsg reports the outcome of an action.
 type statusMsg string
@@ -49,7 +58,10 @@ func loadVMs() tea.Msg {
 	if err != nil {
 		return statusMsg("cannot read " + config.Root() + ": " + err.Error())
 	}
-	return vmsLoadedMsg(vms)
+	// A failure here just means broken VMs silently don't show up this
+	// refresh; it must never block loading the good ones.
+	broken, _ := config.ListBroken()
+	return vmsLoadedMsg{vms: vms, broken: broken}
 }
 
 func Run() error {
@@ -57,6 +69,9 @@ func Run() error {
 		return err
 	}
 	if err := recipes.Install(); err != nil {
+		return err
+	}
+	if err := keys.Ensure(); err != nil {
 		return err
 	}
 	m := model{provisioning: map[string]bool{}}
@@ -75,9 +90,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case vmsLoadedMsg:
-		m.vms = msg
-		if m.cursor >= len(m.vms) {
-			m.cursor = max(0, len(m.vms)-1)
+		m.vms = msg.vms
+		m.broken = msg.broken
+		total := len(m.vms) + len(m.broken)
+		if m.cursor >= total {
+			m.cursor = max(0, total-1)
 		}
 		return m, nil
 	case statusMsg:

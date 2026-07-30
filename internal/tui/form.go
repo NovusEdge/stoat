@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -12,18 +13,22 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 const downloadEntry = "⤓ download latest Alpine…"
 
 type formModel struct {
-	inputs   []textinput.Model // name, ram, cpus, disk, share
-	focus    int
-	isos     []string
-	isoIdx   int
-	mode     string // "live" | "disk"
-	err      string
-	fetching bool
+	inputs      []textinput.Model // name, ram, cpus, disk, share
+	focus       int
+	isos        []string
+	isoIdx      int
+	mode        string // "live" | "disk"
+	err         string
+	fetching    bool
+	recipeNames []string        // all installed recipes, from recipes.List()
+	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
+	recipeSel   map[string]bool // names currently checked
 }
 
 // field indices into inputs
@@ -38,8 +43,9 @@ const (
 
 // focus positions beyond the text inputs
 const (
-	fISO  = fieldCount
-	fMode = fieldCount + 1
+	fISO = fieldCount + iota
+	fMode
+	fRecipes
 )
 
 // focusOrder is the tab-traversal order of focus positions, which must match
@@ -48,15 +54,18 @@ const (
 type focusOrder []int
 
 // order returns the tab-traversal order for the form's current mode: name,
-// iso, mode, ram, cpus, [disk], share. fDisk is included only in disk mode,
-// since viewForm doesn't render a disk field (or its "❯" marker) in live
-// mode — landing focus there would silently edit an invisible field.
+// iso, mode, ram, cpus, [disk], share, recipes. fDisk is included only in
+// disk mode, since viewForm doesn't render a disk field (or its "❯" marker)
+// in live mode — landing focus there would silently edit an invisible
+// field. recipes is always included, even with zero recipes installed —
+// viewForm always renders that row (with a "none installed" placeholder),
+// so it's always a valid landing spot.
 func (f formModel) order() focusOrder {
 	o := focusOrder{fName, fISO, fMode, fRAM, fCPUs}
 	if f.mode == "disk" {
 		o = append(o, fDisk)
 	}
-	return append(o, fShare)
+	return append(o, fShare, fRecipes)
 }
 
 func (o focusOrder) indexOf(focus int) int {
@@ -77,7 +86,7 @@ func (o focusOrder) prev(focus int) int {
 }
 
 func newForm() formModel {
-	f := formModel{mode: "live"}
+	f := formModel{mode: "live", recipeSel: map[string]bool{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
 		ti := textinput.New()
@@ -89,6 +98,7 @@ func newForm() formModel {
 	f.inputs[fName].Placeholder = "name"
 	f.inputs[fName].Focus()
 	f.isos, _ = iso.List()
+	f.recipeNames, _ = recipes.List()
 	return f
 }
 
@@ -159,9 +169,29 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.form.mode = "live"
 				}
 				return m, nil
+			case fRecipes:
+				n := len(m.form.recipeNames)
+				if n == 0 {
+					return m, nil
+				}
+				d := 1
+				if msg.String() == "left" {
+					d = -1
+				}
+				m.form.recipeIdx = (m.form.recipeIdx + d + n) % n
+				return m, nil
 			}
 			// any other field: fall through to the text-input update below
 			// so the arrow key moves the cursor instead of being swallowed.
+		case " ":
+			if m.form.focus == fRecipes && len(m.form.recipeNames) > 0 {
+				name := m.form.recipeNames[m.form.recipeIdx]
+				if m.form.recipeSel == nil {
+					m.form.recipeSel = map[string]bool{}
+				}
+				m.form.recipeSel[name] = !m.form.recipeSel[name]
+				return m, nil
+			}
 		case "enter":
 			if m.form.focus == fISO && m.form.isoIdx == len(m.form.isos) {
 				if m.form.fetching {
@@ -214,7 +244,7 @@ func (f formModel) build() (*config.VM, error) {
 	if strings.ContainsAny(name, "/ ") {
 		return nil, fmt.Errorf("name cannot contain spaces or slashes")
 	}
-	if _, err := os.Stat(config.Root() + "/" + name); err == nil {
+	if _, err := os.Stat(filepath.Join(config.Root(), name)); err == nil {
 		return nil, fmt.Errorf("%s already exists", name)
 	}
 	if len(f.isos) == 0 || f.isoIdx >= len(f.isos) {
@@ -232,6 +262,12 @@ func (f formModel) build() (*config.VM, error) {
 	if err != nil {
 		return nil, err
 	}
+	selected := []string{}
+	for _, r := range f.recipeNames {
+		if f.recipeSel[r] {
+			selected = append(selected, r)
+		}
+	}
 	return &config.VM{
 		Name:    name,
 		Mode:    f.mode,
@@ -241,6 +277,7 @@ func (f formModel) build() (*config.VM, error) {
 		Disk:    strings.TrimSpace(f.inputs[fDisk].Value()),
 		Share:   strings.TrimSpace(f.inputs[fShare].Value()),
 		SSHPort: port,
+		Recipes: selected,
 	}, nil
 }
 
@@ -306,12 +343,42 @@ func (m model) viewForm() string {
 	}
 	row(fShare, "share", f.inputs[fShare].View())
 
+	recipesMarker := "  "
+	if f.focus == fRecipes {
+		recipesMarker = selStyle.Render("❯ ")
+	}
+	b.WriteString(fmt.Sprintf("%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel()))
+
 	if f.fetching {
 		b.WriteString("\n  " + dimStyle.Render("downloading latest alpine…") + "\n")
 	}
 	if f.err != "" {
 		b.WriteString("\n" + errStyle.Render("  "+f.err) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("  tab move   ←/→ change   ↵ create   esc cancel") + "\n")
+	b.WriteString("\n" + dimStyle.Render("  tab move   ←/→ change   space toggle recipe   ↵ create   esc cancel") + "\n")
 	return b.String()
+}
+
+// recipesLabel renders the recipes row's checkbox list, highlighting the
+// item under the row's sub-cursor when the row itself has focus. An empty
+// recipes.List() (nothing installed) renders a placeholder instead of a
+// blank row, and the row stays a harmless, non-crashing landing spot in the
+// focus cycle either way.
+func (f formModel) recipesLabel() string {
+	if len(f.recipeNames) == 0 {
+		return dimStyle.Render("— (no recipes installed)")
+	}
+	items := make([]string, len(f.recipeNames))
+	for i, name := range f.recipeNames {
+		box := "[ ]"
+		if f.recipeSel[name] {
+			box = "[x]"
+		}
+		item := box + " " + name
+		if f.focus == fRecipes && i == f.recipeIdx {
+			item = selStyle.Render(item)
+		}
+		items[i] = item
+	}
+	return strings.Join(items, "  ")
 }

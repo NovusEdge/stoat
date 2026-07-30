@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,11 +12,23 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
+// The list shows good VMs (m.vms) followed by broken ones (m.broken); the
+// cursor ranges over both as one sequence. current and currentBroken split
+// it back apart: exactly one of them returns non-nil for any valid cursor
+// position.
 func (m model) current() *config.VM {
 	if m.cursor < 0 || m.cursor >= len(m.vms) {
 		return nil
 	}
 	return m.vms[m.cursor]
+}
+
+func (m model) currentBroken() *config.Broken {
+	i := m.cursor - len(m.vms)
+	if i < 0 || i >= len(m.broken) {
+		return nil
+	}
+	return &m.broken[i]
 }
 
 func startVM(v *config.VM) tea.Cmd {
@@ -44,25 +58,34 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The delete confirmation prompt owns all keys while pending: "y"
 	// confirms, anything else cancels. This must run before the normal
 	// switch below because "n" is otherwise bound to "new VM".
-	if m.pendingDelete != nil {
+	if m.pendingDelete != nil || m.pendingDeleteBroken != "" {
 		if key.String() == "y" {
-			v := m.pendingDelete
-			m.pendingDelete = nil
+			if m.pendingDelete != nil {
+				v := m.pendingDelete
+				m.pendingDelete = nil
+				m.status = ""
+				return m, tea.Sequence(deleteVM(v), loadVMs)
+			}
+			name := m.pendingDeleteBroken
+			m.pendingDeleteBroken = ""
 			m.status = ""
-			return m, tea.Sequence(deleteVM(v), loadVMs)
+			return m, tea.Sequence(deleteBrokenVM(name), loadVMs)
 		}
 		m.pendingDelete = nil
+		m.pendingDeleteBroken = ""
 		m.status = ""
 		return m, nil
 	}
 
 	v := m.current()
+	broken := m.currentBroken()
+	total := len(m.vms) + len(m.broken)
 
 	switch key.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "j", "down":
-		if m.cursor < len(m.vms)-1 {
+		if m.cursor < total-1 {
 			m.cursor++
 		}
 	case "k", "up":
@@ -71,6 +94,9 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if v == nil {
+			if broken != nil {
+				m.status = broken.Name + ": broken vm.toml — cannot start (d to delete)"
+			}
 			break
 		}
 		m.status = ""
@@ -88,6 +114,9 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailGen++
 			return m, tick(m.detailGen)
 		}
+		if broken != nil {
+			m.status = broken.Name + ": broken vm.toml — cannot start (d to delete)"
+		}
 	case "s":
 		if v != nil && qemu.Running(v) {
 			return m, sshInto(v)
@@ -95,15 +124,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = "not running"
 	case "p":
 		if v != nil {
-			if m.provisioning[v.Name] {
-				break
-			}
-			if m.provisioning == nil {
-				m.provisioning = map[string]bool{}
-			}
-			m.provisioning[v.Name] = true
-			m.status = "provisioning " + v.Name + "…"
-			return m, provision(v)
+			return m, m.startProvision(v)
 		}
 	case "d":
 		if v != nil {
@@ -114,9 +135,14 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "delete " + v.Name + "? y/N"
 			m.screen = screenList
 			m.pendingDelete = v
+		} else if broken != nil {
+			m.status = "delete " + broken.Name + "? y/N"
+			m.screen = screenList
+			m.pendingDeleteBroken = broken.Name
 		}
 	case "esc":
 		m.pendingDelete = nil
+		m.pendingDeleteBroken = ""
 		m.status = ""
 	}
 	return m, nil
@@ -132,6 +158,37 @@ func deleteVM(v *config.VM) tea.Cmd {
 	}
 }
 
+// deleteBrokenVM removes a broken VM's directory by name. There is no
+// *config.VM to call Delete on — the whole point is that its vm.toml
+// couldn't be parsed into one — so this reimplements Delete's data-root
+// containment check directly against the directory path.
+func deleteBrokenVM(name string) tea.Cmd {
+	return func() tea.Msg {
+		dir := filepath.Join(config.Root(), name)
+		if filepath.Dir(dir) != config.Root() {
+			return statusMsg(fmt.Sprintf("refusing to delete %q: outside the data root", dir))
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return statusMsg(err.Error())
+		}
+		return statusMsg(name + " deleted")
+	}
+}
+
+// brokenReason returns a short, single-line reason string for a broken
+// vm.toml's parse error, suitable for a list row.
+func brokenReason(err error) string {
+	s := err.Error()
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	const max = 60
+	if len(s) > max {
+		s = s[:max-1] + "…"
+	}
+	return s
+}
+
 func (m model) viewList() string {
 	var b strings.Builder
 	b.WriteString(banner() + "\n\n")
@@ -140,7 +197,7 @@ func (m model) viewList() string {
 		b.WriteString(errStyle.Render("  "+m.preflight) + "\n\n")
 	}
 
-	if len(m.vms) == 0 {
+	if len(m.vms) == 0 && len(m.broken) == 0 {
 		b.WriteString(dimStyle.Render("  no vms yet — press n to create one") + "\n")
 	}
 
@@ -158,6 +215,18 @@ func (m model) viewList() string {
 		if i == m.cursor {
 			cursor = selStyle.Render("❯ ")
 			row = selStyle.Render(row)
+		}
+		b.WriteString(cursor + row + "\n")
+	}
+
+	for i, bv := range m.broken {
+		plain := fmt.Sprintf("✗ %-14s broken: %s", bv.Name, brokenReason(bv.Err))
+		cursor := "  "
+		row := downStyle.Render(plain)
+		idx := len(m.vms) + i
+		if idx == m.cursor {
+			cursor = selStyle.Render("❯ ")
+			row = selStyle.Render(plain)
 		}
 		b.WriteString(cursor + row + "\n")
 	}
