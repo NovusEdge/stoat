@@ -14,7 +14,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -303,22 +302,6 @@ func parseChecksum(body []byte, filename string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no checksum for %s", filename)
-}
-
-// List returns the ISO filenames already present in the data root.
-func List() ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
-	if err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".iso") {
-			out = append(out, e.Name())
-		}
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 // newDigest picks the hash algorithm to verify with, by the expected

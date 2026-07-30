@@ -70,34 +70,10 @@ func TestSaveLoadRoundtripCloudVM(t *testing.T) {
 	}
 }
 
-// TestBackendForRegression is the Critical from plan review: existing
-// live-mode VMs saved before Backend existed must resolve to "apkovl", not
-// "ssh". An explicit Backend always wins.
-func TestBackendForRegression(t *testing.T) {
-	live := &VM{Mode: "live"}
-	if got := BackendFor(live); got != "apkovl" {
-		t.Errorf("live VM with empty Backend: got %q, want %q", got, "apkovl")
-	}
-
-	cloud := &VM{Mode: "cloud"}
-	if got := BackendFor(cloud); got != "cloudinit" {
-		t.Errorf("cloud VM with empty Backend: got %q, want %q", got, "cloudinit")
-	}
-
-	explicit := &VM{Mode: "live", Backend: "ssh"}
-	if got := BackendFor(explicit); got != "ssh" {
-		t.Errorf("explicit Backend must win: got %q, want %q", got, "ssh")
-	}
-
-	unknownMode := &VM{Mode: "disk"}
-	if got := BackendFor(unknownMode); got != "ssh" {
-		t.Errorf("non-live/cloud mode with empty Backend: got %q, want %q", got, "ssh")
-	}
-}
-
 // TestLoadPreexistingVMTomlHasNoNewFields simulates a vm.toml written before
 // this phase: no os/backend/base/sshuser keys at all. It must still load
-// cleanly and resolve to the apkovl/root defaults.
+// cleanly, leaving Backend empty (dispatch elsewhere keys off Mode, not
+// this field) and SSHUser empty (defaults to root elsewhere).
 func TestLoadPreexistingVMTomlHasNoNewFields(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := EnsureRoot(); err != nil {
@@ -115,8 +91,8 @@ sshport = 2201
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := BackendFor(v); got != "apkovl" {
-		t.Errorf("pre-phase live VM: BackendFor got %q, want %q", got, "apkovl")
+	if v.Backend != "" {
+		t.Errorf("pre-phase VM should have empty Backend, got %q", v.Backend)
 	}
 	if v.SSHUser != "" {
 		t.Errorf("pre-phase VM should have empty SSHUser (defaults to root elsewhere), got %q", v.SSHUser)

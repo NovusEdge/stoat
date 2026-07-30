@@ -49,8 +49,8 @@ func (o imageOption) label() string {
 	return fmt.Sprintf("%-8s %-10s %s (byo)", osLabel, o.backend, o.file)
 }
 
-// localImageFiles lists every plain file under isos/, any extension.
-// iso.List only returns *.iso, which misses BYO qcow2/img cloud images.
+// localImageFiles lists every plain file under isos/, any extension, so BYO
+// qcow2/img cloud images are picked up alongside ISOs.
 func localImageFiles() []string {
 	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
 	if err != nil {
