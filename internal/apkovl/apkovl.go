@@ -72,11 +72,15 @@ func Build(v *config.VM) error {
 	}
 
 	out := filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz")
-	f, err := os.Create(out)
+	tmp := out + ".tmp"
+	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		f.Close()
+		os.Remove(tmp)
+	}()
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
 	b := &builder{tw: tw}
@@ -122,5 +126,11 @@ func Build(v *config.VM) error {
 	if err := tw.Close(); err != nil {
 		return err
 	}
-	return gz.Close()
+	if err := gz.Close(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, out)
 }

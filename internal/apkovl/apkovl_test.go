@@ -126,6 +126,59 @@ func TestBuildOmitsFstabWhenNoShare(t *testing.T) {
 	}
 }
 
+// TestBuildFailureLeavesGoodOverlayIntact proves that a failed rebuild does
+// not leave a corrupt tarball at the canonical path, and does not destroy a
+// previously-good overlay. It forces the failure by making the output
+// directory read-only, which os.Create refuses to write into; that only
+// works as non-root, since root ignores permission bits.
+func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits are ignored, cannot force a write failure")
+	}
+
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &config.VM{Name: "live1", Mode: "live", Dir: filepath.Join(root, "live1")}
+
+	if err := Build(v); err != nil {
+		t.Fatalf("initial build failed: %v", err)
+	}
+	out := filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz")
+	before, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("reading good overlay: %v", err)
+	}
+	// Sanity check: the good overlay is actually extractable.
+	entries(t, out)
+
+	if err := os.Chmod(v.OvlDir(), 0o555); err != nil {
+		t.Fatalf("chmod ovl dir: %v", err)
+	}
+	defer os.Chmod(v.OvlDir(), 0o755)
+
+	if err := Build(v); err == nil {
+		t.Fatal("expected Build to fail when the ovl dir is read-only")
+	}
+
+	if err := os.Chmod(v.OvlDir(), 0o755); err != nil {
+		t.Fatalf("restoring ovl dir perms: %v", err)
+	}
+
+	if _, err := os.Stat(out + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind after failed build: err=%v", err)
+	}
+
+	after, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("original overlay missing after failed rebuild: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Error("failed rebuild altered the previously-good overlay")
+	}
+	// Still extractable, not truncated/corrupt.
+	entries(t, out)
+}
+
 func TestBuildIsDeterministicallyRegenerated(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
