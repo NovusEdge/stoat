@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -24,8 +23,6 @@ type formModel struct {
 	isoIdx   int
 	mode     string // "live" | "disk"
 	err      string
-	prog     progress.Model
-	pct      float64
 	fetching bool
 }
 
@@ -47,7 +44,7 @@ const (
 )
 
 func newForm() formModel {
-	f := formModel{mode: "live", prog: progress.New(progress.WithDefaultGradient())}
+	f := formModel{mode: "live"}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
 		ti := textinput.New()
@@ -63,17 +60,17 @@ func newForm() formModel {
 }
 
 type isoFetchedMsg string
-type isoProgressMsg float64
+type isoFetchErrMsg string
 
 func fetchISO() tea.Cmd {
 	return func() tea.Msg {
 		r, err := iso.Latest()
 		if err != nil {
-			return statusMsg("index: " + err.Error())
+			return isoFetchErrMsg("index: " + err.Error())
 		}
 		path, err := iso.Download(r, nil)
 		if err != nil {
-			return statusMsg("download: " + err.Error())
+			return isoFetchErrMsg("download: " + err.Error())
 		}
 		return isoFetchedMsg(path)
 	}
@@ -91,6 +88,11 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.status = "downloaded " + name
+		return m, nil
+
+	case isoFetchErrMsg:
+		m.form.fetching = false
+		m.status = string(msg)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -129,6 +131,9 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// so the arrow key moves the cursor instead of being swallowed.
 		case "enter":
 			if m.form.focus == fISO && m.form.isoIdx == len(m.form.isos) {
+				if m.form.fetching {
+					return m, nil // a fetch is already in flight; don't start a second one
+				}
 				m.form.fetching = true
 				m.status = "downloading…"
 				return m, fetchISO()
@@ -269,7 +274,7 @@ func (m model) viewForm() string {
 	row(fShare, "share", f.inputs[fShare].View())
 
 	if f.fetching {
-		b.WriteString("\n  " + f.prog.ViewAs(f.pct) + "\n")
+		b.WriteString("\n  " + dimStyle.Render("downloading latest alpine…") + "\n")
 	}
 	if f.err != "" {
 		b.WriteString("\n" + errStyle.Render("  "+f.err) + "\n")
