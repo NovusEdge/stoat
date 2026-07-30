@@ -71,6 +71,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.status = string(msg)
 		return m, nil
+	case screenMsg:
+		m.screen = screen(msg)
+		return m, nil
 	}
 
 	switch m.screen {
