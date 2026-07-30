@@ -16,6 +16,7 @@ import (
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // Preflight reports why VMs cannot start, or nil if they can.
@@ -142,7 +143,19 @@ func ensureCloudOverlay(v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	if _, err := cloudinit.Seed(v, pub); err != nil {
+	// v.Recipes only ever holds names the form offered for this VM's
+	// os/backend, so for a cloud VM every entry here is already a cloud
+	// fragment (recipes.List filters by backend at selection time) — no
+	// extra backend check needed before reading them.
+	var recipeBodies []string
+	for _, name := range v.Recipes {
+		body, err := recipes.Read(name)
+		if err != nil {
+			return fmt.Errorf("reading recipe %s: %w", name, err)
+		}
+		recipeBodies = append(recipeBodies, body)
+	}
+	if _, err := cloudinit.Seed(v, pub, recipeBodies); err != nil {
 		return err
 	}
 	return nil

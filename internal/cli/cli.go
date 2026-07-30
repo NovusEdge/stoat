@@ -353,6 +353,15 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "stoat: provision:", err)
 		return ExitFail
 	}
+	if v.Mode == "cloud" {
+		// cloud-init's packages: list only runs at first boot, baked into
+		// the seed when the overlay was created — there is nothing left for
+		// ssh-based provisioning to do, and piping a recipe (which for cloud
+		// VMs is #cloud-config YAML, not a shell script) into `sh -s` would
+		// just fail.
+		fmt.Fprintf(stdout, "%s is a cloud VM — recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.\n", a.VM)
+		return ExitOK
+	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "provisioning %s...\n", a.VM)
 	}

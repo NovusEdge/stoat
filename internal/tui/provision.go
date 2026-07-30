@@ -39,6 +39,14 @@ func provision(v *config.VM) tea.Cmd {
 // what happened nor blocks a second real provision from starting right
 // after.
 func (m *model) startProvision(v *config.VM) tea.Cmd {
+	if v.Mode == "cloud" {
+		// cloud-init's packages: list is baked into the seed and only runs
+		// at first boot; there is nothing for ssh-based provisioning to do,
+		// and a cloud recipe is #cloud-config YAML, not a shell script, so
+		// piping it into `sh -s` would just fail.
+		m.status = v.Name + ": cloud VMs provision at first boot via cloud-init — recipes are applied automatically; recreate the VM to change them"
+		return nil
+	}
 	if len(v.Recipes) == 0 {
 		m.status = v.Name + ": no recipes selected — nothing to provision"
 		return nil
