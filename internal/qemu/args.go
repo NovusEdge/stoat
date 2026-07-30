@@ -41,6 +41,10 @@ func Args(v *config.VM) []string {
 		// The initramfs looks for *.apkovl.tar.gz at the root of a mountable
 		// filesystem, so the tarball is served through vvfat as a fake FAT disk.
 		a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
+		// vvfat synthesizes a valid MBR signature but no boot code, so without
+		// an explicit boot order QEMU's disk-first default can select the
+		// empty overlay and hang instead of falling through to the ISO.
+		a = append(a, "-boot", "d")
 	case "disk":
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
 		if !v.Installed {

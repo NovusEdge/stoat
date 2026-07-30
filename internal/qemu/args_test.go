@@ -39,6 +39,9 @@ func TestArgsLive(t *testing.T) {
 	if strings.Contains(got, "hostfwd=tcp::") {
 		t.Error("hostfwd must bind 127.0.0.1, not all interfaces")
 	}
+	if !strings.Contains(got, "-boot d") {
+		t.Errorf("live mode must set boot order so the ISO wins over the empty overlay:\n%s", got)
+	}
 }
 
 func TestArgsDiskNotInstalled(t *testing.T) {
