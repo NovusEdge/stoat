@@ -28,6 +28,12 @@ const interfaces = "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 ine
 // truncated tarball.
 const tmpName = ".stoat-ovl.tmp"
 
+// legacyTmpName is the temp filename used before tmpName was introduced. It
+// DOES match nlplug-findfs's *.apkovl.tar.gz* glob, so one left behind by a
+// crash or power loss during an old build could still be picked up by the
+// initramfs and unpacked as a truncated overlay.
+const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
+
 type builder struct {
 	tw  *tar.Writer
 	err error
@@ -80,6 +86,10 @@ func Build(v *config.VM) error {
 
 	out := filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz")
 	tmp := filepath.Join(v.OvlDir(), tmpName)
+	// Remove any temp file orphaned by a crash mid-Build from before tmpName
+	// was introduced: unlike tmpName, it matches the initramfs's
+	// *.apkovl.tar.gz* glob and could otherwise be selected as the overlay.
+	os.Remove(filepath.Join(v.OvlDir(), legacyTmpName))
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err

@@ -219,6 +219,37 @@ func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
 	entries(t, out)
 }
 
+// TestBuildRemovesLegacyTmpFile proves that a file orphaned by a crash
+// mid-Build from before tmpName was introduced — stoat.apkovl.tar.gz.tmp,
+// which DOES match nlplug-findfs's *.apkovl.tar.gz* glob — is cleaned up by
+// Build, so it can never be picked up by the initramfs as a truncated
+// overlay.
+func TestBuildRemovesLegacyTmpFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &config.VM{Name: "live1", Mode: "live", Dir: filepath.Join(root, "live1")}
+
+	if err := os.MkdirAll(v.OvlDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz.tmp")
+	if err := os.WriteFile(legacy, []byte("truncated garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Build(v); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy temp file still present after Build: err=%v", err)
+	}
+	out := filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz")
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("real overlay missing after Build: %v", err)
+	}
+}
+
 func TestBuildIsDeterministicallyRegenerated(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
