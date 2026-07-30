@@ -2,8 +2,12 @@
 # Installs XFCE and starts it. Runs as root over ssh, on a booted Alpine live VM.
 set -e
 
+# setup-apkrepos -c -1 already refreshes the indexes ("Updating repository
+# indexes... done"), so a separate `apk update` here is redundant work that
+# only widens the window for a transient ssh/network drop under `set -e` to
+# kill the whole provision. Don't add retries either — a real apk failure
+# should still fail loudly.
 setup-apkrepos -c -1
-apk update
 
 setup-xorg-base
 apk add xfce4 xfce4-terminal dbus-x11
@@ -52,4 +56,37 @@ fi
 EOF
 fi
 
-echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
+# Live vs disk: a live VM boots Alpine's diskless mode, whose initramfs
+# mounts the root filesystem as tmpfs (and, on the -o overlaytmpfs boot
+# option, overlay-on-tmpfs) — verified against
+# /usr/share/mkinitfs/initramfs-init from mkinitfs-3.14.0-r0 (the package
+# apk installs from the Alpine 3.24 repos): the diskless path reads
+# `mount -t tmpfs -o "$rootflags" tmpfs "$sysroot"` and the overlaytmpfs
+# path reads `mount -t overlay -o ... overlayfs "$sysroot"`. Everything
+# written there — /etc/inittab, /root/.profile, the installed packages —
+# lives in RAM and is gone on reboot; only the apkovl (which cannot carry
+# installed packages) survives. A disk install (setup-disk) instead mounts
+# a real block-device filesystem (ext4 by default) as root, which persists.
+# So: root mounted tmpfs/overlay == live/diskless, anything else == disk.
+root_fstype=$(awk '$2 == "/" { print $3 }' /proc/mounts)
+
+case "$root_fstype" in
+tmpfs | overlay)
+    # Live VM: the autologin/.profile edits above are still worth having in
+    # case tty1 gets re-inited some other way, but they will NOT survive a
+    # reboot, so telling the user to reboot for a desktop would be a lie.
+    # Instead, get XFCE onto the VM's own console *right now*, in this
+    # boot: busybox init (this is Alpine, not sysvinit) documents `HUP:
+    # reload /etc/inittab` in its own --help text, and reloading inittab is
+    # the standard way to make init respawn a tty entry whose command
+    # changed without a reboot. Sending it makes init respawn tty1 through
+    # /sbin/autologin -> login -f root -> .profile -> exec startx, so XFCE
+    # comes up on the VM's console (the one qemu displays) without the user
+    # touching the console at all.
+    kill -HUP 1
+    echo "xfce installed and starting NOW on the vm's console (this session only) — a live VM keeps nothing across reboots (root is tmpfs/overlay, wiped on restart), so rebooting will NOT bring xfce back. For a desktop that survives reboots, provision a disk VM instead."
+    ;;
+*)
+    echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
+    ;;
+esac

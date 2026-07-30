@@ -103,3 +103,47 @@ func TestInstalledRecipeConfiguresAutologinAndGuardedStartx(t *testing.T) {
 		t.Error("xfce.sh does not guard the .profile append against re-running the recipe")
 	}
 }
+
+func TestInstalledRecipeIsHonestAboutLiveVsDiskPersistence(t *testing.T) {
+	// A live VM's root is tmpfs/overlay: /etc/inittab, /root/.profile, and
+	// the installed xfce packages are all discarded on reboot. Telling a
+	// live-VM user to reboot for a persistent desktop is a lie, so the
+	// recipe must branch on live vs disk instead of printing one
+	// unconditional "reboot to land in xfce" message. Assert through the
+	// real path (Install then Read) so this proves what stoat actually
+	// ships, not just what's in the source tree.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(s, "setup-apkrepos") {
+		t.Error("xfce.sh must still configure repos before installing packages")
+	}
+
+	// The recipe must detect live vs disk from inside the guest (checking
+	// the root filesystem type is the verified mechanism) rather than
+	// unconditionally assuming persistence.
+	if !strings.Contains(s, "/proc/mounts") {
+		t.Error("xfce.sh does not inspect /proc/mounts to detect a live (tmpfs/overlay) root")
+	}
+	if !strings.Contains(s, "tmpfs") {
+		t.Error("xfce.sh does not check for a tmpfs root, which Alpine's diskless boot uses")
+	}
+	if !strings.Contains(s, "case ") || !strings.Contains(s, "esac") {
+		t.Error("xfce.sh does not branch on live vs disk (no case/esac found)")
+	}
+
+	// The old unconditional promise must be gone: it can only appear inside
+	// the disk branch now, never as the recipe's only possible output.
+	if strings.Count(s, "reboot the vm to land in xfce automatically") > 1 {
+		t.Error("xfce.sh prints the disk-only reboot promise more than once")
+	}
+	if !strings.Contains(s, "reboot") || !strings.Contains(s, "NOT") {
+		t.Error("xfce.sh does not honestly warn a live-VM user that rebooting will not bring xfce back")
+	}
+}
