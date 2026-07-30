@@ -96,18 +96,23 @@ into `~/.stoat/isos/` yourself and it will show up in the picker too.
 
 ### Development
 
+There is both a `justfile` and a `Makefile` with the same targets — use
+whichever you have. `just` additionally offers `just check` (what the
+pre-commit hook runs) and `just run -- <args>`.
+
 ```
-make hooks
-make test
+just hooks     # or: make hooks
+just test      # or: make test
+just check     # gofmt -l, go vet, go build
 ```
 
-`make hooks` points git at `.githooks` to enable the pre-commit and
-commit-msg hooks.
+`hooks` points git at `.githooks` to enable the pre-commit and commit-msg
+hooks.
 
-> **Note:** if your shell aliases `make` to something else (e.g. `just` via
-> an oh-my-zsh plugin), `make build`/`make install`/etc. will fail with an
-> error like `error: No justfile found` instead of running the Makefile. Use
-> `command make ...` to bypass the alias, or invoke `/usr/bin/make` directly.
+> **Note:** if your shell aliases `make` to `just`, `make build`/`make
+> install`/etc. will fail with `error: No justfile found` — that alias now
+> resolves to the justfile, which has the same targets, so it will work.
+> To reach the real Makefile explicitly, use `command make ...`.
 
 ## Quick start
 
