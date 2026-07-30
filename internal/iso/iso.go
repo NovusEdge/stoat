@@ -3,14 +3,17 @@ package iso
 
 import (
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -34,7 +37,14 @@ type Release struct {
 	Flavor  string `yaml:"flavor"`
 	File    string `yaml:"file"`
 	Version string `yaml:"version"`
-	SHA256  string `yaml:"sha256"`
+
+	// SHA256 is the expected digest, despite the name not always a SHA-256
+	// one: it holds whatever fetchChecksum found (Alpine's index is always
+	// sha256; a catalog Entry's ChecksumURL may be sha512, e.g. Debian's
+	// SHA512SUMS). Download picks the verification algorithm by this
+	// string's hex length (64 -> sha256, 128 -> sha512) rather than by
+	// name. Left empty, it means no checksum was available at all.
+	SHA256 string `yaml:"sha256"`
 
 	// URL, when set, is the full URL Download fetches from. It is left
 	// empty by Latest() (Alpine), which instead resolves against
@@ -42,6 +52,17 @@ type Release struct {
 	// catalog entries (cloud images), whose files don't live under the
 	// Alpine mirror.
 	URL string
+
+	// Verified reports whether Download actually checked the downloaded
+	// bytes against a published digest. It starts false and Download sets
+	// it true only after a byte-for-byte digest match (including the
+	// existing-file reuse shortcut) — never on the strength of a
+	// ChecksumURL merely being configured. When SHA256 is empty (no
+	// checksum was available at Resolve time), Download fetches the file
+	// anyway but Verified stays false, so callers can tell an unverified
+	// download apart from a verified one instead of the two looking
+	// identical.
+	Verified bool
 }
 
 // Entry describes one image in stoat's catalog: what it is, where to fetch
@@ -88,26 +109,34 @@ func Catalog() []Entry {
 			Backend: "cloudinit",
 			URL:     "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
 			// Debian publishes SHA512SUMS (not SHA256) alongside this
-			// image; stoat's checksum path is SHA256-only, so mixing
-			// algorithms here would either misfire or need a second hash
-			// implementation. Left empty rather than wired to the wrong
-			// algorithm: downloads unverified.
-			ChecksumURL: "",
+			// image. Verified 2026-07-30 by GET: 128-hex digests, "<hex>
+			// <filename>" (GNU coreutils) format. parseChecksum/Download
+			// now pick the hash algorithm by digest length (64 hex ->
+			// sha256, 128 hex -> sha512), so this verifies correctly.
+			ChecksumURL: "https://cloud.debian.org/images/cloud/bookworm/latest/SHA512SUMS",
 			SSHUser:     "stoat",
 			Notes:       "Debian 12 (bookworm) generic cloud image",
 		},
 		{
-			ID:      "fedora-cloud",
-			OS:      "fedora",
-			Arch:    "amd64",
+			ID:   "fedora-cloud",
+			OS:   "fedora",
+			Arch: "amd64",
+			// Verified 2026-07-30 by HEAD/GET: Fedora 40 aged out of
+			// releases/ into archives.fedoraproject.org (filename also
+			// changed). Fedora 43 is current and still lives under
+			// releases/ (200, ~583MB, Last-Modified 2025-10-23) — that
+			// path is far more stable than pinning an archived compose,
+			// so this points at 43 rather than the archive.
 			Backend: "cloudinit",
-			URL:     "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-40-1.14.x86_64.qcow2",
-			// Fedora's per-release CHECKSUM file lives next to a specific
-			// compose (e.g. "*-CHECKSUM"), not at a stable "latest" path;
-			// guessing one risks a 404 that hard-fails the whole
-			// download rather than just skipping verification. Left
-			// empty; downloads unverified.
-			ChecksumURL: "",
+			URL:     "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2",
+			// Fedora's per-release CHECKSUM is BSD format ("SHA256
+			// (filename) = hex") inside a clearsigned PGP block, not the
+			// GNU "<hex>  <filename>" form. parseChecksum now has a BSD
+			// branch (small: one regexp, matched before falling back to
+			// the GNU split) so this verifies too; the PGP armor lines
+			// around it are simply lines that don't match either format
+			// and are skipped.
+			ChecksumURL: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-43-1.6-x86_64-CHECKSUM",
 			SSHUser:     "stoat",
 			Notes:       "Fedora Cloud Base qcow2",
 		},
@@ -117,10 +146,10 @@ func Catalog() []Entry {
 			Arch:    "amd64",
 			Backend: "cloudinit",
 			URL:     "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
-			// Arch's rolling mirror doesn't reliably publish a matching
-			// sums file alongside images/latest/; left empty rather than
-			// guessing a filename. Downloads unverified.
-			ChecksumURL: "",
+			// Verified 2026-07-30 by GET: this mirror does publish a
+			// per-image ".SHA256" sidecar (200, "<64hex>  <filename>"),
+			// same format and algorithm parseChecksum already handles.
+			ChecksumURL: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256",
 			SSHUser:     "stoat",
 			Notes:       "Arch Linux rolling cloud image",
 		},
@@ -220,9 +249,14 @@ func Resolve(e Entry) (*Release, error) {
 	return r, nil
 }
 
-// fetchChecksum fetches a published sums file (the "<hex>  <filename>" per
-// line format shared by sha256sum/SHA256SUMS-style outputs) and returns the
-// hex digest for filename.
+// fetchChecksum fetches a published sums file and returns the hex digest for
+// filename. It handles both formats seen across the catalog's real
+// mirrors: GNU coreutils ("<hex>  <filename>" or "<hex> *<filename>", as
+// used by SHA256SUMS/SHA512SUMS/.SHA256) and BSD-style ("SHA256 (filename)
+// = <hex>", as used by Fedora's CHECKSUM, which also arrives wrapped in a
+// clearsigned PGP block — the armor lines simply match neither format and
+// are skipped). The digest's own hex length (64 vs 128) tells Download which
+// algorithm to verify with; fetchChecksum does not need to know it.
 func fetchChecksum(checksumURL, filename string) (string, error) {
 	resp, err := client.Get(checksumURL)
 	if err != nil {
@@ -239,10 +273,25 @@ func fetchChecksum(checksumURL, filename string) (string, error) {
 	return parseChecksum(body, filename)
 }
 
-// parseChecksum scans a sha256sum(1)-style sums file for the line matching
-// filename and returns its lowercase hex digest.
+// bsdChecksumLine matches a BSD-style digest line, e.g.
+// "SHA256 (Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2) = 8465...".
+var bsdChecksumLine = regexp.MustCompile(`^[A-Za-z0-9]+\s+\(([^)]+)\)\s*=\s*([0-9a-fA-F]+)\s*$`)
+
+// parseChecksum scans a sums file (GNU coreutils or BSD format, see
+// fetchChecksum) for the line matching filename and returns its lowercase
+// hex digest.
 func parseChecksum(body []byte, filename string) (string, error) {
 	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if m := bsdChecksumLine.FindStringSubmatch(line); m != nil {
+			if m[1] == filename {
+				return strings.ToLower(m[2]), nil
+			}
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -272,25 +321,42 @@ func List() ([]string, error) {
 	return out, nil
 }
 
-func sha256File(path string) (string, error) {
+// newDigest picks the hash algorithm to verify with, by the expected
+// digest's hex length: 64 hex chars -> sha256, 128 -> sha512. Anything else
+// (including empty, the "no checksum available" case) defaults to sha256,
+// but callers only compare against a non-empty expected digest, so the
+// default is never actually checked in that case.
+func newDigest(expected string) hash.Hash {
+	if len(expected) == hex.EncodedLen(sha512.Size) {
+		return sha512.New()
+	}
+	return sha256.New()
+}
+
+func fileDigest(path string, h hash.Hash) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// Download fetches r into isos/ and, when r.SHA256 is known, verifies it,
-// returning the path relative to the data root. An existing file with a
-// matching sum is reused. The partial download is renamed only after the
-// hash matches (or, for an entry with no published checksum, unconditionally
-// on a full read), so an interrupted fetch never leaves a plausible-looking
-// image behind.
+// Download fetches r into isos/ and, when r.SHA256 is known, verifies it
+// (sha256 or sha512, picked by digest length — see newDigest), returning the
+// path relative to the data root. An existing file with a matching digest is
+// reused. The partial download is renamed only after the digest matches (or,
+// for an entry with no published checksum, unconditionally on a full read),
+// so an interrupted fetch never leaves a plausible-looking image behind.
+//
+// r.Verified is set true only when Download itself confirmed the bytes
+// against a digest (fresh download or reused file) — never merely because a
+// checksum was configured. It stays false whenever r.SHA256 is empty, so a
+// caller can tell an unverified download apart from a verified one instead
+// of the two being indistinguishable.
 //
 // r.URL, when set, is fetched directly (a catalog Entry's direct-URL image);
 // otherwise r.File is resolved against downloadMirror, preserving the
@@ -304,7 +370,8 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 	rel := filepath.Join("isos", r.File)
 
 	if r.SHA256 != "" {
-		if sum, err := sha256File(final); err == nil && sum == r.SHA256 {
+		if sum, err := fileDigest(final, newDigest(r.SHA256)); err == nil && sum == r.SHA256 {
+			r.Verified = true
 			return rel, nil
 		}
 	}
@@ -328,7 +395,7 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	h := sha256.New()
+	h := newDigest(r.SHA256)
 	var done int64
 	buf := make([]byte, 256*1024)
 	for {
@@ -361,6 +428,7 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 			os.Remove(part)
 			return "", fmt.Errorf("checksum mismatch: got %s, want %s", got, r.SHA256)
 		}
+		r.Verified = true
 	}
 	if err := os.Rename(part, final); err != nil {
 		os.Remove(part)

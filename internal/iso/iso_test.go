@@ -2,12 +2,14 @@ package iso
 
 import (
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -171,6 +173,9 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 	if rel != filepath.Join("isos", filename) {
 		t.Fatalf("Download rel path = %q", rel)
 	}
+	if !r.Verified {
+		t.Fatal("Download did not set Verified after a matching checksum")
+	}
 
 	final := filepath.Join(os.Getenv("STOAT_HOME"), "isos", filename)
 	if _, err := os.Stat(final); err != nil {
@@ -191,5 +196,128 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 	}
 	if _, err := os.Stat(badFinal + ".part"); !os.IsNotExist(err) {
 		t.Fatalf(".part left behind after checksum mismatch")
+	}
+}
+
+// TestDownload_SHA512 exercises the algorithm-agnostic verification path: a
+// 128-hex expected digest (as Debian's SHA512SUMS publishes) must be
+// checked with sha512, not sha256, and must still gate the .part rename on
+// a match. Regression coverage for the fix that made Download pick the hash
+// by digest length instead of hardcoding sha256.
+func TestDownload_SHA512(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	body := []byte("hello, this stands in for a debian genericcloud image")
+	sum := sha512.Sum512(body)
+	const filename = "example-genericcloud-amd64.qcow2"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	r := &Release{File: filename, URL: srv.URL + "/" + filename, SHA256: hex.EncodeToString(sum[:])}
+	if len(r.SHA256) != 128 {
+		t.Fatalf("test setup: expected a 128-hex sha512 digest, got %d chars", len(r.SHA256))
+	}
+
+	rel, err := Download(r, nil)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if rel != filepath.Join("isos", filename) {
+		t.Fatalf("Download rel path = %q", rel)
+	}
+	if !r.Verified {
+		t.Fatal("Download did not set Verified for a matching sha512 digest")
+	}
+}
+
+// TestDownload_UnverifiedWhenNoChecksum is the Important-3 regression: an
+// entry resolved with no checksum available must still download (never
+// silently fail), but Verified must stay false so a caller can distinguish
+// "downloaded, unverified" from "downloaded, verified" instead of the two
+// looking identical.
+func TestDownload_UnverifiedWhenNoChecksum(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	body := []byte("no checksum was published for this one")
+	const filename = "unverified-cloudimg-amd64.qcow2"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	r := &Release{File: filename, URL: srv.URL + "/" + filename}
+
+	if _, err := Download(r, nil); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if r.Verified {
+		t.Fatal("Download set Verified with no checksum to verify against")
+	}
+}
+
+// TestParseChecksum_BSDFormat covers Fedora's CHECKSUM format ("SHA256
+// (filename) = hex"), including the surrounding PGP clearsign armor lines
+// that must be skipped rather than misparsed.
+func TestParseChecksum_BSDFormat(t *testing.T) {
+	const filename = "Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
+	want := "846574c8a97cd2d8dc1f231062d73107cc85cbbbda56335e264a46e3a6c8ab2"
+	body := []byte(`-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+# Fedora-Cloud-Base-AmazonEC2-43-1.6.x86_64.raw.xz: 592568816 bytes
+SHA256 (Fedora-Cloud-Base-AmazonEC2-43-1.6.x86_64.raw.xz) = 91a3fa8f5fd870ca4de56c24df97ceb4f8bd806c2e01a1a8a4fa780395a84bf
+# ` + filename + `: 583335936 bytes
+SHA256 (` + filename + `) = ` + want + `
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCAAdFiEExufwgc+A4TFGZ26IgptgZjFkVTEFAmj9DpIACgkQgptgZjFk
+-----END PGP SIGNATURE-----
+`)
+
+	got, err := parseChecksum(body, filename)
+	if err != nil {
+		t.Fatalf("parseChecksum: %v", err)
+	}
+	if got != want {
+		t.Fatalf("parseChecksum = %q, want %q", got, want)
+	}
+}
+
+// TestCatalog_ArchAndDebianHaveChecksumURL is a narrow regression for the
+// review findings: Arch does publish a matching .SHA256 sidecar and Debian
+// does publish SHA512SUMS, so both entries must carry a ChecksumURL now
+// rather than shipping unverified for no real reason.
+func TestCatalog_ArchAndDebianHaveChecksumURL(t *testing.T) {
+	for _, id := range []string{"arch-cloud", "debian-12"} {
+		found := false
+		for _, e := range Catalog() {
+			if e.ID == id {
+				found = true
+				if e.ChecksumURL == "" {
+					t.Errorf("entry %q: expected a non-empty ChecksumURL", id)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("catalog entry %q not found", id)
+		}
+	}
+}
+
+// TestCatalog_FedoraURLNotArchived guards against the exact defect the
+// review found: a Fedora catalog URL pointing at a release that has aged
+// out of releases/ into archives.fedoraproject.org (a 404 for users today).
+func TestCatalog_FedoraURLNotArchived(t *testing.T) {
+	for _, e := range Catalog() {
+		if e.ID != "fedora-cloud" {
+			continue
+		}
+		if strings.Contains(e.URL, "archives.fedoraproject.org") {
+			t.Errorf("fedora-cloud URL points at the archive mirror, not releases/: %s", e.URL)
+		}
 	}
 }
