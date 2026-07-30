@@ -91,46 +91,73 @@ hooks:
 [group('vms')]
 vms:
     #!/usr/bin/env sh
+    . "{{justfile_directory()}}/.just/fmt.sh"
     root="${STOAT_HOME:-$HOME/.stoat}"
-    [ -d "$root" ] || { echo "no data root at $root"; exit 0; }
+    [ -d "$root" ] || { warn "no data root at $root"; exit 0; }
+    head "vms" "$root"
+    dim "$(printf '     %-16s %-6s %-9s %-9s %6s %5s' NAME MODE STATE RECIPES RAM SSH)"
+    any=0
     for d in "$root"/*/; do
+      [ -d "$d" ] || continue
       n=$(basename "$d")
       case "$n" in isos|recipes|logs) continue ;; esac
-      if [ -f "$d/vm.toml" ]; then
-        port=$(sed -n 's/^sshport *= *//p' "$d/vm.toml")
-        mode=$(sed -n 's/^mode *= *//p' "$d/vm.toml" | tr -d '"')
-        state=stopped
-        [ -f "$d/qemu.pid" ] && kill -0 "$(cat "$d/qemu.pid")" 2>/dev/null && state=running
-        printf '%-16s %-6s %-8s ssh:%s\n' "$n" "$mode" "$state" "${port:-?}"
-      else
-        printf '%-16s %s\n' "$n" "(no vm.toml)"
+      any=1
+      if [ ! -f "$d/vm.toml" ]; then
+        printf "  %s  %-16s %s\n" "$(c 8 '?')" "$n" "$(c 8 'no vm.toml')"
+        continue
       fi
+      port=$(sed -n 's/^sshport *= *//p' "$d/vm.toml" | tr -d ' ')
+      mode=$(sed -n 's/^mode *= *//p' "$d/vm.toml" | tr -d '" ')
+      ram=$(sed -n 's/^ram *= *//p' "$d/vm.toml" | tr -d ' ')
+      rec=$(sed -n 's/^recipes *= *//p' "$d/vm.toml" | tr -d '[]" ')
+      [ -n "$mode" ] || { printf "  %s  %-16s %s\n" "$(c 1 '!')" "$n" "$(c 1 'broken vm.toml')"; continue; }
+      if [ -f "$d/qemu.pid" ] && kill -0 "$(cat "$d/qemu.pid" 2>/dev/null)" 2>/dev/null; then
+        dot=$(c 2 '●'); state=$(c 2 "$(printf '%-9s' running)")
+      else
+        dot=$(c 8 '○'); state=$(c 8 "$(printf '%-9s' stopped)")
+      fi
+      printf "  %s  %-16s %-6s %s %-9s %6s %5s\n" "$dot" "$n" "$mode" "$state" "${rec:-—}" "${ram:-?}M" "${port:-?}"
     done
-    echo "--- isos:"
-    ls -1 "$root/isos" 2>/dev/null || echo "  none"
+    [ "$any" = 1 ] || dim "  no vms yet — run 'just dev' and press n"
+    echo
+    head "isos" "$root/isos"
+    ls -1sh "$root/isos" 2>/dev/null | sed '1d;s/^/  /' || dim "  none"
 
 # tail stoat's log
 [group('vms')]
 logs n="50":
     @tail -n {{n}} "${STOAT_HOME:-$HOME/.stoat}/logs/stoat.log" 2>/dev/null || echo "no log yet"
 
-# tail a VM's last provision run, e.g. `just provision-log alpine-test`
+# tail a VM's last provision run, e.g. `just provision-log alpine`
 [group('vms')]
-provision-log name:
-    @tail -n 50 "${STOAT_HOME:-$HOME/.stoat}/{{name}}/last-provision.log" 2>/dev/null || echo "no provision log for {{name}}"
+provision-log name n="40":
+    #!/usr/bin/env sh
+    . "{{justfile_directory()}}/.just/fmt.sh"
+    f="${STOAT_HOME:-$HOME/.stoat}/{{name}}/last-provision.log"
+    [ -f "$f" ] || { warn "no provision log for {{name}} — press p in the TUI first"; exit 0; }
+    head "provision log" "{{name}}"
+    tail -n {{n}} "$f" | sed 's/^/  /'
+    echo
+    dim "  $(wc -l < "$f") lines · $f"
 
 # check host prerequisites
 [group('vms')]
 doctor:
     #!/usr/bin/env sh
-    for b in qemu-system-x86_64 qemu-img ssh ssh-keygen go; do
-      if command -v "$b" >/dev/null; then echo "ok    $b"; else echo "MISS  $b"; fi
+    . "{{justfile_directory()}}/.just/fmt.sh"
+    head "doctor" "$(uname -sr)"
+    miss=0
+    for b in qemu-system-x86_64 qemu-img ssh ssh-keygen go just; do
+      if p=$(command -v "$b" 2>/dev/null); then ok "$b" "$p"; else bad "$b" "not found"; miss=$((miss+1)); fi
     done
-    if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-      echo "ok    /dev/kvm"
-    else
-      echo "MISS  /dev/kvm not accessible — sudo usermod -aG kvm \$USER, then re-login"
-    fi
+    if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ok /dev/kvm "readable and writable"
+    else bad /dev/kvm "add yourself to the kvm group, then re-login"; miss=$((miss+1)); fi
+    root="${STOAT_HOME:-$HOME/.stoat}"
+    [ -d "$root" ] && ok "data root" "$root" || warn2 "data root" "$root (created on first run)"
+    if command -v stoat >/dev/null; then ok "stoat on PATH" "$(command -v stoat) ($(stoat --version 2>/dev/null))"
+    else warn2 "stoat on PATH" "not installed — run 'just install'"; fi
+    echo
+    [ "$miss" = 0 ] && printf "  %s all prerequisites present\n" "$(c 2 ✓)" || printf "  %s %s missing\n" "$(c 1 ✗)" "$miss"
 
 # remove build artifacts (never touches your VMs)
 [group('build')]
