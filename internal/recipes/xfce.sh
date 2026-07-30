@@ -6,7 +6,7 @@ setup-apkrepos -c -1
 apk update
 
 setup-xorg-base
-apk add xfce4 xfce4-terminal dbus-x11 xf86-video-qxl
+apk add xfce4 xfce4-terminal dbus-x11
 
 rc-update add dbus
 rc-service dbus start || true

@@ -2,7 +2,6 @@ package recipes
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -48,15 +47,27 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 	}
 }
 
-func TestBundledRecipeDoesNotAssumeNetworklessApk(t *testing.T) {
+func TestInstalledRecipeConfiguresReposAndMatchesVirtioGPU(t *testing.T) {
 	// The recipe runs after boot over ssh, so it may install from the
-	// network — but it must set up repositories first.
-	b, err := os.ReadFile(filepath.Join("xfce.sh"))
+	// network — but it must set up repositories first. Assert through the
+	// real path (Install then Read) so this proves what stoat actually
+	// installs for a user, not just what's in the source tree.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(b)
 	if !strings.Contains(s, "setup-apkrepos") {
 		t.Error("xfce.sh installs packages without configuring repositories first")
+	}
+	// The VM boots with -vga virtio (virtio-gpu), which setup-xorg-base's
+	// mesa-dri-gallium + modesetting driver already cover. xf86-video-qxl
+	// is the driver for QEMU's separate QXL/SPICE adapter (-vga qxl) and
+	// does not match this device.
+	if strings.Contains(s, "xf86-video-qxl") {
+		t.Error("xfce.sh installs xf86-video-qxl, which does not match -vga virtio (virtio-gpu)")
 	}
 }
