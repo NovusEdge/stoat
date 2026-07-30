@@ -1,4 +1,14 @@
+# build artifacts
 *.iso
 *.qcow2
 /stoat
+
+# agent / planning cruft — local only
 docs/superpowers/
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+.claude/
+.cursor/
+.aider*
