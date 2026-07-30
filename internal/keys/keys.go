@@ -15,21 +15,34 @@ import (
 func PrivatePath() string { return filepath.Join(config.Root(), "id_stoat") }
 func publicPath() string  { return PrivatePath() + ".pub" }
 
+// pairExists reports whether both halves of the keypair are present. A
+// keypair is only usable as a unit; either half missing means broken.
+func pairExists(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	if _, err := os.Stat(path + ".pub"); err != nil {
+		return false
+	}
+	return true
+}
+
 // generate shells out to ssh-keygen, already a runtime dependency, rather
 // than pulling in golang.org/x/crypto for a single call.
 func generate(path, comment string) error {
-	if _, err := os.Stat(path); err == nil {
+	if pairExists(path) {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	// ssh-keygen refuses to overwrite; a stale .pub without its private
-	// half would wedge us, so clear it first.
+	// ssh-keygen refuses to overwrite; a stale half of the pair (either
+	// the private key or its .pub) would wedge us, so clear both first.
+	os.Remove(path)
 	os.Remove(path + ".pub")
 	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", path)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ssh-keygen: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("ssh-keygen: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return os.Chmod(path, 0o600)
 }
