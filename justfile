@@ -5,73 +5,90 @@ scratch := "/tmp/stoat-scratch"
 
 # show available recipes
 default:
-    @just --list --unsorted
+    @just --list
 
 # build ./stoat
+[group('build')]
 build:
     go build -ldflags "{{ldflags}}" -o stoat ./cmd/stoat
 
 # build and install to $PREFIX (default ~/.local/bin)
+[group('build')]
 install: build
     install -Dm755 stoat {{prefix}}/stoat
     @echo "installed {{prefix}}/stoat ({{version}})"
     @command -v stoat >/dev/null || echo "note: {{prefix}} is not on your PATH"
 
 # remove the installed binary — never touches ~/.stoat
+[group('build')]
 uninstall:
     rm -f {{prefix}}/stoat
     @echo "removed {{prefix}}/stoat — your VMs in ${STOAT_HOME:-~/.stoat} were left alone"
 
 # run against your real ~/.stoat
+[group('dev')]
 run *args: build
     ./stoat {{args}}
 
 # run against a throwaway data root, so dev cannot touch your real VMs
+[group('dev')]
 dev *args: build
     @mkdir -p {{scratch}}
     @echo "STOAT_HOME={{scratch}}"
     STOAT_HOME={{scratch}} ./stoat {{args}}
 
 # delete the throwaway data root used by `just dev`
+[group('dev')]
 dev-reset:
     rm -rf {{scratch}}
     @echo "wiped {{scratch}}"
 
+# run all tests
+[group('test')]
 test:
     go test ./...
 
 # verbose tests for one package, e.g. `just test-pkg apkovl`
+[group('test')]
 test-pkg pkg:
     go test ./internal/{{pkg}}/ -v
 
 # tests with the race detector
+[group('test')]
 race:
     go test -race ./...
 
 # coverage summary per package
+[group('test')]
 cover:
     go test -cover ./...
 
 # exactly what .githooks/pre-commit runs
+[group('dev')]
 check:
     gofmt -l .
     go vet ./...
     go build ./...
 
 # format in place
+[group('dev')]
 fmt:
     gofmt -w .
 
+# tidy go.mod and show the go directive
+[group('dev')]
 tidy:
     go mod tidy
     @grep '^go ' go.mod
 
 # enable the pre-commit and commit-msg hooks
+[group('dev')]
 hooks:
     git config core.hooksPath .githooks
     @echo "hooks enabled: $(git config core.hooksPath)"
 
 # what stoat knows about: VMs, ISOs, ports
+[group('vms')]
 vms:
     #!/usr/bin/env sh
     root="${STOAT_HOME:-$HOME/.stoat}"
@@ -93,14 +110,17 @@ vms:
     ls -1 "$root/isos" 2>/dev/null || echo "  none"
 
 # tail stoat's log
+[group('vms')]
 logs n="50":
     @tail -n {{n}} "${STOAT_HOME:-$HOME/.stoat}/logs/stoat.log" 2>/dev/null || echo "no log yet"
 
 # tail a VM's last provision run, e.g. `just provision-log alpine-test`
+[group('vms')]
 provision-log name:
     @tail -n 50 "${STOAT_HOME:-$HOME/.stoat}/{{name}}/last-provision.log" 2>/dev/null || echo "no provision log for {{name}}"
 
 # check host prerequisites
+[group('vms')]
 doctor:
     #!/usr/bin/env sh
     for b in qemu-system-x86_64 qemu-img ssh ssh-keygen go; do
@@ -113,11 +133,13 @@ doctor:
     fi
 
 # remove build artifacts (never touches your VMs)
+[group('build')]
 clean:
     rm -f stoat
     go clean -testcache
 
 # tag a release; pushing the tag triggers the release workflow
+[group('release')]
 tag v:
     @git diff --quiet || { echo "working tree dirty"; exit 1; }
     git tag {{v}}
