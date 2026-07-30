@@ -21,6 +21,13 @@ const repositories = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main\n
 
 const interfaces = "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n"
 
+// tmpName is the in-progress build's filename, in the same directory vvfat
+// exports to the guest. It must NOT match nlplug-findfs's *.apkovl.tar.gz*
+// glob (note the trailing wildcard) — otherwise a file orphaned by a kill or
+// power loss mid-Build could be picked up as the overlay and unpack a
+// truncated tarball.
+const tmpName = ".stoat-ovl.tmp"
+
 type builder struct {
 	tw  *tar.Writer
 	err error
@@ -72,7 +79,7 @@ func Build(v *config.VM) error {
 	}
 
 	out := filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz")
-	tmp := out + ".tmp"
+	tmp := filepath.Join(v.OvlDir(), tmpName)
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err
@@ -117,6 +124,12 @@ func Build(v *config.VM) error {
 		fstab += "host /mnt/host 9p trans=virtio,version=9p2000.L,rw 0 0\n"
 		b.dir("mnt", 0o755)
 		b.dir("mnt/host", 0o755)
+		// Nothing else mounts fstab entries at boot: the initramfs's
+		// default-boot-services set does not include localmount, and this
+		// overlay only symlinks networking (boot) and sshd (default).
+		// Without this, the share mounts only as a side effect of a
+		// recipe running `mount -a`.
+		b.symlink("etc/runlevels/boot/localmount", "/etc/init.d/localmount")
 	}
 	b.file("etc/fstab", 0o644, fstab)
 

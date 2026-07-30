@@ -120,9 +120,49 @@ func TestBuildOmitsFstabWhenNoShare(t *testing.T) {
 	if err := Build(v); err != nil {
 		t.Fatal(err)
 	}
-	content, _ := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
+	content, hdrs := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
 	if strings.Contains(content["etc/fstab"], "/mnt/host") {
 		t.Error("fstab mounts /mnt/host for a VM with no share")
+	}
+	if _, ok := hdrs["etc/runlevels/boot/localmount"]; ok {
+		t.Error("localmount symlink present for a VM with no share")
+	}
+}
+
+// TestBuildSymlinksLocalmountWhenShareConfigured proves that a configured
+// share is actually mounted at boot: the initramfs's default-boot-services
+// set does not include localmount, and the overlay otherwise only symlinks
+// networking (boot) and sshd (default), so an fstab entry with no
+// corresponding localmount symlink is never processed.
+func TestBuildSymlinksLocalmountWhenShareConfigured(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &config.VM{
+		Name: "shared", Mode: "live", Share: "/home/u/vms",
+		Dir: filepath.Join(root, "shared"),
+	}
+	if err := Build(v); err != nil {
+		t.Fatal(err)
+	}
+	_, hdrs := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
+	h, ok := hdrs["etc/runlevels/boot/localmount"]
+	if !ok {
+		t.Fatal("missing etc/runlevels/boot/localmount symlink — share would never be mounted at boot")
+	}
+	if h.Typeflag != tar.TypeSymlink || h.Linkname != "/etc/init.d/localmount" {
+		t.Errorf("etc/runlevels/boot/localmount = %+v, want symlink to /etc/init.d/localmount", h)
+	}
+}
+
+// TestBuildTempFileDoesNotMatchApkovlGlob proves the in-progress temp file
+// cannot be picked up as the overlay by Alpine's nlplug-findfs, which globs
+// *.apkovl.tar.gz* (note the trailing wildcard) at the root of the exported
+// directory. An orphaned temp file matching that glob would be selected as
+// the overlay after a kill or power loss mid-Build, silently unpacking a
+// truncated tarball.
+func TestBuildTempFileDoesNotMatchApkovlGlob(t *testing.T) {
+	if strings.Contains(tmpName, "apkovl.tar.gz") {
+		t.Fatalf("temp file name %q matches the nlplug-findfs *.apkovl.tar.gz* glob", tmpName)
 	}
 }
 
@@ -164,7 +204,7 @@ func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
 		t.Fatalf("restoring ovl dir perms: %v", err)
 	}
 
-	if _, err := os.Stat(out + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(v.OvlDir(), tmpName)); !os.IsNotExist(err) {
 		t.Errorf("temp file left behind after failed build: err=%v", err)
 	}
 
