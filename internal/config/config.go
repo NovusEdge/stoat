@@ -17,9 +17,10 @@ import (
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
 type VM struct {
 	Name      string   `toml:"name"`
-	Mode      string   `toml:"mode"` // "live" | "disk"
-	ISO       string   `toml:"iso"`  // relative to the data root
-	RAM       int      `toml:"ram"`  // MB
+	Mode      string   `toml:"mode"` // "live" | "disk" | "cloud"
+	OS        string   `toml:"os"`
+	ISO       string   `toml:"iso"` // relative to the data root
+	RAM       int      `toml:"ram"` // MB
 	CPUs      int      `toml:"cpus"`
 	Disk      string   `toml:"disk"`      // disk mode only, e.g. "8G"
 	Installed bool     `toml:"installed"` // disk mode only; flips boot order
@@ -27,7 +28,44 @@ type VM struct {
 	SSHPort   int      `toml:"sshport"`
 	Recipes   []string `toml:"recipes"`
 
+	// Backend is the provisioning backend: "apkovl" | "cloudinit" | "ssh".
+	// Empty is allowed on disk (never call this field directly: use
+	// BackendFor, which derives the right value for VMs saved before this
+	// field existed).
+	Backend string `toml:"backend"`
+	// Base is the absolute path to the shared base image an overlay is
+	// created from. Cloud mode only.
+	Base string `toml:"base"`
+	// SSHUser is the account used for SSH-based provisioning/access. Empty
+	// means root; callers apply that default themselves rather than this
+	// package writing "root" into every vm.toml.
+	SSHUser string `toml:"sshuser"`
+
 	Dir string `toml:"-"` // absolute path to the VM directory
+}
+
+// BackendFor returns the provisioning backend for v. If v.Backend is set, it
+// wins. Otherwise the backend is derived from Mode: "live" VMs use the
+// apkovl backend, "cloud" VMs use cloud-init, and anything else falls back
+// to plain ssh.
+//
+// This exists because VMs saved before the Backend field was added have no
+// Backend at all in their vm.toml, and those are overwhelmingly hardware-
+// confirmed "live" Alpine VMs. An empty Backend must never resolve straight
+// to "ssh" — that would silently route existing live VMs away from apkovl
+// provisioning.
+func BackendFor(v *VM) string {
+	if v.Backend != "" {
+		return v.Backend
+	}
+	switch v.Mode {
+	case "live":
+		return "apkovl"
+	case "cloud":
+		return "cloudinit"
+	default:
+		return "ssh"
+	}
 }
 
 // Root is the data root: $STOAT_HOME, or ~/.stoat.
