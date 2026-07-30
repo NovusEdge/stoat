@@ -31,6 +31,19 @@ func TestArgs(t *testing.T) {
 	}
 }
 
+func TestArgsUsesConfiguredSSHUser(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x", SSHUser: "stoat"}
+	got := strings.Join(Args(v), " ")
+
+	if !strings.Contains(got, "stoat@127.0.0.1") {
+		t.Errorf("expected stoat@127.0.0.1 in: %s", got)
+	}
+	if strings.Contains(got, "root@127.0.0.1") {
+		t.Errorf("must not target root@127.0.0.1 when SSHUser is set, got: %s", got)
+	}
+}
+
 func TestArgsExtraGoesAfterTarget(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}

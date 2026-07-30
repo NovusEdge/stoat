@@ -24,6 +24,10 @@ const WaitTimeout = 90 * time.Second
 // are off on purpose: this is a loopback forward to a VM stoat just built,
 // and live VMs are recreated constantly.
 func Args(v *config.VM, extra ...string) []string {
+	user := v.SSHUser
+	if user == "" {
+		user = "root"
+	}
 	a := []string{
 		"-p", fmt.Sprint(v.SSHPort),
 		"-o", "StrictHostKeyChecking=no",
@@ -32,7 +36,7 @@ func Args(v *config.VM, extra ...string) []string {
 		"-o", "ConnectTimeout=5",
 		"-o", "BatchMode=yes",
 		"-i", keys.PrivatePath(),
-		"root@127.0.0.1",
+		user + "@127.0.0.1",
 	}
 	return append(a, extra...)
 }
