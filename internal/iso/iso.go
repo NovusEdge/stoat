@@ -34,6 +34,11 @@ type Release struct {
 
 var client = &http.Client{Timeout: 30 * time.Second}
 
+// downloadMirror is the base URL Download fetches ISO files from. It is a
+// var (not the mirror const) purely so tests can point it at a local
+// httptest.Server instead of the real Alpine mirror.
+var downloadMirror = mirror
+
 // Latest reads Alpine's published index so "latest" is never hardcoded.
 func Latest() (*Release, error) {
 	resp, err := client.Get(indexURL)
@@ -101,7 +106,7 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 		return rel, nil
 	}
 
-	resp, err := client.Get(mirror + r.File)
+	resp, err := client.Get(downloadMirror + r.File)
 	if err != nil {
 		return "", err
 	}
@@ -148,6 +153,7 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 		return "", fmt.Errorf("checksum mismatch: got %s, want %s", got, r.SHA256)
 	}
 	if err := os.Rename(part, final); err != nil {
+		os.Remove(part)
 		return "", err
 	}
 	return rel, nil
