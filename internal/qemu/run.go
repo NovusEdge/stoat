@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/novusedge/stoat/internal/apkovl"
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -88,8 +89,9 @@ func Start(v *config.VM) error {
 	}
 	os.Remove(v.MonitorPath())
 	if v.Mode == "live" {
-		if err := os.MkdirAll(v.OvlDir(), 0o755); err != nil {
-			return err
+		// Disposable VMs: always rebuild rather than checking staleness.
+		if err := apkovl.Build(v); err != nil {
+			return fmt.Errorf("building apkovl: %w", err)
 		}
 	}
 	cmd := exec.Command(Binary, Args(v)...)
