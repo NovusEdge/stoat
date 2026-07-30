@@ -111,6 +111,17 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, sshInto(m.detail.vm)
 			}
 			m.status = "not running"
+		case "p":
+			v := m.detail.vm
+			if m.provisioning[v.Name] {
+				return m, nil
+			}
+			if m.provisioning == nil {
+				m.provisioning = map[string]bool{}
+			}
+			m.provisioning[v.Name] = true
+			m.status = "provisioning " + v.Name + "…"
+			return m, provision(v)
 		}
 	case vmReloadedMsg:
 		m.detail.vm = msg.vm
@@ -175,6 +186,6 @@ func (m model) viewDetail() string {
 	if m.status != "" {
 		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
 	}
-	b.WriteString(dimStyle.Render("  e edit   i installed   s ssh   esc back") + "\n")
+	b.WriteString(dimStyle.Render("  e edit   i installed   s ssh   p provision   esc back") + "\n")
 	return b.String()
 }

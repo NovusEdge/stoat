@@ -26,6 +26,11 @@ type model struct {
 	height        int
 	pendingDelete *config.VM // VM awaiting delete confirmation
 
+	// provisioning tracks VMs with a provision run in flight, keyed by
+	// name, so a second "p" press on the same VM can't start a second ssh
+	// session writing into the same last-provision.log.
+	provisioning map[string]bool
+
 	form      formModel
 	detail    detailModel
 	detailGen int // bumped every time the detail screen is entered; identifies the live tick chain
@@ -52,7 +57,7 @@ func Run() error {
 	if err := recipes.Install(); err != nil {
 		return err
 	}
-	m := model{}
+	m := model{provisioning: map[string]bool{}}
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()
 	}
@@ -75,6 +80,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case statusMsg:
 		m.status = string(msg)
+		return m, nil
+	case provisionDoneMsg:
+		delete(m.provisioning, msg.name)
+		if msg.err != nil {
+			m.status = msg.name + ": " + msg.err.Error()
+		} else {
+			m.status = msg.name + " provisioned"
+		}
 		return m, nil
 	case screenMsg:
 		m.screen = screen(msg)

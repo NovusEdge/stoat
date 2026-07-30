@@ -93,6 +93,18 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, sshInto(v)
 		}
 		m.status = "not running"
+	case "p":
+		if v != nil {
+			if m.provisioning[v.Name] {
+				break
+			}
+			if m.provisioning == nil {
+				m.provisioning = map[string]bool{}
+			}
+			m.provisioning[v.Name] = true
+			m.status = "provisioning " + v.Name + "…"
+			return m, provision(v)
+		}
 	case "d":
 		if v != nil {
 			if qemu.Running(v) {
@@ -155,6 +167,6 @@ func (m model) viewList() string {
 		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
 	}
 	b.WriteString(dimStyle.Render(
-		"  ↵ start/stop   → details   s ssh   n new   d delete   q quit") + "\n")
+		"  ↵ start/stop   → details   s ssh   p provision   n new   d delete   q quit") + "\n")
 	return b.String()
 }
