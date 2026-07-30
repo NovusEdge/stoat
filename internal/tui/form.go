@@ -116,14 +116,17 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					d = -1
 				}
 				m.form.isoIdx = (m.form.isoIdx + d + n) % n
+				return m, nil
 			case fMode:
 				if m.form.mode == "live" {
 					m.form.mode = "disk"
 				} else {
 					m.form.mode = "live"
 				}
+				return m, nil
 			}
-			return m, nil
+			// any other field: fall through to the text-input update below
+			// so the arrow key moves the cursor instead of being swallowed.
 		case "enter":
 			if m.form.focus == fISO && m.form.isoIdx == len(m.form.isos) {
 				m.form.fetching = true
@@ -203,17 +206,29 @@ func (f formModel) build() (*config.VM, error) {
 	}, nil
 }
 
-// createVM writes vm.toml and, for disk mode, allocates the qcow2.
+// buildVM writes vm.toml and, for disk mode, allocates the qcow2. If
+// qemu-img fails, the VM directory (and the vm.toml just written) is removed
+// so a failed creation leaves no trace in the data root — otherwise the list
+// would show a VM with no disk.qcow2 that can never boot.
+func buildVM(v *config.VM) error {
+	if err := v.Save(); err != nil {
+		return err
+	}
+	if v.Mode == "disk" {
+		out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
+		if err != nil {
+			os.RemoveAll(v.Dir)
+			return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+// createVM is the tea.Cmd wrapper around buildVM.
 func createVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
-		if err := v.Save(); err != nil {
+		if err := buildVM(v); err != nil {
 			return statusMsg(err.Error())
-		}
-		if v.Mode == "disk" {
-			out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
-			if err != nil {
-				return statusMsg("qemu-img: " + strings.TrimSpace(string(out)))
-			}
 		}
 		return statusMsg("created " + v.Name)
 	}
