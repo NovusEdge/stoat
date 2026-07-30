@@ -39,6 +39,16 @@ func pid(v *config.VM) int {
 	return p
 }
 
+// cmdlineMatches reports whether a /proc/<pid>/cmdline blob belongs to the VM
+// whose directory is dir. It anchors on dir+"/" rather than a bare substring
+// match: cmdline always contains "-pidfile <dir>/qemu.pid", so the trailing
+// separator is present for a genuine match, but a bare Contains would also
+// match a sibling VM whose directory name has dir's as a prefix (e.g. "work"
+// matching inside "work2").
+func cmdlineMatches(cmdline []byte, dir string) bool {
+	return bytes.Contains(cmdline, []byte(dir+"/"))
+}
+
 // Running reports whether this VM's QEMU process is alive. The cmdline check
 // matters: pids are reused, and a stale pidfile would otherwise report a ghost.
 func Running(v *config.VM) bool {
@@ -51,7 +61,7 @@ func Running(v *config.VM) bool {
 		os.Remove(v.PidPath())
 		return false
 	}
-	if !bytes.Contains(cmdline, []byte(v.Dir)) {
+	if !cmdlineMatches(cmdline, v.Dir) {
 		os.Remove(v.PidPath())
 		return false
 	}
