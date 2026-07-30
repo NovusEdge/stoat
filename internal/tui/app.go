@@ -5,6 +5,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 type screen int
@@ -46,6 +47,9 @@ func loadVMs() tea.Msg {
 
 func Run() error {
 	if err := config.EnsureRoot(); err != nil {
+		return err
+	}
+	if err := recipes.Install(); err != nil {
 		return err
 	}
 	m := model{}
