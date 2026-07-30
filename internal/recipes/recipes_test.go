@@ -71,3 +71,35 @@ func TestInstalledRecipeConfiguresReposAndMatchesVirtioGPU(t *testing.T) {
 		t.Error("xfce.sh installs xf86-video-qxl, which does not match -vga virtio (virtio-gpu)")
 	}
 }
+
+func TestInstalledRecipeConfiguresAutologinAndGuardedStartx(t *testing.T) {
+	// Provisioning must land the user in a desktop, not a bare console: tty1
+	// needs to autologin root, and .profile needs to start X. Assert through
+	// the real path (Install then Read) so this proves what stoat actually
+	// ships, not just what's in the source tree.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(s, "/etc/inittab") {
+		t.Error("xfce.sh does not touch /etc/inittab to configure tty1 autologin")
+	}
+	// busybox getty has no -a/autologin flag; the recipe must not use it.
+	if strings.Contains(s, "getty -a") {
+		t.Error("xfce.sh uses `getty -a`, which busybox getty does not support")
+	}
+
+	// A recipe that stacks another `exec startx` block on every re-run is
+	// the obvious regression, so the guard string must be present.
+	if !strings.Contains(s, "exec startx") {
+		t.Error("xfce.sh does not append a startx block to /root/.profile")
+	}
+	if !strings.Contains(s, "grep -q 'exec startx' /root/.profile") {
+		t.Error("xfce.sh does not guard the .profile append against re-running the recipe")
+	}
+}
