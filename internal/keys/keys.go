@@ -3,7 +3,9 @@
 package keys
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,11 +19,17 @@ func publicPath() string  { return PrivatePath() + ".pub" }
 
 // pairExists reports whether both halves of the keypair are present. A
 // keypair is only usable as a unit; either half missing means broken.
+//
+// Only a genuine absence (fs.ErrNotExist) counts as missing. Any other stat
+// error (e.g. a permissions problem on the directory) is treated as
+// "present" rather than triggering repair: wrongly regenerating the
+// identity would invalidate the authorized_keys already baked into every
+// running guest.
 func pairExists(path string) bool {
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
-	if _, err := os.Stat(path + ".pub"); err != nil {
+	if _, err := os.Stat(path + ".pub"); errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
 	return true
