@@ -3,7 +3,7 @@
 set -e
 
 apt-get update
-apt-get install -y xfce4 xfce4-terminal dbus-x11
+apt-get install -y xfce4 xfce4-terminal dbus-x11 xinit xserver-xorg
 
 systemctl enable dbus
 systemctl start dbus || true

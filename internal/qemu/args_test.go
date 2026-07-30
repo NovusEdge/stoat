@@ -98,6 +98,9 @@ func TestArgsCloud(t *testing.T) {
 	if strings.Contains(got, "-cdrom") {
 		t.Error("cloud mode must not attach an install ISO")
 	}
+	if strings.Contains(got, "-boot") {
+		t.Error("cloud mode must not force-boot the seed cdrom")
+	}
 	if strings.Contains(got, "fat:rw:") {
 		t.Error("cloud mode must not attach an apkovl overlay")
 	}

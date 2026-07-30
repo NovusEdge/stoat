@@ -144,7 +144,10 @@ func TestShellRecipesConfigureReposBeforeInstalling(t *testing.T) {
 	}{
 		{"xfce.alpine.sh", "setup-apkrepos", "apk add"},
 		{"xfce.ubuntu.sh", "apt-get update", "apt-get install"},
-		{"xfce.arch.sh", "pacman -Sy", "pacman -S "},
+		// arch uses a single pacman -Syu (avoids the partial-upgrade hazard
+		// of a separate -Sy + -S), so repo refresh and install are the same
+		// command — repoIdx == installIdx is expected and fine here.
+		{"xfce.arch.sh", "pacman -Syu", "pacman -Syu"},
 	}
 	for _, c := range cases {
 		s, err := Read(c.name)

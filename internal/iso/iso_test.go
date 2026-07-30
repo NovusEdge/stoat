@@ -264,7 +264,7 @@ func TestDownload_UnverifiedWhenNoChecksum(t *testing.T) {
 // that must be skipped rather than misparsed.
 func TestParseChecksum_BSDFormat(t *testing.T) {
 	const filename = "Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
-	want := "846574c8a97cd2d8dc1f231062d73107cc85cbbbda56335e264a46e3a6c8ab2"
+	want := "846574c8a97cd2d8dc1f231062d73107cc85cbbbda56335e264a46e3a6c8ab20"
 	body := []byte(`-----BEGIN PGP SIGNED MESSAGE-----
 Hash: SHA256
 

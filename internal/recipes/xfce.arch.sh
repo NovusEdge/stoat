@@ -2,8 +2,7 @@
 # Installs XFCE and starts it. Runs as root over ssh on a booted Arch VM.
 set -e
 
-pacman -Sy --noconfirm
-pacman -S --noconfirm xfce4 xfce4-terminal dbus xorg-xinit
+pacman -Syu --noconfirm xfce4 xfce4-terminal dbus xorg-xinit
 
 systemctl enable dbus
 systemctl start dbus || true
