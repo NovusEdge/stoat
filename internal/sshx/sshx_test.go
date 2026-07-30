@@ -19,6 +19,7 @@ func TestArgs(t *testing.T) {
 		"-p 2201",
 		"-o StrictHostKeyChecking=no",
 		"-o UserKnownHostsFile=/dev/null",
+		"-o BatchMode=yes",
 		"-i /data/id_stoat",
 		"root@127.0.0.1",
 	} {

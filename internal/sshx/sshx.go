@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ func Args(v *config.VM, extra ...string) []string {
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=5",
+		"-o", "BatchMode=yes",
 		"-i", keys.PrivatePath(),
 		"root@127.0.0.1",
 	}
@@ -38,13 +40,30 @@ func Args(v *config.VM, extra ...string) []string {
 func Wait(v *config.VM, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	addr := fmt.Sprintf("127.0.0.1:%d", v.SSHPort)
-	for time.Now().Before(deadline) {
-		c, err := net.DialTimeout("tcp", addr, time.Second)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		dialTimeout := time.Second
+		if remaining < dialTimeout {
+			dialTimeout = remaining
+		}
+		c, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err == nil {
 			c.Close()
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		sleep := 500 * time.Millisecond
+		if remaining < sleep {
+			sleep = remaining
+		}
+		time.Sleep(sleep)
 	}
 	return fmt.Errorf("%s: ssh not reachable on port %d after %s", v.Name, v.SSHPort, timeout)
 }
@@ -53,7 +72,7 @@ func Wait(v *config.VM, timeout time.Duration) error {
 // last-provision.log. The detail view tails that file on a ticker, so there
 // is no channel plumbing between this and the UI.
 func Provision(v *config.VM) error {
-	log, err := os.Create(v.Dir + "/last-provision.log")
+	log, err := os.Create(filepath.Join(v.Dir, "last-provision.log"))
 	if err != nil {
 		return err
 	}
