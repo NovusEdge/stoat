@@ -163,7 +163,11 @@ func (m model) viewDetail() string {
 		}
 		line("installed", installed)
 	}
-	line("ssh", fmt.Sprintf("root@127.0.0.1:%d", v.SSHPort))
+	sshUser := v.SSHUser
+	if sshUser == "" {
+		sshUser = "root"
+	}
+	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
 	if v.Share != "" {
 		line("share", v.Share+dimStyle.Render(" → /mnt/host"))
 	}
