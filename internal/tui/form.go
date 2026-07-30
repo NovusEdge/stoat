@@ -99,7 +99,10 @@ func newForm() formModel {
 	f.inputs[fName].Placeholder = "name"
 	f.inputs[fName].Focus()
 	f.isos, _ = iso.List()
-	f.recipeNames, _ = recipes.List()
+	// The form's ISO catalog is Alpine-only for now (Task 8 wires proper
+	// OS/backend selection into the form once the image picker exists), so
+	// this hardcodes the one combination that catalog can ever produce.
+	f.recipeNames, _ = recipes.List("alpine", "apkovl")
 	return f
 }
 
