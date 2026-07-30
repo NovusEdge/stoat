@@ -3,6 +3,7 @@ package qemu
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/novusedge/stoat/internal/config"
 )
@@ -50,6 +51,14 @@ func Args(v *config.VM) []string {
 		if !v.Installed {
 			a = append(a, "-cdrom", v.ISOPath(), "-boot", "d")
 		}
+	case "cloud":
+		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
+		// The xorriso seed has no El Torito boot record, so BIOS skips it and
+		// boots the qcow2 without needing an explicit -boot order. cloud-init's
+		// NoCloud datasource finds it by scanning cdrom devices for the CIDATA
+		// volume label.
+		seedISO := filepath.Join(v.OvlDir(), "seed.iso")
+		a = append(a, "-drive", "file="+seedISO+",media=cdrom")
 	}
 	return a
 }

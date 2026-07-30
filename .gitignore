@@ -13,3 +13,9 @@ GEMINI.md
 .cursor/
 .aider*
 .superpowers/
+
+# session resume state, local only
+/CHECKPOINT.md
+
+# local cloud-init hardware-gate test
+/.cloudinit-test/

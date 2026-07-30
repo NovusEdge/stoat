@@ -2,28 +2,136 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
-const downloadEntry = "⤓ download latest Alpine…"
+// imageOption is one entry in the new-VM form's image picker: either a
+// catalog image (from iso.Catalog(), possibly not yet downloaded) or a
+// bring-your-own file sitting in isos/ that doesn't match any catalog entry.
+type imageOption struct {
+	entry   *iso.Entry // non-nil for a catalog image; nil for BYO
+	file    string     // bare filename under isos/, once available locally; "" if a catalog entry hasn't been downloaded yet
+	backend string     // entry.Backend for catalog; iso.Infer's guess for BYO (overridable via fBackend)
+	osName  string     // entry.OS for catalog; iso.Infer's guess for BYO (unrecognised files: "")
+	sshUser string     // entry.SSHUser for catalog; "" for BYO (sshx defaults empty to root)
+}
+
+func (o imageOption) isBYO() bool { return o.entry == nil }
+
+// label renders the image picker row for one option.
+func (o imageOption) label() string {
+	if o.entry != nil {
+		status := "⤓ download"
+		if o.file != "" {
+			status = "downloaded"
+		}
+		return fmt.Sprintf("%-8s %-10s %s", o.entry.OS, o.entry.Backend, status)
+	}
+	osLabel := o.osName
+	if osLabel == "" {
+		osLabel = "?"
+	}
+	return fmt.Sprintf("%-8s %-10s %s (byo)", osLabel, o.backend, o.file)
+}
+
+// localImageFiles lists every plain file under isos/, any extension, so BYO
+// qcow2/img cloud images are picked up alongside ISOs.
+func localImageFiles() []string {
+	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// matchLocalImage reports which local file (if any) satisfies catalog entry
+// e: either the exact basename of e.URL (direct-URL entries), or, for
+// entries resolved through an index rather than a fixed filename (Alpine),
+// whatever local file iso.Infer agrees belongs to e's OS/backend pair.
+func matchLocalImage(e iso.Entry, files []string) string {
+	if e.OS != "alpine" && e.URL != "" {
+		if u, err := url.Parse(e.URL); err == nil {
+			base := path.Base(u.Path)
+			for _, f := range files {
+				if f == base {
+					return f
+				}
+			}
+		}
+	}
+	for _, f := range files {
+		backend, osName := iso.Infer(f)
+		if backend == e.Backend && osName == e.OS {
+			return f
+		}
+	}
+	return ""
+}
+
+// buildImages assembles the form's image picker: every catalog entry (in
+// Catalog order), each flagged with whether it's already downloaded, then
+// every local file that isn't claimed by a catalog entry, as BYO options.
+func buildImages() []imageOption {
+	files := localImageFiles()
+	matched := map[string]bool{}
+	var out []imageOption
+	for _, e := range iso.Catalog() {
+		e := e
+		opt := imageOption{entry: &e, backend: e.Backend, osName: e.OS, sshUser: e.SSHUser}
+		if f := matchLocalImage(e, files); f != "" {
+			opt.file = f
+			matched[f] = true
+		}
+		out = append(out, opt)
+	}
+	for _, f := range files {
+		if matched[f] {
+			continue
+		}
+		backend, osName := iso.Infer(f)
+		out = append(out, imageOption{file: f, backend: backend, osName: osName})
+	}
+	return out
+}
+
+// byoBackends is the fixed cycle offered on the fBackend override row.
+var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 
 type formModel struct {
-	inputs   []textinput.Model // name, ram, cpus, disk, share
-	focus    int
-	isos     []string
-	isoIdx   int
-	mode     string // "live" | "disk"
-	err      string
-	fetching bool
+	inputs      []textinput.Model // name, ram, cpus, disk, share
+	focus       int
+	images      []imageOption
+	imgIdx      int
+	byoBackend  string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
+	mode        string // "live" | "disk" — meaningful only while the selected image's backend is apkovl
+	err         string
+	fetching    bool
+	fetchingOS  string
+	recipeNames []string        // installed recipes matching the selected image's OS/backend
+	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
+	recipeSel   map[string]bool // names currently checked
 }
 
 // field indices into inputs
@@ -38,13 +146,122 @@ const (
 
 // focus positions beyond the text inputs
 const (
-	fISO       = fieldCount
-	fMode      = fieldCount + 1
-	focusCount = fieldCount + 2
+	fISO = fieldCount + iota
+	fMode
+	fBackend
+	fRecipes
 )
 
+// focusOrder is the tab-traversal order of focus positions, which must match
+// the visual order fields are rendered in by viewForm — not the order the
+// field constants happen to be declared in.
+type focusOrder []int
+
+// order returns the tab-traversal order for the form's current state: name,
+// image, [backend override, BYO only], [mode, apkovl only], ram, cpus,
+// [disk, effective disk mode only], share, recipes. Conditional fields are
+// omitted rather than included-but-hidden — viewForm doesn't render them in
+// those states, so landing focus there would silently edit an invisible
+// field (the same reasoning fDisk already followed pre-Task-8). recipes is
+// always included, even with zero recipes matching: viewForm always renders
+// that row (with a "none" placeholder), so it's always a valid landing spot.
+func (f formModel) order() focusOrder {
+	o := focusOrder{fName, fISO}
+	if opt := f.selected(); opt != nil && opt.isBYO() {
+		o = append(o, fBackend)
+	}
+	if f.resolvedBackend() == "apkovl" {
+		o = append(o, fMode)
+	}
+	o = append(o, fRAM, fCPUs)
+	if f.effectiveMode() == "disk" {
+		o = append(o, fDisk)
+	}
+	return append(o, fShare, fRecipes)
+}
+
+func (o focusOrder) indexOf(focus int) int {
+	for i, f := range o {
+		if f == focus {
+			return i
+		}
+	}
+	return 0
+}
+
+func (o focusOrder) next(focus int) int {
+	return o[(o.indexOf(focus)+1)%len(o)]
+}
+
+func (o focusOrder) prev(focus int) int {
+	return o[(o.indexOf(focus)-1+len(o))%len(o)]
+}
+
+// selected returns the image option under the picker's cursor, or nil if
+// the picker has nothing (never happens in practice: iso.Catalog() always
+// contributes entries).
+func (f formModel) selected() *imageOption {
+	if len(f.images) == 0 || f.imgIdx >= len(f.images) {
+		return nil
+	}
+	return &f.images[f.imgIdx]
+}
+
+// resolvedBackend is the backend build() will use: entry.Backend for a
+// catalog image, iso.Infer's guess for BYO unless overridden via fBackend.
+func (f formModel) resolvedBackend() string {
+	opt := f.selected()
+	if opt == nil {
+		return ""
+	}
+	if opt.isBYO() && f.byoBackend != "" {
+		return f.byoBackend
+	}
+	return opt.backend
+}
+
+func (f formModel) resolvedOS() string {
+	if opt := f.selected(); opt != nil {
+		return opt.osName
+	}
+	return ""
+}
+
+func (f formModel) resolvedSSHUser() string {
+	if opt := f.selected(); opt != nil {
+		return opt.sshUser
+	}
+	return ""
+}
+
+// effectiveMode is the Mode build() will write. cloudinit is always "cloud"
+// (a cloud image boots straight off its overlay, no install step); ssh is
+// always "disk" (an unrecognised BYO file is assumed to need a real install,
+// then manual/ssh provisioning — the apkovl live path only exists for
+// Alpine). apkovl keeps the user-controlled live/disk toggle exactly as
+// before Task 8.
+func (f formModel) effectiveMode() string {
+	switch f.resolvedBackend() {
+	case "cloudinit":
+		return "cloud"
+	case "ssh":
+		return "disk"
+	default:
+		return f.mode
+	}
+}
+
+// refreshRecipes recomputes the recipe list for the currently selected
+// image's OS/backend and clears any selection made against the old list —
+// a recipe name from one OS is meaningless once the picker moves to another.
+func (f *formModel) refreshRecipes() {
+	f.recipeNames, _ = recipes.List(f.resolvedOS(), f.resolvedBackend())
+	f.recipeSel = map[string]bool{}
+	f.recipeIdx = 0
+}
+
 func newForm() formModel {
-	f := formModel{mode: "live"}
+	f := formModel{mode: "live", recipeSel: map[string]bool{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
 		ti := textinput.New()
@@ -55,42 +272,63 @@ func newForm() formModel {
 	f.inputs[fName].SetValue("")
 	f.inputs[fName].Placeholder = "name"
 	f.inputs[fName].Focus()
-	f.isos, _ = iso.List()
+
+	f.images = buildImages()
+	// Default to the Alpine catalog entry, so a fresh form behaves exactly
+	// like the pre-Task-8 Alpine-only picker: live/disk toggle available,
+	// apkovl provisioning, recipes filtered to alpine.
+	for i, opt := range f.images {
+		if opt.entry != nil && opt.entry.OS == "alpine" {
+			f.imgIdx = i
+			break
+		}
+	}
+	f.refreshRecipes()
 	return f
 }
 
-type isoFetchedMsg string
-type isoFetchErrMsg string
+type imageFetchedMsg struct {
+	entryID  string
+	path     string
+	verified bool
+}
+type imageFetchErrMsg string
 
-func fetchISO() tea.Cmd {
+func fetchImage(e iso.Entry) tea.Cmd {
 	return func() tea.Msg {
-		r, err := iso.Latest()
+		r, err := iso.Resolve(e)
 		if err != nil {
-			return isoFetchErrMsg("index: " + err.Error())
+			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
-		path, err := iso.Download(r, nil)
+		p, err := iso.Download(r, nil)
 		if err != nil {
-			return isoFetchErrMsg("download: " + err.Error())
+			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
-		return isoFetchedMsg(path)
+		return imageFetchedMsg{entryID: e.ID, path: p, verified: r.Verified}
 	}
 }
 
 func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case isoFetchedMsg:
+	case imageFetchedMsg:
 		m.form.fetching = false
-		m.form.isos, _ = iso.List()
-		name := string(msg)
-		for i, s := range m.form.isos {
-			if "isos/"+s == name {
-				m.form.isoIdx = i
+		m.form.images = buildImages()
+		for i, opt := range m.form.images {
+			if opt.entry != nil && opt.entry.ID == msg.entryID {
+				m.form.imgIdx = i
 			}
 		}
-		m.status = "downloaded " + name
+		m.form.refreshRecipes()
+		note := ""
+		if !msg.verified {
+			// An unverified image download must be visible, not silent —
+			// this is the only consumer of Release.Verified.
+			note = " — UNVERIFIED (no checksum)"
+		}
+		m.status = "downloaded " + msg.path + note
 		return m, nil
 
-	case isoFetchErrMsg:
+	case imageFetchErrMsg:
 		m.form.fetching = false
 		m.status = string(msg)
 		return m, nil
@@ -100,24 +338,48 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.screen = screenList
 			m.status = ""
+			m.showHelp = false
+			return m, nil
+		case "?":
+			m.showHelp = !m.showHelp
 			return m, nil
 		case "tab", "down":
-			m.form.focus = (m.form.focus + 1) % focusCount
+			m.form.focus = m.form.order().next(m.form.focus)
 			m.form.refocus()
 			return m, nil
 		case "shift+tab", "up":
-			m.form.focus = (m.form.focus - 1 + focusCount) % focusCount
+			m.form.focus = m.form.order().prev(m.form.focus)
 			m.form.refocus()
 			return m, nil
 		case "left", "right":
 			switch m.form.focus {
 			case fISO:
-				n := len(m.form.isos) + 1 // +1 for the download entry
+				n := len(m.form.images)
+				if n == 0 {
+					return m, nil
+				}
 				d := 1
 				if msg.String() == "left" {
 					d = -1
 				}
-				m.form.isoIdx = (m.form.isoIdx + d + n) % n
+				m.form.imgIdx = (m.form.imgIdx + d + n) % n
+				m.form.byoBackend = "" // a new image resets any prior override
+				m.form.refreshRecipes()
+				return m, nil
+			case fBackend:
+				cur := m.form.resolvedBackend()
+				idx := 0
+				for i, b := range byoBackends {
+					if b == cur {
+						idx = i
+					}
+				}
+				d := 1
+				if msg.String() == "left" {
+					d = -1
+				}
+				m.form.byoBackend = byoBackends[(idx+d+len(byoBackends))%len(byoBackends)]
+				m.form.refreshRecipes()
 				return m, nil
 			case fMode:
 				if m.form.mode == "live" {
@@ -126,17 +388,40 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.form.mode = "live"
 				}
 				return m, nil
+			case fRecipes:
+				n := len(m.form.recipeNames)
+				if n == 0 {
+					return m, nil
+				}
+				d := 1
+				if msg.String() == "left" {
+					d = -1
+				}
+				m.form.recipeIdx = (m.form.recipeIdx + d + n) % n
+				return m, nil
 			}
 			// any other field: fall through to the text-input update below
 			// so the arrow key moves the cursor instead of being swallowed.
-		case "enter":
-			if m.form.focus == fISO && m.form.isoIdx == len(m.form.isos) {
-				if m.form.fetching {
-					return m, nil // a fetch is already in flight; don't start a second one
+		case " ":
+			if m.form.focus == fRecipes && len(m.form.recipeNames) > 0 {
+				name := m.form.recipeNames[m.form.recipeIdx]
+				if m.form.recipeSel == nil {
+					m.form.recipeSel = map[string]bool{}
 				}
-				m.form.fetching = true
-				m.status = "downloading…"
-				return m, fetchISO()
+				m.form.recipeSel[name] = !m.form.recipeSel[name]
+				return m, nil
+			}
+		case "enter":
+			if m.form.focus == fISO {
+				if opt := m.form.selected(); opt != nil && opt.entry != nil && opt.file == "" {
+					if m.form.fetching {
+						return m, nil // a fetch is already in flight; don't start a second one
+					}
+					m.form.fetching = true
+					m.form.fetchingOS = opt.entry.OS
+					m.status = "downloading " + opt.entry.OS + "…"
+					return m, fetchImage(*opt.entry)
+				}
 			}
 			vm, err := m.form.build()
 			if err != nil {
@@ -181,11 +466,15 @@ func (f formModel) build() (*config.VM, error) {
 	if strings.ContainsAny(name, "/ ") {
 		return nil, fmt.Errorf("name cannot contain spaces or slashes")
 	}
-	if _, err := os.Stat(config.Root() + "/" + name); err == nil {
+	if _, err := os.Stat(filepath.Join(config.Root(), name)); err == nil {
 		return nil, fmt.Errorf("%s already exists", name)
 	}
-	if len(f.isos) == 0 || f.isoIdx >= len(f.isos) {
-		return nil, fmt.Errorf("pick an iso first")
+	opt := f.selected()
+	if opt == nil {
+		return nil, fmt.Errorf("pick an image first")
+	}
+	if opt.file == "" {
+		return nil, fmt.Errorf("download %s first", opt.entry.OS)
 	}
 	ram, err := strconv.Atoi(strings.TrimSpace(f.inputs[fRAM].Value()))
 	if err != nil || ram < 256 {
@@ -199,22 +488,51 @@ func (f formModel) build() (*config.VM, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &config.VM{
+	selected := []string{}
+	for _, r := range f.recipeNames {
+		if f.recipeSel[r] {
+			selected = append(selected, r)
+		}
+	}
+
+	vm := &config.VM{
 		Name:    name,
-		Mode:    f.mode,
-		ISO:     "isos/" + f.isos[f.isoIdx],
+		Mode:    f.effectiveMode(),
+		OS:      f.resolvedOS(),
+		Backend: f.resolvedBackend(),
+		SSHUser: f.resolvedSSHUser(),
 		RAM:     ram,
 		CPUs:    cpus,
-		Disk:    strings.TrimSpace(f.inputs[fDisk].Value()),
 		Share:   strings.TrimSpace(f.inputs[fShare].Value()),
 		SSHPort: port,
-	}, nil
+		Recipes: selected,
+	}
+
+	if vm.Backend == "cloudinit" {
+		abs, err := filepath.Abs(filepath.Join(config.Root(), "isos", opt.file))
+		if err != nil {
+			return nil, err
+		}
+		vm.Base = abs
+	} else {
+		vm.ISO = "isos/" + opt.file
+		vm.Disk = strings.TrimSpace(f.inputs[fDisk].Value())
+	}
+
+	return vm, nil
 }
 
 // buildVM writes vm.toml and, for disk mode, allocates the qcow2. If
 // qemu-img fails, the VM directory (and the vm.toml just written) is removed
 // so a failed creation leaves no trace in the data root — otherwise the list
 // would show a VM with no disk.qcow2 that can never boot.
+//
+// Cloud mode's overlay (backed by Base) and cloud-init seed are deliberately
+// NOT created here: qemu.Start's ensureCloudOverlay creates them once, on
+// first start, since — unlike a live VM's apkovl, rebuilt every start — a
+// cloud overlay holds real guest state that must never be discarded, and
+// creating it here would also mean creating it again if the user never
+// actually starts the VM.
 func buildVM(v *config.VM) error {
 	if err := v.Save(); err != nil {
 		return err
@@ -242,7 +560,6 @@ func createVM(v *config.VM) tea.Cmd {
 func (m model) viewForm() string {
 	f := m.form
 	var b strings.Builder
-	b.WriteString(accentStyle.Render("  new vm") + "\n\n")
 
 	row := func(i int, label, value string) {
 		marker := "  "
@@ -250,35 +567,80 @@ func (m model) viewForm() string {
 			marker = selStyle.Render("❯ ")
 			value = selStyle.Render(value)
 		}
-		b.WriteString(fmt.Sprintf("%s%-8s %s\n", marker, label, value))
+		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
 	}
 
 	row(fName, "name", f.inputs[fName].View())
-	isoLabel := downloadEntry
-	if f.isoIdx < len(f.isos) {
-		isoLabel = f.isos[f.isoIdx]
+
+	opt := f.selected()
+	imgLabel := "— (none)"
+	if opt != nil {
+		imgLabel = opt.label()
 	}
-	row(fISO, "iso", isoLabel)
-	modeLabel := "(•) live   ( ) disk"
-	if f.mode == "disk" {
-		modeLabel = "( ) live   (•) disk"
+	row(fISO, "image", imgLabel)
+
+	if opt != nil && opt.isBYO() {
+		row(fBackend, "backend", f.resolvedBackend())
 	}
-	row(fMode, "mode", modeLabel)
+
+	if f.resolvedBackend() == "apkovl" {
+		modeLabel := "(•) live   ( ) disk"
+		if f.mode == "disk" {
+			modeLabel = "( ) live   (•) disk"
+		}
+		row(fMode, "mode", modeLabel)
+	} else {
+		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + "\n")
+	}
+
 	row(fRAM, "ram", f.inputs[fRAM].View()+dimStyle.Render(" MB"))
 	row(fCPUs, "cpus", f.inputs[fCPUs].View())
-	if f.mode == "disk" {
+	if f.effectiveMode() == "disk" {
 		row(fDisk, "disk", f.inputs[fDisk].View())
 	} else {
-		b.WriteString(dimStyle.Render("  disk     — (live mode)") + "\n")
+		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + "\n")
 	}
 	row(fShare, "share", f.inputs[fShare].View())
 
+	recipesMarker := "  "
+	if f.focus == fRecipes {
+		recipesMarker = selStyle.Render("❯ ")
+	}
+	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
+
 	if f.fetching {
-		b.WriteString("\n  " + dimStyle.Render("downloading latest alpine…") + "\n")
+		b.WriteString("\n" + dimStyle.Render("downloading "+f.fetchingOS+"…"))
 	}
 	if f.err != "" {
-		b.WriteString("\n" + errStyle.Render("  "+f.err) + "\n")
+		b.WriteString("\n" + errStyle.Render(f.err))
 	}
-	b.WriteString("\n" + dimStyle.Render("  tab move   ←/→ change   ↵ create   esc cancel") + "\n")
-	return b.String()
+
+	box := pane("new vm", strings.TrimRight(b.String(), "\n"), m.width)
+
+	parts := []string{box, "", renderFooter(formHelp{}, m.width, m.showHelp)}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// recipesLabel renders the recipes row's checkbox list, highlighting the
+// item under the row's sub-cursor when the row itself has focus. An empty
+// recipes list (nothing matches the selected image's OS/backend) renders a
+// placeholder instead of a blank row, and the row stays a harmless,
+// non-crashing landing spot in the focus cycle either way.
+func (f formModel) recipesLabel() string {
+	if len(f.recipeNames) == 0 {
+		return dimStyle.Render("— (no matching recipes)")
+	}
+	items := make([]string, len(f.recipeNames))
+	for i, name := range f.recipeNames {
+		box := "[ ]"
+		if f.recipeSel[name] {
+			box = "[x]"
+		}
+		item := box + " " + name
+		if f.focus == fRecipes && i == f.recipeIdx {
+			item = selStyle.Render(item)
+		}
+		items[i] = item
+	}
+	return strings.Join(items, "  ")
 }

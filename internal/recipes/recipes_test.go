@@ -1,0 +1,288 @@
+package recipes
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+// allShellRecipes are the per-OS ssh-pushed recipes; allNames also includes
+// the cloud-config fragment.
+var allShellRecipes = []string{"xfce.alpine.sh", "xfce.ubuntu.sh", "xfce.arch.sh"}
+
+func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml") {
+		if _, err := os.Stat(Path(name)); err != nil {
+			t.Errorf("Install did not install %q: %v", name, err)
+		}
+	}
+
+	// A user edit must survive a later Install (i.e. an upgrade).
+	edited := "#!/bin/sh\necho mine\n"
+	if err := os.WriteFile(Path("xfce.alpine.sh"), []byte(edited), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read("xfce.alpine.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != edited {
+		t.Error("Install overwrote a user-edited recipe")
+	}
+}
+
+func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
+	// go:embed must pick up exactly the per-OS shell recipes plus the cloud
+	// fragment — no strays (recipes.go/recipes_test.go must NOT be swept up
+	// by a loose embed pattern).
+	entries, err := bundled.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"xfce.alpine.sh":  true,
+		"xfce.ubuntu.sh":  true,
+		"xfce.arch.sh":    true,
+		"xfce.cloud.yaml": true,
+	}
+	got := map[string]bool{}
+	for _, e := range entries {
+		got[e.Name()] = true
+	}
+	if len(got) != len(want) {
+		t.Errorf("embedded files = %v, want exactly %v", got, want)
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("embed missing %q", name)
+		}
+	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("embed contains stray file %q", name)
+		}
+	}
+}
+
+func TestListFiltersByOSAndBackend(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	contains := func(names []string, want string) bool {
+		for _, n := range names {
+			if n == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	cases := []struct {
+		osName, backend string
+		want            string
+		notWant         []string
+	}{
+		{"ubuntu", "cloudinit", "xfce.cloud.yaml", []string{"xfce.ubuntu.sh", "xfce.alpine.sh"}},
+		{"alpine", "apkovl", "xfce.alpine.sh", []string{"xfce.cloud.yaml", "xfce.ubuntu.sh"}},
+		{"ubuntu", "ssh", "xfce.ubuntu.sh", []string{"xfce.cloud.yaml", "xfce.alpine.sh"}},
+		{"arch", "ssh", "xfce.arch.sh", []string{"xfce.cloud.yaml", "xfce.ubuntu.sh"}},
+	}
+	for _, c := range cases {
+		names, err := List(c.osName, c.backend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !contains(names, c.want) {
+			t.Errorf("List(%q, %q) = %v, want it to contain %q", c.osName, c.backend, names, c.want)
+		}
+		for _, nw := range c.notWant {
+			if contains(names, nw) {
+				t.Errorf("List(%q, %q) = %v, must NOT contain %q", c.osName, c.backend, names, nw)
+			}
+		}
+	}
+
+	// alpine has no cloud-config fragment and no ssh recipe: cloudinit is
+	// never its backend, and its only shell recipe requires osName=="alpine".
+	if names, err := List("alpine", "cloudinit"); err != nil || len(names) != 0 {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, %v, want empty", names, err)
+	}
+	// fedora is deliberately not in cloudOS (Fedora needs the
+	// @xfce-desktop-environment group, not a "xfce4" package) and has no
+	// shell recipe either.
+	if names, err := List("fedora", "cloudinit"); err != nil || len(names) != 0 {
+		t.Errorf("List(\"fedora\", \"cloudinit\") = %v, %v, want empty (undocumented Fedora limitation)", names, err)
+	}
+}
+
+func TestShellRecipesConfigureReposBeforeInstalling(t *testing.T) {
+	// Each recipe runs after boot over ssh, so it may install from the
+	// network — but it must set up/refresh repositories first. Assert
+	// through the real path (Install then Read) so this proves what stoat
+	// actually installs for a user, not just what's in the source tree.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		repoCmd    string
+		installCmd string
+	}{
+		{"xfce.alpine.sh", "setup-apkrepos", "apk add"},
+		{"xfce.ubuntu.sh", "apt-get update", "apt-get install"},
+		// arch uses a single pacman -Syu (avoids the partial-upgrade hazard
+		// of a separate -Sy + -S), so repo refresh and install are the same
+		// command — repoIdx == installIdx is expected and fine here.
+		{"xfce.arch.sh", "pacman -Syu", "pacman -Syu"},
+	}
+	for _, c := range cases {
+		s, err := Read(c.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		repoIdx := strings.Index(s, c.repoCmd)
+		installIdx := strings.Index(s, c.installCmd)
+		if repoIdx == -1 {
+			t.Errorf("%s does not configure repos with %q", c.name, c.repoCmd)
+		}
+		if installIdx == -1 {
+			t.Errorf("%s does not install packages with %q", c.name, c.installCmd)
+		}
+		if repoIdx != -1 && installIdx != -1 && repoIdx > installIdx {
+			t.Errorf("%s installs packages (%q) before configuring repos (%q)", c.name, c.installCmd, c.repoCmd)
+		}
+	}
+}
+
+func TestInstalledAlpineRecipeMatchesVirtioGPU(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce.alpine.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The VM boots with -vga virtio (virtio-gpu), which setup-xorg-base's
+	// mesa-dri-gallium + modesetting driver already cover. xf86-video-qxl
+	// is the driver for QEMU's separate QXL/SPICE adapter (-vga qxl) and
+	// does not match this device.
+	if strings.Contains(s, "xf86-video-qxl") {
+		t.Error("xfce.alpine.sh installs xf86-video-qxl, which does not match -vga virtio (virtio-gpu)")
+	}
+}
+
+func TestInstalledAlpineRecipeConfiguresAutologinAndGuardedStartx(t *testing.T) {
+	// Provisioning must land the user in a desktop, not a bare console: tty1
+	// needs to autologin root, and .profile needs to start X. Assert through
+	// the real path (Install then Read) so this proves what stoat actually
+	// ships, not just what's in the source tree.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce.alpine.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(s, "/etc/inittab") {
+		t.Error("xfce.alpine.sh does not touch /etc/inittab to configure tty1 autologin")
+	}
+	// busybox getty has no -a/autologin flag; the recipe must not use it.
+	if strings.Contains(s, "getty -a") {
+		t.Error("xfce.alpine.sh uses `getty -a`, which busybox getty does not support")
+	}
+
+	// A recipe that stacks another `exec startx` block on every re-run is
+	// the obvious regression, so the guard string must be present.
+	if !strings.Contains(s, "exec startx") {
+		t.Error("xfce.alpine.sh does not append a startx block to /root/.profile")
+	}
+	if !strings.Contains(s, "grep -q 'exec startx' /root/.profile") {
+		t.Error("xfce.alpine.sh does not guard the .profile append against re-running the recipe")
+	}
+}
+
+func TestShellRecipesAreHonestAboutLiveVsDiskPersistence(t *testing.T) {
+	// A live root is tmpfs/overlay: whatever a recipe writes to /etc, /root,
+	// or the package database is discarded on reboot. Telling a live-VM
+	// user to reboot for a persistent desktop is a lie, so every ssh shell
+	// recipe must branch on live vs disk instead of printing one
+	// unconditional "reboot to land in xfce" message. Assert through the
+	// real path (Install then Read) so this proves what stoat actually
+	// ships, not just what's in the source tree.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range allShellRecipes {
+		s, err := Read(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// The recipe must detect live vs disk from inside the guest
+		// (checking the root filesystem type is the verified mechanism)
+		// rather than unconditionally assuming persistence.
+		if !strings.Contains(s, "/proc/mounts") {
+			t.Errorf("%s does not inspect /proc/mounts to detect a live (tmpfs/overlay) root", name)
+		}
+		if !strings.Contains(s, "tmpfs") {
+			t.Errorf("%s does not check for a tmpfs root", name)
+		}
+		if !strings.Contains(s, "case ") || !strings.Contains(s, "esac") {
+			t.Errorf("%s does not branch on live vs disk (no case/esac found)", name)
+		}
+
+		// The unconditional promise must be gone: it can only appear inside
+		// the disk branch now, never as the recipe's only possible output.
+		if strings.Count(s, "reboot the vm to land in xfce automatically") > 1 {
+			t.Errorf("%s prints the disk-only reboot promise more than once", name)
+		}
+		if !strings.Contains(s, "reboot") || !strings.Contains(s, "NOT") {
+			t.Errorf("%s does not honestly warn a live-VM user that rebooting will not bring xfce back", name)
+		}
+	}
+}
+
+func TestCloudFragmentIsCloudConfigWithPackagesList(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(s, "#cloud-config") {
+		t.Error("xfce.cloud.yaml does not start with #cloud-config")
+	}
+	if !strings.Contains(s, "packages:") {
+		t.Error("xfce.cloud.yaml has no packages: list")
+	}
+	if !strings.Contains(s, "xfce4") {
+		t.Error("xfce.cloud.yaml does not install xfce4")
+	}
+	// dbus-x11 is not a real Arch package; the fragment must not list it as
+	// a package to install (mentioning it in an explanatory comment is
+	// fine — this checks the packages: entries, not the whole file).
+	if strings.Contains(s, "  - dbus-x11") {
+		t.Error("xfce.cloud.yaml lists dbus-x11, which does not exist on Arch's pacman repos")
+	}
+}

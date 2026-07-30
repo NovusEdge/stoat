@@ -6,7 +6,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -15,15 +17,28 @@ import (
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
 type VM struct {
 	Name      string   `toml:"name"`
-	Mode      string   `toml:"mode"` // "live" | "disk"
-	ISO       string   `toml:"iso"`  // relative to the data root
-	RAM       int      `toml:"ram"`  // MB
+	Mode      string   `toml:"mode"` // "live" | "disk" | "cloud"
+	OS        string   `toml:"os"`
+	ISO       string   `toml:"iso"` // relative to the data root
+	RAM       int      `toml:"ram"` // MB
 	CPUs      int      `toml:"cpus"`
 	Disk      string   `toml:"disk"`      // disk mode only, e.g. "8G"
 	Installed bool     `toml:"installed"` // disk mode only; flips boot order
 	Share     string   `toml:"share"`     // host dir exposed as /mnt/host
 	SSHPort   int      `toml:"sshport"`
 	Recipes   []string `toml:"recipes"`
+
+	// Backend is the provisioning backend: "apkovl" | "cloudinit" | "ssh".
+	// Written by the form at creation time; dispatch elsewhere in stoat
+	// keys off Mode, not this field.
+	Backend string `toml:"backend"`
+	// Base is the absolute path to the shared base image an overlay is
+	// created from. Cloud mode only.
+	Base string `toml:"base"`
+	// SSHUser is the account used for SSH-based provisioning/access. Empty
+	// means root; callers apply that default themselves rather than this
+	// package writing "root" into every vm.toml.
+	SSHUser string `toml:"sshuser"`
 
 	Dir string `toml:"-"` // absolute path to the VM directory
 }
@@ -123,6 +138,44 @@ func List() ([]*VM, error) {
 	return vms, nil
 }
 
+// Broken describes a VM directory whose vm.toml exists but failed to parse.
+// A directory with no vm.toml at all is not a VM and is never reported here.
+type Broken struct {
+	Name string
+	Err  error
+}
+
+// ListBroken returns every VM directory whose vm.toml exists but fails to
+// parse, sorted by name. It is the counterpart to List: List silently omits
+// these directories (a broken vm.toml cannot yield a usable *VM), so callers
+// that want to tell the user "this VM is broken" rather than making it look
+// deleted must call ListBroken separately.
+func ListBroken() ([]Broken, error) {
+	entries, err := os.ReadDir(Root())
+	if err != nil {
+		return nil, err
+	}
+	var broken []Broken
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "isos" || e.Name() == "recipes" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(Root(), e.Name(), "vm.toml")); err != nil {
+			continue // no vm.toml: not a VM directory
+		}
+		if _, err := Load(e.Name()); err != nil {
+			broken = append(broken, Broken{Name: e.Name(), Err: err})
+		}
+	}
+	sort.Slice(broken, func(i, j int) bool { return broken[i].Name < broken[j].Name })
+	return broken, nil
+}
+
+// sshPortLine is a best-effort match for a `sshport = N` line in a vm.toml
+// that otherwise fails to parse (e.g. an unterminated string earlier in the
+// file). Used by FreePort so a broken VM's port isn't handed out again.
+var sshPortLine = regexp.MustCompile(`(?m)^\s*sshport\s*=\s*(\d+)\s*$`)
+
 // Delete removes the VM directory. It never touches isos/.
 func (v *VM) Delete() error {
 	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {
@@ -143,6 +196,24 @@ func FreePort() (int, error) {
 		// claimed; List's error is deliberately ignored here.
 		for _, v := range vms {
 			claimed[v.SSHPort] = true
+		}
+	}
+	// A broken vm.toml can't be parsed for its port, but the port it was
+	// using is very likely still committed to that VM's disk image. Rather
+	// than treat "unparseable" as "claims nothing" (which is exactly how the
+	// original collision happened), best-effort regex the raw file text for
+	// a sshport line and reserve that port too.
+	if broken, err := ListBroken(); err == nil {
+		for _, b := range broken {
+			data, err := os.ReadFile(filepath.Join(Root(), b.Name, "vm.toml"))
+			if err != nil {
+				continue
+			}
+			if m := sshPortLine.FindSubmatch(data); m != nil {
+				if p, err := strconv.Atoi(string(m[1])); err == nil {
+					claimed[p] = true
+				}
+			}
 		}
 	}
 	for p := 2200; p < 2300; p++ {

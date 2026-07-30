@@ -1,0 +1,54 @@
+#cloud-config
+# XFCE desktop fragment for the cloudinit backend. cloud-init's `packages:`
+# list is handed straight to the image's native package manager (apt on
+# Ubuntu/Debian, pacman on Arch), so ONE fragment can cover all of them —
+# but only for package names that happen to be spelled identically across
+# those package managers. Verified: "xfce4" is the full-desktop metapackage
+# on Debian/Ubuntu apt AND the group name on Arch pacman; "xfce4-terminal"
+# is a real package on both.
+#
+# dbus-x11 is deliberately NOT listed: Arch's official repos have no
+# "dbus-x11" package (dbus-launch lives in the base "dbus" package there),
+# so adding it here would break the Arch case while "working" on
+# Ubuntu/Debian — a broken fragment wearing a working one's name. dbus
+# itself is already present on every cloud image as a systemd dependency,
+# so it needs enabling below, not installing.
+#
+# Fedora is deliberately NOT covered by this fragment at all: Fedora ships
+# XFCE as the package GROUP `@xfce-desktop-environment`, not a package
+# literally named "xfce4" — there is nothing by that name in Fedora's repos.
+# cloud-init's packages: list has no per-distro syntax to special-case one
+# entry, so mixing an "@group" token in here would fail on apt/pacman.
+# ponytail: if Fedora xfce is ever needed, ship a second fragment
+# (e.g. xfce.cloud.fedora.yaml with packages: ["@xfce-desktop-environment"])
+# rather than teaching this one file to branch per distro.
+packages:
+  - xfce4
+  - xfce4-terminal
+
+# Cloud-init images are always a real disk install (never Alpine-style
+# tmpfs/overlay live boot), so — unlike the ssh shell recipes — there is no
+# live-vs-disk branch to get honest about here: everything below persists
+# across reboots by construction.
+runcmd:
+  - systemctl enable dbus
+  - systemctl start dbus
+  - echo 'exec startxfce4' > /root/.xinitrc
+  - mkdir -p /etc/systemd/system/getty@tty1.service.d
+  - |
+    cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
+    [Service]
+    ExecStart=
+    ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+    EOF
+  - systemctl daemon-reload
+  - systemctl enable getty@tty1.service
+  - |
+    if ! grep -q 'exec startx' /root/.profile 2>/dev/null; then
+      cat >> /root/.profile <<'EOF'
+    if [ "$(tty)" = "/dev/tty1" ] && [ -z "$DISPLAY" ]; then
+      exec startx
+    fi
+    EOF
+    fi
+  - echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"

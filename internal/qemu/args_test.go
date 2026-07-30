@@ -80,6 +80,35 @@ func TestArgsDiskInstalled(t *testing.T) {
 	}
 }
 
+func TestArgsCloud(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "cloudy", Mode: "cloud", Base: "/data/base/alpine.qcow2",
+		RAM: 2048, CPUs: 2, Share: "/home/u/vms", SSHPort: 2204,
+		Dir: filepath.Join("/data", "cloudy"),
+	}
+	got := joined(Args(v))
+
+	if !strings.Contains(got, "-drive file=/data/cloudy/disk.qcow2,if=virtio") {
+		t.Errorf("qcow2 overlay not booted:\n%s", got)
+	}
+	if !strings.Contains(got, "-drive file=/data/cloudy/ovl/seed.iso,media=cdrom") {
+		t.Errorf("cloud-init seed not attached as cdrom:\n%s", got)
+	}
+	if strings.Contains(got, "-cdrom") {
+		t.Error("cloud mode must not attach an install ISO")
+	}
+	if strings.Contains(got, "-boot") {
+		t.Error("cloud mode must not force-boot the seed cdrom")
+	}
+	if strings.Contains(got, "fat:rw:") {
+		t.Error("cloud mode must not attach an apkovl overlay")
+	}
+	if !strings.Contains(got, "hostfwd=tcp:127.0.0.1:2204-:22") {
+		t.Error("hostfwd must bind 127.0.0.1, not all interfaces")
+	}
+}
+
 func TestArgsNoShare(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{

@@ -6,12 +6,17 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/novusedge/stoat/internal/apkovl"
+	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // Preflight reports why VMs cannot start, or nil if they can.
@@ -88,8 +93,17 @@ func Start(v *config.VM) error {
 	}
 	os.Remove(v.MonitorPath())
 	if v.Mode == "live" {
-		if err := os.MkdirAll(v.OvlDir(), 0o755); err != nil {
-			return err
+		// Disposable VMs: always rebuild rather than checking staleness.
+		if err := apkovl.Build(v); err != nil {
+			return fmt.Errorf("building apkovl: %w", err)
+		}
+	}
+	if v.Mode == "cloud" {
+		// Unlike the apkovl branch above, a cloud overlay holds real guest
+		// state (installed packages, home directories, ...), so it is
+		// created once and never rebuilt on later starts.
+		if err := ensureCloudOverlay(v); err != nil {
+			return fmt.Errorf("preparing cloud overlay: %w", err)
 		}
 	}
 	cmd := exec.Command(Binary, Args(v)...)
@@ -101,6 +115,48 @@ func Start(v *config.VM) error {
 			msg = err.Error()
 		}
 		return fmt.Errorf("qemu failed to start: %s", msg)
+	}
+	return nil
+}
+
+// ensureCloudOverlay creates v's CoW overlay (backed by v.Base) and cloud-init
+// seed the first time a cloud-mode VM starts. It is a no-op on later starts:
+// once created, the overlay accumulates real guest state (installed
+// packages, home directories, ...) that must never be discarded the way a
+// live VM's apkovl is rebuilt on every start.
+func ensureCloudOverlay(v *config.VM) error {
+	if _, err := os.Stat(v.DiskPath()); err == nil {
+		return nil
+	}
+	base, err := filepath.Abs(v.Base)
+	if err != nil {
+		return err
+	}
+	out, err := exec.Command("qemu-img", "create", "-f", "qcow2", "-b", base, "-F", "qcow2", v.DiskPath()).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
+	}
+	if err := keys.Ensure(); err != nil {
+		return err
+	}
+	pub, err := keys.PublicKey()
+	if err != nil {
+		return err
+	}
+	// v.Recipes only ever holds names the form offered for this VM's
+	// os/backend, so for a cloud VM every entry here is already a cloud
+	// fragment (recipes.List filters by backend at selection time) — no
+	// extra backend check needed before reading them.
+	var recipeBodies []string
+	for _, name := range v.Recipes {
+		body, err := recipes.Read(name)
+		if err != nil {
+			return fmt.Errorf("reading recipe %s: %w", name, err)
+		}
+		recipeBodies = append(recipeBodies, body)
+	}
+	if _, err := cloudinit.Seed(v, pub, recipeBodies); err != nil {
+		return err
 	}
 	return nil
 }

@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -36,7 +38,7 @@ func tick(gen int) tea.Cmd {
 
 // tailLog reads the last n lines of the most recent provision run.
 func tailLog(v *config.VM, n int) string {
-	b, err := os.ReadFile(v.Dir + "/last-provision.log")
+	b, err := os.ReadFile(filepath.Join(v.Dir, "last-provision.log"))
 	if err != nil {
 		return ""
 	}
@@ -65,11 +67,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
 		case "esc", "left", "h", "q":
 			m.screen = screenList
+			m.showHelp = false
 			return m, loadVMs
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
 		}
 		if m.detail.vm == nil {
 			return m, nil
@@ -80,7 +84,7 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if editor == "" {
 				editor = "vi"
 			}
-			c := exec.Command(editor, m.detail.vm.Dir+"/vm.toml")
+			c := exec.Command(editor, filepath.Join(m.detail.vm.Dir, "vm.toml"))
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				v, lerr := config.Load(m.detail.vm.Name)
 				if lerr != nil {
@@ -111,6 +115,8 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, sshInto(m.detail.vm)
 			}
 			m.status = "not running"
+		case "p":
+			return m, m.startProvision(m.detail.vm)
 		}
 	case vmReloadedMsg:
 		m.detail.vm = msg.vm
@@ -123,25 +129,26 @@ type vmReloadedMsg struct{ vm *config.VM }
 
 func (m model) viewDetail() string {
 	v := m.detail.vm
-	var b strings.Builder
 
 	if v == nil {
-		b.WriteString(dimStyle.Render("  no vm selected") + "\n\n")
+		parts := []string{pane("", dimStyle.Render("no vm selected"), m.width), ""}
 		if m.status != "" {
-			b.WriteString(warnStyle.Render("  "+m.status) + "\n")
+			parts = append(parts, warnStyle.Render(m.status))
 		}
-		b.WriteString(dimStyle.Render("  esc back") + "\n")
-		return b.String()
+		parts = append(parts, dimStyle.Render("esc back"))
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
 	state := downStyle.Render("stopped")
 	if qemu.Running(v) {
 		state = upStyle.Render("running")
 	}
-	b.WriteString(accentStyle.Render("  "+v.Name) + dimStyle.Render(" · "+v.Mode+" · ") + state + "\n\n")
+
+	var facts strings.Builder
+	facts.WriteString(dimStyle.Render(v.Mode) + dimStyle.Render(" · ") + state + "\n\n")
 
 	line := func(k, val string) {
-		b.WriteString(fmt.Sprintf("  %-9s %s\n", dimStyle.Render(k), val))
+		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
 	}
 	line("iso", v.ISO)
 	if v.Mode == "disk" {
@@ -156,7 +163,11 @@ func (m model) viewDetail() string {
 		}
 		line("installed", installed)
 	}
-	line("ssh", fmt.Sprintf("root@127.0.0.1:%d", v.SSHPort))
+	sshUser := v.SSHUser
+	if sshUser == "" {
+		sshUser = "root"
+	}
+	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
 	if v.Share != "" {
 		line("share", v.Share+dimStyle.Render(" → /mnt/host"))
 	}
@@ -164,17 +175,24 @@ func (m model) viewDetail() string {
 		line("recipes", strings.Join(v.Recipes, ", "))
 	}
 
+	factsBox := pane(v.Name, strings.TrimRight(facts.String(), "\n"), m.width)
+
+	parts := []string{factsBox}
 	if m.detail.log != "" {
-		b.WriteString("\n" + dimStyle.Render("  last provision") + "\n")
-		for _, l := range strings.Split(m.detail.log, "\n") {
-			b.WriteString("  " + dimStyle.Render(l) + "\n")
+		var log strings.Builder
+		for i, l := range strings.Split(m.detail.log, "\n") {
+			if i > 0 {
+				log.WriteString("\n")
+			}
+			log.WriteString(dimStyle.Render(l))
 		}
+		parts = append(parts, "", pane("last provision", log.String(), m.width))
 	}
 
-	b.WriteString("\n")
+	parts = append(parts, "")
 	if m.status != "" {
-		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
+		parts = append(parts, warnStyle.Render(m.status))
 	}
-	b.WriteString(dimStyle.Render("  e edit   i installed   s ssh   esc back") + "\n")
-	return b.String()
+	parts = append(parts, renderFooter(detailHelp{sshAvailable: qemu.Running(v)}, m.width, m.showHelp))
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

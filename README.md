@@ -171,3 +171,11 @@ Data lives in `~/.stoat` (override with `$STOAT_HOME`):
   recipes/     provisioning recipes
   <vm-name>/   one directory per VM, with a hand-editable vm.toml
 ```
+
+## License
+
+AGPL-3.0-or-later. Copyright (c) 2026 Aliasgar Khimani (NovusEdge).
+
+Free to clone, run, and modify — including by automated agents and harnesses.
+Any distributed or network-hosted derivative must publish its source under the
+same license, so stoat cannot be forked into a proprietary product.

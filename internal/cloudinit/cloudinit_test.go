@@ -1,0 +1,187 @@
+package cloudinit
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/novusedge/stoat/internal/config"
+)
+
+const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
+
+func TestSeedWritesUserDataAndMetaData(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+
+	v := &config.VM{
+		Name: "web1", Mode: "disk", RAM: 2048, CPUs: 2,
+		Dir: filepath.Join(root, "web1"),
+	}
+
+	isoPath, err := Seed(v, testPubkey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedDir := filepath.Join(v.OvlDir(), "seed")
+	userData, err := os.ReadFile(filepath.Join(seedDir, "user-data"))
+	if err != nil {
+		t.Fatalf("reading user-data: %v", err)
+	}
+	ud := string(userData)
+
+	if !strings.HasPrefix(ud, "#cloud-config\n") {
+		t.Errorf("user-data does not start with #cloud-config: %q", ud)
+	}
+	if !strings.Contains(ud, testPubkey) {
+		t.Error("user-data missing the pubkey")
+	}
+	if !strings.Contains(ud, "name: stoat") {
+		t.Error("user-data missing the stoat user")
+	}
+	if !strings.Contains(ud, `sudo: "ALL=(ALL) NOPASSWD:ALL"`) {
+		t.Error("user-data missing quoted sudo directive")
+	}
+	if !strings.Contains(ud, "shell: /bin/bash") {
+		t.Error("user-data missing shell directive")
+	}
+	if !strings.Contains(ud, "ssh_pwauth: false") {
+		t.Error("user-data missing ssh_pwauth: false")
+	}
+	if strings.Contains(ud, "- default") {
+		t.Error("user-data must not include the distro default user")
+	}
+
+	metaData, err := os.ReadFile(filepath.Join(seedDir, "meta-data"))
+	if err != nil {
+		t.Fatalf("reading meta-data: %v", err)
+	}
+	md := string(metaData)
+	if !strings.Contains(md, `instance-id: "stoat-web1"`) {
+		t.Errorf("meta-data missing quoted instance-id: %q", md)
+	}
+	if !strings.Contains(md, `local-hostname: "web1"`) {
+		t.Errorf("meta-data missing quoted local-hostname: %q", md)
+	}
+
+	wantISO := filepath.Join(v.OvlDir(), "seed.iso")
+	if isoPath != wantISO {
+		t.Errorf("Seed returned %q, want %q", isoPath, wantISO)
+	}
+
+	if !haveXorriso() {
+		t.Skip("xorriso not available: skipping ISO label assertion")
+	}
+
+	f, err := os.Open(isoPath)
+	if err != nil {
+		t.Fatalf("seed.iso not written: %v", err)
+	}
+	defer f.Close()
+
+	label := make([]byte, 32)
+	if _, err := f.ReadAt(label, 0x8028); err != nil {
+		t.Fatalf("reading ISO9660 volume label: %v", err)
+	}
+	if got := strings.TrimSpace(string(label)); got != "CIDATA" {
+		t.Errorf("ISO9660 volume label = %q, want CIDATA", got)
+	}
+}
+
+func TestHaveXorriso(t *testing.T) {
+	// Just exercise the function; result depends on the environment.
+	_ = haveXorriso()
+}
+
+// TestSeedNoRecipesByteIdentical guards the hardware-proven baseline: a VM
+// with no cloud recipes must get exactly the same users:/ssh_pwauth: body
+// that was hand-verified against a real Ubuntu 24.04 boot (see
+// .cloudinit-test/seed/user-data), with nothing appended.
+func TestSeedNoRecipesByteIdentical(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+
+	v := &config.VM{
+		Name: "web1", Mode: "cloud", RAM: 2048, CPUs: 2,
+		Dir: filepath.Join(root, "web1"),
+	}
+	if _, err := Seed(v, testPubkey, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(v.OvlDir(), "seed", "user-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf(userDataTemplate, testPubkey)
+	if string(got) != want {
+		t.Errorf("no-recipe user-data changed from the proven baseline:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestSeedMergesCloudRecipe is the C1 regression: a cloud VM with a recipe
+// selected must produce ONE valid #cloud-config document that still
+// contains the proven users: block verbatim, plus the recipe's merged
+// packages.
+func TestSeedMergesCloudRecipe(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+
+	v := &config.VM{
+		Name: "web1", Mode: "cloud", RAM: 2048, CPUs: 2,
+		Dir: filepath.Join(root, "web1"),
+	}
+	fragment := "#cloud-config\npackages:\n  - xfce4\n  - xfce4-terminal\n\nruncmd:\n  - systemctl enable dbus\n"
+
+	if _, err := Seed(v, testPubkey, []string{fragment}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(v.OvlDir(), "seed", "user-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ud := string(got)
+
+	provenUsersBlock := fmt.Sprintf(userDataTemplate, testPubkey)
+	if !strings.Contains(ud, provenUsersBlock) {
+		t.Errorf("merged user-data does not contain the proven users block verbatim:\n%s", ud)
+	}
+	if strings.Count(ud, "#cloud-config") != 1 {
+		t.Errorf("merged user-data must be a single #cloud-config document:\n%s", ud)
+	}
+	if !strings.Contains(ud, "  - xfce4\n") {
+		t.Errorf("merged user-data missing xfce4 package:\n%s", ud)
+	}
+	if !strings.Contains(ud, "systemctl enable dbus") {
+		t.Errorf("merged user-data missing runcmd entry:\n%s", ud)
+	}
+}
+
+// TestSeedErrorsWithoutXorriso is the I1 regression: Seed must hard-error,
+// never silently fall back to handing back the seed directory (that dead
+// vvfat fallback used to make a missing xorriso a permanent, silent
+// "Could not open seed.iso" failure at qemu start, since ensureCloudOverlay
+// discards Seed's return and never re-seeds once the overlay exists).
+func TestSeedErrorsWithoutXorriso(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	// An empty PATH guarantees exec.LookPath("xorriso") fails, regardless of
+	// whether xorriso happens to be installed on the machine running tests.
+	t.Setenv("PATH", t.TempDir())
+
+	v := &config.VM{
+		Name: "web1", Mode: "cloud", RAM: 2048, CPUs: 2,
+		Dir: filepath.Join(root, "web1"),
+	}
+	_, err := Seed(v, testPubkey, nil)
+	if err == nil {
+		t.Fatal("expected an error when xorriso is unavailable, got nil")
+	}
+	if _, statErr := os.Stat(filepath.Join(v.OvlDir(), "seed.iso")); statErr == nil {
+		t.Error("seed.iso must not exist when Seed errored")
+	}
+}
