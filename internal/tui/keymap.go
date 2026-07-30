@@ -27,11 +27,22 @@ var footerHelp = func() help.Model {
 }()
 
 // renderFooter draws the footer for km at the given terminal width, short
-// form unless showAll is set (the "?" toggle).
+// form unless showAll is set (the "?" toggle). The short form is a single
+// line that sits outside every pane; the full form ("?") gets its own pane,
+// so it reads as a distinct help panel rather than an extension of the
+// screen above it.
 func renderFooter(km help.KeyMap, width int, showAll bool) string {
 	h := footerHelp
-	h.Width = width
 	h.ShowAll = showAll
+	if showAll {
+		inner := width - paneFrame()
+		if inner < 1 {
+			inner = 1
+		}
+		h.Width = inner
+		return pane("", h.View(km), width)
+	}
+	h.Width = width
 	return h.View(km)
 }
 

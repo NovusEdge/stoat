@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
@@ -316,7 +317,6 @@ func createVM(v *config.VM) tea.Cmd {
 func (m model) viewForm() string {
 	f := m.form
 	var b strings.Builder
-	b.WriteString(accentStyle.Render("  new vm") + "\n\n")
 
 	row := func(i int, label, value string) {
 		marker := "  "
@@ -324,7 +324,7 @@ func (m model) viewForm() string {
 			marker = selStyle.Render("❯ ")
 			value = selStyle.Render(value)
 		}
-		b.WriteString(fmt.Sprintf("%s%-8s %s\n", marker, label, value))
+		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
 	}
 
 	row(fName, "name", f.inputs[fName].View())
@@ -351,16 +351,19 @@ func (m model) viewForm() string {
 	if f.focus == fRecipes {
 		recipesMarker = selStyle.Render("❯ ")
 	}
-	b.WriteString(fmt.Sprintf("%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel()))
+	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
 
 	if f.fetching {
-		b.WriteString("\n  " + dimStyle.Render("downloading latest alpine…") + "\n")
+		b.WriteString("\n" + dimStyle.Render("downloading latest alpine…"))
 	}
 	if f.err != "" {
-		b.WriteString("\n" + errStyle.Render("  "+f.err) + "\n")
+		b.WriteString("\n" + errStyle.Render(f.err))
 	}
-	b.WriteString("\n  " + renderFooter(formHelp{}, m.width, m.showHelp) + "\n")
-	return b.String()
+
+	box := pane("new vm", strings.TrimRight(b.String(), "\n"), m.width)
+
+	parts := []string{box, "", renderFooter(formHelp{}, m.width, m.showHelp)}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // recipesLabel renders the recipes row's checkbox list, highlighting the

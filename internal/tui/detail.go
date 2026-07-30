@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -128,25 +129,26 @@ type vmReloadedMsg struct{ vm *config.VM }
 
 func (m model) viewDetail() string {
 	v := m.detail.vm
-	var b strings.Builder
 
 	if v == nil {
-		b.WriteString(dimStyle.Render("  no vm selected") + "\n\n")
+		parts := []string{pane("", dimStyle.Render("no vm selected"), m.width), ""}
 		if m.status != "" {
-			b.WriteString(warnStyle.Render("  "+m.status) + "\n")
+			parts = append(parts, warnStyle.Render(m.status))
 		}
-		b.WriteString(dimStyle.Render("  esc back") + "\n")
-		return b.String()
+		parts = append(parts, dimStyle.Render("esc back"))
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
 	state := downStyle.Render("stopped")
 	if qemu.Running(v) {
 		state = upStyle.Render("running")
 	}
-	b.WriteString(accentStyle.Render("  "+v.Name) + dimStyle.Render(" · "+v.Mode+" · ") + state + "\n\n")
+
+	var facts strings.Builder
+	facts.WriteString(dimStyle.Render(v.Mode) + dimStyle.Render(" · ") + state + "\n\n")
 
 	line := func(k, val string) {
-		b.WriteString(fmt.Sprintf("  %-9s %s\n", dimStyle.Render(k), val))
+		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
 	}
 	line("iso", v.ISO)
 	if v.Mode == "disk" {
@@ -169,17 +171,24 @@ func (m model) viewDetail() string {
 		line("recipes", strings.Join(v.Recipes, ", "))
 	}
 
+	factsBox := pane(v.Name, strings.TrimRight(facts.String(), "\n"), m.width)
+
+	parts := []string{factsBox}
 	if m.detail.log != "" {
-		b.WriteString("\n" + dimStyle.Render("  last provision") + "\n")
-		for _, l := range strings.Split(m.detail.log, "\n") {
-			b.WriteString("  " + dimStyle.Render(l) + "\n")
+		var log strings.Builder
+		for i, l := range strings.Split(m.detail.log, "\n") {
+			if i > 0 {
+				log.WriteString("\n")
+			}
+			log.WriteString(dimStyle.Render(l))
 		}
+		parts = append(parts, "", pane("last provision", log.String(), m.width))
 	}
 
-	b.WriteString("\n")
+	parts = append(parts, "")
 	if m.status != "" {
-		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
+		parts = append(parts, warnStyle.Render(m.status))
 	}
-	b.WriteString("  " + renderFooter(detailHelp{sshAvailable: qemu.Running(v)}, m.width, m.showHelp) + "\n")
-	return b.String()
+	parts = append(parts, renderFooter(detailHelp{sshAvailable: qemu.Running(v)}, m.width, m.showHelp))
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

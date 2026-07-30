@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -195,16 +196,18 @@ func brokenReason(err error) string {
 
 // viewList renders the list screen's body — everything below the banner,
 // which View composes separately so it can be centered over this block
-// instead of sharing its left edge (see View's doc comment).
+// instead of sharing its left edge (see View's doc comment). The VM rows
+// live inside a pane; the status line and footer sit outside it, left-
+// aligned to the pane's own left edge.
 func (m model) viewList() string {
-	var b strings.Builder
+	var rows strings.Builder
 
 	if m.preflight != "" {
-		b.WriteString(errStyle.Render("  "+m.preflight) + "\n\n")
+		rows.WriteString(errStyle.Render(m.preflight) + "\n\n")
 	}
 
 	if len(m.vms) == 0 && len(m.broken) == 0 {
-		b.WriteString(dimStyle.Render("  no vms yet — press n to create one") + "\n")
+		rows.WriteString(dimStyle.Render("no vms yet — press n to create one"))
 	}
 
 	for i, v := range m.vms {
@@ -222,7 +225,10 @@ func (m model) viewList() string {
 			cursor = selStyle.Render("❯ ")
 			row = selStyle.Render(row)
 		}
-		b.WriteString(cursor + row + "\n")
+		if i > 0 {
+			rows.WriteString("\n")
+		}
+		rows.WriteString(cursor + row)
 	}
 
 	for i, bv := range m.broken {
@@ -234,15 +240,29 @@ func (m model) viewList() string {
 			cursor = selStyle.Render("❯ ")
 			row = selStyle.Render(plain)
 		}
-		b.WriteString(cursor + row + "\n")
+		if i > 0 || len(m.vms) > 0 {
+			rows.WriteString("\n")
+		}
+		rows.WriteString(cursor + row)
 	}
 
-	b.WriteString("\n")
+	box := pane("", rows.String(), m.width)
+
+	// lipgloss.Place centers (or left-aligns) each LINE of the string handed
+	// to it independently, sized against that string's widest line. Handing
+	// it box+status+footer concatenated as-is — three pieces of very
+	// different natural width — would make every shorter line drift toward
+	// center on its own, which is the "justified" look this used to have.
+	// JoinVertical(Left, ...) pads every line of every piece out to the
+	// widest piece's width first, so the result is one rectangle whose left
+	// edge is the same on every line; only that rectangle moves as a whole
+	// once it's centered in the terminal.
+	parts := []string{box, ""}
 	if m.status != "" {
-		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
+		parts = append(parts, warnStyle.Render(m.status))
 	}
 	v := m.current()
 	sshAvailable := v != nil && qemu.Running(v)
-	b.WriteString("  " + renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp) + "\n")
-	return b.String()
+	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

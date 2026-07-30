@@ -136,9 +136,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// smallWidth and smallHeight are the floor below which panes are refused
+// rather than rendered corrupted — narrower or shorter than this, a bordered
+// box has nowhere to wrap that doesn't come out as garbage.
+const (
+	smallWidth  = 60
+	smallHeight = 20
+)
+
 func (m model) View() string {
+	if m.width == 0 || m.height == 0 {
+		// No WindowSizeMsg has arrived yet (bubbletea renders once before
+		// the first one); nothing sensible to size a pane against.
+		return ""
+	}
+	if m.width < smallWidth || m.height < smallHeight {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			warnStyle.Render("terminal too small — resize to at least 60x20"))
+	}
+
 	var body string
-	hasBanner := m.screen == screenList
 	switch m.screen {
 	case screenForm:
 		body = m.viewForm()
@@ -148,39 +165,15 @@ func (m model) View() string {
 		body = m.viewList()
 	}
 
-	// lipgloss.Place centers each line of a block independently, padding
-	// every line out to the box width on its own. For a ragged block (list
-	// rows, form fields, detail key/value lines) that pads each line to a
-	// DIFFERENT width relative to its neighbors, so the whole block reads as
-	// justified instead of left-aligned. Rendering into a fixed-width block
-	// first — every line padded to the widest line's width, body content
-	// left-aligned within it — keeps each line's left edge fixed relative to
-	// its neighbors; only the resulting rectangle moves when it's placed
-	// into the terminal.
-	//
-	// The list screen's banner is the one exception: it's ASCII art that
-	// reads as a heading, not a row of data, so it gets centered over the
-	// body rather than sharing its left edge. Both are padded to the same
-	// width (the wider of the two) before being joined, so centering the
-	// banner can't shift it relative to the rows below.
-	width := lipgloss.Width(body)
-	var s string
-	if hasBanner {
-		art := banner()
-		if w := lipgloss.Width(art); w > width {
-			width = w
-		}
-		bannerBlock := lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(art)
-		bodyBlock := lipgloss.NewStyle().Width(width).Align(lipgloss.Left).Render(body)
-		s = lipgloss.JoinVertical(lipgloss.Left, bannerBlock, "", bodyBlock)
-	} else {
-		s = lipgloss.NewStyle().Width(width).Align(lipgloss.Left).Render(body)
-	}
-
-	if m.width == 0 || m.height == 0 {
-		// No WindowSizeMsg has arrived yet (bubbletea renders once before
-		// the first one); placing into a 0x0 box would blank the screen.
-		return s
+	// JoinVertical(Center, ...) centers each block as a whole rather than
+	// padding every line to a shared width first — the fix for the
+	// justified-text look a hand-rolled version of this used to produce.
+	// The list screen's banner sits above the body as a heading; every
+	// other screen's body already carries its own pane title, so it has no
+	// separate banner to join.
+	s := body
+	if m.screen == screenList {
+		s = lipgloss.JoinVertical(lipgloss.Center, banner(), "", body)
 	}
 
 	vAlign := lipgloss.Center
