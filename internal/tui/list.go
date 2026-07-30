@@ -82,8 +82,10 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	total := len(m.vms) + len(m.broken)
 
 	switch key.String() {
-	case "q", "ctrl+c":
+	case "q":
 		return m, tea.Quit
+	case "?":
+		m.showHelp = !m.showHelp
 	case "j", "down":
 		if m.cursor < total-1 {
 			m.cursor++
@@ -107,11 +109,13 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.form = newForm()
 		m.screen = screenForm
+		m.showHelp = false
 	case "right", "l":
 		if v != nil {
 			m.detail = newDetail(v)
 			m.screen = screenDetail
 			m.detailGen++
+			m.showHelp = false
 			return m, tick(m.detailGen)
 		}
 		if broken != nil {
@@ -189,9 +193,11 @@ func brokenReason(err error) string {
 	return s
 }
 
+// viewList renders the list screen's body — everything below the banner,
+// which View composes separately so it can be centered over this block
+// instead of sharing its left edge (see View's doc comment).
 func (m model) viewList() string {
 	var b strings.Builder
-	b.WriteString(banner() + "\n\n")
 
 	if m.preflight != "" {
 		b.WriteString(errStyle.Render("  "+m.preflight) + "\n\n")
@@ -235,7 +241,8 @@ func (m model) viewList() string {
 	if m.status != "" {
 		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
 	}
-	b.WriteString(dimStyle.Render(
-		"  ↵ start/stop   → details   s ssh   p provision   n new   d delete   q quit") + "\n")
+	v := m.current()
+	sshAvailable := v != nil && qemu.Running(v)
+	b.WriteString("  " + renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp) + "\n")
 	return b.String()
 }

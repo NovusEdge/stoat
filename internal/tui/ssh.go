@@ -5,12 +5,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/sshx"
 )
+
+// reachabilityProbe is how long a failed interactive ssh attempt waits to
+// re-check sshd's readiness before reporting status, so the message can
+// distinguish "still booting" from a real failure. Short: this only runs
+// after ssh has already failed once, so it just needs to catch the common
+// case of a still-booting guest without making the user wait long for the
+// status line.
+const reachabilityProbe = 800 * time.Millisecond
 
 // sshInto suspends the TUI and hands the terminal to a real ssh process.
 // Host keys are ignored on purpose: live VMs regenerate them every boot, so
@@ -43,8 +53,19 @@ func sshInto(v *config.VM) tea.Cmd {
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 255 {
+				// ssh itself failed to connect. Reuse sshx's banner-aware
+				// readiness check (the same one Provision waits on) instead
+				// of guessing from the exit code alone, so the message can
+				// tell a guest that's still booting apart from one that's
+				// genuinely unreachable (e.g. a disk VM with no key
+				// installed and no sshd ever going to answer).
+				if sshx.Wait(v, reachabilityProbe) != nil {
+					return statusMsg(fmt.Sprintf(
+						"%s: still booting — sshd not reachable yet on port %d, try again shortly",
+						v.Name, v.SSHPort))
+				}
 				return statusMsg(fmt.Sprintf(
-					"ssh: couldn't reach root@127.0.0.1:%d — VM may still be booting/provisioning, or a disk VM needs setup-alpine run at its console first",
+					"ssh: couldn't reach root@127.0.0.1:%d — a disk VM needs setup-alpine run at its console first, or the key isn't installed",
 					v.SSHPort))
 			}
 			return statusMsg("ssh: " + err.Error())

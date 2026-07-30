@@ -143,6 +143,10 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.screen = screenList
 			m.status = ""
+			m.showHelp = false
+			return m, nil
+		case "?":
+			m.showHelp = !m.showHelp
 			return m, nil
 		case "tab", "down":
 			m.form.focus = m.form.order().next(m.form.focus)
@@ -355,7 +359,7 @@ func (m model) viewForm() string {
 	if f.err != "" {
 		b.WriteString("\n" + errStyle.Render("  "+f.err) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("  tab move   ←/→ change   space toggle recipe   ↵ create   esc cancel") + "\n")
+	b.WriteString("\n  " + renderFooter(formHelp{}, m.width, m.showHelp) + "\n")
 	return b.String()
 }
 

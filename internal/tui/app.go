@@ -39,6 +39,8 @@ type model struct {
 	form      formModel
 	detail    detailModel
 	detailGen int // bumped every time the detail screen is entered; identifies the live tick chain
+
+	showHelp bool // "?" toggles the footer between short and full help
 }
 
 // vmsLoadedMsg carries a refreshed VM list, alongside any VM directories
@@ -85,6 +87,16 @@ func Run() error {
 func (m model) Init() tea.Cmd { return loadVMs }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// ctrl+c must quit from every screen and every sub-mode (delete
+	// confirmation, full help, the form, ...). It's handled centrally, once,
+	// here — rather than duplicated per-screen — because that duplication is
+	// exactly how it has regressed before: a new screen or sub-mode gets
+	// added, and whoever writes its key switch doesn't think to repeat the
+	// ctrl+c case.
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -110,6 +122,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case screenMsg:
 		m.screen = screen(msg)
+		m.showHelp = false
 		return m, nil
 	}
 
@@ -124,14 +137,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	var s string
+	var body string
+	hasBanner := m.screen == screenList
 	switch m.screen {
 	case screenForm:
-		s = m.viewForm()
+		body = m.viewForm()
 	case screenDetail:
-		s = m.viewDetail()
+		body = m.viewDetail()
 	default:
-		s = m.viewList()
+		body = m.viewList()
+	}
+
+	// lipgloss.Place centers each line of a block independently, padding
+	// every line out to the box width on its own. For a ragged block (list
+	// rows, form fields, detail key/value lines) that pads each line to a
+	// DIFFERENT width relative to its neighbors, so the whole block reads as
+	// justified instead of left-aligned. Rendering into a fixed-width block
+	// first — every line padded to the widest line's width, body content
+	// left-aligned within it — keeps each line's left edge fixed relative to
+	// its neighbors; only the resulting rectangle moves when it's placed
+	// into the terminal.
+	//
+	// The list screen's banner is the one exception: it's ASCII art that
+	// reads as a heading, not a row of data, so it gets centered over the
+	// body rather than sharing its left edge. Both are padded to the same
+	// width (the wider of the two) before being joined, so centering the
+	// banner can't shift it relative to the rows below.
+	width := lipgloss.Width(body)
+	var s string
+	if hasBanner {
+		art := banner()
+		if w := lipgloss.Width(art); w > width {
+			width = w
+		}
+		bannerBlock := lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(art)
+		bodyBlock := lipgloss.NewStyle().Width(width).Align(lipgloss.Left).Render(body)
+		s = lipgloss.JoinVertical(lipgloss.Left, bannerBlock, "", bodyBlock)
+	} else {
+		s = lipgloss.NewStyle().Width(width).Align(lipgloss.Left).Render(body)
 	}
 
 	if m.width == 0 || m.height == 0 {

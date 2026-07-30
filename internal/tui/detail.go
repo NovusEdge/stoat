@@ -66,11 +66,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
 		case "esc", "left", "h", "q":
 			m.screen = screenList
+			m.showHelp = false
 			return m, loadVMs
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
 		}
 		if m.detail.vm == nil {
 			return m, nil
@@ -178,6 +180,6 @@ func (m model) viewDetail() string {
 	if m.status != "" {
 		b.WriteString(warnStyle.Render("  "+m.status) + "\n")
 	}
-	b.WriteString(dimStyle.Render("  e edit   i installed   s ssh   p provision   esc back") + "\n")
+	b.WriteString("  " + renderFooter(detailHelp{sshAvailable: qemu.Running(v)}, m.width, m.showHelp) + "\n")
 	return b.String()
 }
