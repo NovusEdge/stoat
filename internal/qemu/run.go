@@ -6,13 +6,16 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/novusedge/stoat/internal/apkovl"
+	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/keys"
 )
 
 // Preflight reports why VMs cannot start, or nil if they can.
@@ -94,6 +97,14 @@ func Start(v *config.VM) error {
 			return fmt.Errorf("building apkovl: %w", err)
 		}
 	}
+	if v.Mode == "cloud" {
+		// Unlike the apkovl branch above, a cloud overlay holds real guest
+		// state (installed packages, home directories, ...), so it is
+		// created once and never rebuilt on later starts.
+		if err := ensureCloudOverlay(v); err != nil {
+			return fmt.Errorf("preparing cloud overlay: %w", err)
+		}
+	}
 	cmd := exec.Command(Binary, Args(v)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -103,6 +114,36 @@ func Start(v *config.VM) error {
 			msg = err.Error()
 		}
 		return fmt.Errorf("qemu failed to start: %s", msg)
+	}
+	return nil
+}
+
+// ensureCloudOverlay creates v's CoW overlay (backed by v.Base) and cloud-init
+// seed the first time a cloud-mode VM starts. It is a no-op on later starts:
+// once created, the overlay accumulates real guest state (installed
+// packages, home directories, ...) that must never be discarded the way a
+// live VM's apkovl is rebuilt on every start.
+func ensureCloudOverlay(v *config.VM) error {
+	if _, err := os.Stat(v.DiskPath()); err == nil {
+		return nil
+	}
+	base, err := filepath.Abs(v.Base)
+	if err != nil {
+		return err
+	}
+	out, err := exec.Command("qemu-img", "create", "-f", "qcow2", "-b", base, "-F", "qcow2", v.DiskPath()).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
+	}
+	if err := keys.Ensure(); err != nil {
+		return err
+	}
+	pub, err := keys.PublicKey()
+	if err != nil {
+		return err
+	}
+	if _, err := cloudinit.Seed(v, pub); err != nil {
+		return err
 	}
 	return nil
 }

@@ -138,8 +138,8 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		t.Setenv("STOAT_HOME", t.TempDir())
 		f := newForm()
 		f.inputs[fName].SetValue(name)
-		f.isos = []string{"alpine-standard-3.20.0-x86_64.iso"}
-		f.isoIdx = 0
+		f.images = []imageOption{{file: "alpine-standard-3.20.0-x86_64.iso", backend: "apkovl", osName: "alpine"}}
+		f.imgIdx = 0
 		f.recipeNames = []string{"alpha", "beta", "gamma"}
 		return f
 	}
