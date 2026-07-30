@@ -3,6 +3,7 @@ package sshx
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -51,8 +52,10 @@ func Wait(v *config.VM, timeout time.Duration) error {
 		}
 		c, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err == nil {
+			if bannerReady(c) {
+				return nil
+			}
 			c.Close()
-			return nil
 		}
 
 		remaining = time.Until(deadline)
@@ -66,6 +69,18 @@ func Wait(v *config.VM, timeout time.Duration) error {
 		time.Sleep(sleep)
 	}
 	return fmt.Errorf("%s: ssh not reachable on port %d after %s", v.Name, v.SSHPort, timeout)
+}
+
+// bannerReady reports whether c is a real sshd, not just an accepted TCP
+// connection. QEMU/libslirp's user-mode networking accepts the host-side
+// socket at device init and only later dials the guest, tearing the
+// connection down if nothing answers there yet — so a bare accept() does
+// not mean sshd is up. Requiring the "SSH-" identification banner does.
+func bannerReady(c net.Conn) bool {
+	c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	buf := make([]byte, 4)
+	_, err := io.ReadFull(c, buf)
+	return err == nil && string(buf) == "SSH-"
 }
 
 // Provision runs each of v's recipes over ssh, streaming output to

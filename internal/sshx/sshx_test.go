@@ -2,7 +2,6 @@ package sshx
 
 import (
 	"net"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,17 +40,63 @@ func TestArgsExtraGoesAfterTarget(t *testing.T) {
 	}
 }
 
-func TestWaitSucceedsOncePortAccepts(t *testing.T) {
+// acceptOnly starts a listener that accepts connections and, for each one,
+// writes body (if any) then leaves it open. This models QEMU's user-mode
+// networking: the host-side accept() happens immediately at device init,
+// well before the guest's sshd is actually reachable through it.
+func acceptOnly(t *testing.T, body string) int {
+	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
-	port := l.Addr().(*net.TCPAddr).Port
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			if body != "" {
+				c.Write([]byte(body))
+			}
+		}
+	}()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+func TestWaitTimesOutWhenAcceptedButNoBanner(t *testing.T) {
+	// A bare TCP accept with no SSH banner is exactly what libslirp does
+	// before the guest's sshd is actually up. Wait must not treat this as
+	// ready.
+	port := acceptOnly(t, "")
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
-	if err := Wait(v, 2*time.Second); err != nil {
-		t.Errorf("Wait failed against an open port: %v", err)
+	start := time.Now()
+	err := Wait(v, 500*time.Millisecond)
+	elapsed := time.Since(start)
+	t.Logf("accept-without-banner: Wait took %s", elapsed)
+	if err == nil {
+		t.Fatal("Wait succeeded against a connection with no SSH banner")
+	}
+	if elapsed > 3*time.Second {
+		t.Error("Wait overran its timeout badly")
+	}
+}
+
+func TestWaitSucceedsOnceBannerArrives(t *testing.T) {
+	port := acceptOnly(t, "SSH-2.0-OpenSSH_9.6\r\n")
+
+	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
+	start := time.Now()
+	err := Wait(v, 2*time.Second)
+	elapsed := time.Since(start)
+	t.Logf("accept-with-banner: Wait took %s", elapsed)
+	if err != nil {
+		t.Errorf("Wait failed against a listener sending a real SSH banner: %v", err)
+	}
+	if elapsed > 1*time.Second {
+		t.Error("Wait should succeed quickly once the banner arrives")
 	}
 }
 
@@ -69,5 +114,4 @@ func TestWaitTimesOutOnClosedPort(t *testing.T) {
 	if !strings.Contains(err.Error(), "x") {
 		t.Errorf("error should name the vm, got %v", err)
 	}
-	_ = filepath.Join
 }
