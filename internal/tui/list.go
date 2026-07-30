@@ -85,7 +85,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v != nil {
 			m.detail = newDetail(v)
 			m.screen = screenDetail
-			return m, tick()
+			m.detailGen++
+			return m, tick(m.detailGen)
 		}
 	case "s":
 		if v != nil && qemu.Running(v) {

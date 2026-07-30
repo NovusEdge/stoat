@@ -20,10 +20,18 @@ type detailModel struct {
 
 func newDetail(v *config.VM) detailModel { return detailModel{vm: v} }
 
-type tickMsg time.Time
+// tickMsg carries the generation of the detail-screen visit that scheduled
+// it. updateDetail only re-arms the chain when gen still matches
+// m.detailGen; every other visit to the detail screen bumps detailGen, so a
+// stale chain left over from a prior visit dies silently on its next tick
+// instead of re-arming and running forever alongside the live one.
+type tickMsg struct {
+	t   time.Time
+	gen int
+}
 
-func tick() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+func tick(gen int) tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{t: t, gen: gen} })
 }
 
 // tailLog reads the last n lines of the most recent provision run.
@@ -42,12 +50,17 @@ func tailLog(v *config.VM, n int) string {
 func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
+		if msg.gen != m.detailGen {
+			// A stale chain from a previous visit to the detail screen.
+			// Let it die here instead of re-arming.
+			return m, nil
+		}
 		if m.detail.vm == nil {
 			return m, nil
 		}
 		m.detail.log = tailLog(m.detail.vm, 10)
 		if m.screen == screenDetail {
-			return m, tick()
+			return m, tick(m.detailGen)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -81,11 +94,16 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "installed only applies to disk vms"
 				return m, nil
 			}
-			v.Installed = !v.Installed
-			if err := v.Save(); err != nil {
+			// Save a copy first: only flip the live in-memory VM once the
+			// write to disk actually succeeds, so a failed Save can't leave
+			// the pane showing a state that was never persisted.
+			next := *v
+			next.Installed = !v.Installed
+			if err := next.Save(); err != nil {
 				m.status = err.Error()
 				return m, nil
 			}
+			v.Installed = next.Installed
 			m.status = fmt.Sprintf("%s installed=%v", v.Name, v.Installed)
 			return m, loadVMs
 		case "s":

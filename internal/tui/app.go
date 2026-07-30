@@ -25,8 +25,9 @@ type model struct {
 	height        int
 	pendingDelete string // name of the VM awaiting delete confirmation
 
-	form   formModel
-	detail detailModel
+	form      formModel
+	detail    detailModel
+	detailGen int // bumped every time the detail screen is entered; identifies the live tick chain
 }
 
 // vmsLoadedMsg carries a refreshed VM list.
