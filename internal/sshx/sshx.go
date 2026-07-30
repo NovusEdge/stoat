@@ -52,7 +52,7 @@ func Wait(v *config.VM, timeout time.Duration) error {
 		}
 		c, err := net.DialTimeout("tcp", addr, dialTimeout)
 		if err == nil {
-			if bannerReady(c) {
+			if bannerReady(c, time.Until(deadline)) {
 				return nil
 			}
 			c.Close()
@@ -71,13 +71,30 @@ func Wait(v *config.VM, timeout time.Duration) error {
 	return fmt.Errorf("%s: ssh not reachable on port %d after %s", v.Name, v.SSHPort, timeout)
 }
 
+// bannerDeadline is the per-attempt read deadline for the SSH identification
+// banner. A guest sshd forking under load on a 1-vCPU VM mid-boot can
+// plausibly take longer than a couple hundred milliseconds to emit its
+// banner; since each retry in Wait opens a fresh connection, a too-short
+// deadline here is a hard cliff that no amount of retrying can cross. The
+// outer WaitTimeout already bounds the whole operation, so a generous
+// per-attempt deadline costs nothing in the failure case.
+const bannerDeadline = 2 * time.Second
+
 // bannerReady reports whether c is a real sshd, not just an accepted TCP
 // connection. QEMU/libslirp's user-mode networking accepts the host-side
 // socket at device init and only later dials the guest, tearing the
 // connection down if nothing answers there yet — so a bare accept() does
 // not mean sshd is up. Requiring the "SSH-" identification banner does.
-func bannerReady(c net.Conn) bool {
-	c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+//
+// budget caps the read deadline at the remaining overall timeout, so a
+// short-lived caller (e.g. Wait(v, 300*time.Millisecond) in a test) still
+// returns promptly instead of blocking for the full bannerDeadline.
+func bannerReady(c net.Conn, budget time.Duration) bool {
+	d := bannerDeadline
+	if budget < d {
+		d = budget
+	}
+	c.SetReadDeadline(time.Now().Add(d))
 	buf := make([]byte, 4)
 	_, err := io.ReadFull(c, buf)
 	return err == nil && string(buf) == "SSH-"

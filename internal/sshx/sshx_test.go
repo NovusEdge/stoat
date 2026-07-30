@@ -100,6 +100,37 @@ func TestWaitSucceedsOnceBannerArrives(t *testing.T) {
 	}
 }
 
+func TestWaitSucceedsOnSlowBanner(t *testing.T) {
+	// A guest sshd forking under load on a 1-vCPU VM mid-boot can plausibly
+	// take longer than a couple hundred milliseconds to emit its banner.
+	// This must succeed now that the per-attempt read deadline is ~2s;
+	// with the old 300ms deadline every retry's fresh connection would hit
+	// the same wall and this would time out no matter the overall budget.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+		c.Write([]byte("SSH-2.0-OpenSSH_9.6\r\n"))
+	}()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
+	start := time.Now()
+	err = Wait(v, 3*time.Second)
+	elapsed := time.Since(start)
+	t.Logf("slow-banner (500ms): Wait took %s", elapsed)
+	if err != nil {
+		t.Errorf("Wait failed against a listener whose banner arrives after 500ms: %v", err)
+	}
+}
+
 func TestWaitTimesOutOnClosedPort(t *testing.T) {
 	// Port 1 on loopback: reserved, nothing listens.
 	v := &config.VM{Name: "x", SSHPort: 1, Dir: t.TempDir()}
