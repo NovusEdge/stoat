@@ -6,7 +6,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -123,6 +125,44 @@ func List() ([]*VM, error) {
 	return vms, nil
 }
 
+// Broken describes a VM directory whose vm.toml exists but failed to parse.
+// A directory with no vm.toml at all is not a VM and is never reported here.
+type Broken struct {
+	Name string
+	Err  error
+}
+
+// ListBroken returns every VM directory whose vm.toml exists but fails to
+// parse, sorted by name. It is the counterpart to List: List silently omits
+// these directories (a broken vm.toml cannot yield a usable *VM), so callers
+// that want to tell the user "this VM is broken" rather than making it look
+// deleted must call ListBroken separately.
+func ListBroken() ([]Broken, error) {
+	entries, err := os.ReadDir(Root())
+	if err != nil {
+		return nil, err
+	}
+	var broken []Broken
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "isos" || e.Name() == "recipes" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(Root(), e.Name(), "vm.toml")); err != nil {
+			continue // no vm.toml: not a VM directory
+		}
+		if _, err := Load(e.Name()); err != nil {
+			broken = append(broken, Broken{Name: e.Name(), Err: err})
+		}
+	}
+	sort.Slice(broken, func(i, j int) bool { return broken[i].Name < broken[j].Name })
+	return broken, nil
+}
+
+// sshPortLine is a best-effort match for a `sshport = N` line in a vm.toml
+// that otherwise fails to parse (e.g. an unterminated string earlier in the
+// file). Used by FreePort so a broken VM's port isn't handed out again.
+var sshPortLine = regexp.MustCompile(`(?m)^\s*sshport\s*=\s*(\d+)\s*$`)
+
 // Delete removes the VM directory. It never touches isos/.
 func (v *VM) Delete() error {
 	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {
@@ -143,6 +183,24 @@ func FreePort() (int, error) {
 		// claimed; List's error is deliberately ignored here.
 		for _, v := range vms {
 			claimed[v.SSHPort] = true
+		}
+	}
+	// A broken vm.toml can't be parsed for its port, but the port it was
+	// using is very likely still committed to that VM's disk image. Rather
+	// than treat "unparseable" as "claims nothing" (which is exactly how the
+	// original collision happened), best-effort regex the raw file text for
+	// a sshport line and reserve that port too.
+	if broken, err := ListBroken(); err == nil {
+		for _, b := range broken {
+			data, err := os.ReadFile(filepath.Join(Root(), b.Name, "vm.toml"))
+			if err != nil {
+				continue
+			}
+			if m := sshPortLine.FindSubmatch(data); m != nil {
+				if p, err := strconv.Atoi(string(m[1])); err == nil {
+					claimed[p] = true
+				}
+			}
 		}
 	}
 	for p := 2200; p < 2300; p++ {
