@@ -16,3 +16,6 @@ GEMINI.md
 
 # session resume state, local only
 /CHECKPOINT.md
+
+# local cloud-init hardware-gate test
+/.cloudinit-test/
