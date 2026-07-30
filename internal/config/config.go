@@ -131,9 +131,24 @@ func (v *VM) Delete() error {
 	return os.RemoveAll(v.Dir)
 }
 
-// FreePort returns the first free TCP port at or above 2200 on loopback.
+// FreePort returns the first free TCP port at or above 2200 on loopback that
+// is both bindable right now and not already claimed by an existing VM's
+// vm.toml. A created-but-stopped VM holds nothing open, so the bindability
+// check alone is not enough to avoid handing out the same port twice in a
+// row.
 func FreePort() (int, error) {
+	claimed := map[int]bool{}
+	if vms, err := List(); err == nil {
+		// An unreadable/missing data root (fresh install) means no VMs are
+		// claimed; List's error is deliberately ignored here.
+		for _, v := range vms {
+			claimed[v.SSHPort] = true
+		}
+	}
 	for p := 2200; p < 2300; p++ {
+		if claimed[p] {
+			continue
+		}
 		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
 		if err != nil {
 			continue
