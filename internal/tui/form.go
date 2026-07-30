@@ -38,10 +38,43 @@ const (
 
 // focus positions beyond the text inputs
 const (
-	fISO       = fieldCount
-	fMode      = fieldCount + 1
-	focusCount = fieldCount + 2
+	fISO  = fieldCount
+	fMode = fieldCount + 1
 )
+
+// focusOrder is the tab-traversal order of focus positions, which must match
+// the visual order fields are rendered in by viewForm — not the order the
+// field constants happen to be declared in.
+type focusOrder []int
+
+// order returns the tab-traversal order for the form's current mode: name,
+// iso, mode, ram, cpus, [disk], share. fDisk is included only in disk mode,
+// since viewForm doesn't render a disk field (or its "❯" marker) in live
+// mode — landing focus there would silently edit an invisible field.
+func (f formModel) order() focusOrder {
+	o := focusOrder{fName, fISO, fMode, fRAM, fCPUs}
+	if f.mode == "disk" {
+		o = append(o, fDisk)
+	}
+	return append(o, fShare)
+}
+
+func (o focusOrder) indexOf(focus int) int {
+	for i, f := range o {
+		if f == focus {
+			return i
+		}
+	}
+	return 0
+}
+
+func (o focusOrder) next(focus int) int {
+	return o[(o.indexOf(focus)+1)%len(o)]
+}
+
+func (o focusOrder) prev(focus int) int {
+	return o[(o.indexOf(focus)-1+len(o))%len(o)]
+}
 
 func newForm() formModel {
 	f := formModel{mode: "live"}
@@ -102,11 +135,11 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = ""
 			return m, nil
 		case "tab", "down":
-			m.form.focus = (m.form.focus + 1) % focusCount
+			m.form.focus = m.form.order().next(m.form.focus)
 			m.form.refocus()
 			return m, nil
 		case "shift+tab", "up":
-			m.form.focus = (m.form.focus - 1 + focusCount) % focusCount
+			m.form.focus = m.form.order().prev(m.form.focus)
 			m.form.refocus()
 			return m, nil
 		case "left", "right":

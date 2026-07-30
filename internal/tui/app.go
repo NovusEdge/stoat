@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"github.com/charmbracelet/lipgloss"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -105,12 +107,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	var s string
 	switch m.screen {
 	case screenForm:
-		return m.viewForm()
+		s = m.viewForm()
 	case screenDetail:
-		return m.viewDetail()
+		s = m.viewDetail()
 	default:
-		return m.viewList()
+		s = m.viewList()
 	}
+
+	if m.width == 0 || m.height == 0 {
+		// No WindowSizeMsg has arrived yet (bubbletea renders once before
+		// the first one); placing into a 0x0 box would blank the screen.
+		return s
+	}
+
+	vAlign := lipgloss.Center
+	if lipgloss.Height(s) > m.height {
+		// Content taller than the terminal: centering vertically would clip
+		// it top and bottom with no way to scroll back to what's lost.
+		// Anchor to the top instead so everything stays reachable.
+		vAlign = lipgloss.Top
+	}
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s)
 }
