@@ -13,3 +13,6 @@ GEMINI.md
 .cursor/
 .aider*
 .superpowers/
+
+# session resume state, local only
+/CHECKPOINT.md
