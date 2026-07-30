@@ -1,0 +1,4 @@
+*.iso
+*.qcow2
+/stoat
+docs/superpowers/

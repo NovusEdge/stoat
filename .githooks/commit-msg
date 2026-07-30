@@ -1,0 +1,4 @@
+#!/bin/sh
+# ponytail: strip agent trailers, then squash the blank lines they leave.
+sed -i -E '/^(Co-Authored-By|Co-authored-by):/d; /Generated with \[?Claude Code/d' "$1"
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$1"
