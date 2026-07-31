@@ -82,7 +82,7 @@ func TestFooterNeverOverflows(t *testing.T) {
 	for w := 60; w <= 120; w += 2 {
 		for _, km := range []help.KeyMap{
 			listHelp{}, listHelp{sshAvailable: true},
-			detailHelp{}, detailHelp{sshAvailable: true}, formHelp{},
+			detailHelp{}, detailHelp{sshAvailable: true}, formHelp{}, editHelp{},
 		} {
 			if got := lipgloss.Width(renderFooter(km, w, false)); got > w {
 				t.Errorf("footer at width %d rendered %d cells for %T", w, got, km)
