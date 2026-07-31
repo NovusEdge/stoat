@@ -170,3 +170,29 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		}
 	})
 }
+
+// TestQuestionMarkTypesIntoTextFields covers the reported bug where "?" was
+// always eaten as the help toggle, so it could never be typed into a text
+// field. On a picker row it must still toggle help.
+func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
+	key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}
+
+	m := model{screen: screenForm, form: newForm()}
+	m.form.focus = fName
+	m.form.refocus()
+	got, _ := m.Update(key)
+	after := got.(model)
+	if after.showHelp {
+		t.Error("? on a text field toggled help instead of typing")
+	}
+	if v := after.form.inputs[fName].Value(); v != "?" {
+		t.Errorf("name field = %q, want %q", v, "?")
+	}
+
+	m2 := model{screen: screenForm, form: newForm()}
+	m2.form.focus = fISO
+	got2, _ := m2.Update(key)
+	if !got2.(model).showHelp {
+		t.Error("? on the image picker did not toggle help")
+	}
+}

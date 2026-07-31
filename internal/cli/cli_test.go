@@ -1,6 +1,42 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestColorStateWidth pins the pad-then-colour order. The escape sequences
+// are zero-width on screen but count toward a %-8s verb, so colouring first
+// (as the original did) silently under-pads every coloured row by 9 columns
+// and every field after STATE drifts left.
+func TestColorStateWidth(t *testing.T) {
+	for _, state := range []string{"running", "stopped", "broken"} {
+		got := colorState(state, 8)
+		if visible := stripANSI(got); len(visible) != 8 {
+			t.Errorf("colorState(%q, 8) visible width = %d (%q), want 8", state, len(visible), visible)
+		}
+		// The coloured branch must wrap the *padded* text, not the bare state.
+		if c := colorize(got, state); stripANSI(c) != stripANSI(got) {
+			t.Errorf("colorize changed visible text: %q vs %q", stripANSI(c), stripANSI(got))
+		}
+	}
+}
+
+// stripANSI drops CSI colour sequences so a test can measure what the
+// terminal actually shows.
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
 
 func TestParse(t *testing.T) {
 	cases := []struct {

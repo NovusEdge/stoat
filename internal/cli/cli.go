@@ -195,6 +195,12 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "stoat:", err)
 		return ExitFail
 	}
+	// ponytail: same as the TUI — an unopenable log degrades to io.Discard
+	// rather than failing the command the user actually asked for. `logs`
+	// re-Inits and reports its own error, since there the log IS the command.
+	_ = logx.Init()
+	defer logx.Close()
+	logx.L().Debug("cli", "cmd", a.Cmd, "vm", a.VM)
 
 	switch a.Cmd {
 	case "ls":
@@ -234,17 +240,24 @@ func colorEnabled() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
-func colorState(state string) string {
+// colorState pads to width FIRST, then wraps in escapes: the codes are
+// zero-width on screen but count toward %-8s, so colouring before padding
+// silently eats 9 columns and skews every row after STATE.
+func colorState(state string, width int) string {
+	return colorize(fmt.Sprintf("%-*s", width, state), state)
+}
+
+func colorize(padded, state string) string {
 	if !colorEnabled() {
-		return state
+		return padded
 	}
 	switch state {
 	case "running":
-		return "\x1b[32m" + state + "\x1b[0m" // green
+		return "\x1b[32m" + padded + "\x1b[0m" // green
 	case "broken":
-		return "\x1b[31m" + state + "\x1b[0m" // red
+		return "\x1b[31m" + padded + "\x1b[0m" // red
 	default:
-		return state
+		return padded
 	}
 }
 
@@ -270,15 +283,15 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if qemu.Running(v) {
 			state = "running"
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5d %-6d %d\n",
-			v.Name, v.Mode, colorState(state), v.CPUs, v.RAM, v.SSHPort)
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %d\n",
+			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort)
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
 	// supply, plus a one-line reason.
 	for _, b := range broken {
-		fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %-4s %s\n",
-			b.Name, "-", colorState("broken"), "-", "-", "-", oneLine(b.Err))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %s\n",
+			b.Name, "-", colorState("broken", 8), "-", "-", "-", oneLine(b.Err))
 	}
 	return ExitOK
 }
