@@ -51,9 +51,27 @@ func Install() error {
 // ("<name>.cloud.yaml") supports. cloud-init's packages: list has no
 // per-distro syntax, so one fragment only works across OSes whose package
 // names happen to match. An OS outside this set is served by a per-OS
-// fragment instead ("<name>.<os>.cloud.yaml") — Fedora has one, because it
-// has no package literally named "xfce4"; the desktop is the comps group
-// @xfce-desktop-environment.
+// fragment instead ("<name>.<os>.cloud.yaml") — Fedora has one for xfce,
+// because it has no package literally named "xfce4"; the desktop is the
+// comps group @xfce-desktop.
+//
+// Fedora stays out of this set rather than being added to it, for two
+// independent reasons:
+//
+//  1. List below resolves a shared fragment and a per-OS fragment
+//     separately: a name with BOTH (xfce does) would offer Fedora two
+//     entries for the same recipe the instant cloudOS["fedora"] is true —
+//     the shared one (now wrongly in scope) and the per-OS one. Nothing in
+//     List makes the per-OS file suppress the shared one; that only holds
+//     today because Fedora is absent here.
+//  2. It would also silently break any FUTURE shared-only fragment (no
+//     per-OS override) whose package names happen not to hold on dnf —
+//     devtools.cloud.yaml is one: git/curl/ca-certificates/tmux/less match,
+//     but Fedora's vim package is "vim-enhanced", not "vim".
+//
+// Giving Fedora its own devtools.fedora.cloud.yaml (like xfce's) would work
+// around both, but wasn't judged worth a whole extra file for one divergent
+// package name — revisit if a second Fedora-only fragment shows up.
 var cloudOS = map[string]bool{"ubuntu": true, "debian": true, "arch": true}
 
 // List returns installed recipe names offered for osName on backend.
