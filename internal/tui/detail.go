@@ -151,7 +151,8 @@ func (m model) viewDetail() string {
 	}
 
 	var facts strings.Builder
-	facts.WriteString(dimStyle.Render(v.Mode) + dimStyle.Render(glyphSep) + state + "\n\n")
+	facts.WriteString(dimStyle.Render(modeLabel(v.Mode)) + dimStyle.Render(glyphSep) + state + "\n")
+	facts.WriteString(dimStyle.Render(modeHint(v.Mode)) + "\n\n")
 
 	line := func(k, val string) {
 		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
@@ -181,7 +182,11 @@ func (m model) viewDetail() string {
 		line("share", v.Share+dimStyle.Render(" "+glyphTo+" /mnt/host"))
 	}
 	if len(v.Recipes) > 0 {
-		line("recipes", strings.Join(v.Recipes, ", "))
+		names := make([]string, len(v.Recipes))
+		for i, r := range v.Recipes {
+			names[i] = recipeLabel(r)
+		}
+		line("recipes", strings.Join(names, ", "))
 	}
 
 	factsBox := pane(v.Name, strings.TrimRight(facts.String(), "\n"), m.width)

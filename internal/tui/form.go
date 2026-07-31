@@ -641,10 +641,12 @@ func (m model) viewForm() string {
 	}
 
 	if f.resolvedBackend() == "apkovl" {
-		modeLabel := radio("live", f.mode == "live") + "   " + radio("disk", f.mode == "disk")
-		row(fMode, "mode", modeLabel)
+		modeRow := radio(modeLabel("live"), f.mode == "live") + "   " + radio(modeLabel("disk"), f.mode == "disk")
+		row(fMode, "mode", modeRow)
+		b.WriteString(dimStyle.Render("           "+modeHint(f.effectiveMode())) + "\n")
 	} else {
-		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + "\n")
+		b.WriteString(dimStyle.Render("  mode     "+modeLabel(f.effectiveMode())) + "\n")
+		b.WriteString(dimStyle.Render("           "+modeHint(f.effectiveMode())) + "\n")
 	}
 
 	group()
@@ -701,7 +703,7 @@ func (f formModel) recipesLabel() string {
 		if f.recipeSel[name] {
 			box = "[x]"
 		}
-		item := box + " " + name
+		item := box + " " + recipeLabel(name)
 		if f.focus == fRecipes && i == f.recipeIdx {
 			item = selStyle.Render(item)
 		}
