@@ -183,15 +183,23 @@ func bar(ratio float64, width int) string {
 		dimStyle.Render(strings.Repeat("░", width-filled))
 }
 
-// dlView renders the bar plus its stats line, or just the stats line when the
-// server gave no Content-Length and there is no meaningful bar to draw — a
-// fabricated percentage would be worse than none.
+// dlValueCol is where the form's value column starts: a 2-cell focus marker
+// plus an 8-cell label plus a space (see viewForm's "%s%-8s %s" rows). The
+// download block indents to the same column so it reads as another row of
+// the form rather than something bolted underneath it.
+const dlValueCol = "           "
+
+// dlView renders the download block as a form row: a "download <os>" label
+// line, then the bar, then the stats. When the server gave no
+// Content-Length there is no bar and no percentage — a fabricated one would
+// be worse than none.
 func dlView(osName string, s dlStats) string {
-	head := dimStyle.Render("downloading " + osName + "…")
-	body := dimStyle.Render(s.line())
+	head := fmt.Sprintf("  %-8s %s", "download", dimStyle.Render(osName+"…"))
+	body := dlValueCol + dimStyle.Render(s.line())
 	r := s.ratio()
 	if r < 0 {
 		return head + "\n" + body
 	}
-	return fmt.Sprintf("%s\n%s %3.0f%%\n%s", head, bar(r, dlBarWidth), r*100, body)
+	pct := dimStyle.Render(fmt.Sprintf("%3.0f%%", r*100))
+	return fmt.Sprintf("%s\n%s%s %s\n%s", head, dlValueCol, bar(r, dlBarWidth), pct, body)
 }

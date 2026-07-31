@@ -4,11 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/iso"
 )
 
 // TestFormTabOrder is a regression test for a user-reported bug: tab focus
@@ -169,6 +173,82 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 			t.Fatalf("Recipes = %v, want empty", vm.Recipes)
 		}
 	})
+}
+
+// TestFormPaneWidthIsStable pins the fix for the box resizing (and
+// re-centering) the moment the download block appears: pane() hugs its
+// content, and the download stats line is wider than any form row, so the
+// whole pane jumped mid-download.
+func TestFormPaneWidthIsStable(t *testing.T) {
+	m := model{screen: screenForm, width: 100, height: 40, form: newForm()}
+	idle := lipgloss.Width(m.viewForm())
+
+	m.form.fetching = true
+	m.form.fetchingOS = "ubuntu"
+	m.form.dl = dlStats{done: 600 << 20, total: 1200 << 20, elapsed: 71 * time.Second}
+	busy := lipgloss.Width(m.viewForm())
+
+	if idle != busy {
+		t.Errorf("pane width changed when the download appeared: %d -> %d", idle, busy)
+	}
+}
+
+// TestSpaceDownloadsOnImageRow covers the key move: space starts the
+// download on the image row (and re-downloads an image that is already
+// local), while still toggling recipes on the recipes row.
+func TestSpaceDownloadsOnImageRow(t *testing.T) {
+	space := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+
+	m := model{screen: screenForm, form: newForm()}
+	m.form.focus = fISO
+	got, cmd := m.Update(space)
+	if !got.(model).form.fetching {
+		t.Error("space on the image row did not start a download")
+	}
+	if cmd == nil {
+		t.Error("space on the image row returned no command")
+	}
+
+	// A second press while one is in flight must not start another.
+	again, _ := got.(model).Update(space)
+	if !again.(model).form.fetching {
+		t.Error("in-flight download was cancelled by a second space")
+	}
+
+	// The recipes row still toggles.
+	r := model{screen: screenForm, form: newForm()}
+	r.form.focus = fRecipes
+	if len(r.form.recipeNames) > 0 {
+		name := r.form.recipeNames[r.form.recipeIdx]
+		out, _ := r.Update(space)
+		if !out.(model).form.recipeSel[name] {
+			t.Errorf("space on the recipes row did not toggle %q", name)
+		}
+		if out.(model).form.fetching {
+			t.Error("space on the recipes row started a download")
+		}
+	}
+}
+
+// TestEnterDoesNotDownload pins the move of downloading off enter: enter on
+// an undownloaded image must report what to do rather than silently starting
+// a multi-hundred-megabyte fetch.
+func TestEnterDoesNotDownload(t *testing.T) {
+	m := model{screen: screenForm, form: newForm()}
+	m.form.focus = fISO
+	// Force the selected image to look not-yet-downloaded.
+	m.form.images = []imageOption{{entry: &iso.Entry{ID: "x", OS: "ubuntu", Backend: "cloudinit"}, osName: "ubuntu", backend: "cloudinit"}}
+	m.form.imgIdx = 0
+	m.form.inputs[fName].SetValue("box")
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	after := out.(model)
+	if after.form.fetching {
+		t.Error("enter started a download; space is what downloads now")
+	}
+	if !strings.Contains(after.form.err, "space") {
+		t.Errorf("form.err = %q, want it to point at space", after.form.err)
+	}
 }
 
 // TestQuestionMarkTypesIntoTextFields covers the reported bug where "?" was

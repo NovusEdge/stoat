@@ -139,7 +139,7 @@ func (formHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"tab", "down"}, "tab/↓", "next"),
 		plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev"),
 		plainKey([]string{"left", "right"}, "←/→", "change"),
-		plainKey([]string{" "}, "space", "toggle recipe"),
+		plainKey([]string{" "}, "space", "download / toggle"),
 		plainKey([]string{"enter"}, "↵", "create"),
 		plainKey([]string{"esc"}, "esc", "cancel"),
 		keyHelp,
@@ -149,8 +149,8 @@ func (formHelp) ShortHelp() []key.Binding {
 func (formHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{plainKey([]string{"tab", "down"}, "tab/↓", "next field"), plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev field")},
-		{plainKey([]string{"left", "right"}, "←/→", "change iso/mode/recipe"), plainKey([]string{" "}, "space", "toggle recipe")},
-		{plainKey([]string{"enter"}, "↵", "create / download iso"), plainKey([]string{"esc"}, "esc", "cancel")},
+		{plainKey([]string{"left", "right"}, "←/→", "change iso/mode/recipe"), plainKey([]string{" "}, "space", "download image / toggle recipe")},
+		{plainKey([]string{"enter"}, "↵", "create vm"), plainKey([]string{"esc"}, "esc", "cancel")},
 		{keyCtrlC, keyHelp},
 	}
 }

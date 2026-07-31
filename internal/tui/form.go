@@ -120,6 +120,11 @@ func buildImages() []imageOption {
 // byoBackends is the fixed cycle offered on the fBackend override row.
 var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 
+// formContentWidth holds the new-vm pane at a constant width. Sized to the
+// widest thing it ever shows — the download stats line, indented to the
+// value column — so the box never resizes as optional rows appear.
+const formContentWidth = 56
+
 type formModel struct {
 	inputs      []textinput.Model // name, ram, cpus, disk, share
 	focus       int
@@ -296,11 +301,21 @@ type imageFetchedMsg struct {
 }
 type imageFetchErrMsg string
 
-func fetchImage(e iso.Entry) tea.Cmd {
+// fetchImage downloads e. force re-fetches an image that is already local:
+// iso.Download short-circuits on a checksum match, so the only way to
+// genuinely replace a truncated or superseded file is to remove it first.
+func fetchImage(e iso.Entry, force bool) tea.Cmd {
 	return func() tea.Msg {
 		r, err := iso.Resolve(e)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
+		}
+		if force {
+			// A missing file is the desired state, so only a real failure
+			// (permissions, a directory in the way) is worth reporting.
+			if err := os.Remove(filepath.Join(config.Root(), "isos", r.File)); err != nil && !os.IsNotExist(err) {
+				return imageFetchErrMsg(e.OS + ": " + err.Error())
+			}
 		}
 		p, err := iso.Download(r, dlRecord)
 		if err != nil {
@@ -428,20 +443,26 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form.recipeSel[name] = !m.form.recipeSel[name]
 				return m, nil
 			}
-		case "enter":
+			// space on the image row downloads the selected catalog entry, and
+			// re-downloads it if it's already local — the only way to replace a
+			// truncated or superseded image without deleting it by hand.
 			if m.form.focus == fISO {
-				if opt := m.form.selected(); opt != nil && opt.entry != nil && opt.file == "" {
-					if m.form.fetching {
-						return m, nil // a fetch is already in flight; don't start a second one
-					}
-					m.form.fetching = true
-					m.form.fetchingOS = opt.entry.OS
-					m.form.dl = dlStats{}
-					m.status = ""
-					dlStart()
-					return m, tea.Batch(fetchImage(*opt.entry), dlTick())
+				opt := m.form.selected()
+				if opt == nil || opt.entry == nil {
+					m.status = "byo images are already local — nothing to download"
+					return m, nil
 				}
+				if m.form.fetching {
+					return m, nil // a fetch is already in flight; don't start a second one
+				}
+				m.form.fetching = true
+				m.form.fetchingOS = opt.entry.OS
+				m.form.dl = dlStats{}
+				m.status = ""
+				dlStart()
+				return m, tea.Batch(fetchImage(*opt.entry, opt.file != ""), dlTick())
 			}
+		case "enter":
 			vm, err := m.form.build()
 			if err != nil {
 				m.form.err = err.Error()
@@ -493,7 +514,7 @@ func (f formModel) build() (*config.VM, error) {
 		return nil, fmt.Errorf("pick an image first")
 	}
 	if opt.file == "" {
-		return nil, fmt.Errorf("download %s first", opt.entry.OS)
+		return nil, fmt.Errorf("press space to download %s first", opt.entry.OS)
 	}
 	ram, err := strconv.Atoi(strings.TrimSpace(f.inputs[fRAM].Value()))
 	if err != nil || ram < 256 {
@@ -634,10 +655,17 @@ func (m model) viewForm() string {
 		b.WriteString("\n" + errStyle.Render(f.err))
 	}
 
-	box := pane("new vm", strings.TrimRight(b.String(), "\n"), m.width)
+	box := paneAt("new vm", strings.TrimRight(b.String(), "\n"), formContentWidth, m.width)
 
-	parts := []string{box, "", renderFooter(formHelp{}, m.width, m.showHelp)}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	// Center rather than Left: the footer is far wider than the box, so a
+	// left join pins the box to the footer's left edge and the pane reads as
+	// off-center once the whole rectangle is placed.
+	parts := []string{box, ""}
+	if m.status != "" {
+		parts = append(parts, warnStyle.Render(m.status))
+	}
+	parts = append(parts, renderFooter(formHelp{}, m.width, m.showHelp))
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }
 
 // recipesLabel renders the recipes row's checkbox list, highlighting the
