@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDownload_RenameFailureCleansUpPart drives Download down the success
@@ -319,5 +320,63 @@ func TestCatalog_FedoraURLNotArchived(t *testing.T) {
 		if strings.Contains(e.URL, "archives.fedoraproject.org") {
 			t.Errorf("fedora-cloud URL points at the archive mirror, not releases/: %s", e.URL)
 		}
+	}
+}
+
+// TestDownloadOutlastsMetadataTimeout is the regression test for a reported
+// failure: "ubuntu: context deadline exceeded (Client.Timeout or context
+// cancellation while reading body)". Download shared the metadata client,
+// whose Timeout bounds the WHOLE request including the body — so any image
+// taking longer than that ceiling died mid-transfer, which is every real
+// image. The server here dribbles the body out over noticeably longer than
+// the metadata client's own timeout; the download must still complete.
+func TestDownloadOutlastsMetadataTimeout(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	// Shrink the metadata client for the length of the test, so "longer than
+	// the metadata timeout" costs milliseconds instead of 30 real seconds.
+	origClient := client
+	client = &http.Client{Timeout: 50 * time.Millisecond}
+	defer func() { client = origClient }()
+
+	body := []byte(strings.Repeat("payload!", 64))
+	sum := sha256.Sum256(body)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		flusher, _ := w.(http.Flusher)
+		for i := 0; i < len(body); i += 64 {
+			w.Write(body[i:min(i+64, len(body))])
+			if flusher != nil {
+				flusher.Flush()
+			}
+			// Total transfer time lands well past the metadata timeout.
+			time.Sleep(15 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	origMirror := downloadMirror
+	downloadMirror = srv.URL + "/"
+	defer func() { downloadMirror = origMirror }()
+
+	r := &Release{File: "slow.iso", Version: "0.0.0", SHA256: hex.EncodeToString(sum[:])}
+
+	var lastDone, lastTotal int64
+	got, err := Download(r, func(done, total int64) { lastDone, lastTotal = done, total })
+	if err != nil {
+		t.Fatalf("slow download failed: %v", err)
+	}
+	if got != filepath.Join("isos", "slow.iso") {
+		t.Errorf("Download returned %q", got)
+	}
+	if lastDone != int64(len(body)) {
+		t.Errorf("progress reported %d bytes, want %d", lastDone, len(body))
+	}
+	if lastTotal != int64(len(body)) {
+		t.Errorf("progress reported total %d, want %d", lastTotal, len(body))
+	}
+	if !r.Verified {
+		t.Error("checksum should have verified")
 	}
 }

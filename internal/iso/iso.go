@@ -2,12 +2,14 @@
 package iso
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"hash"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -187,7 +190,30 @@ func Infer(filename string) (backend, os string) {
 	}
 }
 
+// client fetches small metadata — release indexes and checksum files — where
+// a ceiling on the whole request is exactly right.
 var client = &http.Client{Timeout: 30 * time.Second}
+
+// downloadClient fetches images. http.Client.Timeout bounds the ENTIRE
+// request including reading the body, so the 30s that suits a checksum file
+// kills any image download that takes longer than 30 seconds — which is all
+// of them ("context deadline exceeded ... while reading body"). Bound only
+// the phases that can hang without producing bytes, and let a healthy
+// transfer run as long as it needs to.
+var downloadClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	},
+}
+
+// stallTimeout aborts a download whose body has gone this long without
+// producing a single byte. Removing the overall timeout above would otherwise
+// mean a half-dead connection hangs until the OS gives up on the socket,
+// which can be many minutes with nothing on screen but 0 B/s.
+const stallTimeout = 60 * time.Second
 
 // downloadMirror is the base URL Download fetches ISO files from. It is a
 // var (not the mirror const) purely so tests can point it at a local
@@ -364,7 +390,13 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 		src = downloadMirror + r.File
 	}
 
-	resp, err := client.Get(src)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -372,6 +404,15 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download: %s", resp.Status)
 	}
+
+	// Cancelling the request is what unblocks a Read that will never return;
+	// every chunk that does arrive pushes the deadline back out.
+	// stalled distinguishes "no bytes for a minute" from any other
+	// cancellation, so the user gets a reason rather than a bare
+	// "context canceled" they can't act on.
+	var stalled atomic.Bool
+	stall := time.AfterFunc(stallTimeout, func() { stalled.Store(true); cancel() })
+	defer stall.Stop()
 
 	part := final + ".part"
 	f, err := os.Create(part)
@@ -384,6 +425,7 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			stall.Reset(stallTimeout)
 			if _, werr := f.Write(buf[:n]); werr != nil {
 				f.Close()
 				os.Remove(part)
@@ -401,10 +443,20 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 		if rerr != nil {
 			f.Close()
 			os.Remove(part)
+			if stalled.Load() {
+				return "", fmt.Errorf("download stalled: no data for %s", stallTimeout)
+			}
 			return "", rerr
 		}
 	}
-	f.Close()
+	// Checked, not deferred: a Close error here would mean bytes never
+	// reached disk, and the digest is computed from the read stream in
+	// memory — so a short file would pass verification and get renamed into
+	// place as a "verified" image.
+	if err := f.Close(); err != nil {
+		os.Remove(part)
+		return "", err
+	}
 
 	if r.SHA256 != "" {
 		if got := hex.EncodeToString(h.Sum(nil)); got != r.SHA256 {

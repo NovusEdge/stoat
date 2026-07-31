@@ -70,8 +70,27 @@ func pane(title, body string, maxWidth int) string {
 	return style.Render(content)
 }
 
-const bannerArt = `
-███████╗████████╗ ██████╗  █████╗ ████████╗
+// rowGap separates rows inside a pane. A terminal has no fractional leading,
+// so "a bit more line spacing" can only mean one blank line; this names it in
+// one place.
+const rowGap = "\n\n"
+
+// paneAt draws a pane whose content is held at a fixed width, for screens
+// whose rows come and go — a download block, an error line, a conditional
+// disk row. pane() hugs its content, so without this the box changes width
+// (and re-centers) the moment an optional row appears, which reads as the
+// layout jumping under the user mid-action. width is still clamped to the
+// terminal, so a narrow terminal wins over the fixed width.
+func paneAt(title, body string, width, maxWidth int) string {
+	if maxWidth > 0 {
+		if inner := maxWidth - paneFrame(); width > inner {
+			width = max(inner, 1)
+		}
+	}
+	return pane(title, lipgloss.NewStyle().Width(width).Render(body), maxWidth)
+}
+
+const bannerArt = `███████╗████████╗ ██████╗  █████╗ ████████╗
 ██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚══██╔══╝
 ███████╗   ██║   ██║   ██║███████║   ██║
 ╚════██║   ██║   ██║   ██║██╔══██║   ██║

@@ -4,11 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/iso"
 )
 
 // TestFormTabOrder is a regression test for a user-reported bug: tab focus
@@ -171,10 +175,102 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 	})
 }
 
+// TestFormPaneWidthIsStable pins the fix for the box resizing (and
+// re-centering) the moment the download block appears: pane() hugs its
+// content, and the download stats line is wider than any form row, so the
+// whole pane jumped mid-download.
+func TestFormPaneWidthIsStable(t *testing.T) {
+	// newForm()/build() read the data root; without this they see the
+	// developer's real ~/.stoat and break the day it holds a VM named "box".
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	m := model{screen: screenForm, width: 100, height: 40, form: newForm()}
+	idle := lipgloss.Width(m.viewForm())
+
+	m.form.fetching = true
+	m.form.fetchingOS = "ubuntu"
+	m.form.dl = dlStats{done: 600 << 20, total: 1200 << 20, elapsed: 71 * time.Second}
+	busy := lipgloss.Width(m.viewForm())
+
+	if idle != busy {
+		t.Errorf("pane width changed when the download appeared: %d -> %d", idle, busy)
+	}
+}
+
+// TestSpaceDownloadsOnImageRow covers the key move: space starts the
+// download on the image row (and re-downloads an image that is already
+// local), while still toggling recipes on the recipes row.
+func TestSpaceDownloadsOnImageRow(t *testing.T) {
+	// newForm()/build() read the data root; without this they see the
+	// developer's real ~/.stoat and break the day it holds a VM named "box".
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	space := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+
+	m := model{screen: screenForm, form: newForm()}
+	m.form.focus = fISO
+	got, cmd := m.Update(space)
+	if !got.(model).form.fetching {
+		t.Error("space on the image row did not start a download")
+	}
+	if cmd == nil {
+		t.Error("space on the image row returned no command")
+	}
+
+	// A second press while one is in flight must not start another.
+	again, _ := got.(model).Update(space)
+	if !again.(model).form.fetching {
+		t.Error("in-flight download was cancelled by a second space")
+	}
+
+	// The recipes row still toggles.
+	r := model{screen: screenForm, form: newForm()}
+	r.form.focus = fRecipes
+	if len(r.form.recipeNames) > 0 {
+		name := r.form.recipeNames[r.form.recipeIdx]
+		out, _ := r.Update(space)
+		if !out.(model).form.recipeSel[name] {
+			t.Errorf("space on the recipes row did not toggle %q", name)
+		}
+		if out.(model).form.fetching {
+			t.Error("space on the recipes row started a download")
+		}
+	}
+}
+
+// TestEnterDoesNotDownload pins the move of downloading off enter: enter on
+// an undownloaded image must report what to do rather than silently starting
+// a multi-hundred-megabyte fetch.
+func TestEnterDoesNotDownload(t *testing.T) {
+	// newForm()/build() read the data root; without this they see the
+	// developer's real ~/.stoat and break the day it holds a VM named "box".
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	m := model{screen: screenForm, form: newForm()}
+	m.form.focus = fISO
+	// Force the selected image to look not-yet-downloaded.
+	m.form.images = []imageOption{{entry: &iso.Entry{ID: "x", OS: "ubuntu", Backend: "cloudinit"}, osName: "ubuntu", backend: "cloudinit"}}
+	m.form.imgIdx = 0
+	m.form.inputs[fName].SetValue("box")
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	after := out.(model)
+	if after.form.fetching {
+		t.Error("enter started a download; space is what downloads now")
+	}
+	if !strings.Contains(after.form.err, "space") {
+		t.Errorf("form.err = %q, want it to point at space", after.form.err)
+	}
+}
+
 // TestQuestionMarkTypesIntoTextFields covers the reported bug where "?" was
 // always eaten as the help toggle, so it could never be typed into a text
 // field. On a picker row it must still toggle help.
 func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
+	// newForm()/build() read the data root; without this they see the
+	// developer's real ~/.stoat and break the day it holds a VM named "box".
+	t.Setenv("STOAT_HOME", t.TempDir())
+
 	key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}
 
 	m := model{screen: screenForm, form: newForm()}
@@ -194,5 +290,75 @@ func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
 	got2, _ := m2.Update(key)
 	if !got2.(model).showHelp {
 		t.Error("? on the image picker did not toggle help")
+	}
+}
+
+// TestDownloadSurvivesLeavingTheForm is the regression test for the review's
+// C1. Leaving the form with "esc" does not cancel the fetch — there is no
+// cancel — so the goroutine keeps writing. If "n" then handed out a fresh
+// form, "fetching" would reset to false and a second space would start a
+// SECOND download of the same file: two writers interleaving into one .part,
+// each verifying its own read stream, so both pass the checksum and the
+// image that lands is a corrupt splice marked verified.
+func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	space := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	m := model{screen: screenForm, form: newForm(), provisioning: map[string]bool{}}
+	m.form.focus = fISO
+
+	out, _ := m.Update(space)
+	m = out.(model)
+	if !m.form.fetching {
+		t.Fatal("space did not start a download")
+	}
+
+	// esc back to the list; the fetch keeps running.
+	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = out.(model)
+	if m.screen != screenList {
+		t.Fatalf("esc left screen %v, want the list", m.screen)
+	}
+	if !m.form.fetching {
+		t.Fatal("fetching flag was cleared even though nothing cancelled the download")
+	}
+
+	// "n" must NOT hand out a fresh form while that download is live.
+	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = out.(model)
+	if !m.form.fetching {
+		t.Error(`"n" reset the form and cleared fetching: a second space would corrupt the image`)
+	}
+
+	// ...so a second space is refused rather than starting a rival writer.
+	before := m.form.fetchingOS
+	out, cmd := m.Update(space)
+	m = out.(model)
+	if cmd != nil {
+		t.Error("a second space started another download while one was in flight")
+	}
+	if m.form.fetchingOS != before {
+		t.Errorf("in-flight download was retargeted: %q -> %q", before, m.form.fetchingOS)
+	}
+}
+
+// TestFetchOutcomesReachTheUserFromTheList covers the other half of C1: a
+// download that fails after the user has gone back to the list must still
+// report itself. Routed by screen, imageFetchErrMsg was dropped on the floor
+// and a checksum failure was simply never mentioned.
+func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	m := model{screen: screenList, form: newForm(), provisioning: map[string]bool{}}
+	m.form.fetching = true
+	m.form.fetchingOS = "ubuntu"
+
+	out, _ := m.Update(imageFetchErrMsg("ubuntu: checksum mismatch"))
+	m = out.(model)
+	if m.form.fetching {
+		t.Error("a failed fetch left the fetching flag set")
+	}
+	if !strings.Contains(m.status, "checksum mismatch") {
+		t.Errorf("status = %q, want the failure reported", m.status)
 	}
 }

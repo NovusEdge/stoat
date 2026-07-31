@@ -108,7 +108,14 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Sequence(startVM(v), loadVMs)
 	case "n":
-		m.form = newForm()
+		// A fresh form would reset "fetching" to false while the previous
+		// form's download goroutine is still writing, letting a second fetch
+		// start on the same file: two writers interleaving into one .part,
+		// each verifying its own read stream, producing a corrupt image that
+		// passes the checksum. Reuse the form that owns the live download.
+		if !m.form.fetching {
+			m.form = newForm()
+		}
 		m.screen = screenForm
 		m.showHelp = false
 	case "right", "l":
@@ -218,15 +225,22 @@ func (m model) viewList() string {
 			dot, dotStyle = "●", upStyle
 			state = fmt.Sprintf("up %s  :%d", qemu.Uptime(v), v.SSHPort)
 		}
-		row := fmt.Sprintf("%s %-14s %-5s %5dM %2dc  %s",
-			dotStyle.Render(dot), v.Name, v.Mode, v.RAM, v.CPUs, state)
+		// The dot is rendered OUTSIDE the selection wrap on purpose. A styled
+		// substring ends in \x1b[0m, which resets the enclosing style too, so
+		// wrapping a row that starts with a coloured dot left everything after
+		// the dot unhighlighted — the selected row was marked by the ❯ alone.
+		// state is kept out of the wrap for the same reason as the dot: when
+		// it's the dim "—" of a stopped VM, its trailing reset would render
+		// that one glyph unbolded inside an otherwise highlighted row.
+		label := fmt.Sprintf("%-14s %-5s %5dM %2dc  ", v.Name, v.Mode, v.RAM, v.CPUs)
 		cursor := "  "
 		if i == m.cursor {
 			cursor = selStyle.Render("❯ ")
-			row = selStyle.Render(row)
+			label = selStyle.Render(label)
 		}
+		row := dotStyle.Render(dot) + " " + label + state
 		if i > 0 {
-			rows.WriteString("\n")
+			rows.WriteString(rowGap)
 		}
 		rows.WriteString(cursor + row)
 	}
@@ -241,7 +255,7 @@ func (m model) viewList() string {
 			row = selStyle.Render(plain)
 		}
 		if i > 0 || len(m.vms) > 0 {
-			rows.WriteString("\n")
+			rows.WriteString(rowGap)
 		}
 		rows.WriteString(cursor + row)
 	}
@@ -250,13 +264,15 @@ func (m model) viewList() string {
 
 	// lipgloss.Place centers (or left-aligns) each LINE of the string handed
 	// to it independently, sized against that string's widest line. Handing
-	// it box+status+footer concatenated as-is — three pieces of very
-	// different natural width — would make every shorter line drift toward
-	// center on its own, which is the "justified" look this used to have.
-	// JoinVertical(Left, ...) pads every line of every piece out to the
-	// widest piece's width first, so the result is one rectangle whose left
-	// edge is the same on every line; only that rectangle moves as a whole
-	// once it's centered in the terminal.
+	// it box+status+footer concatenated as-is would make every shorter line
+	// drift toward center on its own, which is the "justified" look this
+	// used to have. JoinVertical pads every line of every piece out to the
+	// widest piece's width first, so the result is one rectangle that moves
+	// as a whole once it's centered in the terminal.
+	//
+	// Center, not Left: the footer is much wider than the box, so a left join
+	// pins the box to the footer's left edge — leaving it visibly off-center
+	// under the centered banner.
 	parts := []string{box, ""}
 	if m.status != "" {
 		parts = append(parts, warnStyle.Render(m.status))
@@ -264,5 +280,5 @@ func (m model) viewList() string {
 	v := m.current()
 	sshAvailable := v != nil && qemu.Running(v)
 	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }

@@ -136,7 +136,7 @@ func (m model) viewDetail() string {
 			parts = append(parts, warnStyle.Render(m.status))
 		}
 		parts = append(parts, dimStyle.Render("esc back"))
-		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return lipgloss.JoinVertical(lipgloss.Center, parts...)
 	}
 
 	state := downStyle.Render("stopped")
@@ -201,5 +201,7 @@ func (m model) viewDetail() string {
 		parts = append(parts, warnStyle.Render(m.status))
 	}
 	parts = append(parts, renderFooter(detailHelp{sshAvailable: qemu.Running(v)}, m.width, m.showHelp))
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	// Center for the same reason as the list: the footer is wider than the
+	// pane, and a left join would pin the pane to the footer's left edge.
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -58,7 +59,12 @@ func localImageFiles() []string {
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		// .part files are half-finished downloads. iso.Infer happily matches
+		// one ("…cloudimg-amd64.img.part" contains "cloudimg"), so without
+		// this they show up as selectable BYO images and a VM can be built on
+		// a truncated file. Aborting a download is routine — it is minutes
+		// long with no cancel key — so these do accumulate.
+		if !e.IsDir() && !strings.HasSuffix(e.Name(), ".part") {
 			out = append(out, e.Name())
 		}
 	}
@@ -119,6 +125,11 @@ func buildImages() []imageOption {
 // byoBackends is the fixed cycle offered on the fBackend override row.
 var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 
+// formContentWidth holds the new-vm pane at a constant width. Sized to the
+// widest thing it ever shows — the download stats line, indented to the
+// value column — so the box never resizes as optional rows appear.
+const formContentWidth = 56
+
 type formModel struct {
 	inputs      []textinput.Model // name, ram, cpus, disk, share
 	focus       int
@@ -132,6 +143,7 @@ type formModel struct {
 	recipeNames []string        // installed recipes matching the selected image's OS/backend
 	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
 	recipeSel   map[string]bool // names currently checked
+	dl          dlStats         // last snapshot of the in-flight download
 }
 
 // field indices into inputs
@@ -294,13 +306,18 @@ type imageFetchedMsg struct {
 }
 type imageFetchErrMsg string
 
+// fetchImage downloads e. Re-running it on an image that is already local is
+// safe and is how "re-download" works: iso.Download only short-circuits when
+// the local file's digest MATCHES the published one, so a truncated or
+// superseded file mismatches and is refetched in full. Deleting it first
+// would only open a window where a good image is gone and the refetch fails.
 func fetchImage(e iso.Entry) tea.Cmd {
 	return func() tea.Msg {
 		r, err := iso.Resolve(e)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
-		p, err := iso.Download(r, nil)
+		p, err := iso.Download(r, dlRecord)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
@@ -310,6 +327,16 @@ func fetchImage(e iso.Entry) tea.Cmd {
 
 func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case dlTickMsg:
+		// The chain is anchored to m.form.fetching rather than to a
+		// generation counter: only one download can be in flight at a time,
+		// so when the fetch ends the chain simply stops re-arming.
+		if !m.form.fetching {
+			return m, nil
+		}
+		m.form.dl = dlSnapshot(time.Now())
+		return m, dlTick()
+
 	case imageFetchedMsg:
 		m.form.fetching = false
 		m.form.images = buildImages()
@@ -416,18 +443,27 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form.recipeSel[name] = !m.form.recipeSel[name]
 				return m, nil
 			}
-		case "enter":
+			// space on the image row downloads the selected catalog entry.
+			// Pressing it on an image that is already local re-verifies it and
+			// refetches only if the bytes no longer match the published digest,
+			// so it doubles as "repair this image" at no risk to a good one.
 			if m.form.focus == fISO {
-				if opt := m.form.selected(); opt != nil && opt.entry != nil && opt.file == "" {
-					if m.form.fetching {
-						return m, nil // a fetch is already in flight; don't start a second one
-					}
-					m.form.fetching = true
-					m.form.fetchingOS = opt.entry.OS
-					m.status = "downloading " + opt.entry.OS + "…"
-					return m, fetchImage(*opt.entry)
+				opt := m.form.selected()
+				if opt == nil || opt.entry == nil {
+					m.status = "byo images are already local — nothing to download"
+					return m, nil
 				}
+				if m.form.fetching {
+					return m, nil // a fetch is already in flight; don't start a second one
+				}
+				m.form.fetching = true
+				m.form.fetchingOS = opt.entry.OS
+				m.form.dl = dlStats{}
+				m.status = ""
+				dlStart()
+				return m, tea.Batch(fetchImage(*opt.entry), dlTick())
 			}
+		case "enter":
 			vm, err := m.form.build()
 			if err != nil {
 				m.form.err = err.Error()
@@ -479,7 +515,7 @@ func (f formModel) build() (*config.VM, error) {
 		return nil, fmt.Errorf("pick an image first")
 	}
 	if opt.file == "" {
-		return nil, fmt.Errorf("download %s first", opt.entry.OS)
+		return nil, fmt.Errorf("press space to download %s first", opt.entry.OS)
 	}
 	ram, err := strconv.Atoi(strings.TrimSpace(f.inputs[fRAM].Value()))
 	if err != nil || ram < 256 {
@@ -566,16 +602,32 @@ func (m model) viewForm() string {
 	f := m.form
 	var b strings.Builder
 
+	// Rows are single-spaced with a blank line between GROUPS of related
+	// fields, not between every row. The form is the tallest screen — nine
+	// rows plus a title and a download block — so spacing every row both
+	// overflowed a 24-line terminal and read as too airy; grouping gives the
+	// separation without the sprawl, and says which fields belong together.
+	group := func() { b.WriteString("\n") }
+
 	row := func(i int, label, value string) {
 		marker := "  "
 		if f.focus == i {
 			marker = selStyle.Render("❯ ")
-			value = selStyle.Render(value)
+			// Text inputs are NOT wrapped: a textinput's view carries its own
+			// cursor styling, and a styled substring's \x1b[0m resets the
+			// enclosing style too — so wrapping produced a row that was accent
+			// up to the cursor and default after it. The ❯ and the input's own
+			// cursor already mark focus. Picker rows are plain strings and wrap
+			// safely.
+			if i >= fieldCount {
+				value = selStyle.Render(value)
+			}
 		}
 		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
 	}
 
 	row(fName, "name", f.inputs[fName].View())
+	group()
 
 	opt := f.selected()
 	imgLabel := "— (none)"
@@ -598,6 +650,8 @@ func (m model) viewForm() string {
 		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + "\n")
 	}
 
+	group()
+
 	row(fRAM, "ram", f.inputs[fRAM].View()+dimStyle.Render(" MB"))
 	row(fCPUs, "cpus", f.inputs[fCPUs].View())
 	if f.effectiveMode() == "disk" {
@@ -605,6 +659,8 @@ func (m model) viewForm() string {
 	} else {
 		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + "\n")
 	}
+	group()
+
 	row(fShare, "share", f.inputs[fShare].View())
 
 	recipesMarker := "  "
@@ -614,16 +670,23 @@ func (m model) viewForm() string {
 	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
 
 	if f.fetching {
-		b.WriteString("\n" + dimStyle.Render("downloading "+f.fetchingOS+"…"))
+		b.WriteString("\n" + dlView(f.fetchingOS, f.dl))
 	}
 	if f.err != "" {
 		b.WriteString("\n" + errStyle.Render(f.err))
 	}
 
-	box := pane("new vm", strings.TrimRight(b.String(), "\n"), m.width)
+	box := paneAt("new vm", strings.TrimRight(b.String(), "\n"), formContentWidth, m.width)
 
-	parts := []string{box, "", renderFooter(formHelp{}, m.width, m.showHelp)}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	// Center rather than Left: the footer is far wider than the box, so a
+	// left join pins the box to the footer's left edge and the pane reads as
+	// off-center once the whole rectangle is placed.
+	parts := []string{box, ""}
+	if m.status != "" {
+		parts = append(parts, warnStyle.Render(m.status))
+	}
+	parts = append(parts, renderFooter(formHelp{}, m.width, m.showHelp))
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }
 
 // recipesLabel renders the recipes row's checkbox list, highlighting the
