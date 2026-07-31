@@ -218,13 +218,17 @@ func (m model) viewList() string {
 			dot, dotStyle = "●", upStyle
 			state = fmt.Sprintf("up %s  :%d", qemu.Uptime(v), v.SSHPort)
 		}
-		row := fmt.Sprintf("%s %-14s %-5s %5dM %2dc  %s",
-			dotStyle.Render(dot), v.Name, v.Mode, v.RAM, v.CPUs, state)
+		// The dot is rendered OUTSIDE the selection wrap on purpose. A styled
+		// substring ends in \x1b[0m, which resets the enclosing style too, so
+		// wrapping a row that starts with a coloured dot left everything after
+		// the dot unhighlighted — the selected row was marked by the ❯ alone.
+		label := fmt.Sprintf("%-14s %-5s %5dM %2dc  %s", v.Name, v.Mode, v.RAM, v.CPUs, state)
 		cursor := "  "
 		if i == m.cursor {
 			cursor = selStyle.Render("❯ ")
-			row = selStyle.Render(row)
+			label = selStyle.Render(label)
 		}
+		row := dotStyle.Render(dot) + " " + label
 		if i > 0 {
 			rows.WriteString("\n")
 		}
@@ -250,13 +254,15 @@ func (m model) viewList() string {
 
 	// lipgloss.Place centers (or left-aligns) each LINE of the string handed
 	// to it independently, sized against that string's widest line. Handing
-	// it box+status+footer concatenated as-is — three pieces of very
-	// different natural width — would make every shorter line drift toward
-	// center on its own, which is the "justified" look this used to have.
-	// JoinVertical(Left, ...) pads every line of every piece out to the
-	// widest piece's width first, so the result is one rectangle whose left
-	// edge is the same on every line; only that rectangle moves as a whole
-	// once it's centered in the terminal.
+	// it box+status+footer concatenated as-is would make every shorter line
+	// drift toward center on its own, which is the "justified" look this
+	// used to have. JoinVertical pads every line of every piece out to the
+	// widest piece's width first, so the result is one rectangle that moves
+	// as a whole once it's centered in the terminal.
+	//
+	// Center, not Left: the footer is much wider than the box, so a left join
+	// pins the box to the footer's left edge — leaving it visibly off-center
+	// under the centered banner.
 	parts := []string{box, ""}
 	if m.status != "" {
 		parts = append(parts, warnStyle.Render(m.status))
@@ -264,5 +270,5 @@ func (m model) viewList() string {
 	v := m.current()
 	sshAvailable := v != nil && qemu.Running(v)
 	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }

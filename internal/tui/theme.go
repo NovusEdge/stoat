@@ -85,8 +85,7 @@ func paneAt(title, body string, width, maxWidth int) string {
 	return pane(title, lipgloss.NewStyle().Width(width).Render(body), maxWidth)
 }
 
-const bannerArt = `
-███████╗████████╗ ██████╗  █████╗ ████████╗
+const bannerArt = `███████╗████████╗ ██████╗  █████╗ ████████╗
 ██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚══██╔══╝
 ███████╗   ██║   ██║   ██║███████║   ██║
 ╚════██║   ██║   ██║   ██║██╔══██║   ██║
