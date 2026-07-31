@@ -61,10 +61,20 @@ func (f *fields) String() string {
 		Border(lipgloss.Border{}).
 		BorderTop(false).BorderLeft(false).BorderRight(false).
 		BorderHeader(false).BorderRow(false).BorderColumn(false).
-		// BorderBottom stays ON deliberately. lipgloss v1.1.0's table drops
-		// the last data row entirely when it is off (three rows render as
-		// two). The border glyphs are all empty, so leaving it on draws
-		// nothing and costs no line — turning it off costs a row.
+		// BorderBottom stays ON deliberately: with it off, lipgloss v1.1.0's
+		// table drops the last data row entirely (three rows render as two).
+		// The glyphs are all empty, so leaving it on draws nothing and costs
+		// no line — turning it off costs a row.
+		//
+		// The real fault is table.computeHeight(), which returns one line too
+		// few for a table with no headers, and which String() applies as a
+		// hard MaxHeight clamp. That arithmetic is unchanged in lipgloss
+		// v2.0.5; v2 only stops CALLING it, by clamping to
+		// min(t.height, computeHeight()) — and t.height is 0 unless someone
+		// calls .Height(). So the migration must not "clean up" this line on
+		// the grounds that v2 fixed the bug: it did not, and calling .Height()
+		// on this table brings it straight back, in either version.
+		// TestFieldsKeepsEveryRow is the guard.
 		BorderBottom(true).
 		StyleFunc(func(_, col int) lipgloss.Style {
 			switch col {
