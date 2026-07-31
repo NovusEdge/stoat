@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
-
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
@@ -24,9 +24,9 @@ type model struct {
 	screen              screen
 	vms                 []*config.VM
 	broken              []config.Broken // VMs whose vm.toml exists but fails to parse
-	cursor              int
-	status              string // transient message shown under the list
-	preflight           string // non-empty when qemu or /dev/kvm is unusable
+	list                list.Model      // owns the VM list's cursor, scrolling and "/" filter
+	status              string          // transient message shown under the list
+	preflight           string          // non-empty when qemu or /dev/kvm is unusable
 	width               int
 	height              int
 	pendingDelete       *config.VM // VM awaiting delete confirmation
@@ -81,7 +81,7 @@ func Run() error {
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
 	defer logx.Close()
-	m := model{provisioning: map[string]bool{}}
+	m := model{provisioning: map[string]bool{}, list: newVMList()}
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()
 	}
@@ -105,15 +105,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// A taller terminal shows more VMs before paginating; the width stays
+		// fixed so the pane doesn't breathe with the window.
+		m.list.SetWidth(listWidth)
+		m.syncListHeight()
 		return m, nil
 	case vmsLoadedMsg:
 		m.vms = msg.vms
 		m.broken = msg.broken
-		total := len(m.vms) + len(m.broken)
-		if m.cursor >= total {
-			m.cursor = max(0, total-1)
-		}
-		return m, nil
+		// SetItems returns a Cmd that re-applies an active filter to the new
+		// items; dropping it would leave a filtered list showing the old
+		// matches after a refresh.
+		cmd := m.list.SetItems(vmItems(msg.vms, msg.broken))
+		m.syncListHeight()
+		return m, cmd
 	case statusMsg:
 		m.status = string(msg)
 		return m, nil

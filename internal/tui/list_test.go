@@ -22,15 +22,13 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	m := model{
-		screen: screenList,
-		width:  100,
-		height: 30,
-		vms: []*config.VM{
-			{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
-			{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
-		},
+	vms := []*config.VM{
+		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
+		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
 	}
+	m := model{screen: screenList, width: 100, height: 30, list: newVMList(), vms: vms}
+	m.list.SetItems(vmItems(vms, nil))
+	m.syncListHeight()
 	out := m.viewList()
 
 	i := strings.Index(out, "alpha")
