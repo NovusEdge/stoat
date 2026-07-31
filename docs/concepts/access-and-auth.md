@@ -58,8 +58,8 @@ per image when a VM is created from the catalog:
 
 | Image | Backend | SSH user |
 |---|---|---|
-| `alpine-standard` | `apkovl` | `root` |
-| `ubuntu-24.04`, `debian-12`, `fedora-cloud`, `arch-cloud` | `cloudinit` | `stoat` |
+| `alpine-standard`, `alpine-virt` | `apkovl` | `root` |
+| `ubuntu-24.04`, `debian-13`, `fedora-cloud`, `arch-cloud` | `cloudinit` | `stoat` |
 
 The `stoat` user is used for the cloud images specifically because that's the
 user stoat's own cloud-init seed creates and keys — not each distro's usual
