@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -47,7 +46,7 @@ func TestFormTabOrder(t *testing.T) {
 			// order and land back on the start (fName) — one full wrap.
 			var forward []int
 			for i := 0; i < len(c.order); i++ {
-				mm, _ := m.updateForm(tea.KeyMsg{Type: tea.KeyTab})
+				mm, _ := m.updateForm(keyMsg("tab"))
 				m = mm.(model)
 				forward = append(forward, m.form.focus)
 			}
@@ -64,7 +63,7 @@ func TestFormTabOrder(t *testing.T) {
 			// wrap the other way.
 			var backward []int
 			for i := 0; i < len(c.order); i++ {
-				mm, _ := m.updateForm(tea.KeyMsg{Type: tea.KeyShiftTab})
+				mm, _ := m.updateForm(keyMsg("shift+tab"))
 				m = mm.(model)
 				backward = append(backward, m.form.focus)
 			}
@@ -211,7 +210,7 @@ func TestSpaceDownloadsOnImageRow(t *testing.T) {
 	// developer's real ~/.stoat and break the day it holds a VM named "box".
 	t.Setenv("STOAT_HOME", t.TempDir())
 
-	space := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	space := keyMsg(keySpace)
 
 	m := model{screen: screenForm, form: newForm()}
 	m.form.focus = fISO
@@ -259,7 +258,7 @@ func TestEnterDoesNotDownload(t *testing.T) {
 	m.form.imgIdx = 0
 	m.form.inputs[fName].SetValue("box")
 
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.Update(keyMsg("enter"))
 	after := out.(model)
 	if after.form.fetching {
 		t.Error("enter started a download; space is what downloads now")
@@ -277,7 +276,7 @@ func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
 	// developer's real ~/.stoat and break the day it holds a VM named "box".
 	t.Setenv("STOAT_HOME", t.TempDir())
 
-	key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}
+	key := keyMsg("?")
 
 	m := model{screen: screenForm, form: newForm()}
 	m.form.focus = fName
@@ -309,7 +308,7 @@ func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
 func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
-	space := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	space := keyMsg(keySpace)
 	m := model{screen: screenForm, form: newForm(), provisioning: map[string]provState{}}
 	m.form.focus = fISO
 
@@ -320,7 +319,7 @@ func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
 	}
 
 	// esc back to the list; the fetch keeps running.
-	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ = m.Update(keyMsg("esc"))
 	m = out.(model)
 	if m.screen != screenList {
 		t.Fatalf("esc left screen %v, want the list", m.screen)
@@ -330,7 +329,7 @@ func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
 	}
 
 	// "n" must NOT hand out a fresh form while that download is live.
-	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	out, _ = m.Update(keyMsg("n"))
 	m = out.(model)
 	if !m.form.fetching {
 		t.Error(`"n" reset the form and cleared fetching: a second space would corrupt the image`)

@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -116,7 +114,7 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 		detail:    detailModel{vm: v},
 	}
 
-	newM, _ := m.updateDetail(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	newM, _ := m.updateDetail(keyMsg("i"))
 	got := newM.(model)
 
 	if v.Installed != false {

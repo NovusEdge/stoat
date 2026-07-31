@@ -449,7 +449,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// any other field: fall through to the text-input update below
 			// so the arrow key moves the cursor instead of being swallowed.
-		case " ":
+		case keySpace:
 			if m.form.focus == fRecipes && len(m.form.recipeNames) > 0 {
 				name := m.form.recipeNames[m.form.recipeIdx]
 				if m.form.recipeSel == nil {

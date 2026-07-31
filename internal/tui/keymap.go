@@ -7,6 +7,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// keySpace is what tea.KeyMsg.String() returns for the space bar, named once
+// because it is the one binding in the program whose spelling is decided by
+// bubbletea rather than by us — v2 reports it as "space" rather than " ".
+// Every switch case, key.Binding and test that means "space" goes through
+// this, so that change is one edit and not a silent no-match at runtime.
+const keySpace = " "
+
 // footerHelp renders both the short (single-line) and full (toggled by "?")
 // help footers. Its Styles are intentionally blank: every color still comes
 // from theme.go, applied per-binding via plainKey/styledKey below, so a
@@ -150,7 +157,7 @@ func (formHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"tab", "down"}, "tab/↓", "next"),
 		plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev"),
 		plainKey([]string{"left", "right"}, "←/→", "change"),
-		plainKey([]string{" "}, "space", "download / toggle"),
+		plainKey([]string{keySpace}, "space", "download / toggle"),
 		plainKey([]string{"enter"}, "↵", "create"),
 		plainKey([]string{"esc"}, "esc", "cancel"),
 		keyHelp,
@@ -160,7 +167,7 @@ func (formHelp) ShortHelp() []key.Binding {
 func (formHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{plainKey([]string{"tab", "down"}, "tab/↓", "next field"), plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev field")},
-		{plainKey([]string{"left", "right"}, "←/→", "change iso/mode/recipe"), plainKey([]string{" "}, "space", "download image / toggle recipe")},
+		{plainKey([]string{"left", "right"}, "←/→", "change iso/mode/recipe"), plainKey([]string{keySpace}, "space", "download image / toggle recipe")},
 		{plainKey([]string{"enter"}, "↵", "create vm"), plainKey([]string{"esc"}, "esc", "cancel")},
 		{keyCtrlC, keyHelp},
 	}
@@ -173,7 +180,7 @@ func (editHelp) ShortHelp() []key.Binding {
 	return []key.Binding{
 		plainKey([]string{"tab", "down"}, "tab/↓", "next"),
 		plainKey([]string{"left", "right"}, "←/→", "change"),
-		plainKey([]string{" "}, "space", "toggle recipe"),
+		plainKey([]string{keySpace}, "space", "toggle recipe"),
 		plainKey([]string{"enter"}, "↵", "save"),
 		plainKey([]string{"esc"}, "esc", "cancel"),
 		keyHelp,
@@ -183,7 +190,7 @@ func (editHelp) ShortHelp() []key.Binding {
 func (editHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{plainKey([]string{"tab", "down"}, "tab/↓", "next field"), plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev field")},
-		{plainKey([]string{"left", "right"}, "←/→", "change mode/recipe"), plainKey([]string{" "}, "space", "toggle recipe")},
+		{plainKey([]string{"left", "right"}, "←/→", "change mode/recipe"), plainKey([]string{keySpace}, "space", "toggle recipe")},
 		{plainKey([]string{"enter"}, "↵", "save"), plainKey([]string{"esc"}, "esc", "cancel without saving")},
 		{keyCtrlC, keyHelp},
 	}

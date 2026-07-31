@@ -510,7 +510,7 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-		case " ":
+		case keySpace:
 			if m.edit.focus == eRecipes && len(m.edit.recipeNames) > 0 {
 				n := m.edit.recipeNames[m.edit.recipeIdx]
 				m.edit.recipeSel[n] = !m.edit.recipeSel[n]
