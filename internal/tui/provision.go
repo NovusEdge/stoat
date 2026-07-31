@@ -55,8 +55,7 @@ func (m *model) startProvision(v *config.VM) tea.Cmd {
 		// at first boot; there is nothing for ssh-based provisioning to do,
 		// and a cloud recipe is #cloud-config YAML, not a shell script, so
 		// piping it into `sh -s` would just fail.
-		m.status = v.Name + ": cloud VMs provision at first boot via cloud-init — recipes are applied automatically; recreate the VM to change them"
-		return nil
+		return m.showToast(v.Name+": cloud VMs provision at first boot via cloud-init — recipes are applied automatically; recreate the VM to change them", true)
 	}
 	// A disk VM boots its installer ISO with no key and no sshd: apkovl.Build
 	// runs for live mode only (qemu/run.go), so there is nothing for ssh to
@@ -64,13 +63,11 @@ func (m *model) startProvision(v *config.VM) tea.Cmd {
 	// user waits the full 90s ssh timeout and gets "ssh not reachable", which
 	// says nothing about the real cause.
 	if v.Mode == "disk" && !v.Installed {
-		m.status = v.Name + ": not installed yet — run " + installerName(v) +
-			" in the qemu window, then press i (marks it installed) before provisioning"
-		return nil
+		return m.showToast(v.Name+": not installed yet — run "+installerName(v)+
+			" in the qemu window, then press i (marks it installed) before provisioning", true)
 	}
 	if len(v.Recipes) == 0 {
-		m.status = v.Name + ": no recipes selected — nothing to provision"
-		return nil
+		return m.showToast(v.Name+": no recipes selected — nothing to provision", true)
 	}
 	if _, running := m.provisioning[v.Name]; running {
 		return nil

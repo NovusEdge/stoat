@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,12 +24,18 @@ const (
 )
 
 type model struct {
-	screen              screen
-	vms                 []*config.VM
-	broken              []config.Broken // VMs whose vm.toml exists but fails to parse
-	list                list.Model      // owns the VM list's cursor, scrolling and "/" filter
-	status              string          // transient message shown under the list
-	preflight           string          // non-empty when qemu or /dev/kvm is unusable
+	screen screen
+	vms    []*config.VM
+	broken []config.Broken // VMs whose vm.toml exists but fails to parse
+	list   list.Model      // owns the VM list's cursor, scrolling and "/" filter
+	status string          // a prompt awaiting an answer, shown under the list
+
+	// toast reports a finished action and expires on its own. Anything that
+	// needs an answer stays in status instead; see toast.go.
+	toast    toast
+	toastGen int
+
+	preflight           string // non-empty when qemu or /dev/kvm is unusable
 	width               int
 	height              int
 	pendingDelete       *config.VM // VM awaiting delete confirmation
@@ -41,6 +48,14 @@ type model struct {
 	// spinner line shows: when it started and where it has got to.
 	provisioning map[string]provState
 	spin         spinner.Model
+
+	// cloudInit holds each cloud VM's last polled cloud-init status. A cloud
+	// VM does most of its setup minutes into the boot, so without this
+	// "installing", "finished" and "failed" are indistinguishable from the
+	// outside — a VM rejects a correct password and then silently starts
+	// accepting it.
+	cloudInit map[string]string
+	ciProg    progress.Model // the stage bar beside a cloud VM's setup line
 
 	form      formModel
 	edit      editModel
@@ -59,13 +74,18 @@ type vmsLoadedMsg struct {
 	broken []config.Broken
 }
 
-// statusMsg reports the outcome of an action.
+// statusMsg reports that an action finished, errMsg that one failed. They are
+// two types rather than one with a flag because every producer already knows
+// which it is at the point it returns, and a toast has to colour them
+// differently — an ssh failure and "vm deleted" cannot look alike.
 type statusMsg string
+
+type errMsg string
 
 func loadVMs() tea.Msg {
 	vms, err := config.List()
 	if err != nil {
-		return statusMsg("cannot read " + config.Root() + ": " + err.Error())
+		return errMsg("cannot read " + config.Root() + ": " + err.Error())
 	}
 	// A failure here just means broken VMs silently don't show up this
 	// refresh; it must never block loading the good ones.
@@ -87,7 +107,13 @@ func Run() error {
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
 	defer logx.Close()
-	m := model{provisioning: map[string]provState{}, list: newVMList(), spin: newSpinner()}
+	m := model{
+		provisioning: map[string]provState{},
+		cloudInit:    map[string]string{},
+		ciProg:       newCloudInitProgress(),
+		list:         newVMList(),
+		spin:         newSpinner(),
+	}
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()
 	}
@@ -135,7 +161,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncListHeight()
 		return m, cmd
 	case statusMsg:
-		m.status = string(msg)
+		cmd := m.showToast(string(msg), false)
+		return m, cmd
+	case errMsg:
+		cmd := m.showToast(string(msg), true)
+		return m, cmd
+	case toastExpiredMsg:
+		// Only the timer belonging to the toast currently on screen retires it;
+		// an older one whose toast has already been replaced dies here.
+		if msg.gen == m.toastGen {
+			m.toast = toast{}
+		}
 		return m, nil
 	case spinner.TickMsg:
 		// The chain is anchored to there being work in flight: when the last
@@ -154,15 +190,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, cmd
+	case cloudInitTickMsg:
+		if v := m.vmByName(msg.name); v != nil && qemu.Running(v) {
+			return m, checkCloudInit(v)
+		}
+		return m, nil
+	case cloudInitMsg:
+		m.cloudInit[msg.name] = msg.status
+		if cloudInitDone(msg.status) {
+			return m, nil
+		}
+		if v := m.vmByName(msg.name); v != nil && qemu.Running(v) {
+			return m, pollCloudInit(v)
+		}
+		return m, nil
 	case vmStartedMsg:
-		m.status = msg.vm.Name + " started"
+		started := m.showToast(msg.vm.Name+" started", false)
+		if msg.vm.Mode == "cloud" {
+			// Start watching immediately: the first few polls report
+			// "booting…", which is itself the information the user wants.
+			m.cloudInit[msg.vm.Name] = "waiting"
+			return m, tea.Batch(started, loadVMs, checkCloudInit(msg.vm))
+		}
 		if !wantsAutoProvisionPrompt(msg.vm) {
-			return m, loadVMs
+			return m, tea.Batch(started, loadVMs)
 		}
 		// Watch for sshd in the background. The user keeps full use of the UI
 		// meanwhile — this is an offer that arrives when it is ready, not a
 		// modal wait.
-		return m, tea.Batch(loadVMs, awaitSSH(msg.vm))
+		return m, tea.Batch(started, loadVMs, awaitSSH(msg.vm))
 	case sshReadyMsg:
 		v := m.vmByName(msg.name)
 		// Re-check on arrival: up to 90 seconds have passed, in which the VM
@@ -185,22 +241,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case provisionDoneMsg:
 		delete(m.provisioning, msg.name)
 		if msg.err != nil {
-			m.status = msg.name + ": " + msg.err.Error()
-		} else {
-			m.status = msg.name + " provisioned"
+			cmd := m.showToast(msg.name+": "+msg.err.Error(), true)
+			return m, cmd
 		}
-		return m, nil
+		cmd := m.showToast(msg.name+" provisioned", false)
+		return m, cmd
 	case vmSavedMsg:
 		// Adopt the saved VM only now: saveEdit returns a statusMsg instead
 		// on failure, so the panes never show state that wasn't persisted.
 		m.detail.vm = msg.vm
 		m.edit.vm = msg.vm
 		m.screen = screenDetail
-		m.status = msg.vm.Name + " saved" + msg.note
 		// Re-arm the detail ticker for the same reason as the edit form's
 		// esc path: it dies while any other screen is showing.
 		m.detailGen++
-		return m, tea.Batch(loadVMs, tick(m.detailGen))
+		saved := m.showToast(msg.vm.Name+" saved"+msg.note, false)
+		return m, tea.Batch(saved, loadVMs, tick(m.detailGen))
 	case screenMsg:
 		m.screen = screen(msg)
 		m.showHelp = false
@@ -276,5 +332,7 @@ func (m model) View() string {
 		// Anchor to the top instead so everything stays reachable.
 		vAlign = lipgloss.Top
 	}
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s)
+	// The toast goes on last, over the finished screen: it is an overlay, so
+	// it must not be part of what Place centers.
+	return m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s))
 }

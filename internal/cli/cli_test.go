@@ -135,3 +135,51 @@ func TestMainExitCodes(t *testing.T) {
 type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+// TestParseRecipe covers the subcommand's argument shape. Flags must be
+// parsed AFTER the positionals: Go's flag package stops at the first non-flag
+// argument, so "recipe new x --os alpine" would otherwise silently ignore
+// --os and report it as a stray argument.
+func TestParseRecipe(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		want    *Args
+		wantErr bool
+	}{
+		{"list", []string{"recipe", "list"}, &Args{Cmd: "recipe", Sub: "list"}, false},
+		{
+			"new with flags after the name",
+			[]string{"recipe", "new", "nodejs", "--os", "alpine"},
+			&Args{Cmd: "recipe", Sub: "new", VM: "nodejs", OS: "alpine"}, false,
+		},
+		{
+			"new with a backend",
+			[]string{"recipe", "new", "nodejs", "--os", "ubuntu", "--backend", "cloudinit"},
+			&Args{Cmd: "recipe", Sub: "new", VM: "nodejs", OS: "ubuntu", Backend: "cloudinit"}, false,
+		},
+		{"new without a name", []string{"recipe", "new"}, nil, true},
+		{"new with only a flag where the name goes", []string{"recipe", "new", "--os", "alpine"}, nil, true},
+		{"unknown action", []string{"recipe", "frobnicate"}, nil, true},
+		{"no action", []string{"recipe"}, nil, true},
+		{"list with a stray argument", []string{"recipe", "list", "extra"}, nil, true},
+		{"new with too many positionals", []string{"recipe", "new", "a", "b"}, nil, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Parse(c.args)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("Parse(%v) = %+v, want an error", c.args, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse(%v): %v", c.args, err)
+			}
+			if *got != *c.want {
+				t.Errorf("Parse(%v) = %+v, want %+v", c.args, got, c.want)
+			}
+		})
+	}
+}

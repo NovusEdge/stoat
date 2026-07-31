@@ -1,5 +1,8 @@
 #cloud-config
-# XFCE desktop fragment for the cloudinit backend. cloud-init's `packages:
+# XFCE desktop fragment for the cloudinit backend. cloud-init's packages: list
+# is handed to the guest's own package manager, so these names must be real on
+# apt AND pacman; Fedora needs @-group syntax and gets its own fragment.
+packages:
   - xfce4
   - xfce4-terminal
   # lightdm gives a graphical LOGIN SCREEN, which is the right shape for a

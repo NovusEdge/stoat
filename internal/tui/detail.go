@@ -94,15 +94,15 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				v, lerr := config.Load(m.detail.vm.Name)
 				if lerr != nil {
-					return statusMsg(lerr.Error())
+					return errMsg(lerr.Error())
 				}
 				return vmReloadedMsg{v}
 			})
 		case "i":
 			v := m.detail.vm
 			if v.Mode != "disk" {
-				m.status = "installed only applies to disk vms"
-				return m, nil
+				cmd := m.showToast("installed only applies to disk vms", true)
+				return m, cmd
 			}
 			// Save a copy first: only flip the live in-memory VM once the
 			// write to disk actually succeeds, so a failed Save can't leave
@@ -110,17 +110,18 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next := *v
 			next.Installed = !v.Installed
 			if err := next.Save(); err != nil {
-				m.status = err.Error()
-				return m, nil
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
 			}
 			v.Installed = next.Installed
-			m.status = fmt.Sprintf("%s installed=%v", v.Name, v.Installed)
-			return m, loadVMs
+			cmd := m.showToast(fmt.Sprintf("%s installed=%v", v.Name, v.Installed), false)
+			return m, tea.Batch(loadVMs, cmd)
 		case "s":
 			if qemu.Running(m.detail.vm) {
 				return m, sshInto(m.detail.vm)
 			}
-			m.status = "not running"
+			cmd := m.showToast("not running", true)
+			return m, cmd
 		case "p":
 			return m, m.startProvision(m.detail.vm)
 		}
@@ -150,13 +151,12 @@ func (m model) viewDetail() string {
 		state = upStyle.Render("running")
 	}
 
-	var facts strings.Builder
-	facts.WriteString(dimStyle.Render(modeLabel(v.Mode)) + dimStyle.Render(glyphSep) + state + "\n")
-	facts.WriteString(dimStyle.Render(modeHint(v.Mode)) + "\n\n")
+	var facts fields
+	facts.row("", "", dimStyle.Render(modeLabel(v.Mode))+dimStyle.Render(glyphSep)+state)
+	facts.hint(modeHint(v.Mode))
+	facts.gap()
 
-	line := func(k, val string) {
-		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
-	}
+	line := func(k, val string) { facts.row("", k, val) }
 	// A cloud VM has no ISO — it boots an overlay of a base image — so the
 	// row would otherwise render as an empty label.
 	if v.ISO != "" {
@@ -204,18 +204,13 @@ func (m model) viewDetail() string {
 		line("recipes", strings.Join(names, ", "))
 	}
 
-	factsBox := pane(v.Name, strings.TrimRight(facts.String(), "\n"), m.width)
+	factsBox := pane(v.Name, facts.String(), m.width)
 
 	parts := []string{factsBox}
 	if m.detail.log != "" {
-		var log strings.Builder
-		for i, l := range strings.Split(m.detail.log, "\n") {
-			if i > 0 {
-				log.WriteString("\n")
-			}
-			log.WriteString(dimStyle.Render(l))
-		}
-		parts = append(parts, "", pane("last provision", log.String(), m.width))
+		// lipgloss re-applies the style on every line of a multi-line string,
+		// so the log needs no per-line loop of its own.
+		parts = append(parts, "", pane("last provision", dimStyle.Render(m.detail.log), m.width))
 	}
 
 	parts = append(parts, "")

@@ -2,10 +2,10 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -176,14 +176,12 @@ func humanDuration(d time.Duration) string {
 // did and would look untethered.
 const dlBarWidth = 32
 
-// bar renders the filled/empty track. Built from two lipgloss-styled runs
-// rather than a per-cell gradient: the accent colour already reads as "this
-// is the active thing" everywhere else in the UI, and a solid fill degrades
-// correctly on a terminal without truecolor.
-//
-// ponytail: hand-rolled instead of bubbles/progress — that component pulls in
-// the harmonica module purely for spring animation, and driving the bar from
-// real byte counts means ViewAs is static, so the animation would never run.
+// dlBar is the component both progress bars are drawn with. ViewAs is fed a
+// ratio computed from real byte counts, so none of its spring animation runs
+// — it is used for its gradient and width handling, not its motion.
+var dlBar = progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage())
+
+// bar renders the filled/empty track at ratio, clamped to [0,1].
 func bar(ratio float64, width int) string {
 	if ratio < 0 {
 		ratio = 0
@@ -191,28 +189,24 @@ func bar(ratio float64, width int) string {
 	if ratio > 1 {
 		ratio = 1
 	}
-	filled := int(ratio*float64(width) + 0.5)
-	return accentStyle.Render(strings.Repeat(glyphBarFull, filled)) +
-		dimStyle.Render(strings.Repeat(glyphBarEmpty, width-filled))
+	p := dlBar
+	p.Width = width
+	return p.ViewAs(ratio)
 }
 
-// dlValueCol is where the form's value column starts: a 2-cell focus marker
-// plus an 8-cell label plus a space (see viewForm's "%s%-8s %s" rows). The
-// download block indents to the same column so it reads as another row of
-// the form rather than something bolted underneath it.
-const dlValueCol = "           "
-
-// dlView renders the download block as a form row: a "download <os>" label
-// line, then the bar, then the stats. When the server gave no
+// dlView renders the download block as form rows: a "download <os>" label
+// row, then the bar, then the stats — label-less rows land in the same value
+// column as the fields above, so the block reads as part of the form rather
+// than something bolted underneath it. When the server gave no
 // Content-Length there is no bar and no percentage — a fabricated one would
 // be worse than none.
 func dlView(osName string, s dlStats) string {
-	head := fmt.Sprintf("  %-8s %s", "download", dimStyle.Render(osName+"…"))
-	body := dlValueCol + dimStyle.Render(s.line())
-	r := s.ratio()
-	if r < 0 {
-		return head + "\n" + body
+	// The block renders inside the form pane, so it wraps to the form's width.
+	f := fields{width: formContentWidth}
+	f.row("", "download", dimStyle.Render(osName+"…"))
+	if r := s.ratio(); r >= 0 {
+		f.row("", "", bar(r, dlBarWidth)+" "+dimStyle.Render(fmt.Sprintf("%3.0f%%", r*100)))
 	}
-	pct := dimStyle.Render(fmt.Sprintf("%3.0f%%", r*100))
-	return fmt.Sprintf("%s\n%s%s %s\n%s", head, dlValueCol, bar(r, dlBarWidth), pct, body)
+	f.row("", "", dimStyle.Render(s.line()))
+	return f.String()
 }

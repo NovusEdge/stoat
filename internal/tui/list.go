@@ -41,7 +41,7 @@ func startVM(v *config.VM) tea.Cmd {
 		// its previous life describes work that no longer exists.
 		ensureNoStaleLog(v)
 		if err := qemu.Start(v); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		return vmStartedMsg{v}
 	}
@@ -54,7 +54,7 @@ type vmStartedMsg struct{ vm *config.VM }
 func stopVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
 		if err := qemu.Stop(v); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		return statusMsg(v.Name + " stopped")
 	}
@@ -83,8 +83,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "y" {
 			return m, m.startProvision(v)
 		}
-		m.status = "not provisioning " + v.Name + " — press p when you want to"
-		return m, nil
+		cmd := m.showToast("not provisioning "+v.Name+" — press p when you want to", false)
+		return m, cmd
 	}
 
 	// The delete confirmation prompt owns all keys while pending: "y"
@@ -141,7 +141,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if v == nil {
 			if broken != nil {
-				m.status = broken.Name + ": broken vm.toml — cannot start (d to delete)"
+				cmd := m.showToast(broken.Name+": broken vm.toml — cannot start (d to delete)", true)
+				return m, cmd
 			}
 			break
 		}
@@ -152,6 +153,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// No loadVMs here: startVM's vmStartedMsg handler issues one itself,
 		// alongside the ssh watch, so sequencing another would refresh twice.
 		return m, startVM(v)
+	case "r":
+		return m, openRecipesDir()
 	case "n":
 		// A fresh form would reset "fetching" to false while the previous
 		// form's download goroutine is still writing, letting a second fetch
@@ -172,13 +175,15 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tick(m.detailGen)
 		}
 		if broken != nil {
-			m.status = broken.Name + ": broken vm.toml — cannot start (d to delete)"
+			cmd := m.showToast(broken.Name+": broken vm.toml — cannot start (d to delete)", true)
+			return m, cmd
 		}
 	case "s":
 		if v != nil && qemu.Running(v) {
 			return m, sshInto(v)
 		}
-		m.status = "not running"
+		cmd := m.showToast("not running", true)
+		return m, cmd
 	case "p":
 		if v != nil {
 			return m, m.startProvision(v)
@@ -186,8 +191,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "d":
 		if v != nil {
 			if qemu.Running(v) {
-				m.status = "stop " + v.Name + " first"
-				break
+				cmd := m.showToast("stop "+v.Name+" first", true)
+				return m, cmd
 			}
 			m.status = "delete " + v.Name + "? y/N"
 			m.screen = screenList
@@ -205,7 +210,7 @@ func deleteVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
 		name := v.Name
 		if err := v.Delete(); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		return statusMsg(name + " deleted")
 	}
@@ -219,10 +224,10 @@ func deleteBrokenVM(name string) tea.Cmd {
 	return func() tea.Msg {
 		dir := filepath.Join(config.Root(), name)
 		if filepath.Dir(dir) != config.Root() {
-			return statusMsg(fmt.Sprintf("refusing to delete %q: outside the data root", dir))
+			return errMsg(fmt.Sprintf("refusing to delete %q: outside the data root", dir))
 		}
 		if err := os.RemoveAll(dir); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		return statusMsg(name + " deleted")
 	}
@@ -275,6 +280,15 @@ func (m model) viewList() string {
 	// Fixed width, like the form: the pane must not resize as VM names
 	// change length or a search empties it.
 	box := paneAt("", rows.String(), listWidth, m.width)
+	// How to get into the selected VM, beside the list rather than a screen
+	// away: the answer differs per VM, and guessing wrong leaves you at a
+	// login prompt. Dropped entirely on a terminal too narrow for both.
+	cur := m.current()
+	ci := ""
+	if cur != nil {
+		ci = m.cloudInit[cur.Name]
+	}
+	box = joinAccess(box, accessBox(cur, ci, m.ciProg, m.width), m.width)
 
 	// lipgloss.Place centers (or left-aligns) each LINE of the string handed
 	// to it independently, sized against that string's widest line. Handing

@@ -52,9 +52,9 @@ func listFixture(t *testing.T) model {
 }
 
 func typeSearch(m model, term string) model {
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = drainCmds(m, keyMsg("/"))
 	for _, r := range term {
-		m = drainCmds(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = drainCmds(m, keyMsg(string(r)))
 	}
 	return m
 }
@@ -66,7 +66,7 @@ func typeSearch(m model, term string) model {
 // VM than the one under the cursor.
 func TestFilteredSelectionActsOnTheVisibleRow(t *testing.T) {
 	m := typeSearch(listFixture(t), "gam")
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyEnter}) // apply the filter
+	m = drainCmds(m, keyMsg("enter")) // apply the filter
 
 	if got := len(m.list.VisibleItems()); got != 1 {
 		t.Fatalf("filter %q left %d visible rows, want 1", "gam", got)
@@ -105,12 +105,12 @@ func TestSearchKeysDoNotFireBindings(t *testing.T) {
 // nothing visible.
 func TestEscClearsFilterBeforeAnythingElse(t *testing.T) {
 	m := typeSearch(listFixture(t), "alp")
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = drainCmds(m, keyMsg("enter"))
 	if len(m.list.VisibleItems()) != 1 {
 		t.Fatalf("filter did not apply: %d visible", len(m.list.VisibleItems()))
 	}
 
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = drainCmds(m, keyMsg("esc"))
 	if m.list.IsFiltered() {
 		t.Error("esc left the filter applied")
 	}
@@ -154,7 +154,7 @@ func TestAllVMsFitOnOnePage(t *testing.T) {
 // showing stale matches after a VM starts or stops.
 func TestRefreshKeepsFilterApplied(t *testing.T) {
 	m := typeSearch(listFixture(t), "bet")
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = drainCmds(m, keyMsg("enter"))
 
 	vms := []*config.VM{
 		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
@@ -183,8 +183,8 @@ func TestRefreshKeepsFilterApplied(t *testing.T) {
 // wrong VM. This repo has shipped a delete-the-wrong-VM bug before.
 func TestCursorClampsWhenTheBottomVMDisappears(t *testing.T) {
 	m := listFixture(t) // alpha, beta, gamma
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = drainCmds(m, keyMsg("j"))
+	m = drainCmds(m, keyMsg("j"))
 	if v := m.current(); v == nil || v.Name != "gamma" {
 		t.Fatalf("setup: selected %v, want gamma", v)
 	}

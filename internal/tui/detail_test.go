@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -116,14 +114,14 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 		detail:    detailModel{vm: v},
 	}
 
-	newM, _ := m.updateDetail(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	newM, _ := m.updateDetail(keyMsg("i"))
 	got := newM.(model)
 
 	if v.Installed != false {
 		t.Fatalf("v.Installed changed to %v in memory despite Save failing; want unchanged (false)", v.Installed)
 	}
-	if got.status == "" {
-		t.Fatal("expected a non-empty status message reporting the Save error")
+	if got.toast.text == "" || !got.toast.err {
+		t.Fatalf("expected an error toast reporting the Save failure, got %+v", got.toast)
 	}
 
 	// Confirm the toggle truly never touched disk.

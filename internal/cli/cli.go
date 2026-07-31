@@ -41,6 +41,13 @@ type Args struct {
 	Quiet bool
 	Yes   bool
 	N     int // logs -n
+
+	// Sub is the second word for subcommands that have one ("recipe list").
+	// OS and Backend belong to "recipe new"; VM carries the recipe name
+	// there, since it is the same "one positional argument" slot.
+	Sub     string
+	OS      string
+	Backend string
 }
 
 // usageError marks a Parse failure as an exit-2 condition. Every Parse
@@ -118,6 +125,41 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "rm", VM: fs.Arg(0), Quiet: quiet, Yes: yes}, nil
 
+	case "recipe":
+		// Positionals are pulled off BEFORE flag parsing: Go's flag package
+		// stops at the first non-flag argument, so "recipe new x --os alpine"
+		// would otherwise leave --os unparsed and reported as a stray
+		// argument. Flags therefore come after the name, which is also how
+		// the usage text spells it.
+		if len(rest) == 0 {
+			return nil, usageError(`recipe: expected "list" or "new <name>"`)
+		}
+		sub, rem := rest[0], rest[1:]
+		var name string
+		switch sub {
+		case "list":
+		case "new":
+			if len(rem) == 0 || strings.HasPrefix(rem[0], "-") {
+				return nil, usageError("recipe new: missing name")
+			}
+			name, rem = rem[0], rem[1:]
+		default:
+			return nil, usageError(fmt.Sprintf("recipe: unknown action %q (expected \"list\" or \"new\")", sub))
+		}
+
+		fs := newFlagSet(cmd)
+		var quiet bool
+		osName := fs.String("os", "", "target OS for a new shell recipe (alpine, ubuntu, debian, arch, fedora)")
+		backend := fs.String("backend", "", `"cloudinit" for a cloud-init fragment; shell otherwise`)
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("recipe %s: unexpected argument %q", sub, fs.Arg(0)))
+		}
+		return &Args{Cmd: "recipe", Sub: sub, VM: name, OS: *osName, Backend: *backend, Quiet: quiet}, nil
+
 	case "logs":
 		fs := newFlagSet(cmd)
 		var quiet bool
@@ -147,6 +189,9 @@ commands:
   provision <name>     run recipes, streaming output to stdout
   rm <name> [-y]       delete a VM; refuses while running, confirms unless -y
   logs [-n N]          tail the stoat log (default 50 lines)
+  recipe list          list installed recipes and where they live
+  recipe new <name> [--os alpine] [--backend cloudinit]
+                       scaffold a recipe in the recipes directory
   doctor               check host prerequisites
   version              print the stoat version
   help                 show this message
@@ -215,6 +260,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runProvision(a, stdout, stderr)
 	case "rm":
 		return runRM(a, stdin, stdout, stderr)
+	case "recipe":
+		return runRecipe(a, stdout, stderr)
 	case "logs":
 		return runLogs(a, stdout, stderr)
 	case "doctor":
@@ -503,4 +550,41 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "FAIL:", i)
 	}
 	return ExitFail
+}
+
+// runRecipe implements "recipe list" and "recipe new". Authoring a recipe has
+// always been "put a correctly named file in the recipes directory" — the
+// only real problem was that nothing told you so, or what the name had to be.
+func runRecipe(a *Args, stdout, stderr io.Writer) int {
+	switch a.Sub {
+	case "list":
+		names, err := recipes.Installed()
+		if err != nil {
+			fmt.Fprintln(stderr, "stoat: recipe list:", err)
+			return ExitFail
+		}
+		fmt.Fprintln(stdout, recipes.Dir())
+		if len(names) == 0 {
+			fmt.Fprintln(stdout, "  (none)")
+			return ExitOK
+		}
+		for _, n := range names {
+			fmt.Fprintln(stdout, "  "+n)
+		}
+		return ExitOK
+
+	case "new":
+		path, err := recipes.New(a.VM, a.OS, a.Backend)
+		if err != nil {
+			fmt.Fprintln(stderr, "stoat: recipe new:", err)
+			return ExitFail
+		}
+		fmt.Fprintln(stdout, path)
+		if !a.Quiet {
+			fmt.Fprintln(stdout, "edit it, then pick it in the new-vm form for a matching vm")
+		}
+		return ExitOK
+	}
+	fmt.Fprintln(stderr, "stoat: recipe: unknown action", a.Sub)
+	return ExitUsage
 }

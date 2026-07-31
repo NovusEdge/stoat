@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -109,7 +107,7 @@ func TestDeclinedOfferDoesNotOpenTheNewVMForm(t *testing.T) {
 		m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 			provisioning: map[string]provState{}, pendingProvision: v}
 
-		out, _ := m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		out, _ := m.updateList(keyMsg(key))
 		after := out.(model)
 
 		if after.screen != screenList {
@@ -121,8 +119,8 @@ func TestDeclinedOfferDoesNotOpenTheNewVMForm(t *testing.T) {
 		if len(after.provisioning) != 0 {
 			t.Errorf("declining with %q started provisioning anyway", key)
 		}
-		if !strings.Contains(after.status, "press p") {
-			t.Errorf("declining with %q gave no way back in: %q", key, after.status)
+		if !strings.Contains(after.toast.text, "press p") {
+			t.Errorf("declining with %q gave no way back in: %q", key, after.toast.text)
 		}
 	}
 }
@@ -133,7 +131,7 @@ func TestAcceptedOfferProvisions(t *testing.T) {
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, pendingProvision: v}
 
-	out, cmd := m.updateList(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	out, cmd := m.updateList(keyMsg("y"))
 	after := out.(model)
 
 	if after.pendingProvision != nil {

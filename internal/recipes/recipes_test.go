@@ -4,12 +4,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // allShellRecipes are the per-OS ssh-pushed recipes; allNames also includes
 // the cloud-config fragment.
 var allShellRecipes = []string{
-	"xfce.alpine.sh", "xfce.ubuntu.sh", "xfce.arch.sh",
+	"xfce.alpine.sh", "xfce.ubuntu.sh", "xfce.arch.sh", "xfce.debian.sh",
 	"docker.alpine.sh", "devtools.alpine.sh", "tailscale.alpine.sh",
 }
 
@@ -21,7 +23,7 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml") {
+	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml", "devtools.cloud.yaml") {
 		if _, err := os.Stat(Path(name)); err != nil {
 			t.Errorf("Install did not install %q: %v", name, err)
 		}
@@ -56,11 +58,13 @@ func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 		"xfce.alpine.sh":         true,
 		"xfce.ubuntu.sh":         true,
 		"xfce.arch.sh":           true,
+		"xfce.debian.sh":         true,
 		"docker.alpine.sh":       true,
 		"devtools.alpine.sh":     true,
 		"tailscale.alpine.sh":    true,
 		"xfce.cloud.yaml":        true,
 		"xfce.fedora.cloud.yaml": true,
+		"devtools.cloud.yaml":    true,
 	}
 	got := map[string]bool{}
 	for _, e := range entries {
@@ -128,7 +132,7 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 	}
 	// fedora is served by a per-OS fragment rather than the shared one: it
 	// has no package literally named "xfce4", so it needs the comps group
-	// @xfce-desktop-environment. It must get exactly ONE xfce entry — the
+	// @xfce-desktop. It must get exactly ONE xfce entry — the
 	// Fedora fragment, never the shared file, which would fail on dnf.
 	names, err := List("fedora", "cloudinit")
 	if err != nil {
@@ -140,14 +144,19 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 
 	// The converse: an OS covered by the shared fragment must NOT also be
 	// offered Fedora's, or the picker shows two xfce entries and one of them
-	// installs a group name apt has never heard of.
+	// installs a group name apt has never heard of. Checked by content
+	// rather than exact length/order, since devtools.cloud.yaml is a second
+	// shared fragment now and a future one shouldn't need this test rewritten.
 	for _, os := range []string{"ubuntu", "debian", "arch"} {
 		names, err := List(os, "cloudinit")
 		if err != nil {
 			t.Fatalf("List(%q, \"cloudinit\"): %v", os, err)
 		}
-		if len(names) != 1 || names[0] != "xfce.cloud.yaml" {
-			t.Errorf("List(%q, \"cloudinit\") = %v, want [xfce.cloud.yaml]", os, names)
+		if !contains(names, "xfce.cloud.yaml") {
+			t.Errorf("List(%q, \"cloudinit\") = %v, want it to contain xfce.cloud.yaml", os, names)
+		}
+		if contains(names, "xfce.fedora.cloud.yaml") {
+			t.Errorf("List(%q, \"cloudinit\") = %v, must NOT contain xfce.fedora.cloud.yaml", os, names)
 		}
 	}
 }
@@ -286,28 +295,138 @@ func TestShellRecipesAreHonestAboutLiveVsDiskPersistence(t *testing.T) {
 	}
 }
 
-func TestCloudFragmentIsCloudConfigWithPackagesList(t *testing.T) {
+// TestCloudFragmentsParse asserts every bundled cloud fragment against the
+// contract the merger actually relies on. It parses rather than string-matches
+// because string-matching is what let a real bug ship: a collapsed comment
+// swallowed the `packages:` key in both fragments, leaving them invalid YAML
+// with no packages at all, and `strings.Contains(s, "packages:")` still passed
+// — it matched the word inside the comment. Every cloud VM's xfce recipe
+// installed nothing for a full release.
+func TestCloudFragmentsParse(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := Install(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Read("xfce.cloud.yaml")
+	for _, name := range []string{"xfce.cloud.yaml", "xfce.fedora.cloud.yaml"} {
+		s, err := Read(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(s, "#cloud-config") {
+			t.Errorf("%s does not start with #cloud-config", name)
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+			t.Errorf("%s is not valid YAML: %v", name, err)
+			continue
+		}
+		pkgs, _ := doc["packages"].([]any)
+		if len(pkgs) == 0 {
+			t.Errorf("%s has no packages: list — the fragment installs nothing", name)
+		}
+		// mergeCloudRecipes only splices packages: and runcmd:. Anything else
+		// a fragment declares is dropped without a word, so the bundled ones
+		// must not declare anything else.
+		for k := range doc {
+			if k != "packages" && k != "runcmd" {
+				t.Errorf("%s has top-level key %q, which mergeCloudRecipes silently drops", name, k)
+			}
+		}
+		// dbus-x11 is not a real Arch package, and lightdm-gtk-greeter is not
+		// a real Fedora one. Checked against the parsed list, so an
+		// explanatory mention in a comment is fine.
+		for _, p := range pkgs {
+			switch p {
+			case "dbus-x11":
+				if name == "xfce.cloud.yaml" {
+					t.Errorf("%s installs dbus-x11, which does not exist on Arch", name)
+				}
+			case "lightdm-gtk-greeter":
+				if name == "xfce.fedora.cloud.yaml" {
+					t.Errorf("%s installs lightdm-gtk-greeter; on Fedora it is lightdm-gtk", name)
+				}
+			}
+		}
+	}
+}
+
+// TestDevtoolsCloudFragment parses devtools.cloud.yaml as real YAML rather
+// than string-matching it. A substring check like
+// strings.Contains(s, "packages:") would still pass even if a collapsed
+// comment swallowed the packages: key and orphaned the list items at the
+// top level — that shape is invalid YAML, and mergeCloudRecipes
+// (internal/cloudinit) would silently find no packages block, so the
+// fragment would install nothing with no error anywhere. Parsing catches
+// what string-matching can't.
+func TestDevtoolsCloudFragment(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("devtools.cloud.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(s, "#cloud-config") {
-		t.Error("xfce.cloud.yaml does not start with #cloud-config")
+		t.Error("devtools.cloud.yaml does not start with #cloud-config")
 	}
-	if !strings.Contains(s, "packages:") {
-		t.Error("xfce.cloud.yaml has no packages: list")
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+		t.Fatalf("devtools.cloud.yaml is not valid YAML: %v", err)
 	}
-	if !strings.Contains(s, "xfce4") {
-		t.Error("xfce.cloud.yaml does not install xfce4")
+
+	pkgs, _ := doc["packages"].([]any)
+	if len(pkgs) == 0 {
+		t.Fatal("devtools.cloud.yaml has no packages: list — the fragment installs nothing")
 	}
-	// dbus-x11 is not a real Arch package; the fragment must not list it as
-	// a package to install (mentioning it in an explanatory comment is
-	// fine — this checks the packages: entries, not the whole file).
-	if strings.Contains(s, "  - dbus-x11") {
-		t.Error("xfce.cloud.yaml lists dbus-x11, which does not exist on Arch's pacman repos")
+
+	// mergeCloudRecipes (internal/cloudinit) only splices packages: and
+	// runcmd: out of a fragment; any other top-level key is silently
+	// dropped, so a bundled fragment must not declare one.
+	for k := range doc {
+		if k != "packages" && k != "runcmd" {
+			t.Errorf("devtools.cloud.yaml has top-level key %q, which mergeCloudRecipes silently drops", k)
+		}
+	}
+
+	want := []string{"git", "curl", "ca-certificates", "vim", "tmux", "less"}
+	got := map[string]bool{}
+	for _, p := range pkgs {
+		if s, ok := p.(string); ok {
+			got[s] = true
+		}
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("devtools.cloud.yaml does not install %q", w)
+		}
+	}
+}
+
+// TestListOffersDebianXfceOverSSH covers the new xfce.debian.sh recipe: it
+// must be offered on the ssh backend for osName "debian" (the file naming
+// contract List relies on), and not bleed into the cloud-config or ubuntu
+// results.
+func TestListOffersDebianXfceOverSSH(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	names, err := List("debian", "ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, n := range names {
+		if n == "xfce.debian.sh" {
+			found = true
+		}
+		if n == "xfce.cloud.yaml" || n == "xfce.ubuntu.sh" {
+			t.Errorf("List(\"debian\", \"ssh\") = %v, must not contain %q", names, n)
+		}
+	}
+	if !found {
+		t.Errorf("List(\"debian\", \"ssh\") = %v, want it to contain \"xfce.debian.sh\"", names)
 	}
 }

@@ -66,14 +66,14 @@ cover:
 # exactly what .githooks/pre-commit runs
 [group('dev')]
 check:
-    gofmt -l .
+    gofmt -l $(git ls-files "*.go" | grep -v "^vendor/")
     go vet ./...
     go build ./...
 
 # format in place
 [group('dev')]
 fmt:
-    gofmt -w .
+    gofmt -w $(git ls-files "*.go" | grep -v "^vendor/")
 
 # tidy go.mod and show the go directive
 [group('dev')]

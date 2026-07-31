@@ -66,18 +66,35 @@ See [troubleshooting](../troubleshooting.md) if you hit that.
 
 | Recipe | Files | What it does |
 |---|---|---|
-| **xfce** | `xfce.alpine.sh`, `xfce.arch.sh`, `xfce.ubuntu.sh`, `xfce.cloud.yaml`, `xfce.fedora.cloud.yaml` | Installs an XFCE desktop, autologins root on tty1, and starts X. |
+| **xfce** | `xfce.alpine.sh`, `xfce.arch.sh`, `xfce.ubuntu.sh`, `xfce.debian.sh`, `xfce.cloud.yaml`, `xfce.fedora.cloud.yaml` | Installs an XFCE desktop. The shell recipes autologin root on tty1 and start X; the cloud fragments install `lightdm` and give you a graphical login screen instead — a cloud image has a real user account (`stoat`), so there is someone to log in *as*. |
 | **docker** | `docker.alpine.sh` | Installs Docker plus the compose plugin (`docker-cli-compose`, a separate package from `docker` on Alpine) and starts the daemon. |
-| **devtools** | `devtools.alpine.sh` | The baseline for a throwaway VM: `git`, `curl`, `ca-certificates`, `build-base` (Alpine's gcc/make/libc-dev meta-package), `vim`, `tmux`, `less`, `bash`. |
+| **devtools** | `devtools.alpine.sh`, `devtools.cloud.yaml` | The baseline for a throwaway VM: `git`, `curl`, `ca-certificates`, `vim`, `tmux`, `less`. The Alpine version also installs `bash` (Alpine defaults to `ash`) and `build-base`, its gcc/make/libc-dev meta-package. |
 | **tailscale** | `tailscale.alpine.sh` | Installs Tailscale and starts `tailscaled`. |
 
-xfce is the one recipe with a cloud-config side: `xfce.cloud.yaml` covers
-Ubuntu, Debian, and Arch with one shared fragment (their package managers all
-have a real `xfce4` package). Fedora gets its own `xfce.fedora.cloud.yaml`,
-because Fedora has no package literally named `xfce4` — the desktop ships as
-the comps group `@xfce-desktop-environment`, and cloud-init's `packages:` list
-has no per-distro syntax to special-case one entry. See
-[writing your own](writing-your-own.md) for the details if you're adding
+Two recipes have a cloud-config side, `xfce` and `devtools`. A shared
+`<name>.cloud.yaml` covers Ubuntu, Debian and Arch, because cloud-init's
+`packages:` list is handed straight to the guest's own package manager with no
+per-distro syntax — so a shared fragment only works where the names happen to
+match on both apt and pacman.
+
+`devtools.cloud.yaml` deliberately drops the compiler toolchain that
+`devtools.alpine.sh` installs: it is `build-essential` on apt, `base-devel` on
+pacman and `@development-tools` on dnf — three names and three shapes for one
+thing. Install your distro's own if you need it.
+
+Fedora is the recurring exception and stays out of the shared set entirely:
+
+- For xfce it has no package literally named `xfce4`, so it gets its own
+  `xfce.fedora.cloud.yaml` using the comps group `@xfce-desktop`.
+- For devtools, its `vim` is packaged as `vim-enhanced`, so even the shared
+  fragment's names don't hold.
+
+Worth knowing if you're writing your own: **Arch has no `xfce4` package
+either** — `xfce4` is a package *group* there. It works only because
+`pacman -S` accepts a group name where apt would want a real package. Do not
+assume a name that resolves on two distros resolves the same way on both.
+
+See [writing your own](writing-your-own.md) for the details if you're adding
 another cross-distro recipe.
 
 ### Tailscale installs but does not authenticate

@@ -407,7 +407,7 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 		// a missing image with no hint that this form caused it.
 		if v.Mode == "disk" && missing {
 			if running {
-				return statusMsg("stop " + v.Name + " first — switching to disk mode has to create its disk")
+				return errMsg("stop " + v.Name + " first — switching to disk mode has to create its disk")
 			}
 			size := a.resizeTo
 			if size == "" {
@@ -415,7 +415,7 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 			}
 			out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), size).CombinedOutput()
 			if err != nil {
-				return statusMsg("qemu-img create: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
+				return errMsg("qemu-img create: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
 			}
 			v.Disk = size
 			a.resizeTo = "" // created at the requested size already
@@ -423,21 +423,21 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 
 		if a.resizeTo != "" {
 			if running {
-				return statusMsg("stop " + v.Name + " before resizing its disk (nothing was saved)")
+				return errMsg("stop " + v.Name + " before resizing its disk (nothing was saved)")
 			}
 			// A cloud VM's overlay is created lazily on first start, so before
 			// then there is nothing to grow. Say so rather than letting
 			// qemu-img fail with "Could not open".
 			if missing {
-				return statusMsg("start " + v.Name + " once before growing its disk (nothing was saved)")
+				return errMsg("start " + v.Name + " once before growing its disk (nothing was saved)")
 			}
 			out, err := exec.Command("qemu-img", "resize", v.DiskPath(), a.resizeTo).CombinedOutput()
 			if err != nil {
-				return statusMsg("qemu-img resize: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
+				return errMsg("qemu-img resize: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
 			}
 		}
 		if err := v.Save(); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		note := ""
 		switch {
@@ -510,7 +510,7 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-		case " ":
+		case keySpace:
 			if m.edit.focus == eRecipes && len(m.edit.recipeNames) > 0 {
 				n := m.edit.recipeNames[m.edit.recipeIdx]
 				m.edit.recipeSel[n] = !m.edit.recipeSel[n]
@@ -545,7 +545,7 @@ func (m model) viewEdit() string {
 		return pane("edit", dimStyle.Render("no vm selected"), m.width)
 	}
 
-	var b strings.Builder
+	b := fields{width: editContentWidth}
 	// row draws a field. A changed field carries a dim "was X" so the pane
 	// shows what is about to be written versus what is on disk — an edit form
 	// that looks identical whether or not you have touched it makes it far
@@ -565,7 +565,7 @@ func (m model) viewEdit() string {
 				value += warnStyle.Render("  " + glyphWas + " was " + was)
 			}
 		}
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
+		b.row(marker, label, value)
 	}
 
 	modeParts := make([]string, len(editModes))
@@ -577,8 +577,8 @@ func (m model) viewEdit() string {
 		modeRow += warnStyle.Render("  " + glyphWas + " was " + e.vm.Mode)
 	}
 	row(eMode, "mode", modeRow)
-	b.WriteString(dimStyle.Render("           "+modeHint(e.mode)) + "\n")
-	b.WriteString("\n")
+	b.hint(modeHint(e.mode))
+	b.gap()
 
 	row(eRAM, "ram", e.inputs[eRAM].View()+dimStyle.Render(" MB"))
 	row(eCPUs, "cpus", e.inputs[eCPUs].View())
@@ -594,11 +594,11 @@ func (m model) viewEdit() string {
 		}
 		row(eDisk, "disk", disk)
 	}
-	b.WriteString("\n")
+	b.gap()
 
 	row(eShare, "share", e.inputs[eShare].View())
 	row(eSSHPort, "ssh", e.inputs[eSSHPort].View())
-	b.WriteString("\n")
+	b.gap()
 
 	// Recipes are only offered when any exist for this VM's os/backend;
 	// an empty row is one more thing to tab through for nothing.
@@ -607,20 +607,24 @@ func (m model) viewEdit() string {
 		if e.focus == eRecipes {
 			marker = selStyle.Render(glyphCursor)
 		}
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, "recipes", editRecipesLabel(e))
+		b.row(marker, "recipes", editRecipesLabel(e))
 	}
 
+	// Notes about the form as a whole, not about any one field, so they sit
+	// under the table at its left edge rather than in the value column.
+	body := b.String()
+	note := func(s string) { body += "\n" + s }
 	if !e.dirty() {
-		b.WriteString("\n" + dimStyle.Render("no changes"))
+		note(dimStyle.Render("no changes"))
 	}
 	if qemu.Running(e.vm) {
-		b.WriteString("\n" + warnStyle.Render("running — ram/cpus/ssh apply on restart"))
+		note(warnStyle.Render("running — ram/cpus/ssh apply on restart"))
 	}
 	if e.err != "" {
-		b.WriteString("\n" + errStyle.Render(e.err))
+		note(errStyle.Render(e.err))
 	}
 
-	box := paneAt("edit "+e.vm.Name, strings.TrimRight(b.String(), "\n"), editContentWidth, m.width)
+	box := paneAt("edit "+e.vm.Name, body, editContentWidth, m.width)
 
 	parts := []string{box, ""}
 	if m.status != "" {
@@ -646,6 +650,5 @@ func editRecipesLabel(e editModel) string {
 		}
 		items[i] = item
 	}
-	// 11 = the value column (2-cell marker + 8-cell label + space).
-	return wrapItems(items, editContentWidth-11, strings.Repeat(" ", 11))
+	return wrapItems(items, editContentWidth-fieldValueColumn, strings.Repeat(" ", fieldValueColumn))
 }
