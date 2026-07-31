@@ -230,7 +230,7 @@ func (m model) viewList() string {
 		}
 		row := dotStyle.Render(dot) + " " + label
 		if i > 0 {
-			rows.WriteString("\n")
+			rows.WriteString(rowGap)
 		}
 		rows.WriteString(cursor + row)
 	}
@@ -245,7 +245,7 @@ func (m model) viewList() string {
 			row = selStyle.Render(plain)
 		}
 		if i > 0 || len(m.vms) > 0 {
-			rows.WriteString("\n")
+			rows.WriteString(rowGap)
 		}
 		rows.WriteString(cursor + row)
 	}

@@ -70,6 +70,11 @@ func pane(title, body string, maxWidth int) string {
 	return style.Render(content)
 }
 
+// rowGap separates rows inside a pane. A terminal has no fractional leading,
+// so "a bit more line spacing" can only mean one blank line — this names it
+// in one place so list and detail stay in step.
+const rowGap = "\n\n"
+
 // paneAt draws a pane whose content is held at a fixed width, for screens
 // whose rows come and go — a download block, an error line, a conditional
 // disk row. pane() hugs its content, so without this the box changes width
