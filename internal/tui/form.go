@@ -125,6 +125,11 @@ var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 // value column — so the box never resizes as optional rows appear.
 const formContentWidth = 56
 
+// formRoomyHeight is the terminal height at or above which the form
+// double-spaces its rows. Below it the pane would overflow — 28 lines with a
+// download block showing — and an overflowing pane loses the footer.
+const formRoomyHeight = 32
+
 type formModel struct {
 	inputs      []textinput.Model // name, ram, cpus, disk, share
 	focus       int
@@ -601,13 +606,30 @@ func (m model) viewForm() string {
 	f := m.form
 	var b strings.Builder
 
+	// The form is the tallest screen: nine rows plus a title, and a download
+	// block on top of that. Double-spaced it needs ~28 lines, so on a short
+	// terminal the gap is dropped rather than letting the pane overflow and
+	// take the footer with it.
+	gap := rowGap
+	if m.height > 0 && m.height < formRoomyHeight {
+		gap = "\n"
+	}
+
 	row := func(i int, label, value string) {
 		marker := "  "
 		if f.focus == i {
 			marker = selStyle.Render("❯ ")
-			value = selStyle.Render(value)
+			// Text inputs are NOT wrapped: a textinput's view carries its own
+			// cursor styling, and a styled substring's \x1b[0m resets the
+			// enclosing style too — so wrapping produced a row that was accent
+			// up to the cursor and default after it. The ❯ and the input's own
+			// cursor already mark focus. Picker rows are plain strings and wrap
+			// safely.
+			if i >= fieldCount {
+				value = selStyle.Render(value)
+			}
 		}
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
+		fmt.Fprintf(&b, "%s%-8s %s%s", marker, label, value, gap)
 	}
 
 	row(fName, "name", f.inputs[fName].View())
@@ -630,7 +652,7 @@ func (m model) viewForm() string {
 		}
 		row(fMode, "mode", modeLabel)
 	} else {
-		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + "\n")
+		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + gap)
 	}
 
 	row(fRAM, "ram", f.inputs[fRAM].View()+dimStyle.Render(" MB"))
@@ -638,7 +660,7 @@ func (m model) viewForm() string {
 	if f.effectiveMode() == "disk" {
 		row(fDisk, "disk", f.inputs[fDisk].View())
 	} else {
-		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + "\n")
+		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + gap)
 	}
 	row(fShare, "share", f.inputs[fShare].View())
 
@@ -646,7 +668,7 @@ func (m model) viewForm() string {
 	if f.focus == fRecipes {
 		recipesMarker = selStyle.Render("❯ ")
 	}
-	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
+	fmt.Fprintf(&b, "%s%-8s %s%s", recipesMarker, "recipes", f.recipesLabel(), gap)
 
 	if f.fetching {
 		b.WriteString("\n" + dlView(f.fetchingOS, f.dl))
