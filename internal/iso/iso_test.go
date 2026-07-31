@@ -293,7 +293,7 @@ iQIzBAEBCAAdFiEExufwgc+A4TFGZ26IgptgZjFkVTEFAmj9DpIACgkQgptgZjFk
 // does publish SHA512SUMS, so both entries must carry a ChecksumURL now
 // rather than shipping unverified for no real reason.
 func TestCatalog_ArchAndDebianHaveChecksumURL(t *testing.T) {
-	for _, id := range []string{"arch-cloud", "debian-12"} {
+	for _, id := range []string{"arch-cloud", "debian-13"} {
 		found := false
 		for _, e := range Catalog() {
 			if e.ID == id {
@@ -312,14 +312,59 @@ func TestCatalog_ArchAndDebianHaveChecksumURL(t *testing.T) {
 // TestCatalog_FedoraURLNotArchived guards against the exact defect the
 // review found: a Fedora catalog URL pointing at a release that has aged
 // out of releases/ into archives.fedoraproject.org (a 404 for users today).
+//
+// Grepping e.URL for the literal string "archives.fedoraproject.org" (the
+// old version of this test) can never fail: the catalog URL is always
+// spelled with releases/ in it, right up until the day Fedora retires that
+// release and it starts 404ing. Catching that means actually asking the
+// server, so this does a ranged GET against the real URL. Per this
+// package's convention of skipping rather than failing when a dependency
+// isn't there (see the xorriso/qemu-img skips elsewhere in this repo), a
+// network-level failure (DNS, connect, TLS) skips instead of failing —
+// only a reachable server telling us the pinned release is gone is a real
+// failure.
 func TestCatalog_FedoraURLNotArchived(t *testing.T) {
-	for _, e := range Catalog() {
-		if e.ID != "fedora-cloud" {
-			continue
+	// Every other test in this package serves from a local httptest server;
+	// this is the only one that touches the real internet, so -short stays
+	// fully offline.
+	if testing.Short() {
+		t.Skip("live network check; skipped under -short")
+	}
+	var e Entry
+	for _, c := range Catalog() {
+		if c.ID == "fedora-cloud" {
+			e = c
 		}
-		if strings.Contains(e.URL, "archives.fedoraproject.org") {
-			t.Errorf("fedora-cloud URL points at the archive mirror, not releases/: %s", e.URL)
-		}
+	}
+	if e.ID == "" {
+		t.Fatal(`catalog entry "fedora-cloud" not found`)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, e.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Skipf("network unreachable, skipping live fedora-cloud check: %v", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusPartialContent:
+		return
+	case http.StatusNotFound, http.StatusGone:
+		// The one thing this test exists to catch: the pinned release has
+		// left releases/ for the archive, and every user's download 404s.
+		t.Errorf("fedora-cloud pinned release is gone from %s: %s (final URL %s) — bump the release and both compose suffixes",
+			e.URL, resp.Status, resp.Request.URL)
+	default:
+		// A mirror having a bad day (5xx, 429, a geo-redirect to a sick
+		// host) is not the catalog being wrong. Failing on it would make
+		// the whole suite red for a reason no commit can fix, which is how
+		// CI here has gone quietly red before.
+		t.Skipf("fedora mirror returned %s; not a catalog defect, skipping", resp.Status)
 	}
 }
 

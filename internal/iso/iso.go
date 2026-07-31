@@ -28,7 +28,6 @@ import (
 const (
 	mirror   = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/"
 	indexURL = mirror + "latest-releases.yaml"
-	flavor   = "alpine-standard"
 )
 
 // Release is a concrete, resolved download: a filename with a known (or
@@ -70,11 +69,15 @@ type Release struct {
 // Entry describes one image in stoat's catalog: what it is, where to fetch
 // it, and which provisioning backend applies once it boots.
 type Entry struct {
-	ID          string
-	OS          string
-	Arch        string
-	Backend     string // "apkovl" | "cloudinit" | "ssh"
-	URL         string
+	ID      string
+	OS      string
+	Backend string // "apkovl" | "cloudinit" | "ssh"
+	URL     string
+	// Flavor selects which line of Alpine's latest-releases.yaml this
+	// entry resolves to (e.g. "alpine-standard", "alpine-virt"). It is
+	// only meaningful when OS == "alpine" — every other entry is a direct
+	// URL and Resolve never looks at it.
+	Flavor      string
 	ChecksumURL string
 	SSHUser     string
 	Notes       string
@@ -94,7 +97,6 @@ func Catalog() []Entry {
 		{
 			ID:          "ubuntu-24.04",
 			OS:          "ubuntu",
-			Arch:        "amd64",
 			Backend:     "cloudinit",
 			URL:         "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
 			ChecksumURL: "https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS",
@@ -105,47 +107,47 @@ func Catalog() []Entry {
 			Notes:   "Ubuntu 24.04 LTS server cloud image",
 		},
 		{
-			ID:      "debian-12",
+			ID:      "debian-13",
 			OS:      "debian",
-			Arch:    "amd64",
 			Backend: "cloudinit",
-			URL:     "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
+			URL:     "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
 			// Debian publishes SHA512SUMS (not SHA256) alongside this
-			// image. Verified 2026-07-30 by GET: 128-hex digests, "<hex>
+			// image. Verified 2026-07-31 by GET: 128-hex digests, "<hex>
 			// <filename>" (GNU coreutils) format. parseChecksum/Download
 			// now pick the hash algorithm by digest length (64 hex ->
 			// sha256, 128 hex -> sha512), so this verifies correctly.
-			ChecksumURL: "https://cloud.debian.org/images/cloud/bookworm/latest/SHA512SUMS",
+			ChecksumURL: "https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS",
 			SSHUser:     "stoat",
-			Notes:       "Debian 12 (bookworm) generic cloud image",
+			Notes:       "Debian 13 (trixie) generic cloud image",
 		},
 		{
-			ID:   "fedora-cloud",
-			OS:   "fedora",
-			Arch: "amd64",
-			// Verified 2026-07-30 by HEAD/GET: Fedora 40 aged out of
-			// releases/ into archives.fedoraproject.org (filename also
-			// changed). Fedora 43 is current and still lives under
-			// releases/ (200, ~583MB, Last-Modified 2025-10-23) — that
-			// path is far more stable than pinning an archived compose,
-			// so this points at 43 rather than the archive.
+			ID: "fedora-cloud",
+			OS: "fedora",
+			// Fedora keeps roughly N/N-1/N-2 under releases/ with no
+			// latest/ symlink for cloud images, so this entry needs a
+			// manual bump every Fedora cycle and WILL break (releases/
+			// -> archives.fedoraproject.org, filename changes too) once
+			// the pinned release ages out. Verified 2026-07-31 by
+			// GET: Fedora 44 is current and lives under releases/
+			// (200, ~583MB, Last-Modified 2026-04-22).
 			Backend: "cloudinit",
-			URL:     "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2",
+			URL:     "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
 			// Fedora's per-release CHECKSUM is BSD format ("SHA256
 			// (filename) = hex") inside a clearsigned PGP block, not the
 			// GNU "<hex>  <filename>" form. parseChecksum now has a BSD
 			// branch (small: one regexp, matched before falling back to
 			// the GNU split) so this verifies too; the PGP armor lines
 			// around it are simply lines that don't match either format
-			// and are skipped.
-			ChecksumURL: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-43-1.6-x86_64-CHECKSUM",
+			// and are skipped. The compose suffix (here "1.7") is baked
+			// into both this URL and ChecksumURL and changes per respin —
+			// re-verify both together on the next bump.
+			ChecksumURL: "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-44-1.7-x86_64-CHECKSUM",
 			SSHUser:     "stoat",
 			Notes:       "Fedora Cloud Base qcow2",
 		},
 		{
 			ID:      "arch-cloud",
 			OS:      "arch",
-			Arch:    "amd64",
 			Backend: "cloudinit",
 			URL:     "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
 			// Verified 2026-07-30 by GET: this mirror does publish a
@@ -158,9 +160,9 @@ func Catalog() []Entry {
 		{
 			ID:      "alpine-standard",
 			OS:      "alpine",
-			Arch:    "amd64",
 			Backend: "apkovl",
 			URL:     indexURL,
+			Flavor:  "alpine-standard",
 			// Alpine's checksum isn't a separate sums file: each release
 			// in latest-releases.yaml embeds its own sha256 inline, and
 			// Resolve() reads it via Latest(). ChecksumURL is left empty
@@ -169,6 +171,22 @@ func Catalog() []Entry {
 			ChecksumURL: "",
 			SSHUser:     "root",
 			Notes:       "Alpine standard live ISO (existing apkovl path)",
+		},
+		{
+			ID:      "alpine-virt",
+			OS:      "alpine",
+			Backend: "apkovl",
+			URL:     indexURL,
+			Flavor:  "alpine-virt",
+			// Same index, different flavor line (see alpine-standard
+			// above) — virt is built for VM guests specifically: virtio
+			// drivers only, no baremetal hardware support, meaningfully
+			// smaller. That's a better default for a tool whose only
+			// target is QEMU, so it's offered alongside standard rather
+			// than replacing it.
+			ChecksumURL: "",
+			SSHUser:     "root",
+			Notes:       "Alpine virt live ISO (smaller, virtio-only, built for VM guests)",
 		},
 	}
 }
@@ -220,8 +238,11 @@ const stallTimeout = 60 * time.Second
 // httptest.Server instead of the real Alpine mirror.
 var downloadMirror = mirror
 
-// Latest reads Alpine's published index so "latest" is never hardcoded.
-func Latest() (*Release, error) {
+// Latest reads Alpine's published index so "latest" is never hardcoded, and
+// returns the release matching flavor (e.g. "alpine-standard",
+// "alpine-virt") — the index lists several flavors per release under the
+// same file.
+func Latest(flavor string) (*Release, error) {
 	resp, err := client.Get(indexURL)
 	if err != nil {
 		return nil, err
@@ -253,7 +274,7 @@ func Latest() (*Release, error) {
 // verification" rather than an error.
 func Resolve(e Entry) (*Release, error) {
 	if e.OS == "alpine" {
-		return Latest()
+		return Latest(e.Flavor)
 	}
 
 	u, err := url.Parse(e.URL)
