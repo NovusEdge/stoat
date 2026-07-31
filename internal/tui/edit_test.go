@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -333,6 +334,12 @@ func TestParseSizeRejectsRelative(t *testing.T) {
 // which meant no resize ran, the save succeeded, and the next start died on a
 // missing image with nothing pointing back at this form.
 func TestModeSwitchToDiskNeedsADiskFile(t *testing.T) {
+	// saveEdit shells out to qemu-img to create the missing disk, so this
+	// test needs the real tool; skip rather than fail where it isn't
+	// installed (CI), which would make the suite permanently red.
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed: skipping disk-creation test")
+	}
 	t.Setenv("STOAT_HOME", t.TempDir())
 	dir := t.TempDir()
 	v := &config.VM{
