@@ -125,11 +125,6 @@ var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 // value column — so the box never resizes as optional rows appear.
 const formContentWidth = 56
 
-// formRoomyHeight is the terminal height at or above which the form
-// double-spaces its rows. Below it the pane would overflow — 28 lines with a
-// download block showing — and an overflowing pane loses the footer.
-const formRoomyHeight = 32
-
 type formModel struct {
 	inputs      []textinput.Model // name, ram, cpus, disk, share
 	focus       int
@@ -606,14 +601,12 @@ func (m model) viewForm() string {
 	f := m.form
 	var b strings.Builder
 
-	// The form is the tallest screen: nine rows plus a title, and a download
-	// block on top of that. Double-spaced it needs ~28 lines, so on a short
-	// terminal the gap is dropped rather than letting the pane overflow and
-	// take the footer with it.
-	gap := rowGap
-	if m.height > 0 && m.height < formRoomyHeight {
-		gap = "\n"
-	}
+	// Rows are single-spaced with a blank line between GROUPS of related
+	// fields, not between every row. The form is the tallest screen — nine
+	// rows plus a title and a download block — so spacing every row both
+	// overflowed a 24-line terminal and read as too airy; grouping gives the
+	// separation without the sprawl, and says which fields belong together.
+	group := func() { b.WriteString("\n") }
 
 	row := func(i int, label, value string) {
 		marker := "  "
@@ -629,10 +622,11 @@ func (m model) viewForm() string {
 				value = selStyle.Render(value)
 			}
 		}
-		fmt.Fprintf(&b, "%s%-8s %s%s", marker, label, value, gap)
+		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
 	}
 
 	row(fName, "name", f.inputs[fName].View())
+	group()
 
 	opt := f.selected()
 	imgLabel := "— (none)"
@@ -652,23 +646,27 @@ func (m model) viewForm() string {
 		}
 		row(fMode, "mode", modeLabel)
 	} else {
-		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + gap)
+		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + "\n")
 	}
+
+	group()
 
 	row(fRAM, "ram", f.inputs[fRAM].View()+dimStyle.Render(" MB"))
 	row(fCPUs, "cpus", f.inputs[fCPUs].View())
 	if f.effectiveMode() == "disk" {
 		row(fDisk, "disk", f.inputs[fDisk].View())
 	} else {
-		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + gap)
+		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + "\n")
 	}
+	group()
+
 	row(fShare, "share", f.inputs[fShare].View())
 
 	recipesMarker := "  "
 	if f.focus == fRecipes {
 		recipesMarker = selStyle.Render("❯ ")
 	}
-	fmt.Fprintf(&b, "%s%-8s %s%s", recipesMarker, "recipes", f.recipesLabel(), gap)
+	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
 
 	if f.fetching {
 		b.WriteString("\n" + dlView(f.fetchingOS, f.dl))
