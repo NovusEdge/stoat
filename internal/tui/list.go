@@ -37,12 +37,19 @@ func (m model) currentBroken() *config.Broken {
 
 func startVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
+		// A live VM's root is wiped by the boot about to happen, so a log from
+		// its previous life describes work that no longer exists.
+		ensureNoStaleLog(v)
 		if err := qemu.Start(v); err != nil {
 			return statusMsg(err.Error())
 		}
-		return statusMsg(v.Name + " started")
+		return vmStartedMsg{v}
 	}
 }
+
+// vmStartedMsg reports a successful start, carrying the VM so the model can
+// decide whether to watch for ssh and offer to provision.
+type vmStartedMsg struct{ vm *config.VM }
 
 func stopVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
@@ -65,6 +72,19 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list, cmd = m.list.Update(msg)
 		m.syncListHeight()
 		return m, cmd
+	}
+
+	// The auto-provision offer owns all keys while pending, for the same
+	// reason the delete prompt below does: "n" is bound to new-VM, so a
+	// plain key switch would open the form on a decline.
+	if m.pendingProvision != nil {
+		v := m.pendingProvision
+		m.pendingProvision = nil
+		if key.String() == "y" {
+			return m, m.startProvision(v)
+		}
+		m.status = "not provisioning " + v.Name + " — press p when you want to"
+		return m, nil
 	}
 
 	// The delete confirmation prompt owns all keys while pending: "y"
@@ -129,7 +149,9 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if qemu.Running(v) {
 			return m, tea.Sequence(stopVM(v), loadVMs)
 		}
-		return m, tea.Sequence(startVM(v), loadVMs)
+		// No loadVMs here: startVM's vmStartedMsg handler issues one itself,
+		// alongside the ssh watch, so sequencing another would refresh twice.
+		return m, startVM(v)
 	case "n":
 		// A fresh form would reset "fetching" to false while the previous
 		// form's download goroutine is still writing, letting a second fetch
