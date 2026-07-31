@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // This file is the one place that turns stoat's internal identifiers into the
 // words a user reads. Recipes are stored as filenames and modes as the values
@@ -51,4 +55,35 @@ func modeHint(mode string) string {
 		return "prebuilt image · ssh + recipes at first boot"
 	}
 	return ""
+}
+
+// wrapItems lays out picker items across as many lines as they need, keeping
+// continuation lines aligned under the first. Width is measured with lipgloss
+// because the item under the cursor carries styling, and counting its escape
+// bytes would wrap far too early.
+//
+// It exists because the recipes row is inline and grows with the recipe
+// catalog: at four entries it ran past the pane and wrapped mid-item, which
+// put a bare "xfce" on its own line under the label column.
+func wrapItems(items []string, width int, indent string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	const gap = "  "
+	var out strings.Builder
+	line := ""
+	for _, it := range items {
+		candidate := it
+		if line != "" {
+			candidate = line + gap + it
+		}
+		if line != "" && lipgloss.Width(candidate) > width {
+			out.WriteString(line + "\n" + indent)
+			line = it
+			continue
+		}
+		line = candidate
+	}
+	out.WriteString(line)
+	return out.String()
 }

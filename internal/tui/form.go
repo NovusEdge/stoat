@@ -709,5 +709,6 @@ func (f formModel) recipesLabel() string {
 		}
 		items[i] = item
 	}
-	return strings.Join(items, "  ")
+	// 11 = the value column (2-cell marker + 8-cell label + space).
+	return wrapItems(items, formContentWidth-11, strings.Repeat(" ", 11))
 }

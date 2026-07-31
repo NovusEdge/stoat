@@ -69,3 +69,47 @@ func TestDiskModeHintExplainsTheInstallStep(t *testing.T) {
 		t.Error("the detail pane doesn't show the mode hint")
 	}
 }
+
+// TestWrapItemsKeepsRowsInsideThePane covers the recipes row growing with the
+// catalog: at four entries the inline list ran past the pane and wrapped
+// mid-item, leaving a bare "xfce" on its own line under the label column.
+func TestWrapItemsKeepsRowsInsideThePane(t *testing.T) {
+	const width = formContentWidth - 11
+	indent := strings.Repeat(" ", 11)
+
+	items := []string{"[x] devtools", "[ ] docker", "[x] tailscale", "[ ] xfce"}
+	out := wrapItems(items, width, indent)
+
+	for i, line := range strings.Split(out, "\n") {
+		got := len([]rune(strings.TrimRight(line, " ")))
+		if i > 0 {
+			// Continuation lines carry the indent, so they're measured whole.
+			if !strings.HasPrefix(line, indent) {
+				t.Errorf("continuation line %d is not aligned under the first: %q", i, line)
+			}
+			got = len([]rune(strings.TrimRight(line, " ")))
+			if got > width+len(indent) {
+				t.Errorf("line %d is %d cells, max %d: %q", i, got, width+len(indent), line)
+			}
+			continue
+		}
+		if got > width {
+			t.Errorf("line %d is %d cells, max %d: %q", i, got, width, line)
+		}
+	}
+
+	// Every item must survive the wrap — losing one silently would hide a
+	// recipe the user could otherwise select.
+	for _, it := range items {
+		if !strings.Contains(out, it) {
+			t.Errorf("wrapItems dropped %q", it)
+		}
+	}
+
+	if wrapItems(nil, width, indent) != "" {
+		t.Error("no items should render as nothing, not a blank line")
+	}
+	if got := wrapItems([]string{"[ ] one"}, width, indent); got != "[ ] one" {
+		t.Errorf("a single item should not be wrapped or indented: %q", got)
+	}
+}
