@@ -163,6 +163,19 @@ func ensureCloudOverlay(v *config.VM) error {
 	if err != nil {
 		return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
 	}
+	// An overlay inherits its BASE image's virtual size, and cloud images are
+	// sized to boot, not to install anything: Ubuntu 24.04's is 3.5G with a
+	// 2.4G root. Installing a desktop into that fills the disk, apt exits 100,
+	// and cloud-init reports a bare "error" — the failure looks like a broken
+	// recipe rather than a full disk. Grow it here, before first boot, so
+	// cloud-init's own growpart/resizefs expands the filesystem to match.
+	if v.Disk != "" {
+		out, err := exec.Command("qemu-img", "resize", v.DiskPath(), v.Disk).CombinedOutput()
+		if err != nil {
+			os.Remove(v.DiskPath())
+			return fmt.Errorf("qemu-img resize to %s: %s", v.Disk, strings.TrimSpace(string(out)))
+		}
+	}
 	if err := keys.Ensure(); err != nil {
 		return err
 	}

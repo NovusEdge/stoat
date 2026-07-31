@@ -190,7 +190,9 @@ func (f formModel) order() focusOrder {
 		o = append(o, fMode)
 	}
 	o = append(o, fRAM, fCPUs)
-	if f.effectiveMode() == "disk" {
+	// Cloud VMs need a size as much as disk ones do: the overlay inherits the
+	// base image's virtual size, which is sized to boot and nothing more.
+	if m := f.effectiveMode(); m == "disk" || m == "cloud" {
 		o = append(o, fDisk)
 	}
 	o = append(o, fShare, fRecipes)
@@ -572,6 +574,7 @@ func (f formModel) build() (*config.VM, error) {
 			return nil, err
 		}
 		vm.Base = abs
+		vm.Disk = strings.TrimSpace(f.inputs[fDisk].Value())
 		// Only a cloud image needs this. cloud-init locks every account by
 		// default, so without a console password the qemu window shows a
 		// login prompt with no valid answer. A live Alpine VM already logs
@@ -683,10 +686,14 @@ func (m model) viewForm() string {
 
 	row(fRAM, "ram", f.inputs[fRAM].View()+dimStyle.Render(" MB"))
 	row(fCPUs, "cpus", f.inputs[fCPUs].View())
-	if f.effectiveMode() == "disk" {
+	switch f.effectiveMode() {
+	case "disk":
 		row(fDisk, "disk", f.inputs[fDisk].View())
-	} else {
-		b.WriteString(dimStyle.Render("  disk     — ("+f.effectiveMode()+" mode)") + "\n")
+	case "cloud":
+		row(fDisk, "disk", f.inputs[fDisk].View())
+		b.WriteString(dimStyle.Render("           cloud images ship ~2.4G of usable root — raise this to install anything") + "\n")
+	default:
+		b.WriteString(dimStyle.Render("  disk     — (live mode)") + "\n")
 	}
 	group()
 

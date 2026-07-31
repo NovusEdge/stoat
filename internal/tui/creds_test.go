@@ -116,3 +116,39 @@ func containsFocus(o focusOrder, want int) bool {
 	}
 	return false
 }
+
+// TestCloudVMGetsADiskSize is the regression test for a reported failure that
+// looked like a broken recipe and was not. A CoW overlay inherits its BASE
+// image's virtual size, and cloud images are sized to boot and nothing more —
+// Ubuntu 24.04's is 3.5G with a 2.4G root. Installing a desktop filled it,
+// apt exited 100, and cloud-init reported a bare "error" with no mention of
+// disk space anywhere the user could see.
+func TestCloudVMGetsADiskSize(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	f := newForm()
+	f.inputs[fName].SetValue("ubuntu-1")
+	f.images = []imageOption{{
+		entry:   &iso.Entry{ID: "u", OS: "ubuntu", Backend: "cloudinit", SSHUser: "stoat"},
+		file:    "ubuntu-24.04-server-cloudimg-amd64.img",
+		osName:  "ubuntu",
+		backend: "cloudinit",
+		sshUser: "stoat",
+	}}
+	f.imgIdx = 0
+
+	vm, err := f.build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if vm.Mode != "cloud" {
+		t.Fatalf("mode = %q, want cloud", vm.Mode)
+	}
+	if vm.Disk == "" {
+		t.Error("a cloud VM was built with no disk size — its overlay would inherit the base image's, which cannot fit a desktop")
+	}
+
+	// And the size row must be reachable, or the user cannot change it.
+	if !containsFocus(f.order(), fDisk) {
+		t.Errorf("the disk row is not in the cloud focus order: %v", f.order())
+	}
+}
