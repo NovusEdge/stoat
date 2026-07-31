@@ -75,8 +75,10 @@ stoat
 2. Pick an image and press SPACE to download it (not enter — enter tries to create the VM and tells you to download first).
 3. Press ENTER to create the VM.
 4. Back on the list, press ENTER to start it.
-5. Press `s` to ssh in.
-6. Optionally press `p` to provision it with any recipes you checked.
+5. If you checked any recipes, stoat waits for sshd and then offers to run
+   them: `test1 is up — run xfce now? y/N`. Press `y`, or decline and press
+   `p` whenever you like.
+6. Press `s` to ssh in.
 
 See [docs/getting-started/first-vm.md](docs/getting-started/first-vm.md) for the walkthrough with screenshots and troubleshooting.
 
