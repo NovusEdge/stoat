@@ -71,8 +71,8 @@ func pane(title, body string, maxWidth int) string {
 }
 
 // rowGap separates rows inside a pane. A terminal has no fractional leading,
-// so "a bit more line spacing" can only mean one blank line — this names it
-// in one place so list and detail stay in step.
+// so "a bit more line spacing" can only mean one blank line; this names it in
+// one place.
 const rowGap = "\n\n"
 
 // paneAt draws a pane whose content is held at a fixed width, for screens

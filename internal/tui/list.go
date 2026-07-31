@@ -108,7 +108,14 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Sequence(startVM(v), loadVMs)
 	case "n":
-		m.form = newForm()
+		// A fresh form would reset "fetching" to false while the previous
+		// form's download goroutine is still writing, letting a second fetch
+		// start on the same file: two writers interleaving into one .part,
+		// each verifying its own read stream, producing a corrupt image that
+		// passes the checksum. Reuse the form that owns the live download.
+		if !m.form.fetching {
+			m.form = newForm()
+		}
 		m.screen = screenForm
 		m.showHelp = false
 	case "right", "l":
@@ -222,13 +229,16 @@ func (m model) viewList() string {
 		// substring ends in \x1b[0m, which resets the enclosing style too, so
 		// wrapping a row that starts with a coloured dot left everything after
 		// the dot unhighlighted — the selected row was marked by the ❯ alone.
-		label := fmt.Sprintf("%-14s %-5s %5dM %2dc  %s", v.Name, v.Mode, v.RAM, v.CPUs, state)
+		// state is kept out of the wrap for the same reason as the dot: when
+		// it's the dim "—" of a stopped VM, its trailing reset would render
+		// that one glyph unbolded inside an otherwise highlighted row.
+		label := fmt.Sprintf("%-14s %-5s %5dM %2dc  ", v.Name, v.Mode, v.RAM, v.CPUs)
 		cursor := "  "
 		if i == m.cursor {
 			cursor = selStyle.Render("❯ ")
 			label = selStyle.Render(label)
 		}
-		row := dotStyle.Render(dot) + " " + label
+		row := dotStyle.Render(dot) + " " + label + state
 		if i > 0 {
 			rows.WriteString(rowGap)
 		}

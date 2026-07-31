@@ -59,7 +59,12 @@ func localImageFiles() []string {
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		// .part files are half-finished downloads. iso.Infer happily matches
+		// one ("…cloudimg-amd64.img.part" contains "cloudimg"), so without
+		// this they show up as selectable BYO images and a VM can be built on
+		// a truncated file. Aborting a download is routine — it is minutes
+		// long with no cancel key — so these do accumulate.
+		if !e.IsDir() && !strings.HasSuffix(e.Name(), ".part") {
 			out = append(out, e.Name())
 		}
 	}
@@ -301,21 +306,16 @@ type imageFetchedMsg struct {
 }
 type imageFetchErrMsg string
 
-// fetchImage downloads e. force re-fetches an image that is already local:
-// iso.Download short-circuits on a checksum match, so the only way to
-// genuinely replace a truncated or superseded file is to remove it first.
-func fetchImage(e iso.Entry, force bool) tea.Cmd {
+// fetchImage downloads e. Re-running it on an image that is already local is
+// safe and is how "re-download" works: iso.Download only short-circuits when
+// the local file's digest MATCHES the published one, so a truncated or
+// superseded file mismatches and is refetched in full. Deleting it first
+// would only open a window where a good image is gone and the refetch fails.
+func fetchImage(e iso.Entry) tea.Cmd {
 	return func() tea.Msg {
 		r, err := iso.Resolve(e)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
-		}
-		if force {
-			// A missing file is the desired state, so only a real failure
-			// (permissions, a directory in the way) is worth reporting.
-			if err := os.Remove(filepath.Join(config.Root(), "isos", r.File)); err != nil && !os.IsNotExist(err) {
-				return imageFetchErrMsg(e.OS + ": " + err.Error())
-			}
 		}
 		p, err := iso.Download(r, dlRecord)
 		if err != nil {
@@ -443,9 +443,10 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form.recipeSel[name] = !m.form.recipeSel[name]
 				return m, nil
 			}
-			// space on the image row downloads the selected catalog entry, and
-			// re-downloads it if it's already local — the only way to replace a
-			// truncated or superseded image without deleting it by hand.
+			// space on the image row downloads the selected catalog entry.
+			// Pressing it on an image that is already local re-verifies it and
+			// refetches only if the bytes no longer match the published digest,
+			// so it doubles as "repair this image" at no risk to a good one.
 			if m.form.focus == fISO {
 				opt := m.form.selected()
 				if opt == nil || opt.entry == nil {
@@ -460,7 +461,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form.dl = dlStats{}
 				m.status = ""
 				dlStart()
-				return m, tea.Batch(fetchImage(*opt.entry, opt.file != ""), dlTick())
+				return m, tea.Batch(fetchImage(*opt.entry), dlTick())
 			}
 		case "enter":
 			vm, err := m.form.build()

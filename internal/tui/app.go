@@ -129,6 +129,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screen(msg)
 		m.showHelp = false
 		return m, nil
+	case dlTickMsg, imageFetchedMsg, imageFetchErrMsg:
+		// A download outlives the form: "esc" returns to the list while the
+		// fetch goroutine keeps running, and there is no way to cancel it.
+		// Routing its messages by screen would strand them — the tick chain
+		// would die, and a checksum failure would be swallowed with the user
+		// never told. They go to the form's handler wherever we are, exactly
+		// as provisionDoneMsg is handled centrally above.
+		return m.updateForm(msg)
 	}
 
 	switch m.screen {

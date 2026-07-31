@@ -15,10 +15,16 @@ import (
 // message — the detail screen already tails last-provision.log the same way,
 // so this is the idiom already in the codebase rather than a new one.
 //
-// ponytail: one global cell, not a per-download map. The form refuses to
-// start a second fetch while one is in flight (m.form.fetching), so there is
-// never more than one writer. If concurrent downloads ever land, key this by
-// entry ID.
+// ponytail: one global cell, not a per-download map. Exactly one download can
+// be in flight — the form refuses to start a second while fetching, and
+// list.go refuses to hand out a fresh form that would clear that flag — so
+// there is never more than one writer. If concurrent downloads ever land, key
+// this by entry ID.
+//
+// done and total are written in that order, so a poll landing between them
+// sees the new done against a total of 0 for a single frame at the very
+// start; total is constant thereafter, so ratio() never sees done > total
+// from tearing. start is written before the goroutine launches.
 var dlProgress struct {
 	done  atomic.Int64
 	total atomic.Int64 // 0 when the server sent no Content-Length
@@ -102,7 +108,14 @@ func (s dlStats) eta() time.Duration {
 	if s.total <= 0 || sp <= 0 || s.done >= s.total {
 		return -1
 	}
-	return time.Duration(float64(s.total-s.done) / sp * float64(time.Second))
+	// A slow first second yields an absurd estimate ("582h32m left"), and at
+	// the extreme the float exceeds int64 nanoseconds, where the conversion
+	// is implementation-defined. Report no estimate rather than a wrong one.
+	secs := float64(s.total-s.done) / sp
+	if secs > 99*3600 {
+		return -1
+	}
+	return time.Duration(secs * float64(time.Second))
 }
 
 // line renders the text under the bar: "512 MiB / 1.2 GiB · 8.4 MiB/s · 2m10s left".
@@ -121,9 +134,9 @@ func (s dlStats) line() string {
 	return out
 }
 
-// humanBytes formats a byte count in binary units. Sub-unit values get no
-// decimal ("947 KiB", not "947.0 KiB") since the fraction is noise at that
-// scale.
+// humanBytes formats a byte count in binary units. Values of 100 and up drop
+// the decimal ("947 KiB", not "947.0 KiB") since the fraction is noise at
+// that scale.
 func humanBytes(n int64) string {
 	const unit = 1024
 	if n < unit {

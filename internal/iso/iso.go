@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -406,7 +407,11 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 
 	// Cancelling the request is what unblocks a Read that will never return;
 	// every chunk that does arrive pushes the deadline back out.
-	stall := time.AfterFunc(stallTimeout, cancel)
+	// stalled distinguishes "no bytes for a minute" from any other
+	// cancellation, so the user gets a reason rather than a bare
+	// "context canceled" they can't act on.
+	var stalled atomic.Bool
+	stall := time.AfterFunc(stallTimeout, func() { stalled.Store(true); cancel() })
 	defer stall.Stop()
 
 	part := final + ".part"
@@ -438,10 +443,20 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 		if rerr != nil {
 			f.Close()
 			os.Remove(part)
+			if stalled.Load() {
+				return "", fmt.Errorf("download stalled: no data for %s", stallTimeout)
+			}
 			return "", rerr
 		}
 	}
-	f.Close()
+	// Checked, not deferred: a Close error here would mean bytes never
+	// reached disk, and the digest is computed from the read stream in
+	// memory — so a short file would pass verification and get renamed into
+	// place as a "verified" image.
+	if err := f.Close(); err != nil {
+		os.Remove(part)
+		return "", err
+	}
 
 	if r.SHA256 != "" {
 		if got := hex.EncodeToString(h.Sum(nil)); got != r.SHA256 {

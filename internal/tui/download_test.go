@@ -163,3 +163,50 @@ func stripSGR(s string) string {
 	}
 	return b.String()
 }
+
+// TestDLRecordNormalisesUnknownTotal pins the documented contract of the one
+// function that crosses goroutines: a negative Content-Length becomes 0, so
+// readers have a single "unknown" value to check instead of two.
+func TestDLRecordNormalisesUnknownTotal(t *testing.T) {
+	dlStart()
+	dlRecord(4096, -1)
+	s := dlSnapshot(time.Now())
+	if s.total != 0 {
+		t.Errorf("total = %d, want 0 for an absent Content-Length", s.total)
+	}
+	if s.done != 4096 {
+		t.Errorf("done = %d, want 4096", s.done)
+	}
+	if s.elapsed <= 0 {
+		t.Error("elapsed should be positive once dlStart has run")
+	}
+
+	dlRecord(8192, 1<<20)
+	if s := dlSnapshot(time.Now()); s.total != 1<<20 || s.done != 8192 {
+		t.Errorf("snapshot = %+v, want done=8192 total=%d", s, int64(1<<20))
+	}
+}
+
+// TestETAIsOmittedWhenAbsurd covers the guard on a slow first sample: at
+// 1 KiB/s against a 2 GiB image the honest estimate is ~582 hours, and at the
+// extreme the float exceeds int64 nanoseconds, where the conversion is
+// implementation-defined. No estimate beats a wrong one.
+func TestETAIsOmittedWhenAbsurd(t *testing.T) {
+	slow := dlStats{done: 1024, total: 2 << 30, elapsed: time.Second}
+	if eta := slow.eta(); eta != -1 {
+		t.Errorf("eta = %v, want -1 for an absurd estimate", eta)
+	}
+	if strings.Contains(slow.line(), "left") {
+		t.Errorf("line() should omit the ETA: %q", slow.line())
+	}
+	// Speed and byte counts are still real and still shown.
+	if !strings.Contains(slow.line(), "/s") {
+		t.Errorf("line() should still report speed: %q", slow.line())
+	}
+
+	// A pathological case that overflowed int64 nanoseconds outright.
+	huge := dlStats{done: 10, total: 4 << 30, elapsed: 600 * time.Second}
+	if eta := huge.eta(); eta != -1 {
+		t.Errorf("eta = %v, want -1", eta)
+	}
+}
