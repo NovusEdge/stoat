@@ -70,6 +70,37 @@ func pane(title, body string, maxWidth int) string {
 	return style.Render(content)
 }
 
+// Glyphs are named here for the same reason colours are: so a symbol means
+// one thing across every screen and changing it is one edit, not a grep.
+//
+// Nothing upstream to reuse — bubbletea and lipgloss export no glyphs at all,
+// and bubbles keeps its own bullet unexported and writes arrows as raw
+// literals in its key help. So these are ours to name.
+const (
+	glyphCursor   = "❯ " // the focused row / selected item marker
+	glyphRadioOn  = "(•)"
+	glyphRadioOff = "( )"
+	glyphWas      = "←" // points at the value a field used to hold
+	glyphSep      = " · "
+	glyphDownload = "⤓"
+	glyphBarFull  = "█"
+	glyphBarEmpty = "░"
+	glyphRunning  = "●"
+	glyphStopped  = "○"
+	glyphBroken   = "✗"
+	glyphTo       = "→" // "share → /mnt/host", "8G → 16G"
+)
+
+// radio renders one option of an inline radio row. bubbles has no select
+// component (its list is a whole screen, not a three-way inline toggle), so
+// this is the smallest thing that keeps every radio in the UI identical.
+func radio(label string, on bool) string {
+	if on {
+		return glyphRadioOn + " " + label
+	}
+	return glyphRadioOff + " " + label
+}
+
 // rowGap separates rows inside a pane. A terminal has no fractional leading,
 // so "a bit more line spacing" can only mean one blank line; this names it in
 // one place.

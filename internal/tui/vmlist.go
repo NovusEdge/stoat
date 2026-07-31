@@ -52,7 +52,7 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 
 	cursor := "  "
 	if selected {
-		cursor = selStyle.Render("❯ ")
+		cursor = selStyle.Render(glyphCursor)
 	}
 
 	if it.broken != nil {
@@ -65,15 +65,15 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		} else {
 			plain = downStyle.Render(plain)
 		}
-		fmt.Fprint(w, cursor+errStyle.Render("✗")+" "+plain)
+		fmt.Fprint(w, cursor+errStyle.Render(glyphBroken)+" "+plain)
 		return
 	}
 
 	v := it.vm
-	dot, dotStyle := "○", downStyle
+	dot, dotStyle := glyphStopped, downStyle
 	state := dimStyle.Render("—")
 	if qemu.Running(v) {
-		dot, dotStyle = "●", upStyle
+		dot, dotStyle = glyphRunning, upStyle
 		state = fmt.Sprintf("up %s  :%d", qemu.Uptime(v), v.SSHPort)
 	}
 	// The dot and the state stay OUTSIDE the selection wrap: a styled

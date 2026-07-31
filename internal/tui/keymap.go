@@ -121,6 +121,7 @@ func (h detailHelp) ssh() key.Binding {
 func (h detailHelp) ShortHelp() []key.Binding {
 	return []key.Binding{
 		plainKey([]string{"e"}, "e", "edit"),
+		plainKey([]string{"E"}, "E", "raw toml"),
 		plainKey([]string{"i"}, "i", "installed"),
 		h.ssh(),
 		plainKey([]string{"p"}, "p", "provision"),
@@ -131,7 +132,8 @@ func (h detailHelp) ShortHelp() []key.Binding {
 
 func (h detailHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{plainKey([]string{"e"}, "e", "edit"), plainKey([]string{"i"}, "i", "installed")},
+		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
+		{plainKey([]string{"i"}, "i", "installed"), plainKey([]string{"p"}, "p", "provision")},
 		{h.ssh(), plainKey([]string{"p"}, "p", "provision")},
 		{plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"), keyCtrlC},
 		{keyHelp},
@@ -158,6 +160,29 @@ func (formHelp) FullHelp() [][]key.Binding {
 		{plainKey([]string{"tab", "down"}, "tab/↓", "next field"), plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev field")},
 		{plainKey([]string{"left", "right"}, "←/→", "change iso/mode/recipe"), plainKey([]string{" "}, "space", "download image / toggle recipe")},
 		{plainKey([]string{"enter"}, "↵", "create vm"), plainKey([]string{"esc"}, "esc", "cancel")},
+		{keyCtrlC, keyHelp},
+	}
+}
+
+// editHelp is the help.KeyMap for the in-TUI edit form.
+type editHelp struct{}
+
+func (editHelp) ShortHelp() []key.Binding {
+	return []key.Binding{
+		plainKey([]string{"tab", "down"}, "tab/↓", "next"),
+		plainKey([]string{"left", "right"}, "←/→", "change"),
+		plainKey([]string{" "}, "space", "toggle recipe"),
+		plainKey([]string{"enter"}, "↵", "save"),
+		plainKey([]string{"esc"}, "esc", "cancel"),
+		keyHelp,
+	}
+}
+
+func (editHelp) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{plainKey([]string{"tab", "down"}, "tab/↓", "next field"), plainKey([]string{"shift+tab", "up"}, "shift+tab/↑", "prev field")},
+		{plainKey([]string{"left", "right"}, "←/→", "change mode/recipe"), plainKey([]string{" "}, "space", "toggle recipe")},
+		{plainKey([]string{"enter"}, "↵", "save"), plainKey([]string{"esc"}, "esc", "cancel without saving")},
 		{keyCtrlC, keyHelp},
 	}
 }

@@ -126,10 +126,10 @@ func (s dlStats) line() string {
 		out += " / " + humanBytes(s.total)
 	}
 	if sp := s.speed(); sp > 0 {
-		out += " · " + humanBytes(int64(sp)) + "/s"
+		out += glyphSep + humanBytes(int64(sp)) + "/s"
 	}
 	if eta := s.eta(); eta > 0 {
-		out += " · " + humanDuration(eta) + " left"
+		out += glyphSep + humanDuration(eta) + " left"
 	}
 	return out
 }
@@ -192,8 +192,8 @@ func bar(ratio float64, width int) string {
 		ratio = 1
 	}
 	filled := int(ratio*float64(width) + 0.5)
-	return accentStyle.Render(strings.Repeat("█", filled)) +
-		dimStyle.Render(strings.Repeat("░", width-filled))
+	return accentStyle.Render(strings.Repeat(glyphBarFull, filled)) +
+		dimStyle.Render(strings.Repeat(glyphBarEmpty, width-filled))
 }
 
 // dlValueCol is where the form's value column starts: a 2-cell focus marker

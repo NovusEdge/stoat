@@ -18,7 +18,7 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml") {
+	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml") {
 		if _, err := os.Stat(Path(name)); err != nil {
 			t.Errorf("Install did not install %q: %v", name, err)
 		}
@@ -43,17 +43,18 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 
 func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 	// go:embed must pick up exactly the per-OS shell recipes plus the cloud
-	// fragment — no strays (recipes.go/recipes_test.go must NOT be swept up
+	// fragments — no strays (recipes.go/recipes_test.go must NOT be swept up
 	// by a loose embed pattern).
 	entries, err := bundled.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
-		"xfce.alpine.sh":  true,
-		"xfce.ubuntu.sh":  true,
-		"xfce.arch.sh":    true,
-		"xfce.cloud.yaml": true,
+		"xfce.alpine.sh":         true,
+		"xfce.ubuntu.sh":         true,
+		"xfce.arch.sh":           true,
+		"xfce.cloud.yaml":        true,
+		"xfce.fedora.cloud.yaml": true,
 	}
 	got := map[string]bool{}
 	for _, e := range entries {
@@ -119,11 +120,29 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 	if names, err := List("alpine", "cloudinit"); err != nil || len(names) != 0 {
 		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, %v, want empty", names, err)
 	}
-	// fedora is deliberately not in cloudOS (Fedora needs the
-	// @xfce-desktop-environment group, not a "xfce4" package) and has no
-	// shell recipe either.
-	if names, err := List("fedora", "cloudinit"); err != nil || len(names) != 0 {
-		t.Errorf("List(\"fedora\", \"cloudinit\") = %v, %v, want empty (undocumented Fedora limitation)", names, err)
+	// fedora is served by a per-OS fragment rather than the shared one: it
+	// has no package literally named "xfce4", so it needs the comps group
+	// @xfce-desktop-environment. It must get exactly ONE xfce entry — the
+	// Fedora fragment, never the shared file, which would fail on dnf.
+	names, err := List("fedora", "cloudinit")
+	if err != nil {
+		t.Fatalf("List(\"fedora\", \"cloudinit\"): %v", err)
+	}
+	if len(names) != 1 || names[0] != "xfce.fedora.cloud.yaml" {
+		t.Errorf("List(\"fedora\", \"cloudinit\") = %v, want [xfce.fedora.cloud.yaml]", names)
+	}
+
+	// The converse: an OS covered by the shared fragment must NOT also be
+	// offered Fedora's, or the picker shows two xfce entries and one of them
+	// installs a group name apt has never heard of.
+	for _, os := range []string{"ubuntu", "debian", "arch"} {
+		names, err := List(os, "cloudinit")
+		if err != nil {
+			t.Fatalf("List(%q, \"cloudinit\"): %v", os, err)
+		}
+		if len(names) != 1 || names[0] != "xfce.cloud.yaml" {
+			t.Errorf("List(%q, \"cloudinit\") = %v, want [xfce.cloud.yaml]", os, names)
+		}
 	}
 }
 

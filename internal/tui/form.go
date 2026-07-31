@@ -37,7 +37,7 @@ func (o imageOption) isBYO() bool { return o.entry == nil }
 // label renders the image picker row for one option.
 func (o imageOption) label() string {
 	if o.entry != nil {
-		status := "⤓ download"
+		status := glyphDownload + " download"
 		if o.file != "" {
 			status = "downloaded"
 		}
@@ -612,7 +612,7 @@ func (m model) viewForm() string {
 	row := func(i int, label, value string) {
 		marker := "  "
 		if f.focus == i {
-			marker = selStyle.Render("❯ ")
+			marker = selStyle.Render(glyphCursor)
 			// Text inputs are NOT wrapped: a textinput's view carries its own
 			// cursor styling, and a styled substring's \x1b[0m resets the
 			// enclosing style too — so wrapping produced a row that was accent
@@ -641,10 +641,7 @@ func (m model) viewForm() string {
 	}
 
 	if f.resolvedBackend() == "apkovl" {
-		modeLabel := "(•) live   ( ) disk"
-		if f.mode == "disk" {
-			modeLabel = "( ) live   (•) disk"
-		}
+		modeLabel := radio("live", f.mode == "live") + "   " + radio("disk", f.mode == "disk")
 		row(fMode, "mode", modeLabel)
 	} else {
 		b.WriteString(dimStyle.Render("  mode     — ("+f.effectiveMode()+")") + "\n")
@@ -665,7 +662,7 @@ func (m model) viewForm() string {
 
 	recipesMarker := "  "
 	if f.focus == fRecipes {
-		recipesMarker = selStyle.Render("❯ ")
+		recipesMarker = selStyle.Render(glyphCursor)
 	}
 	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
 

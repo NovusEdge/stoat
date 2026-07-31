@@ -80,6 +80,12 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "e":
+			m.edit = newEdit(m.detail.vm)
+			m.screen = screenEdit
+			m.showHelp = false
+			m.status = ""
+			return m, nil
+		case "E":
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
 				editor = "vi"
@@ -145,7 +151,7 @@ func (m model) viewDetail() string {
 	}
 
 	var facts strings.Builder
-	facts.WriteString(dimStyle.Render(v.Mode) + dimStyle.Render(" · ") + state + "\n\n")
+	facts.WriteString(dimStyle.Render(v.Mode) + dimStyle.Render(glyphSep) + state + "\n\n")
 
 	line := func(k, val string) {
 		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
@@ -176,7 +182,7 @@ func (m model) viewDetail() string {
 	}
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
 	if v.Share != "" {
-		line("share", v.Share+dimStyle.Render(" → /mnt/host"))
+		line("share", v.Share+dimStyle.Render(" "+glyphTo+" /mnt/host"))
 	}
 	if len(v.Recipes) > 0 {
 		line("recipes", strings.Join(v.Recipes, ", "))

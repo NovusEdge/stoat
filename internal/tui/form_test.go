@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -106,6 +107,11 @@ func TestFormTabOrder(t *testing.T) {
 // failure. Before the fix, v.Save() ran unconditionally before qemu-img, so
 // a bad size left a phantom, unbootable VM behind.
 func TestBuildVMFailedDiskCreationLeavesNoTrace(t *testing.T) {
+	// Without qemu-img this passes for the wrong reason: buildVM fails
+	// because the binary is missing, not because the size is invalid.
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed: skipping disk-creation failure test")
+	}
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := config.EnsureRoot(); err != nil {
 		t.Fatal(err)

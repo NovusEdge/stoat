@@ -13,6 +13,15 @@ import (
 const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
 
 func TestSeedWritesUserDataAndMetaData(t *testing.T) {
+	// Seed() hard-errors without xorriso, on purpose — a silent fallback used
+	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
+	// start. That contract has its own test below; this one is about the
+	// seed's CONTENTS, so it skips rather than turning CI permanently red on
+	// a machine that simply hasn't got the tool.
+	if !haveXorriso() {
+		t.Skip("xorriso not installed: skipping seed-content test")
+	}
+
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 
@@ -72,10 +81,6 @@ func TestSeedWritesUserDataAndMetaData(t *testing.T) {
 		t.Errorf("Seed returned %q, want %q", isoPath, wantISO)
 	}
 
-	if !haveXorriso() {
-		t.Skip("xorriso not available: skipping ISO label assertion")
-	}
-
 	f, err := os.Open(isoPath)
 	if err != nil {
 		t.Fatalf("seed.iso not written: %v", err)
@@ -101,6 +106,15 @@ func TestHaveXorriso(t *testing.T) {
 // that was hand-verified against a real Ubuntu 24.04 boot (see
 // .cloudinit-test/seed/user-data), with nothing appended.
 func TestSeedNoRecipesByteIdentical(t *testing.T) {
+	// Seed() hard-errors without xorriso, on purpose — a silent fallback used
+	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
+	// start. That contract has its own test below; this one is about the
+	// seed's CONTENTS, so it skips rather than turning CI permanently red on
+	// a machine that simply hasn't got the tool.
+	if !haveXorriso() {
+		t.Skip("xorriso not installed: skipping seed-content test")
+	}
+
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 
@@ -127,6 +141,15 @@ func TestSeedNoRecipesByteIdentical(t *testing.T) {
 // contains the proven users: block verbatim, plus the recipe's merged
 // packages.
 func TestSeedMergesCloudRecipe(t *testing.T) {
+	// Seed() hard-errors without xorriso, on purpose — a silent fallback used
+	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
+	// start. That contract has its own test below; this one is about the
+	// seed's CONTENTS, so it skips rather than turning CI permanently red on
+	// a machine that simply hasn't got the tool.
+	if !haveXorriso() {
+		t.Skip("xorriso not installed: skipping seed-content test")
+	}
+
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 

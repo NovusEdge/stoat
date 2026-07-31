@@ -184,6 +184,22 @@ func (v *VM) Delete() error {
 	return os.RemoveAll(v.Dir)
 }
 
+// BrokenSSHPort best-effort reads the sshport out of a VM directory whose
+// vm.toml does not parse, so callers assigning a port can avoid one that a
+// broken VM is still committed to. An error means no port could be read —
+// which is not the same as the VM claiming none.
+func BrokenSSHPort(name string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(Root(), name, "vm.toml"))
+	if err != nil {
+		return 0, err
+	}
+	m := sshPortLine.FindSubmatch(data)
+	if m == nil {
+		return 0, fmt.Errorf("%s: no sshport line", name)
+	}
+	return strconv.Atoi(string(m[1]))
+}
+
 // FreePort returns the first free TCP port at or above 2200 on loopback that
 // is both bindable right now and not already claimed by an existing VM's
 // vm.toml. A created-but-stopped VM holds nothing open, so the bindability
@@ -205,14 +221,8 @@ func FreePort() (int, error) {
 	// a sshport line and reserve that port too.
 	if broken, err := ListBroken(); err == nil {
 		for _, b := range broken {
-			data, err := os.ReadFile(filepath.Join(Root(), b.Name, "vm.toml"))
-			if err != nil {
-				continue
-			}
-			if m := sshPortLine.FindSubmatch(data); m != nil {
-				if p, err := strconv.Atoi(string(m[1])); err == nil {
-					claimed[p] = true
-				}
+			if p, err := BrokenSSHPort(b.Name); err == nil {
+				claimed[p] = true
 			}
 		}
 	}

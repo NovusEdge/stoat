@@ -19,9 +19,9 @@
 # literally named "xfce4" — there is nothing by that name in Fedora's repos.
 # cloud-init's packages: list has no per-distro syntax to special-case one
 # entry, so mixing an "@group" token in here would fail on apt/pacman.
-# ponytail: if Fedora xfce is ever needed, ship a second fragment
-# (e.g. xfce.cloud.fedora.yaml with packages: ["@xfce-desktop-environment"])
-# rather than teaching this one file to branch per distro.
+# That second fragment now exists: xfce.fedora.cloud.yaml. recipes.List
+# offers a per-OS "<name>.<os>.cloud.yaml" in place of this shared file for
+# any OS that has one, so Fedora gets its group and the rest get this.
 packages:
   - xfce4
   - xfce4-terminal

@@ -47,10 +47,13 @@ func Install() error {
 	return nil
 }
 
-// cloudOS is the set of os values the single shared cloud-config fragment
-// (xfce.cloud.yaml) supports. cloud-init's packages: list has no per-distro
-// syntax, so one fragment only works across OSes whose package names happen
-// to match — see that file's header comment for why Fedora is excluded.
+// cloudOS is the set of os values the SHARED cloud-config fragment
+// ("<name>.cloud.yaml") supports. cloud-init's packages: list has no
+// per-distro syntax, so one fragment only works across OSes whose package
+// names happen to match. An OS outside this set is served by a per-OS
+// fragment instead ("<name>.<os>.cloud.yaml") — Fedora has one, because it
+// has no package literally named "xfce4"; the desktop is the comps group
+// @xfce-desktop-environment.
 var cloudOS = map[string]bool{"ubuntu": true, "debian": true, "arch": true}
 
 // List returns installed recipe names offered for osName on backend.
@@ -59,7 +62,8 @@ var cloudOS = map[string]bool{"ubuntu": true, "debian": true, "arch": true}
 // interactively over a live shell, so they're offered on the apkovl/ssh
 // backends, filtered to the exact matching OS. The cloud-config fragment
 // ("xfce.cloud.yaml") only makes sense merged into a cloud-init seed, so
-// it's offered only on the cloudinit backend, filtered to cloudOS. A
+// it's offered only on the cloudinit backend, filtered to cloudOS — unless a
+// per-OS fragment ("xfce.fedora.cloud.yaml") exists for that OS. A
 // recipe with no file for the (osName, backend) combination is not
 // offered — e.g. List("ubuntu", "cloudinit") never returns xfce.ubuntu.sh,
 // and List("alpine", "apkovl") never returns the cloud fragment.
@@ -76,7 +80,16 @@ func List(osName, backend string) ([]string, error) {
 		name := e.Name()
 		switch {
 		case backend == "cloudinit" && strings.HasSuffix(name, ".cloud.yaml"):
-			if cloudOS[osName] {
+			// "xfce.fedora.cloud.yaml" -> per-OS, offered only to fedora.
+			// "xfce.cloud.yaml"        -> shared, offered to cloudOS.
+			// A per-OS fragment and the shared one therefore never both
+			// appear for the same OS, so the picker shows one xfce entry.
+			base := strings.TrimSuffix(name, ".cloud.yaml")
+			if i := strings.LastIndex(base, "."); i >= 0 {
+				if base[i+1:] == osName {
+					out = append(out, name)
+				}
+			} else if cloudOS[osName] {
 				out = append(out, name)
 			}
 		case backend != "cloudinit" && strings.HasSuffix(name, ".sh"):

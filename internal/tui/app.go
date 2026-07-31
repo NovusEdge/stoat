@@ -18,6 +18,7 @@ const (
 	screenList screen = iota
 	screenForm
 	screenDetail
+	screenEdit
 )
 
 type model struct {
@@ -38,6 +39,7 @@ type model struct {
 	provisioning map[string]bool
 
 	form      formModel
+	edit      editModel
 	detail    detailModel
 	detailGen int // bumped every time the detail screen is entered; identifies the live tick chain
 
@@ -139,6 +141,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.name + " provisioned"
 		}
 		return m, nil
+	case vmSavedMsg:
+		// Adopt the saved VM only now: saveEdit returns a statusMsg instead
+		// on failure, so the panes never show state that wasn't persisted.
+		m.detail.vm = msg.vm
+		m.edit.vm = msg.vm
+		m.screen = screenDetail
+		m.status = msg.vm.Name + " saved" + msg.note
+		// Re-arm the detail ticker for the same reason as the edit form's
+		// esc path: it dies while any other screen is showing.
+		m.detailGen++
+		return m, tea.Batch(loadVMs, tick(m.detailGen))
 	case screenMsg:
 		m.screen = screen(msg)
 		m.showHelp = false
@@ -156,6 +169,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenForm:
 		return m.updateForm(msg)
+	case screenEdit:
+		return m.updateEdit(msg)
 	case screenDetail:
 		return m.updateDetail(msg)
 	default:
@@ -186,6 +201,8 @@ func (m model) View() string {
 	switch m.screen {
 	case screenForm:
 		body = m.viewForm()
+	case screenEdit:
+		body = m.viewEdit()
 	case screenDetail:
 		body = m.viewDetail()
 	default:
