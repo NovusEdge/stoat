@@ -32,6 +32,7 @@ type model struct {
 	width               int
 	height              int
 	pendingDelete       *config.VM // VM awaiting delete confirmation
+	pendingProvision    *config.VM // VM that just became reachable, awaiting a y/N to provision
 	pendingDeleteBroken string     // name of a broken VM dir awaiting delete confirmation; mutually exclusive with pendingDelete
 
 	// provisioning tracks VMs with a provision run in flight, keyed by name,
@@ -153,6 +154,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, cmd
+	case vmStartedMsg:
+		m.status = msg.vm.Name + " started"
+		if !wantsAutoProvisionPrompt(msg.vm) {
+			return m, loadVMs
+		}
+		// Watch for sshd in the background. The user keeps full use of the UI
+		// meanwhile — this is an offer that arrives when it is ready, not a
+		// modal wait.
+		return m, tea.Batch(loadVMs, awaitSSH(msg.vm))
+	case sshReadyMsg:
+		v := m.vmByName(msg.name)
+		// Re-check on arrival: up to 90 seconds have passed, in which the VM
+		// could have been stopped, deleted, edited to drop its recipes, or
+		// provisioned by hand.
+		if v == nil || !qemu.Running(v) || !wantsAutoProvisionPrompt(v) {
+			return m, nil
+		}
+		if _, busy := m.provisioning[v.Name]; busy {
+			return m, nil
+		}
+		// Never stack prompts: a pending delete is a more consequential
+		// question and the user is mid-answer.
+		if m.pendingDelete != nil || m.pendingDeleteBroken != "" {
+			return m, nil
+		}
+		m.pendingProvision = v
+		m.status = autoProvisionPrompt(v)
+		return m, nil
 	case provisionDoneMsg:
 		delete(m.provisioning, msg.name)
 		if msg.err != nil {
