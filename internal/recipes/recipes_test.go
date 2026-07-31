@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // allShellRecipes are the per-OS ssh-pushed recipes; allNames also includes
@@ -286,28 +288,57 @@ func TestShellRecipesAreHonestAboutLiveVsDiskPersistence(t *testing.T) {
 	}
 }
 
-func TestCloudFragmentIsCloudConfigWithPackagesList(t *testing.T) {
+// TestCloudFragmentsParse asserts every bundled cloud fragment against the
+// contract the merger actually relies on. It parses rather than string-matches
+// because string-matching is what let a real bug ship: a collapsed comment
+// swallowed the `packages:` key in both fragments, leaving them invalid YAML
+// with no packages at all, and `strings.Contains(s, "packages:")` still passed
+// — it matched the word inside the comment. Every cloud VM's xfce recipe
+// installed nothing for a full release.
+func TestCloudFragmentsParse(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := Install(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Read("xfce.cloud.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(s, "#cloud-config") {
-		t.Error("xfce.cloud.yaml does not start with #cloud-config")
-	}
-	if !strings.Contains(s, "packages:") {
-		t.Error("xfce.cloud.yaml has no packages: list")
-	}
-	if !strings.Contains(s, "xfce4") {
-		t.Error("xfce.cloud.yaml does not install xfce4")
-	}
-	// dbus-x11 is not a real Arch package; the fragment must not list it as
-	// a package to install (mentioning it in an explanatory comment is
-	// fine — this checks the packages: entries, not the whole file).
-	if strings.Contains(s, "  - dbus-x11") {
-		t.Error("xfce.cloud.yaml lists dbus-x11, which does not exist on Arch's pacman repos")
+	for _, name := range []string{"xfce.cloud.yaml", "xfce.fedora.cloud.yaml"} {
+		s, err := Read(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(s, "#cloud-config") {
+			t.Errorf("%s does not start with #cloud-config", name)
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+			t.Errorf("%s is not valid YAML: %v", name, err)
+			continue
+		}
+		pkgs, _ := doc["packages"].([]any)
+		if len(pkgs) == 0 {
+			t.Errorf("%s has no packages: list — the fragment installs nothing", name)
+		}
+		// mergeCloudRecipes only splices packages: and runcmd:. Anything else
+		// a fragment declares is dropped without a word, so the bundled ones
+		// must not declare anything else.
+		for k := range doc {
+			if k != "packages" && k != "runcmd" {
+				t.Errorf("%s has top-level key %q, which mergeCloudRecipes silently drops", name, k)
+			}
+		}
+		// dbus-x11 is not a real Arch package, and lightdm-gtk-greeter is not
+		// a real Fedora one. Checked against the parsed list, so an
+		// explanatory mention in a comment is fine.
+		for _, p := range pkgs {
+			switch p {
+			case "dbus-x11":
+				if name == "xfce.cloud.yaml" {
+					t.Errorf("%s installs dbus-x11, which does not exist on Arch", name)
+				}
+			case "lightdm-gtk-greeter":
+				if name == "xfce.fedora.cloud.yaml" {
+					t.Errorf("%s installs lightdm-gtk-greeter; on Fedora it is lightdm-gtk", name)
+				}
+			}
+		}
 	}
 }

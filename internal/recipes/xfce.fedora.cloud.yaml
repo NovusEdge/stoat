@@ -5,11 +5,19 @@
 # "xfce4" — the desktop ships as the comps group @xfce-desktop-environment.
 # The shared xfce.cloud.yaml lists plain "xfce4"/"xfce4-terminal", which are
 # real on apt and pacman, so mixing an "@group" token into that one file would
-# break Ubuntu/Debian/Arch. cloud-init's packages:
-  - "@xfce-desktop-environment"
-  # Fedora's Xfce group ships lightdm, but naming it explicitly means this
-  # fragment does not depend on the group's contents staying that way.
+# break Ubuntu/Debian/Arch.
+#
+# @xfce-desktop is the comps GROUP (58 packages). The similarly-named
+# @xfce-desktop-environment is an *environment* that pulls in 20 groups —
+# printing, 3d-printing, dial-up — which is a lot of disk against a cloud
+# image's small root.
+packages:
+  - "@xfce-desktop"
+  # The greeter is lightdm-gtk on Fedora, not lightdm-gtk-greeter as on
+  # Debian/Arch. @xfce-desktop happens to pull it in; naming it explicitly
+  # means this fragment does not depend on the group's contents staying so.
   - lightdm
+  - lightdm-gtk
 
 # Same reasoning as the shared fragment: a cloud image has a real user
 # account (stoat), so it gets a login screen rather than the single-user
