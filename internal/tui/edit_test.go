@@ -217,3 +217,81 @@ func TestEditTabOrderSkipsDiskInLiveMode(t *testing.T) {
 		t.Errorf("eDisk missing from disk-mode focus order: %v", e.order())
 	}
 }
+
+// TestEditCloudVMSavesWithoutADiskSize is the regression test for a reported
+// bug: a cloud VM boots a CoW overlay of its base image and carries no disk
+// size in vm.toml at all, so the field opens empty — and validate demanded
+// one, making every cloud VM impossible to save with "disk size is required".
+func TestEditCloudVMSavesWithoutADiskSize(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	v := &config.VM{
+		Name: "fed", Mode: "cloud", OS: "fedora", Backend: "cloudinit",
+		RAM: 4096, CPUs: 4, SSHPort: 2202, Dir: t.TempDir(), Base: "/tmp/base.qcow2",
+	}
+	e := newEdit(v)
+	if e.inputs[eDisk].Value() != "" {
+		t.Fatalf("expected an empty disk field for a cloud VM, got %q", e.inputs[eDisk].Value())
+	}
+
+	a, err := e.validate(nil)
+	if err != nil {
+		t.Fatalf("a cloud VM could not be saved: %v", err)
+	}
+	if a.resizeTo != "" {
+		t.Errorf("a blank disk field asked for a resize to %q", a.resizeTo)
+	}
+
+	// Filling it in is still a grow request.
+	e.inputs[eDisk].SetValue("40G")
+	a, err = e.validate(nil)
+	if err != nil {
+		t.Fatalf("growing a cloud overlay was refused: %v", err)
+	}
+	if a.resizeTo != "40G" {
+		t.Errorf("resizeTo = %q, want 40G", a.resizeTo)
+	}
+
+	// A disk-mode VM still requires one, since it has no base to fall back on.
+	d := newEdit(&config.VM{Name: "d", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Dir: t.TempDir()})
+	d.inputs[eDisk].SetValue("")
+	if _, err := d.validate(nil); err == nil {
+		t.Error("disk mode accepted an empty disk size")
+	}
+}
+
+// TestEditChangeMarkers covers the diff display: an untouched form reports no
+// changes, and a touched field says what it was.
+func TestEditChangeMarkers(t *testing.T) {
+	e := editFixture(t)
+	if e.dirty() {
+		t.Error("an untouched form reports itself dirty")
+	}
+	for i := 0; i < eFieldCount; i++ {
+		if was := e.changed(i); was != "" {
+			t.Errorf("field %d reports a change (%q) before being edited", i, was)
+		}
+	}
+
+	e.inputs[eRAM].SetValue("8192")
+	if was := e.changed(eRAM); was != "4096" {
+		t.Errorf("changed(eRAM) = %q, want the old value 4096", was)
+	}
+	if !e.dirty() {
+		t.Error("an edited form does not report itself dirty")
+	}
+
+	// Toggling a recipe counts as a change even with every text field intact.
+	clean := editFixture(t)
+	clean.recipeNames = []string{"x.alpine.sh"}
+	clean.recipeSel = map[string]bool{"x.alpine.sh": true}
+	if !clean.dirty() {
+		t.Error("selecting a recipe did not mark the form dirty")
+	}
+
+	// Mode changes count too.
+	md := editFixture(t)
+	md.mode = "live"
+	if !md.dirty() {
+		t.Error("changing the mode did not mark the form dirty")
+	}
+}

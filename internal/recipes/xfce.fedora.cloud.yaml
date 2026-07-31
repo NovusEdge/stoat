@@ -1,0 +1,44 @@
+#cloud-config
+# XFCE desktop fragment for Fedora on the cloudinit backend.
+#
+# Fedora needs its own fragment because it has no package literally named
+# "xfce4" — the desktop ships as the comps group @xfce-desktop-environment.
+# The shared xfce.cloud.yaml lists plain "xfce4"/"xfce4-terminal", which are
+# real on apt and pacman, so mixing an "@group" token into that one file would
+# break Ubuntu/Debian/Arch. cloud-init's packages: list has no per-distro
+# syntax, hence a second file rather than a branch.
+#
+# The "@" prefix is what dnf itself documents for this: the Fedora project's
+# own Xfce page gives `dnf install @xfce-desktop-environment` verbatim, and
+# cloud-init hands the packages: entries straight to dnf install, so this
+# resolves to exactly that command.
+packages:
+  - "@xfce-desktop-environment"
+
+# Cloud images are always a real disk install (never Alpine-style tmpfs live
+# boot), so everything below persists across reboots by construction — there
+# is no live-vs-disk branch to be honest about here.
+runcmd:
+  # dbus ships with every Fedora cloud image as a systemd dependency, so it
+  # needs enabling, not installing.
+  - systemctl enable dbus
+  - systemctl start dbus
+  - echo 'exec startxfce4' > /root/.xinitrc
+  - mkdir -p /etc/systemd/system/getty@tty1.service.d
+  - |
+    cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
+    [Service]
+    ExecStart=
+    ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+    EOF
+  - systemctl daemon-reload
+  - systemctl enable getty@tty1.service
+  - |
+    if ! grep -q 'exec startx' /root/.profile 2>/dev/null; then
+      cat >> /root/.profile <<'EOF'
+    if [ "$(tty)" = "/dev/tty1" ] && [ -z "$DISPLAY" ]; then
+      exec startx
+    fi
+    EOF
+    fi
+  - echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"

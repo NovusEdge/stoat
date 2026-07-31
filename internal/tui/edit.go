@@ -69,6 +69,11 @@ func newEdit(v *config.VM) editModel {
 		ti.SetValue(vals[i])
 		e.inputs = append(e.inputs, ti)
 	}
+	// A cloud VM carries no size of its own, so the field is empty and the
+	// placeholder says what leaving it that way means.
+	if v.Mode == "cloud" {
+		e.inputs[eDisk].Placeholder = "unchanged"
+	}
 	e.inputs[eRAM].Focus()
 
 	// Recipes are offered for the VM's own os/backend pair, exactly as the
@@ -95,12 +100,71 @@ func backendOf(v *config.VM) string {
 	return "ssh"
 }
 
+// order is the tab-traversal order for the current mode. Rows viewEdit does
+// not draw are omitted rather than included-but-hidden, so focus can never
+// land somewhere invisible and edit a field the user can't see.
 func (e editModel) order() []int {
 	o := []int{eMode, eRAM, eCPUs}
 	if e.mode != "live" {
 		o = append(o, eDisk)
 	}
-	return append(o, eShare, eSSHPort, eRecipes)
+	o = append(o, eShare, eSSHPort)
+	if len(e.recipeNames) > 0 {
+		o = append(o, eRecipes)
+	}
+	return o
+}
+
+// changed reports the original value of field i when the input differs from
+// it, for the "was X" marker. Empty means unchanged.
+func (e editModel) changed(i int) string {
+	was := e.original(i)
+	if strings.TrimSpace(e.inputs[i].Value()) == was {
+		return ""
+	}
+	if was == "" {
+		return "unset"
+	}
+	return was
+}
+
+func (e editModel) original(i int) string {
+	switch i {
+	case eRAM:
+		return strconv.Itoa(e.vm.RAM)
+	case eCPUs:
+		return strconv.Itoa(e.vm.CPUs)
+	case eDisk:
+		return e.vm.Disk
+	case eShare:
+		return e.vm.Share
+	case eSSHPort:
+		return strconv.Itoa(e.vm.SSHPort)
+	}
+	return ""
+}
+
+// dirty reports whether anything at all differs from the VM on disk, so the
+// footer can say whether "enter" would write nothing.
+func (e editModel) dirty() bool {
+	if e.mode != e.vm.Mode {
+		return true
+	}
+	for i := 0; i < eFieldCount; i++ {
+		if e.changed(i) != "" {
+			return true
+		}
+	}
+	was := map[string]bool{}
+	for _, r := range e.vm.Recipes {
+		was[r] = true
+	}
+	for _, n := range e.recipeNames {
+		if e.recipeSel[n] != was[n] {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *editModel) refocus() {
@@ -180,11 +244,13 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 
 	out := &applied{vm: next, sshChanged: port != e.vm.SSHPort}
 
-	if e.mode != "live" {
-		size := strings.TrimSpace(e.inputs[eDisk].Value())
-		if size == "" {
-			return nil, fmt.Errorf("disk size is required in %s mode", e.mode)
-		}
+	// Only a disk-mode VM has a size of its own. A cloud VM boots a CoW
+	// overlay of its base image and carries no size in vm.toml at all, so
+	// demanding one here rejected every cloud VM's first save; there the
+	// field is an optional "grow the overlay to". A live VM has no disk.
+	if size := strings.TrimSpace(e.inputs[eDisk].Value()); e.mode == "disk" && size == "" {
+		return nil, fmt.Errorf("disk size is required in disk mode")
+	} else if e.mode != "live" && size != "" {
 		if size != e.vm.Disk {
 			oldBytes, err1 := parseSize(e.vm.Disk)
 			newBytes, err2 := parseSize(size)
@@ -359,6 +425,10 @@ func (m model) viewEdit() string {
 	}
 
 	var b strings.Builder
+	// row draws a field. A changed field carries a dim "was X" so the pane
+	// shows what is about to be written versus what is on disk — an edit form
+	// that looks identical whether or not you have touched it makes it far
+	// too easy to save something you didn't mean to.
 	row := func(i int, label, value string) {
 		marker := "  "
 		if e.focus == i {
@@ -367,6 +437,11 @@ func (m model) viewEdit() string {
 			// end the accent at the cursor's reset (see viewForm).
 			if i >= eFieldCount {
 				value = selStyle.Render(value)
+			}
+		}
+		if i < eFieldCount {
+			if was := e.changed(i); was != "" {
+				value += warnStyle.Render("  ← was " + was)
 			}
 		}
 		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
@@ -380,15 +455,26 @@ func (m model) viewEdit() string {
 		}
 		modeLabel += mark + " " + md + "  "
 	}
-	row(eMode, "mode", strings.TrimRight(modeLabel, " "))
+	modeLabel = strings.TrimRight(modeLabel, " ")
+	if e.mode != e.vm.Mode {
+		modeLabel += warnStyle.Render("  ← was " + e.vm.Mode)
+	}
+	row(eMode, "mode", modeLabel)
 	b.WriteString("\n")
 
 	row(eRAM, "ram", e.inputs[eRAM].View()+dimStyle.Render(" MB"))
 	row(eCPUs, "cpus", e.inputs[eCPUs].View())
+	// The disk row is drawn only where it means something: a size of its own
+	// in disk mode, an optional "grow the overlay to" in cloud mode, and
+	// nothing at all for a live VM, which has no disk.
 	if e.mode != "live" {
-		row(eDisk, "disk", e.inputs[eDisk].View()+dimStyle.Render(" (grow only)"))
-	} else {
-		b.WriteString(dimStyle.Render("  disk     — (live mode)") + "\n")
+		disk := e.inputs[eDisk].View()
+		// The hint is dropped once the field is changed, so the "was X"
+		// marker sits right next to the value it refers to.
+		if e.changed(eDisk) == "" {
+			disk += dimStyle.Render("  (grow only)")
+		}
+		row(eDisk, "disk", disk)
 	}
 	b.WriteString("\n")
 
@@ -396,12 +482,19 @@ func (m model) viewEdit() string {
 	row(eSSHPort, "ssh", e.inputs[eSSHPort].View())
 	b.WriteString("\n")
 
-	marker := "  "
-	if e.focus == eRecipes {
-		marker = selStyle.Render("❯ ")
+	// Recipes are only offered when any exist for this VM's os/backend;
+	// an empty row is one more thing to tab through for nothing.
+	if len(e.recipeNames) > 0 {
+		marker := "  "
+		if e.focus == eRecipes {
+			marker = selStyle.Render("❯ ")
+		}
+		fmt.Fprintf(&b, "%s%-8s %s\n", marker, "recipes", editRecipesLabel(e))
 	}
-	fmt.Fprintf(&b, "%s%-8s %s\n", marker, "recipes", editRecipesLabel(e))
 
+	if !e.dirty() {
+		b.WriteString("\n" + dimStyle.Render("no changes"))
+	}
 	if qemu.Running(e.vm) {
 		b.WriteString("\n" + warnStyle.Render("running — ram/cpus/ssh apply on restart"))
 	}
