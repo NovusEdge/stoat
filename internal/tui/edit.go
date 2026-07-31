@@ -432,7 +432,7 @@ func (m model) viewEdit() string {
 	row := func(i int, label, value string) {
 		marker := "  "
 		if e.focus == i {
-			marker = selStyle.Render("❯ ")
+			marker = selStyle.Render(glyphCursor)
 			// Text inputs carry their own cursor styling; wrapping them would
 			// end the accent at the cursor's reset (see viewForm).
 			if i >= eFieldCount {
@@ -441,23 +441,19 @@ func (m model) viewEdit() string {
 		}
 		if i < eFieldCount {
 			if was := e.changed(i); was != "" {
-				value += warnStyle.Render("  ← was " + was)
+				value += warnStyle.Render("  " + glyphWas + " was " + was)
 			}
 		}
 		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
 	}
 
-	modeLabel := ""
-	for _, md := range editModes {
-		mark := "( )"
-		if md == e.mode {
-			mark = "(•)"
-		}
-		modeLabel += mark + " " + md + "  "
+	modeParts := make([]string, len(editModes))
+	for i, md := range editModes {
+		modeParts[i] = radio(md, md == e.mode)
 	}
-	modeLabel = strings.TrimRight(modeLabel, " ")
+	modeLabel := strings.Join(modeParts, "  ")
 	if e.mode != e.vm.Mode {
-		modeLabel += warnStyle.Render("  ← was " + e.vm.Mode)
+		modeLabel += warnStyle.Render("  " + glyphWas + " was " + e.vm.Mode)
 	}
 	row(eMode, "mode", modeLabel)
 	b.WriteString("\n")
@@ -487,7 +483,7 @@ func (m model) viewEdit() string {
 	if len(e.recipeNames) > 0 {
 		marker := "  "
 		if e.focus == eRecipes {
-			marker = selStyle.Render("❯ ")
+			marker = selStyle.Render(glyphCursor)
 		}
 		fmt.Fprintf(&b, "%s%-8s %s\n", marker, "recipes", editRecipesLabel(e))
 	}
