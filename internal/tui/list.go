@@ -13,23 +13,26 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// The list shows good VMs (m.vms) followed by broken ones (m.broken); the
-// cursor ranges over both as one sequence. current and currentBroken split
-// it back apart: exactly one of them returns non-nil for any valid cursor
-// position.
+// The list shows good VMs followed by broken ones (a directory whose vm.toml
+// won't parse) as one sequence. current and currentBroken split the selected
+// row back apart: exactly one of them returns non-nil for any valid
+// selection. Both read through the list component, so they honour an active
+// search filter — indexing the raw slices would select the wrong VM whenever
+// a filter is applied.
 func (m model) current() *config.VM {
-	if m.cursor < 0 || m.cursor >= len(m.vms) {
+	it, ok := m.selectedItem()
+	if !ok {
 		return nil
 	}
-	return m.vms[m.cursor]
+	return it.vm
 }
 
 func (m model) currentBroken() *config.Broken {
-	i := m.cursor - len(m.vms)
-	if i < 0 || i >= len(m.broken) {
+	it, ok := m.selectedItem()
+	if !ok {
 		return nil
 	}
-	return &m.broken[i]
+	return it.broken
 }
 
 func startVM(v *config.VM) tea.Cmd {
@@ -51,9 +54,17 @@ func stopVM(v *config.VM) tea.Cmd {
 }
 
 func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// While the search input is open it owns the keyboard: every one of
+	// stoat's single-letter bindings (n, d, p, s, q) is a character the user
+	// is trying to type into it. The list component also needs non-key
+	// messages (its filter resolves through a Cmd), so those are forwarded
+	// before the key switch below ever runs.
 	key, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
+	if !ok || m.filterActive() {
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		m.syncListHeight()
+		return m, cmd
 	}
 
 	// The delete confirmation prompt owns all keys while pending: "y"
@@ -80,21 +91,33 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	v := m.current()
 	broken := m.currentBroken()
-	total := len(m.vms) + len(m.broken)
 
 	switch key.String() {
 	case "q":
 		return m, tea.Quit
 	case "?":
 		m.showHelp = !m.showHelp
-	case "j", "down":
-		if m.cursor < total-1 {
-			m.cursor++
+	case "j", "down", "k", "up", "/", "pgup", "pgdown", "home", "end", "g", "G":
+		// Movement, paging and opening the search box all belong to the list
+		// component — it owns the cursor and the filter.
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		m.syncListHeight()
+		return m, cmd
+	case "esc":
+		// Clears an applied filter. Note a pending delete is handled earlier
+		// and consumes esc before this runs, so with both active the delete
+		// cancels and the filter stays — the safer of the two orderings.
+		if m.list.IsFiltered() {
+			var cmd tea.Cmd
+			m.list, cmd = m.list.Update(msg)
+			m.syncListHeight()
+			return m, cmd
 		}
-	case "k", "up":
-		if m.cursor > 0 {
-			m.cursor--
-		}
+		m.pendingDelete = nil
+		m.pendingDeleteBroken = ""
+		m.status = ""
+		return m, nil
 	case "enter":
 		if v == nil {
 			if broken != nil {
@@ -152,10 +175,6 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenList
 			m.pendingDeleteBroken = broken.Name
 		}
-	case "esc":
-		m.pendingDelete = nil
-		m.pendingDeleteBroken = ""
-		m.status = ""
 	}
 	return m, nil
 }
@@ -212,55 +231,28 @@ func (m model) viewList() string {
 	if m.preflight != "" {
 		rows.WriteString(errStyle.Render(m.preflight) + "\n\n")
 	}
-
-	if len(m.vms) == 0 && len(m.broken) == 0 {
+	switch {
+	case len(m.list.Items()) == 0:
+		// The genuinely-empty first run. Left to the component this renders
+		// its own "No vms." — capitalised, full stop, no guidance — as the
+		// very first screen a new user ever sees.
 		rows.WriteString(dimStyle.Render("no vms yet — press n to create one"))
+	// "there are VMs but none are visible" rather than IsFiltered(), which
+	// only reports an APPLIED filter — while the user is still typing, the
+	// state is Filtering and the pane would otherwise render empty.
+	case len(m.list.VisibleItems()) == 0:
+		// bubbles/list renders an empty viewport here; without a message the
+		// pane just collapses and reads as "stoat lost my VMs".
+		rows.WriteString(dimStyle.Render("no vm matches this search — esc clears it"))
+	default:
+		// The delegate puts a blank line after every row including the last;
+		// inside a padded pane that reads as a stray gap above the border.
+		rows.WriteString(strings.TrimRight(m.list.View(), " \n"))
 	}
 
-	for i, v := range m.vms {
-		running := qemu.Running(v)
-		dot, dotStyle := "○", downStyle
-		state := dimStyle.Render("—")
-		if running {
-			dot, dotStyle = "●", upStyle
-			state = fmt.Sprintf("up %s  :%d", qemu.Uptime(v), v.SSHPort)
-		}
-		// The dot is rendered OUTSIDE the selection wrap on purpose. A styled
-		// substring ends in \x1b[0m, which resets the enclosing style too, so
-		// wrapping a row that starts with a coloured dot left everything after
-		// the dot unhighlighted — the selected row was marked by the ❯ alone.
-		// state is kept out of the wrap for the same reason as the dot: when
-		// it's the dim "—" of a stopped VM, its trailing reset would render
-		// that one glyph unbolded inside an otherwise highlighted row.
-		label := fmt.Sprintf("%-14s %-5s %5dM %2dc  ", v.Name, v.Mode, v.RAM, v.CPUs)
-		cursor := "  "
-		if i == m.cursor {
-			cursor = selStyle.Render("❯ ")
-			label = selStyle.Render(label)
-		}
-		row := dotStyle.Render(dot) + " " + label + state
-		if i > 0 {
-			rows.WriteString(rowGap)
-		}
-		rows.WriteString(cursor + row)
-	}
-
-	for i, bv := range m.broken {
-		plain := fmt.Sprintf("✗ %-14s broken: %s", bv.Name, brokenReason(bv.Err))
-		cursor := "  "
-		row := downStyle.Render(plain)
-		idx := len(m.vms) + i
-		if idx == m.cursor {
-			cursor = selStyle.Render("❯ ")
-			row = selStyle.Render(plain)
-		}
-		if i > 0 || len(m.vms) > 0 {
-			rows.WriteString(rowGap)
-		}
-		rows.WriteString(cursor + row)
-	}
-
-	box := pane("", rows.String(), m.width)
+	// Fixed width, like the form: the pane must not resize as VM names
+	// change length or a search empties it.
+	box := paneAt("", rows.String(), listWidth, m.width)
 
 	// lipgloss.Place centers (or left-aligns) each LINE of the string handed
 	// to it independently, sized against that string's widest line. Handing
@@ -274,6 +266,13 @@ func (m model) viewList() string {
 	// pins the box to the footer's left edge — leaving it visibly off-center
 	// under the centered banner.
 	parts := []string{box, ""}
+	// The search line sits between the pane and the status: while the input
+	// is open it IS the input, and once a filter is applied it reports what
+	// is being hidden — without it a filtered list just looks like VMs went
+	// missing.
+	if search := listStatusLine(m.list); search != "" {
+		parts = append(parts, search, "")
+	}
 	if m.status != "" {
 		parts = append(parts, warnStyle.Render(m.status))
 	}
