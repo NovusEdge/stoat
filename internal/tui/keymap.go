@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // footerHelp renders both the short (single-line) and full (toggled by "?")
@@ -43,7 +44,11 @@ func renderFooter(km help.KeyMap, width int, showAll bool) string {
 		return pane("", h.View(km), width)
 	}
 	h.Width = width
-	return h.View(km)
+	// help.Model gives up truncating once its running total passes the width
+	// (it can only cut where an ellipsis still fits), and then appends every
+	// remaining binding — so the short footer can come back WIDER than the
+	// terminal and wrap, pushing the whole screen up. Cut it here instead.
+	return ansi.Truncate(h.View(km), width, "…")
 }
 
 // styledKey builds a key.Binding whose help text is pre-rendered in style,

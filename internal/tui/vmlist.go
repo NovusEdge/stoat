@@ -92,7 +92,15 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 // from the terminal so the pane doesn't resize as VMs come and go; the row
 // budget is what bubbles/list paginates against.
 const (
-	listWidth        = 46
+	// Wide enough for the widest row the format can produce with values that
+	// are actually reachable: a 14-char name, 5-digit RAM, 2-digit cpus, an
+	// uptime just under 1000 hours and a 5-digit port (the edit form allows
+	// up to 65535). Sized off the RUNNING row on purpose — a stopped one is
+	// only 38 cells, which is why an undersized value looks fine in every
+	// test render and then wraps the port onto its own line the moment
+	// something is actually up. A terminal narrower than this still clamps
+	// (paneAt bounds to the window), which is unavoidable at that size.
+	listWidth        = 60
 	listVisibleRows  = 6
 	listMinRows      = 2
 	listRowsHeadroom = 14 // banner, pane frame, status, footer
@@ -164,9 +172,13 @@ func listHeight(items, termHeight int, paginated bool) int {
 	// page two; viewList trims the resulting trailing blank instead.
 	h := n * 2
 	if paginated {
-		// The pagination line and its margin are drawn inside the height the
-		// component is given; without room the last VM is pushed to page two.
-		h += 2
+		// The pagination line is drawn inside the height the component is
+		// given, so it needs room or the last VM is pushed to page two. It
+		// costs exactly one line: bubbles only adds a top margin to it when
+		// the delegate's spacing is 0, and ours is 1. Budgeting two made the
+		// pane a line taller than the terminal, which flipped View() to
+		// top-align and cut the footer off the bottom.
+		h++
 	}
 	return h
 }

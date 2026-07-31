@@ -105,8 +105,9 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncListHeight()
 		return m, cmd
 	case "esc":
-		// esc clears an applied filter first; only once there is no filter
-		// left does it fall through to cancelling a pending delete.
+		// Clears an applied filter. Note a pending delete is handled earlier
+		// and consumes esc before this runs, so with both active the delete
+		// cancels and the filter stays — the safer of the two orderings.
 		if m.list.IsFiltered() {
 			var cmd tea.Cmd
 			m.list, cmd = m.list.Update(msg)
@@ -230,14 +231,20 @@ func (m model) viewList() string {
 	if m.preflight != "" {
 		rows.WriteString(errStyle.Render(m.preflight) + "\n\n")
 	}
+	switch {
+	case len(m.list.Items()) == 0:
+		// The genuinely-empty first run. Left to the component this renders
+		// its own "No vms." — capitalised, full stop, no guidance — as the
+		// very first screen a new user ever sees.
+		rows.WriteString(dimStyle.Render("no vms yet — press n to create one"))
 	// "there are VMs but none are visible" rather than IsFiltered(), which
 	// only reports an APPLIED filter — while the user is still typing, the
 	// state is Filtering and the pane would otherwise render empty.
-	if len(m.list.VisibleItems()) == 0 && len(m.list.Items()) > 0 {
+	case len(m.list.VisibleItems()) == 0:
 		// bubbles/list renders an empty viewport here; without a message the
 		// pane just collapses and reads as "stoat lost my VMs".
 		rows.WriteString(dimStyle.Render("no vm matches this search — esc clears it"))
-	} else {
+	default:
 		// The delegate puts a blank line after every row including the last;
 		// inside a padded pane that reads as a stray gap above the border.
 		rows.WriteString(strings.TrimRight(m.list.View(), " \n"))

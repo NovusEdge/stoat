@@ -174,3 +174,47 @@ func TestRefreshKeepsFilterApplied(t *testing.T) {
 		t.Errorf("selection after refresh = %v, want beta", v)
 	}
 }
+
+// TestCursorClampsWhenTheBottomVMDisappears covers a subtle one: SetItems does
+// not clamp the cursor, and the SetHeight that follows remaps an out-of-range
+// index to the TOP of the list rather than the bottom (it recomputes
+// page/cursor against a new, smaller PerPage). So deleting the last VM moved
+// the selection to the FIRST one — and the next "d" would arm a delete on the
+// wrong VM. This repo has shipped a delete-the-wrong-VM bug before.
+func TestCursorClampsWhenTheBottomVMDisappears(t *testing.T) {
+	m := listFixture(t) // alpha, beta, gamma
+	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = drainCmds(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if v := m.current(); v == nil || v.Name != "gamma" {
+		t.Fatalf("setup: selected %v, want gamma", v)
+	}
+
+	// gamma is deleted; the refresh brings back two VMs.
+	m = drainCmds(m, vmsLoadedMsg{vms: []*config.VM{
+		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
+		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
+	}})
+
+	v := m.current()
+	if v == nil {
+		t.Fatal("nothing selected after the bottom VM disappeared")
+	}
+	if v.Name != "beta" {
+		t.Errorf("selection jumped to %q; want beta (the new bottom row), not the top", v.Name)
+	}
+}
+
+// TestFirstRunSaysHowToStart guards the empty-state copy. Left to the
+// component this renders its own "No vms." — capitalised, full stop, no
+// guidance — as the very first screen a new user ever sees.
+func TestFirstRunSaysHowToStart(t *testing.T) {
+	m := model{screen: screenList, width: 100, height: 30, list: newVMList()}
+	m.syncListHeight()
+	out := m.viewList()
+	if !strings.Contains(out, "press n to create one") {
+		t.Errorf("first-run pane does not say how to start:\n%s", out)
+	}
+	if strings.Contains(out, "No vms.") {
+		t.Error("first-run pane fell through to the component's own empty message")
+	}
+}

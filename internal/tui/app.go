@@ -117,6 +117,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// items; dropping it would leave a filtered list showing the old
 		// matches after a refresh.
 		cmd := m.list.SetItems(vmItems(msg.vms, msg.broken))
+		// SetItems does not clamp the cursor, and the SetHeight below remaps
+		// an out-of-range index to the TOP rather than the bottom. Without
+		// this, deleting the last VM in the list moves the cursor to the
+		// first one — and the next "d" arms a delete on the wrong VM.
+		// Guarded on n > 0 because SetItems nils the filtered set for a
+		// moment, and clamping then would reset a filtered cursor.
+		if n := len(m.list.VisibleItems()); n > 0 && m.list.Index() >= n {
+			m.list.Select(n - 1)
+		}
 		m.syncListHeight()
 		return m, cmd
 	case statusMsg:
