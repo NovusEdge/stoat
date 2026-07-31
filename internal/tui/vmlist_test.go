@@ -46,7 +46,7 @@ func listFixture(t *testing.T) model {
 		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
 		{Name: "gamma", Mode: "cloud", RAM: 8192, CPUs: 8, SSHPort: 2202, Dir: t.TempDir()},
 	}
-	m := model{screen: screenList, list: newVMList(), provisioning: map[string]bool{}}
+	m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
 	m = drainCmds(m, tea.WindowSizeMsg{Width: 100, Height: 34})
 	return drainCmds(m, vmsLoadedMsg{vms: vms})
 }

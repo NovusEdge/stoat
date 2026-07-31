@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -33,10 +34,12 @@ type model struct {
 	pendingDelete       *config.VM // VM awaiting delete confirmation
 	pendingDeleteBroken string     // name of a broken VM dir awaiting delete confirmation; mutually exclusive with pendingDelete
 
-	// provisioning tracks VMs with a provision run in flight, keyed by
-	// name, so a second "p" press on the same VM can't start a second ssh
-	// session writing into the same last-provision.log.
-	provisioning map[string]bool
+	// provisioning tracks VMs with a provision run in flight, keyed by name,
+	// so a second "p" press on the same VM can't start a second ssh session
+	// writing into the same last-provision.log. The value carries what the
+	// spinner line shows: when it started and where it has got to.
+	provisioning map[string]provState
+	spin         spinner.Model
 
 	form      formModel
 	edit      editModel
@@ -83,7 +86,7 @@ func Run() error {
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
 	defer logx.Close()
-	m := model{provisioning: map[string]bool{}, list: newVMList()}
+	m := model{provisioning: map[string]provState{}, list: newVMList(), spin: newSpinner()}
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()
 	}
@@ -133,6 +136,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.status = string(msg)
 		return m, nil
+	case spinner.TickMsg:
+		// The chain is anchored to there being work in flight: when the last
+		// provision finishes it simply stops re-arming. Each tick also
+		// re-reads the tail of every running VM's log, which is where the
+		// step and last-output text come from.
+		if len(m.provisioning) == 0 {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		for name, st := range m.provisioning {
+			if v := m.vmByName(name); v != nil {
+				st.step, st.last = readProvStep(v)
+				m.provisioning[name] = st
+			}
+		}
+		return m, cmd
 	case provisionDoneMsg:
 		delete(m.provisioning, msg.name)
 		if msg.err != nil {

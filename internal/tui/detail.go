@@ -163,14 +163,10 @@ func (m model) viewDetail() string {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
-		// A disk VM is only an Alpine one when its image says so; a BYO
-		// Fedora/Debian/unknown ISO has no setup-alpine to run, and telling
-		// the user to run one is worse than saying nothing specific.
-		installer := "the installer"
-		if v.OS == "alpine" {
-			installer = "setup-alpine"
-		}
-		installed := warnStyle.Render("no — run " + installer + " in the qemu window, then press i")
+		// Until this is true a disk VM has no sshd and no key (apkovl is
+		// built for live mode only), so "p" cannot work — startProvision
+		// refuses with the same instruction rather than timing out on ssh.
+		installed := warnStyle.Render("no — run " + installerName(v) + " in the qemu window, then press i")
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}
@@ -203,6 +199,9 @@ func (m model) viewDetail() string {
 	}
 
 	parts = append(parts, "")
+	for _, l := range provLines(m) {
+		parts = append(parts, l)
+	}
 	if m.status != "" {
 		parts = append(parts, warnStyle.Render(m.status))
 	}

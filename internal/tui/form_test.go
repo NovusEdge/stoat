@@ -310,7 +310,7 @@ func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
 	space := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
-	m := model{screen: screenForm, form: newForm(), provisioning: map[string]bool{}}
+	m := model{screen: screenForm, form: newForm(), provisioning: map[string]provState{}}
 	m.form.focus = fISO
 
 	out, _ := m.Update(space)
@@ -355,7 +355,7 @@ func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
 func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
-	m := model{screen: screenList, form: newForm(), provisioning: map[string]bool{}}
+	m := model{screen: screenList, form: newForm(), provisioning: map[string]provState{}}
 	m.form.fetching = true
 	m.form.fetchingOS = "ubuntu"
 

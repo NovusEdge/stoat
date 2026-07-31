@@ -273,6 +273,12 @@ func (m model) viewList() string {
 	if search := listStatusLine(m.list); search != "" {
 		parts = append(parts, search, "")
 	}
+	// In-flight provision runs sit above the status line: they are ongoing
+	// state, not a one-off message, and a run started from here keeps going
+	// while the user moves around the list.
+	for _, l := range provLines(m) {
+		parts = append(parts, l)
+	}
 	if m.status != "" {
 		parts = append(parts, warnStyle.Render(m.status))
 	}
