@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -132,6 +133,7 @@ type formModel struct {
 	recipeNames []string        // installed recipes matching the selected image's OS/backend
 	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
 	recipeSel   map[string]bool // names currently checked
+	dl          dlStats         // last snapshot of the in-flight download
 }
 
 // field indices into inputs
@@ -300,7 +302,7 @@ func fetchImage(e iso.Entry) tea.Cmd {
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
-		p, err := iso.Download(r, nil)
+		p, err := iso.Download(r, dlRecord)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
@@ -310,6 +312,16 @@ func fetchImage(e iso.Entry) tea.Cmd {
 
 func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case dlTickMsg:
+		// The chain is anchored to m.form.fetching rather than to a
+		// generation counter: only one download can be in flight at a time,
+		// so when the fetch ends the chain simply stops re-arming.
+		if !m.form.fetching {
+			return m, nil
+		}
+		m.form.dl = dlSnapshot(time.Now())
+		return m, dlTick()
+
 	case imageFetchedMsg:
 		m.form.fetching = false
 		m.form.images = buildImages()
@@ -424,8 +436,10 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.form.fetching = true
 					m.form.fetchingOS = opt.entry.OS
-					m.status = "downloading " + opt.entry.OS + "…"
-					return m, fetchImage(*opt.entry)
+					m.form.dl = dlStats{}
+					m.status = ""
+					dlStart()
+					return m, tea.Batch(fetchImage(*opt.entry), dlTick())
 				}
 			}
 			vm, err := m.form.build()
@@ -614,7 +628,7 @@ func (m model) viewForm() string {
 	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
 
 	if f.fetching {
-		b.WriteString("\n" + dimStyle.Render("downloading "+f.fetchingOS+"…"))
+		b.WriteString("\n" + dlView(f.fetchingOS, f.dl))
 	}
 	if f.err != "" {
 		b.WriteString("\n" + errStyle.Render(f.err))
