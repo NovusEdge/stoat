@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -41,6 +42,14 @@ type model struct {
 	// spinner line shows: when it started and where it has got to.
 	provisioning map[string]provState
 	spin         spinner.Model
+
+	// cloudInit holds each cloud VM's last polled cloud-init status. A cloud
+	// VM does most of its setup minutes into the boot, so without this
+	// "installing", "finished" and "failed" are indistinguishable from the
+	// outside — a VM rejects a correct password and then silently starts
+	// accepting it.
+	cloudInit map[string]string
+	ciProg    progress.Model // the stage bar beside a cloud VM's setup line
 
 	form      formModel
 	edit      editModel
@@ -87,7 +96,13 @@ func Run() error {
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
 	defer logx.Close()
-	m := model{provisioning: map[string]provState{}, list: newVMList(), spin: newSpinner()}
+	m := model{
+		provisioning: map[string]provState{},
+		cloudInit:    map[string]string{},
+		ciProg:       newCloudInitProgress(),
+		list:         newVMList(),
+		spin:         newSpinner(),
+	}
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()
 	}
@@ -154,8 +169,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, cmd
+	case cloudInitTickMsg:
+		if v := m.vmByName(msg.name); v != nil && qemu.Running(v) {
+			return m, checkCloudInit(v)
+		}
+		return m, nil
+	case cloudInitMsg:
+		m.cloudInit[msg.name] = msg.status
+		if cloudInitDone(msg.status) {
+			return m, nil
+		}
+		if v := m.vmByName(msg.name); v != nil && qemu.Running(v) {
+			return m, pollCloudInit(v)
+		}
+		return m, nil
 	case vmStartedMsg:
 		m.status = msg.vm.Name + " started"
+		if msg.vm.Mode == "cloud" {
+			// Start watching immediately: the first few polls report
+			// "booting…", which is itself the information the user wants.
+			m.cloudInit[msg.vm.Name] = "waiting"
+			return m, tea.Batch(loadVMs, checkCloudInit(msg.vm))
+		}
 		if !wantsAutoProvisionPrompt(msg.vm) {
 			return m, loadVMs
 		}

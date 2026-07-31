@@ -277,6 +277,15 @@ func (m model) viewList() string {
 	// Fixed width, like the form: the pane must not resize as VM names
 	// change length or a search empties it.
 	box := paneAt("", rows.String(), listWidth, m.width)
+	// How to get into the selected VM, beside the list rather than a screen
+	// away: the answer differs per VM, and guessing wrong leaves you at a
+	// login prompt. Dropped entirely on a terminal too narrow for both.
+	cur := m.current()
+	ci := ""
+	if cur != nil {
+		ci = m.cloudInit[cur.Name]
+	}
+	box = joinAccess(box, accessBox(cur, ci, m.ciProg, m.width), m.width)
 
 	// lipgloss.Place centers (or left-aligns) each LINE of the string handed
 	// to it independently, sized against that string's widest line. Handing

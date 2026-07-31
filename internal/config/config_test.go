@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -269,7 +271,19 @@ func TestFreePortFreshInstallNoVMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p != 2200 {
-		t.Errorf("want first free port 2200 on a fresh install, got %d", p)
+	// FreePort probes the host by binding, so a VM (or anything else) already
+	// listening on 2200 legitimately pushes the answer up. Asserting exactly
+	// 2200 made this test fail whenever the developer had a VM running —
+	// which says nothing about FreePort and everything about the machine.
+	// What actually matters is that a fresh install gets a usable port in
+	// range, and that the port it names is genuinely bindable.
+	if p < 2200 || p >= 2300 {
+		t.Errorf("free port %d is outside the 2200-2299 range", p)
+	}
+	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
+	if err != nil {
+		t.Errorf("FreePort returned %d, which is not actually free: %v", p, err)
+	} else {
+		l.Close()
 	}
 }

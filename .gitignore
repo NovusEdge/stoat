@@ -1,4 +1,5 @@
 # build artifacts
+/vendor/
 *.iso
 *.qcow2
 /stoat

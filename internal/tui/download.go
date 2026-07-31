@@ -2,10 +2,10 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -176,14 +176,12 @@ func humanDuration(d time.Duration) string {
 // did and would look untethered.
 const dlBarWidth = 32
 
-// bar renders the filled/empty track. Built from two lipgloss-styled runs
-// rather than a per-cell gradient: the accent colour already reads as "this
-// is the active thing" everywhere else in the UI, and a solid fill degrades
-// correctly on a terminal without truecolor.
-//
-// ponytail: hand-rolled instead of bubbles/progress — that component pulls in
-// the harmonica module purely for spring animation, and driving the bar from
-// real byte counts means ViewAs is static, so the animation would never run.
+// dlBar is the component both progress bars are drawn with. ViewAs is fed a
+// ratio computed from real byte counts, so none of its spring animation runs
+// — it is used for its gradient and width handling, not its motion.
+var dlBar = progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage())
+
+// bar renders the filled/empty track at ratio, clamped to [0,1].
 func bar(ratio float64, width int) string {
 	if ratio < 0 {
 		ratio = 0
@@ -191,9 +189,9 @@ func bar(ratio float64, width int) string {
 	if ratio > 1 {
 		ratio = 1
 	}
-	filled := int(ratio*float64(width) + 0.5)
-	return accentStyle.Render(strings.Repeat(glyphBarFull, filled)) +
-		dimStyle.Render(strings.Repeat(glyphBarEmpty, width-filled))
+	p := dlBar
+	p.Width = width
+	return p.ViewAs(ratio)
 }
 
 // dlValueCol is where the form's value column starts: a 2-cell focus marker
