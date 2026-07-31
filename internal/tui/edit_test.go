@@ -1,17 +1,22 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/recipes"
 )
+
+func recipesInstall() error { return recipes.Install() }
 
 func editFixture(t *testing.T) editModel {
 	t.Helper()
 	t.Setenv("STOAT_HOME", t.TempDir())
 	return newEdit(&config.VM{
 		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl",
+		ISO: "isos/alpine-standard-3.24.1-x86_64.iso",
 		RAM: 4096, CPUs: 4, Disk: "8G", Share: "~/vms", SSHPort: 2200,
 		Dir: t.TempDir(),
 	})
@@ -51,10 +56,11 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
-// TestEditRefusesDiskShrink is the guard that matters most. qemu-img will
-// shrink a qcow2 without complaint, truncating the filesystem inside and
-// destroying whatever lived in the tail. Exposing disk size in the UI is only
-// safe because this refuses.
+// TestEditRefusesDiskShrink covers the friendly half of the shrink guard.
+// qemu-img itself refuses a shrink without --shrink (verified: exit 1,
+// "Use the --shrink option"), and saveEdit never passes it — so this is not
+// the last line of defence, it is the one that answers in stoat's own words
+// instead of a raw qemu-img error, and before anything is written.
 func TestEditRefusesDiskShrink(t *testing.T) {
 	e := editFixture(t)
 	e.inputs[eDisk].SetValue("4G") // was 8G
@@ -154,7 +160,8 @@ func TestEditCarriesRecipeSelection(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{
 		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl",
-		RAM: 4096, CPUs: 4, Disk: "8G", SSHPort: 2200, Dir: t.TempDir(),
+		ISO: "isos/alpine.iso", RAM: 4096, CPUs: 4, Disk: "8G",
+		SSHPort: 2200, Dir: t.TempDir(),
 		Recipes: []string{"xfce.alpine.sh"},
 	}
 	e := newEdit(v)
@@ -180,8 +187,8 @@ func TestEditCarriesRecipeSelection(t *testing.T) {
 func TestEditDoesNotMutateUntilSaved(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{
-		Name: "work", Mode: "disk", OS: "alpine", RAM: 4096, CPUs: 4,
-		Disk: "8G", SSHPort: 2200, Dir: t.TempDir(),
+		Name: "work", Mode: "disk", OS: "alpine", ISO: "isos/alpine.iso",
+		RAM: 4096, CPUs: 4, Disk: "8G", SSHPort: 2200, Dir: t.TempDir(),
 	}
 	e := newEdit(v)
 	e.inputs[eRAM].SetValue("16384")
@@ -252,7 +259,7 @@ func TestEditCloudVMSavesWithoutADiskSize(t *testing.T) {
 	}
 
 	// A disk-mode VM still requires one, since it has no base to fall back on.
-	d := newEdit(&config.VM{Name: "d", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Dir: t.TempDir()})
+	d := newEdit(&config.VM{Name: "d", Mode: "disk", ISO: "isos/x.iso", RAM: 1024, CPUs: 1, SSHPort: 2200, Dir: t.TempDir()})
 	d.inputs[eDisk].SetValue("")
 	if _, err := d.validate(nil); err == nil {
 		t.Error("disk mode accepted an empty disk size")
@@ -293,5 +300,114 @@ func TestEditChangeMarkers(t *testing.T) {
 	md.mode = "live"
 	if !md.dirty() {
 		t.Error("changing the mode did not mark the form dirty")
+	}
+}
+
+// TestParseSizeRejectsRelative covers a size qemu-img accepts but means
+// something else by: "+8G" GROWS BY 8G, while strconv.ParseFloat reads "+8"
+// as 8, so the grow check would clear it as "grow to 8G". A 4G disk would
+// become 12G while vm.toml recorded the literal "+8G", disagreeing with the
+// disk from then on. Verified against qemu-img: an 8G image given "+8G"
+// becomes 16G.
+func TestParseSizeRejectsRelative(t *testing.T) {
+	for _, in := range []string{"+8G", "-4G", "+512M"} {
+		if _, err := parseSize(in); err == nil {
+			t.Errorf("parseSize(%q) was accepted; it is a RELATIVE size", in)
+		}
+	}
+
+	// And it must be refused at the form level, not just in the parser.
+	e := editFixture(t)
+	e.inputs[eDisk].SetValue("+8G")
+	if _, err := e.validate(nil); err == nil {
+		t.Error("a relative disk size was accepted by validate")
+	} else if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error = %q, should say to use an absolute size", err)
+	}
+}
+
+// TestModeSwitchToDiskNeedsADiskFile is the regression test for the worst
+// finding in review: the create form records a disk size for every non-cloud
+// VM, but only creates disk.qcow2 in disk mode. So a live VM has "8G" in its
+// vm.toml and no file — and flipping it to disk mode left the size unchanged,
+// which meant no resize ran, the save succeeded, and the next start died on a
+// missing image with nothing pointing back at this form.
+func TestModeSwitchToDiskNeedsADiskFile(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	dir := t.TempDir()
+	v := &config.VM{
+		Name: "live1", Mode: "live", OS: "alpine", Backend: "apkovl",
+		ISO: "isos/alpine.iso", RAM: 4096, CPUs: 4, Disk: "8G",
+		SSHPort: 2200, Dir: dir,
+	}
+	if _, err := os.Stat(v.DiskPath()); !os.IsNotExist(err) {
+		t.Fatalf("fixture should have no disk file: %v", err)
+	}
+
+	e := newEdit(v)
+	e.mode = "disk"
+	a, err := e.validate(nil)
+	if err != nil {
+		t.Fatalf("live -> disk was refused: %v", err)
+	}
+
+	// saveEdit must create the missing disk rather than writing a vm.toml
+	// that promises one.
+	msg := saveEdit(a, false)()
+	if s, ok := msg.(statusMsg); ok {
+		t.Fatalf("save failed: %s", s)
+	}
+	if _, err := os.Stat(v.DiskPath()); err != nil {
+		t.Errorf("switching to disk mode did not create the disk: %v", err)
+	}
+}
+
+// TestModeSwitchOffCloudNeedsAnISO covers the mirror of the cloud-needs-a-base
+// guard. A cloud VM has no ISO, and ISOPath() on an empty ISO resolves to the
+// data root DIRECTORY — so qemu would be handed "-cdrom ~/.stoat" and refuse
+// to start.
+func TestModeSwitchOffCloudNeedsAnISO(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	e := newEdit(&config.VM{
+		Name: "fed", Mode: "cloud", OS: "fedora", Backend: "cloudinit",
+		RAM: 4096, CPUs: 4, SSHPort: 2202, Dir: t.TempDir(), Base: "/tmp/b.qcow2",
+	})
+	for _, mode := range []string{"live", "disk"} {
+		e.mode = mode
+		if _, err := e.validate(nil); err == nil {
+			t.Errorf("cloud -> %s was accepted with no iso to boot", mode)
+		} else if !strings.Contains(err.Error(), "iso") {
+			t.Errorf("error = %q, should mention the missing iso", err)
+		}
+	}
+}
+
+// TestModeSwitchResyncsRecipes covers the cross-backend leak: the recipe list
+// is per-backend and the backend follows the mode, so a cloud fragment must
+// stop being on offer (and stop being saved) once the VM is no longer cloud.
+func TestModeSwitchResyncsRecipes(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := recipesInstall(); err != nil {
+		t.Fatal(err)
+	}
+	e := newEdit(&config.VM{
+		Name: "u", Mode: "cloud", OS: "ubuntu", Backend: "cloudinit",
+		ISO: "isos/u.iso", RAM: 4096, CPUs: 4, SSHPort: 2203,
+		Dir: t.TempDir(), Base: "/tmp/b.qcow2",
+		Recipes: []string{"xfce.cloud.yaml"},
+	})
+	if !e.recipeSel["xfce.cloud.yaml"] {
+		t.Fatal("cloud fragment did not open pre-checked")
+	}
+
+	e.mode = "live"
+	e.syncRecipes()
+	if e.recipeSel["xfce.cloud.yaml"] {
+		t.Error("a cloud fragment survived the switch to live mode")
+	}
+	for _, n := range e.recipeNames {
+		if strings.HasSuffix(n, ".cloud.yaml") {
+			t.Errorf("live mode still offers the cloud fragment %q", n)
+		}
 	}
 }

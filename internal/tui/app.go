@@ -148,7 +148,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.edit.vm = msg.vm
 		m.screen = screenDetail
 		m.status = msg.vm.Name + " saved" + msg.note
-		return m, loadVMs
+		// Re-arm the detail ticker for the same reason as the edit form's
+		// esc path: it dies while any other screen is showing.
+		m.detailGen++
+		return m, tea.Batch(loadVMs, tick(m.detailGen))
 	case screenMsg:
 		m.screen = screen(msg)
 		m.showHelp = false

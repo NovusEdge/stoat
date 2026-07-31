@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -86,6 +87,39 @@ func newEdit(v *config.VM) editModel {
 	return e
 }
 
+// brokenPortHolder reports the name of a broken VM directory whose raw
+// vm.toml claims port, or "" if none does. Broken VMs never reach m.vms, so
+// the caller cannot see them any other way.
+func brokenPortHolder(port int, self string) string {
+	broken, err := config.ListBroken()
+	if err != nil {
+		return ""
+	}
+	for _, b := range broken {
+		if b.Name == self {
+			continue
+		}
+		if p, err := config.BrokenSSHPort(b.Name); err == nil && p == port {
+			return b.Name
+		}
+	}
+	return ""
+}
+
+// backendForMode is the backend a VM would use in the given mode. Only the
+// cloud pairing is forced: the cloudinit seed exists solely for cloud mode,
+// and a VM leaving it has to fall back to ssh. A disk-mode Alpine VM keeps
+// apkovl, which is why this is not a simple mode->backend table.
+func backendForMode(v *config.VM, mode string) string {
+	if mode == "cloud" {
+		return "cloudinit"
+	}
+	if backendOf(v) == "cloudinit" {
+		return "ssh"
+	}
+	return backendOf(v)
+}
+
 // backendOf reports the provisioning backend for v, deriving it from Mode
 // when the field is empty — VMs created before the backend field existed have
 // no value, and defaulting those to "ssh" would offer an Alpine VM the wrong
@@ -167,6 +201,30 @@ func (e editModel) dirty() bool {
 	return false
 }
 
+// syncRecipes re-reads the recipes available for the currently selected
+// mode's backend and drops any selection that is no longer on offer.
+func (e *editModel) syncRecipes() {
+	names, _ := recipes.List(e.vm.OS, backendForMode(e.vm, e.mode))
+	e.recipeNames = names
+	valid := map[string]bool{}
+	for _, n := range names {
+		valid[n] = true
+	}
+	for n := range e.recipeSel {
+		if !valid[n] {
+			delete(e.recipeSel, n)
+		}
+	}
+	if e.recipeIdx >= len(names) {
+		e.recipeIdx = 0
+	}
+	// The recipes row leaves the focus order when it empties.
+	if e.focus == eRecipes && len(names) == 0 {
+		e.focus = eSSHPort
+		e.refocus()
+	}
+}
+
 func (e *editModel) refocus() {
 	for i := range e.inputs {
 		if i == e.focus {
@@ -201,7 +259,6 @@ func prevIn(o []int, focus int) int {
 type applied struct {
 	vm         config.VM
 	resizeTo   string // non-empty when the qcow2 must be grown
-	needsBoot  bool   // true when the VM is running and the change only takes effect at launch
 	sshChanged bool
 }
 
@@ -227,6 +284,13 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 			return nil, fmt.Errorf("port %d is already used by %s", port, o.Name)
 		}
 	}
+	// config.List drops VMs whose vm.toml won't parse, but the port such a VM
+	// was using is still committed to its disk image. config.FreePort goes out
+	// of its way to scan those; not doing the same here would re-open the
+	// collision from the other side.
+	if name := brokenPortHolder(port, e.vm.Name); name != "" {
+		return nil, fmt.Errorf("port %d is already used by %s (broken vm.toml)", port, name)
+	}
 
 	next := *e.vm
 	next.RAM = ram
@@ -241,6 +305,16 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 	if e.mode == "cloud" && next.Base == "" {
 		return nil, fmt.Errorf("cloud mode needs a base image — create a new VM from the catalog instead")
 	}
+	// The mirror of the above. A cloud VM has no ISO, and ISOPath() on an
+	// empty ISO resolves to the data root DIRECTORY, so qemu is handed
+	// "-cdrom ~/.stoat" and refuses to start.
+	if e.mode != "cloud" && next.ISO == "" {
+		return nil, fmt.Errorf("%s mode needs an iso — this vm only has a cloud base image", e.mode)
+	}
+	// Backend follows the mode where the two are inseparable: only a cloud
+	// VM can use the cloudinit seed, and a VM leaving cloud mode has to fall
+	// back to ssh provisioning. Otherwise the VM's own backend is kept.
+	next.Backend = backendForMode(e.vm, e.mode)
 
 	out := &applied{vm: next, sshChanged: port != e.vm.SSHPort}
 
@@ -286,6 +360,13 @@ func parseSize(s string) (int64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty")
 	}
+	// qemu-img also accepts relative sizes ("+8G"), and strconv.ParseFloat
+	// happily reads "+8" as 8 — so "+8G" would pass the grow check as "8G"
+	// and then ADD 8G, leaving vm.toml recording "+8G" and disagreeing with
+	// the disk forever after. Refused rather than translated.
+	if strings.HasPrefix(s, "+") || strings.HasPrefix(s, "-") {
+		return 0, fmt.Errorf("use an absolute size like 16G, not a relative one")
+	}
 	mult := int64(1)
 	switch s[len(s)-1] {
 	case 'K':
@@ -316,13 +397,43 @@ type vmSavedMsg struct {
 func saveEdit(a *applied, running bool) tea.Cmd {
 	return func() tea.Msg {
 		v := a.vm
+		_, diskErr := os.Stat(v.DiskPath())
+		missing := os.IsNotExist(diskErr)
+
+		// A live VM records a disk size (the create form writes one for every
+		// non-cloud VM) but has no disk.qcow2, because buildVM only creates
+		// one in disk mode. Switching such a VM to disk mode therefore has to
+		// create the file, or the save "succeeds" and the next start dies on
+		// a missing image with no hint that this form caused it.
+		if v.Mode == "disk" && missing {
+			if running {
+				return statusMsg("stop " + v.Name + " first — switching to disk mode has to create its disk")
+			}
+			size := a.resizeTo
+			if size == "" {
+				size = v.Disk
+			}
+			out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), size).CombinedOutput()
+			if err != nil {
+				return statusMsg("qemu-img create: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
+			}
+			v.Disk = size
+			a.resizeTo = "" // created at the requested size already
+		}
+
 		if a.resizeTo != "" {
 			if running {
-				return statusMsg("stop " + v.Name + " before resizing its disk")
+				return statusMsg("stop " + v.Name + " before resizing its disk (nothing was saved)")
+			}
+			// A cloud VM's overlay is created lazily on first start, so before
+			// then there is nothing to grow. Say so rather than letting
+			// qemu-img fail with "Could not open".
+			if missing {
+				return statusMsg("start " + v.Name + " once before growing its disk (nothing was saved)")
 			}
 			out, err := exec.Command("qemu-img", "resize", v.DiskPath(), a.resizeTo).CombinedOutput()
 			if err != nil {
-				return statusMsg("qemu-img resize: " + strings.TrimSpace(string(out)))
+				return statusMsg("qemu-img resize: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
 			}
 		}
 		if err := v.Save(); err != nil {
@@ -348,7 +459,12 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.screen = screenDetail
 			m.showHelp = false
-			return m, nil
+			// Re-arm the detail screen's ticker. It only re-arms itself while
+			// screen == screenDetail, so the visit to this form killed it —
+			// leaving uptime, running state and the provision-log tail frozen
+			// until the user went out to the list and back.
+			m.detailGen++
+			return m, tick(m.detailGen)
 		case "?":
 			// Same rule as the create form: "?" is a character while a text
 			// field has focus, and a help toggle otherwise.
@@ -378,6 +494,11 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.edit.mode = editModes[(i+d+len(editModes))%len(editModes)]
+				// The recipe list is per-backend, and the backend follows the
+				// mode. Without this the picker keeps offering (and validate
+				// keeps writing) a cloud fragment to a now-live VM, which the
+				// ssh path would try to execute as a shell script.
+				m.edit.syncRecipes()
 				return m, nil
 			case eRecipes:
 				if n := len(m.edit.recipeNames); n > 0 {
