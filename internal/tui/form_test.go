@@ -364,7 +364,7 @@ func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 	if m.form.fetching {
 		t.Error("a failed fetch left the fetching flag set")
 	}
-	if !strings.Contains(m.status, "checksum mismatch") {
-		t.Errorf("status = %q, want the failure reported", m.status)
+	if !strings.Contains(m.toast.text, "checksum mismatch") {
+		t.Errorf("toast = %q, want the failure reported", m.toast.text)
 	}
 }

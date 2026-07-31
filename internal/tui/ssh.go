@@ -60,15 +60,15 @@ func sshInto(v *config.VM) tea.Cmd {
 				// genuinely unreachable (e.g. a disk VM with no key
 				// installed and no sshd ever going to answer).
 				if sshx.Wait(v, reachabilityProbe) != nil {
-					return statusMsg(fmt.Sprintf(
+					return errMsg(fmt.Sprintf(
 						"%s: still booting — sshd not reachable yet on port %d, try again shortly",
 						v.Name, v.SSHPort))
 				}
-				return statusMsg(fmt.Sprintf(
+				return errMsg(fmt.Sprintf(
 					"ssh: couldn't reach root@127.0.0.1:%d — a disk VM needs setup-alpine run at its console first, or the key isn't installed",
 					v.SSHPort))
 			}
-			return statusMsg("ssh: " + err.Error())
+			return errMsg("ssh: " + err.Error())
 		}
 		return statusMsg("")
 	})

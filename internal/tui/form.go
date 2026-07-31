@@ -364,13 +364,13 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// this is the only consumer of Release.Verified.
 			note = " — UNVERIFIED (no checksum)"
 		}
-		m.status = "downloaded " + msg.path + note
-		return m, nil
+		cmd := m.showToast("downloaded "+msg.path+note, false)
+		return m, cmd
 
 	case imageFetchErrMsg:
 		m.form.fetching = false
-		m.status = string(msg)
-		return m, nil
+		cmd := m.showToast(string(msg), true)
+		return m, cmd
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -469,8 +469,8 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.form.focus == fISO {
 				opt := m.form.selected()
 				if opt == nil || opt.entry == nil {
-					m.status = "byo images are already local — nothing to download"
-					return m, nil
+					cmd := m.showToast("byo images are already local — nothing to download", true)
+					return m, cmd
 				}
 				if m.form.fetching {
 					return m, nil // a fetch is already in flight; don't start a second one
@@ -625,7 +625,7 @@ func buildVM(v *config.VM) error {
 func createVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
 		if err := buildVM(v); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		return statusMsg("created " + v.Name)
 	}

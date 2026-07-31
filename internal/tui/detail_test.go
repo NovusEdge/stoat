@@ -122,8 +122,8 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	if v.Installed != false {
 		t.Fatalf("v.Installed changed to %v in memory despite Save failing; want unchanged (false)", v.Installed)
 	}
-	if got.status == "" {
-		t.Fatal("expected a non-empty status message reporting the Save error")
+	if got.toast.text == "" || !got.toast.err {
+		t.Fatalf("expected an error toast reporting the Save failure, got %+v", got.toast)
 	}
 
 	// Confirm the toggle truly never touched disk.

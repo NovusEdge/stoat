@@ -121,15 +121,16 @@ func TestProvisionRefusedUntilInstalled(t *testing.T) {
 		SSHPort: 2201, Dir: t.TempDir(), Recipes: []string{"xfce.alpine.sh"},
 	}
 
-	if cmd := m.startProvision(v); cmd != nil {
-		t.Error("provisioning started on a disk VM with no OS installed")
-	}
+	// A refusal still returns a Cmd — the one that shows its toast — so the
+	// invariant to check is that no run was registered, not that no Cmd came
+	// back.
+	m.startProvision(v)
 	if len(m.provisioning) != 0 {
 		t.Error("the VM was marked as provisioning anyway")
 	}
 	for _, want := range []string{"not installed", "setup-alpine", "press i"} {
-		if !strings.Contains(m.status, want) {
-			t.Errorf("status = %q, missing %q", m.status, want)
+		if !strings.Contains(m.toast.text, want) {
+			t.Errorf("toast = %q, missing %q", m.toast.text, want)
 		}
 	}
 
@@ -145,7 +146,7 @@ func TestProvisionRefusedUntilInstalled(t *testing.T) {
 		Name: "fed", Mode: "disk", OS: "fedora", SSHPort: 2202,
 		Dir: t.TempDir(), Recipes: []string{"x.sh"},
 	})
-	if strings.Contains(m2.status, "setup-alpine") {
-		t.Errorf("a fedora VM was told to run setup-alpine: %q", m2.status)
+	if strings.Contains(m2.toast.text, "setup-alpine") {
+		t.Errorf("a fedora VM was told to run setup-alpine: %q", m2.toast.text)
 	}
 }

@@ -121,8 +121,8 @@ func TestDeclinedOfferDoesNotOpenTheNewVMForm(t *testing.T) {
 		if len(after.provisioning) != 0 {
 			t.Errorf("declining with %q started provisioning anyway", key)
 		}
-		if !strings.Contains(after.status, "press p") {
-			t.Errorf("declining with %q gave no way back in: %q", key, after.status)
+		if !strings.Contains(after.toast.text, "press p") {
+			t.Errorf("declining with %q gave no way back in: %q", key, after.toast.text)
 		}
 	}
 }

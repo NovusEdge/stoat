@@ -25,7 +25,7 @@ func openRecipesDir() tea.Cmd {
 	c := exec.Command(editor, recipes.Dir())
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
-			return statusMsg("editor: " + err.Error())
+			return errMsg("editor: " + err.Error())
 		}
 		// The form reads the recipe list when it opens, so a recipe added
 		// just now shows up on the next "n" with nothing else to do.

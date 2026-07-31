@@ -407,7 +407,7 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 		// a missing image with no hint that this form caused it.
 		if v.Mode == "disk" && missing {
 			if running {
-				return statusMsg("stop " + v.Name + " first — switching to disk mode has to create its disk")
+				return errMsg("stop " + v.Name + " first — switching to disk mode has to create its disk")
 			}
 			size := a.resizeTo
 			if size == "" {
@@ -415,7 +415,7 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 			}
 			out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), size).CombinedOutput()
 			if err != nil {
-				return statusMsg("qemu-img create: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
+				return errMsg("qemu-img create: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
 			}
 			v.Disk = size
 			a.resizeTo = "" // created at the requested size already
@@ -423,21 +423,21 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 
 		if a.resizeTo != "" {
 			if running {
-				return statusMsg("stop " + v.Name + " before resizing its disk (nothing was saved)")
+				return errMsg("stop " + v.Name + " before resizing its disk (nothing was saved)")
 			}
 			// A cloud VM's overlay is created lazily on first start, so before
 			// then there is nothing to grow. Say so rather than letting
 			// qemu-img fail with "Could not open".
 			if missing {
-				return statusMsg("start " + v.Name + " once before growing its disk (nothing was saved)")
+				return errMsg("start " + v.Name + " once before growing its disk (nothing was saved)")
 			}
 			out, err := exec.Command("qemu-img", "resize", v.DiskPath(), a.resizeTo).CombinedOutput()
 			if err != nil {
-				return statusMsg("qemu-img resize: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
+				return errMsg("qemu-img resize: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
 			}
 		}
 		if err := v.Save(); err != nil {
-			return statusMsg(err.Error())
+			return errMsg(err.Error())
 		}
 		note := ""
 		switch {

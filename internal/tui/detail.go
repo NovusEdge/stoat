@@ -94,15 +94,15 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				v, lerr := config.Load(m.detail.vm.Name)
 				if lerr != nil {
-					return statusMsg(lerr.Error())
+					return errMsg(lerr.Error())
 				}
 				return vmReloadedMsg{v}
 			})
 		case "i":
 			v := m.detail.vm
 			if v.Mode != "disk" {
-				m.status = "installed only applies to disk vms"
-				return m, nil
+				cmd := m.showToast("installed only applies to disk vms", true)
+				return m, cmd
 			}
 			// Save a copy first: only flip the live in-memory VM once the
 			// write to disk actually succeeds, so a failed Save can't leave
@@ -110,17 +110,18 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next := *v
 			next.Installed = !v.Installed
 			if err := next.Save(); err != nil {
-				m.status = err.Error()
-				return m, nil
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
 			}
 			v.Installed = next.Installed
-			m.status = fmt.Sprintf("%s installed=%v", v.Name, v.Installed)
-			return m, loadVMs
+			cmd := m.showToast(fmt.Sprintf("%s installed=%v", v.Name, v.Installed), false)
+			return m, tea.Batch(loadVMs, cmd)
 		case "s":
 			if qemu.Running(m.detail.vm) {
 				return m, sshInto(m.detail.vm)
 			}
-			m.status = "not running"
+			cmd := m.showToast("not running", true)
+			return m, cmd
 		case "p":
 			return m, m.startProvision(m.detail.vm)
 		}
