@@ -157,7 +157,14 @@ func (m model) viewDetail() string {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
-		installed := warnStyle.Render("no — run setup-alpine in the qemu window, then press i")
+		// A disk VM is only an Alpine one when its image says so; a BYO
+		// Fedora/Debian/unknown ISO has no setup-alpine to run, and telling
+		// the user to run one is worse than saying nothing specific.
+		installer := "the installer"
+		if v.OS == "alpine" {
+			installer = "setup-alpine"
+		}
+		installed := warnStyle.Render("no — run " + installer + " in the qemu window, then press i")
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}

@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,4 +145,31 @@ func contains(haystack, needle string) bool {
 		}
 		return false
 	})()
+}
+
+// TestInstallerHintMatchesOS covers the reported bug where an uninstalled
+// disk VM was always told to run setup-alpine, even when its image was a
+// Fedora/Debian/unknown BYO ISO that has no such command.
+func TestInstallerHintMatchesOS(t *testing.T) {
+	cases := []struct {
+		os   string
+		want string
+	}{
+		{"alpine", "setup-alpine"},
+		{"fedora", "the installer"},
+		{"", "the installer"},
+	}
+	for _, c := range cases {
+		m := model{screen: screenDetail, width: 100, height: 40}
+		m.detail = newDetail(&config.VM{
+			Name: "d", Mode: "disk", OS: c.os, Dir: t.TempDir(), Disk: "disk.qcow2",
+		})
+		out := m.viewDetail()
+		if !strings.Contains(out, c.want) {
+			t.Errorf("os=%q: detail view missing %q", c.os, c.want)
+		}
+		if c.os != "alpine" && strings.Contains(out, "setup-alpine") {
+			t.Errorf("os=%q: detail view still says setup-alpine", c.os)
+		}
+	}
 }

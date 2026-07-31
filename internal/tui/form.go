@@ -341,6 +341,11 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		case "?":
+			// Only a help toggle when no text field has focus — otherwise "?"
+			// is just a character the user is trying to type into name/share.
+			if m.form.focus < fieldCount {
+				break
+			}
 			m.showHelp = !m.showHelp
 			return m, nil
 		case "tab", "down":

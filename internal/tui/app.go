@@ -7,6 +7,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -76,6 +77,10 @@ func Run() error {
 	if err := keys.Ensure(); err != nil {
 		return err
 	}
+	// ponytail: a log we can't open is not worth refusing to start over —
+	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
+	_ = logx.Init()
+	defer logx.Close()
 	m := model{provisioning: map[string]bool{}}
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()

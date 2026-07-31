@@ -16,6 +16,7 @@ import (
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -114,8 +115,10 @@ func Start(v *config.VM) error {
 		if msg == "" {
 			msg = err.Error()
 		}
+		logx.L().Error("start failed", "vm", v.Name, "err", msg)
 		return fmt.Errorf("qemu failed to start: %s", msg)
 	}
+	logx.L().Info("started", "vm", v.Name, "mode", v.Mode, "ssh", v.SSHPort)
 	return nil
 }
 
@@ -173,12 +176,14 @@ func Stop(v *config.VM) error {
 		c.Close()
 		for i := 0; i < 100; i++ {
 			if !Running(v) {
+				logx.L().Info("stopped", "vm", v.Name)
 				return nil
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	if p := pid(v); p != 0 {
+		logx.L().Warn("graceful powerdown timed out, sending SIGTERM", "vm", v.Name, "pid", p)
 		_ = syscall.Kill(p, syscall.SIGTERM)
 	}
 	return nil

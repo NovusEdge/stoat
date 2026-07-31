@@ -13,6 +13,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -107,7 +108,16 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 // Provision runs each of v's recipes over ssh, streaming output to
 // last-provision.log. The detail view tails that file on a ticker, so there
 // is no channel plumbing between this and the UI.
-func Provision(v *config.VM) error {
+func Provision(v *config.VM) (err error) {
+	logx.L().Info("provision start", "vm", v.Name, "recipes", strings.Join(v.Recipes, ","))
+	defer func() {
+		if err != nil {
+			logx.L().Error("provision failed", "vm", v.Name, "err", err)
+		} else {
+			logx.L().Info("provision done", "vm", v.Name)
+		}
+	}()
+
 	log, err := os.Create(filepath.Join(v.Dir, "last-provision.log"))
 	if err != nil {
 		return err
