@@ -80,6 +80,12 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "e":
+			m.edit = newEdit(m.detail.vm)
+			m.screen = screenEdit
+			m.showHelp = false
+			m.status = ""
+			return m, nil
+		case "E":
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
 				editor = "vi"
