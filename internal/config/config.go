@@ -40,6 +40,16 @@ type VM struct {
 	// package writing "root" into every vm.toml.
 	SSHUser string `toml:"sshuser"`
 
+	// ConsolePassword is the password for SSHUser at the VM's GRAPHICAL
+	// CONSOLE — the qemu window — not over ssh. Cloud images lock every
+	// account by default (cloud-init's lock_passwd defaults to true) and
+	// stoat's seed sets ssh_pwauth: false, so without this a cloud VM shows
+	// a login prompt nobody on earth can answer: root is locked and the
+	// stoat user has no password. Empty means no console login is possible,
+	// which is the correct state for a live Alpine VM, whose root already
+	// logs in at the console with no password at all.
+	ConsolePassword string `toml:"console_password"`
+
 	Dir string `toml:"-"` // absolute path to the VM directory
 }
 

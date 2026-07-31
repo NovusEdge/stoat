@@ -118,8 +118,32 @@ func Start(v *config.VM) error {
 		logx.L().Error("start failed", "vm", v.Name, "err", msg)
 		return fmt.Errorf("qemu failed to start: %s", msg)
 	}
-	logx.L().Info("started", "vm", v.Name, "mode", v.Mode, "ssh", v.SSHPort)
+	// Log how to get in, not just that it started: this is the line someone
+	// greps for when a VM is up but they cannot reach it.
+	user := v.SSHUser
+	if user == "" {
+		user = "root"
+	}
+	logx.L().Info("started",
+		"vm", v.Name, "mode", v.Mode,
+		"ssh", fmt.Sprintf("%s@127.0.0.1:%d", user, v.SSHPort),
+		"console", consoleCredential(v, user))
 	return nil
+}
+
+// consoleCredential describes how (or whether) a human can log in at the qemu
+// window, for the start log line.
+func consoleCredential(v *config.VM, user string) string {
+	switch {
+	case v.ConsolePassword != "":
+		return user + "/" + v.ConsolePassword
+	case v.Mode == "live":
+		return "root, no password"
+	case v.Mode == "cloud":
+		return "none — accounts are locked, use ssh"
+	default:
+		return "whatever the guest installer was given"
+	}
 }
 
 // ensureCloudOverlay creates v's CoW overlay (backed by v.Base) and cloud-init

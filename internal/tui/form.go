@@ -143,7 +143,10 @@ type formModel struct {
 	recipeNames []string        // installed recipes matching the selected image's OS/backend
 	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
 	recipeSel   map[string]bool // names currently checked
-	dl          dlStats         // last snapshot of the in-flight download
+	// randomPassword swaps the fixed, documented console password for a
+	// generated one. Cloud images only — see build().
+	randomPassword bool
+	dl             dlStats // last snapshot of the in-flight download
 }
 
 // field indices into inputs
@@ -162,6 +165,7 @@ const (
 	fMode
 	fBackend
 	fRecipes
+	fPassword
 )
 
 // focusOrder is the tab-traversal order of focus positions, which must match
@@ -189,7 +193,13 @@ func (f formModel) order() focusOrder {
 	if f.effectiveMode() == "disk" {
 		o = append(o, fDisk)
 	}
-	return append(o, fShare, fRecipes)
+	o = append(o, fShare, fRecipes)
+	// The console password row is only meaningful for a cloud image; the
+	// other backends never set one.
+	if f.resolvedBackend() == "cloudinit" {
+		o = append(o, fPassword)
+	}
+	return o
 }
 
 func (o focusOrder) indexOf(focus int) int {
@@ -420,6 +430,9 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.form.mode = "live"
 				}
 				return m, nil
+			case fPassword:
+				m.form.randomPassword = !m.form.randomPassword
+				return m, nil
 			case fRecipes:
 				n := len(m.form.recipeNames)
 				if n == 0 {
@@ -447,6 +460,10 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Pressing it on an image that is already local re-verifies it and
 			// refetches only if the bytes no longer match the published digest,
 			// so it doubles as "repair this image" at no risk to a good one.
+			if m.form.focus == fPassword {
+				m.form.randomPassword = !m.form.randomPassword
+				return m, nil
+			}
 			if m.form.focus == fISO {
 				opt := m.form.selected()
 				if opt == nil || opt.entry == nil {
@@ -555,6 +572,19 @@ func (f formModel) build() (*config.VM, error) {
 			return nil, err
 		}
 		vm.Base = abs
+		// Only a cloud image needs this. cloud-init locks every account by
+		// default, so without a console password the qemu window shows a
+		// login prompt with no valid answer. A live Alpine VM already logs
+		// root in at the console with no password, and a disk VM's password
+		// is whatever the user sets during the guest's own installer.
+		pw := config.DefaultConsolePassword
+		if f.randomPassword {
+			var err error
+			if pw, err = config.RandomConsolePassword(); err != nil {
+				return nil, err
+			}
+		}
+		vm.ConsolePassword = pw
 	} else {
 		vm.ISO = "isos/" + opt.file
 		vm.Disk = strings.TrimSpace(f.inputs[fDisk].Value())
@@ -667,6 +697,16 @@ func (m model) viewForm() string {
 		recipesMarker = selStyle.Render(glyphCursor)
 	}
 	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
+
+	if f.resolvedBackend() == "cloudinit" {
+		marker := "  "
+		if f.focus == fPassword {
+			marker = selStyle.Render(glyphCursor)
+		}
+		val := radio("stoat", !f.randomPassword) + "  " + radio("random", f.randomPassword)
+		fmt.Fprintf(&b, "%s%-8s %s\n", marker, "console", val)
+		b.WriteString(dimStyle.Render("           console login for the stoat user") + "\n")
+	}
 
 	if f.fetching {
 		b.WriteString("\n" + dlView(f.fetchingOS, f.dl))
