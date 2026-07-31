@@ -570,13 +570,14 @@ func (m model) viewEdit() string {
 
 	modeParts := make([]string, len(editModes))
 	for i, md := range editModes {
-		modeParts[i] = radio(md, md == e.mode)
+		modeParts[i] = radio(modeLabel(md), md == e.mode)
 	}
-	modeLabel := strings.Join(modeParts, "  ")
+	modeRow := strings.Join(modeParts, "  ")
 	if e.mode != e.vm.Mode {
-		modeLabel += warnStyle.Render("  " + glyphWas + " was " + e.vm.Mode)
+		modeRow += warnStyle.Render("  " + glyphWas + " was " + e.vm.Mode)
 	}
-	row(eMode, "mode", modeLabel)
+	row(eMode, "mode", modeRow)
+	b.WriteString(dimStyle.Render("           "+modeHint(e.mode)) + "\n")
 	b.WriteString("\n")
 
 	row(eRAM, "ram", e.inputs[eRAM].View()+dimStyle.Render(" MB"))
@@ -639,11 +640,12 @@ func editRecipesLabel(e editModel) string {
 		if e.recipeSel[name] {
 			box = "[x]"
 		}
-		item := box + " " + name
+		item := box + " " + recipeLabel(name)
 		if e.focus == eRecipes && i == e.recipeIdx {
 			item = selStyle.Render(item)
 		}
 		items[i] = item
 	}
-	return strings.Join(items, "  ")
+	// 11 = the value column (2-cell marker + 8-cell label + space).
+	return wrapItems(items, editContentWidth-11, strings.Repeat(" ", 11))
 }

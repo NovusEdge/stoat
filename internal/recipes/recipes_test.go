@@ -8,7 +8,10 @@ import (
 
 // allShellRecipes are the per-OS ssh-pushed recipes; allNames also includes
 // the cloud-config fragment.
-var allShellRecipes = []string{"xfce.alpine.sh", "xfce.ubuntu.sh", "xfce.arch.sh"}
+var allShellRecipes = []string{
+	"xfce.alpine.sh", "xfce.ubuntu.sh", "xfce.arch.sh",
+	"docker.alpine.sh", "devtools.alpine.sh", "tailscale.alpine.sh",
+}
 
 func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 	root := t.TempDir()
@@ -53,6 +56,9 @@ func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 		"xfce.alpine.sh":         true,
 		"xfce.ubuntu.sh":         true,
 		"xfce.arch.sh":           true,
+		"docker.alpine.sh":       true,
+		"devtools.alpine.sh":     true,
+		"tailscale.alpine.sh":    true,
 		"xfce.cloud.yaml":        true,
 		"xfce.fedora.cloud.yaml": true,
 	}
