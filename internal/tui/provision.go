@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -11,6 +12,16 @@ import (
 )
 
 var errNotRunning = errors.New("not running — start it first")
+
+// installerName is what the user actually types at the guest console. Only
+// Alpine has setup-alpine; a BYO Fedora/Debian/unknown ISO has its own, so
+// naming the wrong one is worse than staying general.
+func installerName(v *config.VM) string {
+	if v.OS == "alpine" {
+		return "setup-alpine"
+	}
+	return "the installer"
+}
 
 type provisionDoneMsg struct {
 	name string
@@ -47,14 +58,27 @@ func (m *model) startProvision(v *config.VM) tea.Cmd {
 		m.status = v.Name + ": cloud VMs provision at first boot via cloud-init — recipes are applied automatically; recreate the VM to change them"
 		return nil
 	}
+	// A disk VM boots its installer ISO with no key and no sshd: apkovl.Build
+	// runs for live mode only (qemu/run.go), so there is nothing for ssh to
+	// connect to until the guest OS is actually installed. Without this the
+	// user waits the full 90s ssh timeout and gets "ssh not reachable", which
+	// says nothing about the real cause.
+	if v.Mode == "disk" && !v.Installed {
+		m.status = v.Name + ": not installed yet — run " + installerName(v) +
+			" in the qemu window, then press i (marks it installed) before provisioning"
+		return nil
+	}
 	if len(v.Recipes) == 0 {
 		m.status = v.Name + ": no recipes selected — nothing to provision"
 		return nil
 	}
-	if m.provisioning[v.Name] {
+	if _, running := m.provisioning[v.Name]; running {
 		return nil
 	}
-	m.provisioning[v.Name] = true
-	m.status = "provisioning " + v.Name + "…"
-	return provision(v)
+	// The spinner and elapsed clock start here, not when the first log line
+	// lands, so the UI accounts for the ssh wait too — which on a cold live
+	// boot is the longest part of the whole run.
+	m.provisioning[v.Name] = provState{start: time.Now(), step: "starting"}
+	m.status = ""
+	return tea.Batch(provision(v), m.spin.Tick)
 }

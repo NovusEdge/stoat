@@ -1,0 +1,151 @@
+package tui
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/novusedge/stoat/internal/config"
+)
+
+func provFixture(t *testing.T, log string) *config.VM {
+	t.Helper()
+	dir := t.TempDir()
+	if log != "" {
+		if err := os.WriteFile(filepath.Join(dir, "last-provision.log"), []byte(log), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &config.VM{Name: "work", Mode: "live", OS: "alpine", SSHPort: 2200, Dir: dir}
+}
+
+// TestReadProvStep covers what the spinner line actually reports, across the
+// stages a real run passes through. The step comes from the log the run
+// already writes, so there is no progress channel to keep in sync — and no
+// percentage, because nothing knows how many packages a recipe will install.
+func TestReadProvStep(t *testing.T) {
+	cases := []struct {
+		name, log, wantStep, wantLast string
+	}{
+		{"no log yet", "", "starting", ""},
+		{
+			"waiting for ssh",
+			"waiting for ssh on port 2200…\n",
+			"waiting for ssh", "",
+		},
+		{
+			"inside a recipe",
+			"waiting for ssh on port 2200…\n\n=== recipe xfce.alpine.sh ===\n(147/263) Installing gtk+3.0\n",
+			"xfce.alpine.sh", "(147/263) Installing gtk+3.0",
+		},
+		{
+			"second recipe wins",
+			"=== recipe a.alpine.sh ===\nout a\n=== recipe b.alpine.sh ===\nout b\n",
+			"b.alpine.sh", "out b",
+		},
+		{
+			"finished",
+			"=== recipe xfce.alpine.sh ===\nOK: 672.4 MiB in 378 packages\n\ndone\n",
+			"xfce.alpine.sh", "done",
+		},
+		{
+			"failed",
+			"waiting for ssh on port 2200…\nFAILED: work: ssh not reachable on port 2200 after 1m30s\n",
+			"waiting for ssh", "FAILED: work: ssh not reachable on port 2200 after 1m30s",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			step, last := readProvStep(provFixture(t, c.log))
+			if step != c.wantStep {
+				t.Errorf("step = %q, want %q", step, c.wantStep)
+			}
+			if last != c.wantLast {
+				t.Errorf("last = %q, want %q", last, c.wantLast)
+			}
+		})
+	}
+}
+
+// TestReadProvStepReadsOnlyTheTail proves the log isn't re-read whole several
+// times a second: a desktop install writes hundreds of KB, and only the end of
+// it means "current".
+func TestReadProvStepReadsOnlyTheTail(t *testing.T) {
+	big := strings.Repeat("(1/263) Installing something-or-other\n", 8000) // ~300KB
+	v := provFixture(t, "=== recipe xfce.alpine.sh ===\n"+big+"OK: done installing\n")
+
+	step, last := readProvStep(v)
+	if last != "OK: done installing" {
+		t.Errorf("last = %q, want the final line", last)
+	}
+	// The recipe marker is now far outside the tail window, so the step falls
+	// back rather than reporting a stale recipe name.
+	if step == "" {
+		t.Error("step should never be empty")
+	}
+	if n := len(tailBytes(filepath.Join(v.Dir, "last-provision.log"), provTailBytes)); int64(n) > provTailBytes {
+		t.Errorf("read %d bytes, want at most %d", n, provTailBytes)
+	}
+}
+
+func TestProvElapsed(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{900 * time.Millisecond, "1s"},
+		{45 * time.Second, "45s"},
+		{96 * time.Second, "1m36s"},
+		{214 * time.Second, "3m34s"},
+		{time.Hour + 5*time.Second, "60m05s"},
+	}
+	for _, c := range cases {
+		if got := provElapsed(c.d); got != c.want {
+			t.Errorf("provElapsed(%s) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+// TestProvisionRefusedUntilInstalled is the regression test for a reported
+// failure: pressing "p" on a disk VM that had never had its OS installed sat
+// for the full 90s ssh timeout and then said "ssh not reachable", which says
+// nothing about the real cause. apkovl (which installs the key and enables
+// sshd) is built for LIVE mode only, so a disk VM has no ssh at all until the
+// guest OS is installed.
+func TestProvisionRefusedUntilInstalled(t *testing.T) {
+	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
+	v := &config.VM{
+		Name: "alpine-test-1", Mode: "disk", OS: "alpine", Installed: false,
+		SSHPort: 2201, Dir: t.TempDir(), Recipes: []string{"xfce.alpine.sh"},
+	}
+
+	if cmd := m.startProvision(v); cmd != nil {
+		t.Error("provisioning started on a disk VM with no OS installed")
+	}
+	if len(m.provisioning) != 0 {
+		t.Error("the VM was marked as provisioning anyway")
+	}
+	for _, want := range []string{"not installed", "setup-alpine", "press i"} {
+		if !strings.Contains(m.status, want) {
+			t.Errorf("status = %q, missing %q", m.status, want)
+		}
+	}
+
+	// Once marked installed it proceeds (and fails later on ssh, honestly).
+	v.Installed = true
+	if cmd := m.startProvision(v); cmd == nil {
+		t.Error("an installed disk VM was still refused")
+	}
+
+	// A non-Alpine disk VM must not be told to run setup-alpine.
+	m2 := model{provisioning: map[string]provState{}, spin: newSpinner()}
+	m2.startProvision(&config.VM{
+		Name: "fed", Mode: "disk", OS: "fedora", SSHPort: 2202,
+		Dir: t.TempDir(), Recipes: []string{"x.sh"},
+	})
+	if strings.Contains(m2.status, "setup-alpine") {
+		t.Errorf("a fedora VM was told to run setup-alpine: %q", m2.status)
+	}
+}

@@ -42,7 +42,7 @@ func TestListPaneFitsTheTerminal(t *testing.T) {
 		{30, 50}, {34, 50}, {40, 3}, {60, 50},
 	}
 	for _, c := range cases {
-		m := model{screen: screenList, list: newVMList(), provisioning: map[string]bool{}}
+		m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
 		mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: c.height})
 		m = mm.(model)
 		mm, _ = m.Update(vmsLoadedMsg{vms: geoVMs(t, c.vms)})
