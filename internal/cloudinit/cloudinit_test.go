@@ -130,7 +130,7 @@ func TestSeedNoRecipesByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fmt.Sprintf(userDataTemplate, testPubkey)
+	want := fmt.Sprintf(userDataTemplate, testPubkey, "")
 	if string(got) != want {
 		t.Errorf("no-recipe user-data changed from the proven baseline:\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -169,7 +169,7 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 	}
 	ud := string(got)
 
-	provenUsersBlock := fmt.Sprintf(userDataTemplate, testPubkey)
+	provenUsersBlock := fmt.Sprintf(userDataTemplate, testPubkey, "")
 	if !strings.Contains(ud, provenUsersBlock) {
 		t.Errorf("merged user-data does not contain the proven users block verbatim:\n%s", ud)
 	}

@@ -118,8 +118,32 @@ func Start(v *config.VM) error {
 		logx.L().Error("start failed", "vm", v.Name, "err", msg)
 		return fmt.Errorf("qemu failed to start: %s", msg)
 	}
-	logx.L().Info("started", "vm", v.Name, "mode", v.Mode, "ssh", v.SSHPort)
+	// Log how to get in, not just that it started: this is the line someone
+	// greps for when a VM is up but they cannot reach it.
+	user := v.SSHUser
+	if user == "" {
+		user = "root"
+	}
+	logx.L().Info("started",
+		"vm", v.Name, "mode", v.Mode,
+		"ssh", fmt.Sprintf("%s@127.0.0.1:%d", user, v.SSHPort),
+		"console", consoleCredential(v, user))
 	return nil
+}
+
+// consoleCredential describes how (or whether) a human can log in at the qemu
+// window, for the start log line.
+func consoleCredential(v *config.VM, user string) string {
+	switch {
+	case v.ConsolePassword != "":
+		return user + "/" + v.ConsolePassword
+	case v.Mode == "live":
+		return "root, no password"
+	case v.Mode == "cloud":
+		return "none — accounts are locked, use ssh"
+	default:
+		return "whatever the guest installer was given"
+	}
 }
 
 // ensureCloudOverlay creates v's CoW overlay (backed by v.Base) and cloud-init
@@ -138,6 +162,19 @@ func ensureCloudOverlay(v *config.VM) error {
 	out, err := exec.Command("qemu-img", "create", "-f", "qcow2", "-b", base, "-F", "qcow2", v.DiskPath()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
+	}
+	// An overlay inherits its BASE image's virtual size, and cloud images are
+	// sized to boot, not to install anything: Ubuntu 24.04's is 3.5G with a
+	// 2.4G root. Installing a desktop into that fills the disk, apt exits 100,
+	// and cloud-init reports a bare "error" — the failure looks like a broken
+	// recipe rather than a full disk. Grow it here, before first boot, so
+	// cloud-init's own growpart/resizefs expands the filesystem to match.
+	if v.Disk != "" {
+		out, err := exec.Command("qemu-img", "resize", v.DiskPath(), v.Disk).CombinedOutput()
+		if err != nil {
+			os.Remove(v.DiskPath())
+			return fmt.Errorf("qemu-img resize to %s: %s", v.Disk, strings.TrimSpace(string(out)))
+		}
 	}
 	if err := keys.Ensure(); err != nil {
 		return err

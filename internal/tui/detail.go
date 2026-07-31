@@ -157,7 +157,13 @@ func (m model) viewDetail() string {
 	line := func(k, val string) {
 		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
 	}
-	line("iso", v.ISO)
+	// A cloud VM has no ISO — it boots an overlay of a base image — so the
+	// row would otherwise render as an empty label.
+	if v.ISO != "" {
+		line("iso", v.ISO)
+	} else if v.Base != "" {
+		line("image", filepath.Base(v.Base))
+	}
 	if v.Mode == "disk" {
 		size := "—"
 		if fi, err := os.Stat(v.DiskPath()); err == nil {
@@ -178,6 +184,15 @@ func (m model) viewDetail() string {
 		sshUser = "root"
 	}
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
+	// How to get in. The console line matters most for cloud images: they
+	// lock every account, so without a password the qemu window shows a
+	// login prompt with no valid answer — and the moment you need it is the
+	// moment ssh isn't working, which is the worst time to go looking.
+	if v.ConsolePassword != "" {
+		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (qemu window only)"))
+	} else if v.Mode == "cloud" {
+		line("console", warnStyle.Render("no password set — console login is not possible"))
+	}
 	if v.Share != "" {
 		line("share", v.Share+dimStyle.Render(" "+glyphTo+" /mnt/host"))
 	}

@@ -1,54 +1,29 @@
 #cloud-config
-# XFCE desktop fragment for the cloudinit backend. cloud-init's `packages:`
-# list is handed straight to the image's native package manager (apt on
-# Ubuntu/Debian, pacman on Arch), so ONE fragment can cover all of them —
-# but only for package names that happen to be spelled identically across
-# those package managers. Verified: "xfce4" is the full-desktop metapackage
-# on Debian/Ubuntu apt AND the group name on Arch pacman; "xfce4-terminal"
-# is a real package on both.
-#
-# dbus-x11 is deliberately NOT listed: Arch's official repos have no
-# "dbus-x11" package (dbus-launch lives in the base "dbus" package there),
-# so adding it here would break the Arch case while "working" on
-# Ubuntu/Debian — a broken fragment wearing a working one's name. dbus
-# itself is already present on every cloud image as a systemd dependency,
-# so it needs enabling below, not installing.
-#
-# Fedora is deliberately NOT covered by this fragment at all: Fedora ships
-# XFCE as the package GROUP `@xfce-desktop-environment`, not a package
-# literally named "xfce4" — there is nothing by that name in Fedora's repos.
-# cloud-init's packages: list has no per-distro syntax to special-case one
-# entry, so mixing an "@group" token in here would fail on apt/pacman.
-# That second fragment now exists: xfce.fedora.cloud.yaml. recipes.List
-# offers a per-OS "<name>.<os>.cloud.yaml" in place of this shared file for
-# any OS that has one, so Fedora gets its group and the rest get this.
-packages:
+# XFCE desktop fragment for the cloudinit backend. cloud-init's `packages:
   - xfce4
   - xfce4-terminal
+  # lightdm gives a graphical LOGIN SCREEN, which is the right shape for a
+  # cloud image: it has a real user account (stoat), unlike the Alpine live
+  # recipe's single-user autologin. Verified present under these exact names
+  # in both Debian bookworm and Arch's extra repo.
+  #
+  # It also sidesteps a trap: `startx` lives in the separate `xinit` package
+  # on Debian/Ubuntu but `xorg-xinit` on Arch, so a shared fragment cannot
+  # name it. A display manager needs neither.
+  - lightdm
+  - lightdm-gtk-greeter
 
-# Cloud-init images are always a real disk install (never Alpine-style
-# tmpfs/overlay live boot), so — unlike the ssh shell recipes — there is no
-# live-vs-disk branch to get honest about here: everything below persists
-# across reboots by construction.
+# Cloud images boot to multi-user.target with no graphics. Switching the
+# default and starting lightdm brings the desktop up on the qemu console in
+# this boot, not just after a reboot.
+#
+# Log in as the `stoat` user with the console password stoat set at creation
+# (see the console row on the detail screen). Earlier versions of this
+# fragment configured /root/.xinitrc and autologged root in — copied from the
+# Alpine recipe, where root IS the user. On a cloud image root is locked and
+# you connect as stoat, so that configured a desktop for an account nobody
+# can reach.
 runcmd:
-  - systemctl enable dbus
-  - systemctl start dbus
-  - echo 'exec startxfce4' > /root/.xinitrc
-  - mkdir -p /etc/systemd/system/getty@tty1.service.d
-  - |
-    cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
-    [Service]
-    ExecStart=
-    ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
-    EOF
-  - systemctl daemon-reload
-  - systemctl enable getty@tty1.service
-  - |
-    if ! grep -q 'exec startx' /root/.profile 2>/dev/null; then
-      cat >> /root/.profile <<'EOF'
-    if [ "$(tty)" = "/dev/tty1" ] && [ -z "$DISPLAY" ]; then
-      exec startx
-    fi
-    EOF
-    fi
-  - echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
+  - systemctl enable lightdm
+  - systemctl set-default graphical.target
+  - systemctl start lightdm

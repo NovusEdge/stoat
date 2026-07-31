@@ -19,6 +19,12 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 )
 
+// userDataTemplate declares the account stoat connects as. The password
+// block is filled in by consolePasswordBlock below.
+//
+// ssh_pwauth stays false on purpose: the password exists so the qemu WINDOW
+// is usable, not so the forwarded port accepts one. Key-only over the
+// network, password at the console.
 const userDataTemplate = `#cloud-config
 users:
   - name: stoat
@@ -26,8 +32,25 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - %s
-ssh_pwauth: false
+%sssh_pwauth: false
 `
+
+// consolePasswordBlock renders the two lines that make console login work,
+// or nothing when no password is set.
+//
+// It uses plain_text_passwd rather than a hash. cloud-init prefers a hash,
+// and for an internet-facing server that is right — but the hash would live
+// in the same seed file, in the same data root, next to the private key that
+// already grants full access to this VM. Protecting it from someone who can
+// read the seed but not the key guards a split that does not occur here, and
+// the alternative costs either a crypt(3) dependency or a hard requirement on
+// openssl at VM-create time.
+func consolePasswordBlock(password string) string {
+	if password == "" {
+		return ""
+	}
+	return fmt.Sprintf("    lock_passwd: false\n    plain_text_passwd: %q\n", password)
+}
 
 const metaDataTemplate = `instance-id: %q
 local-hostname: %q
@@ -126,7 +149,8 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 		return "", err
 	}
 
-	userData := fmt.Sprintf(userDataTemplate, pubkey) + mergeCloudRecipes(recipeBodies)
+	userData := fmt.Sprintf(userDataTemplate, pubkey, consolePasswordBlock(v.ConsolePassword)) +
+		mergeCloudRecipes(recipeBodies)
 	if err := os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(userData), 0o644); err != nil {
 		return "", err
 	}
