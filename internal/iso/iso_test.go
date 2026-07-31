@@ -94,6 +94,86 @@ func TestCatalog_EntriesValid(t *testing.T) {
 		if !validBackend[e.Backend] {
 			t.Errorf("entry %q: invalid backend %q", e.ID, e.Backend)
 		}
+		// Every entry needs a variant label: it is the only thing telling
+		// two entries of the same OS apart in a grouped picker, and an
+		// entry that forgets it renders as a blank row.
+		if e.Variant == "" {
+			t.Errorf("entry %q: empty Variant", e.ID)
+		}
+	}
+}
+
+// TestByOSGroupsWithoutLosingEntries covers the grouped view the image
+// picker reads. The failure that matters is silent: a grouping that drops or
+// duplicates an entry still renders a perfectly plausible menu, just one
+// missing an image nobody can then select.
+func TestByOSGroupsWithoutLosingEntries(t *testing.T) {
+	groups := ByOS()
+	if len(groups) == 0 {
+		t.Fatal("ByOS() returned no groups")
+	}
+
+	// Every catalog entry appears exactly once across all groups, under its
+	// own OS.
+	seen := map[string]int{}
+	for _, g := range groups {
+		if g.OS == "" {
+			t.Error("group with empty OS")
+		}
+		if len(g.Entries) == 0 {
+			t.Errorf("group %q has no entries", g.OS)
+		}
+		for _, e := range g.Entries {
+			if e.OS != g.OS {
+				t.Errorf("entry %q (os %q) filed under group %q", e.ID, e.OS, g.OS)
+			}
+			seen[e.ID]++
+		}
+	}
+	for _, e := range Catalog() {
+		if seen[e.ID] != 1 {
+			t.Errorf("entry %q appears %d times in ByOS(), want exactly 1", e.ID, seen[e.ID])
+		}
+	}
+	if len(seen) != len(Catalog()) {
+		t.Errorf("ByOS() covers %d entries, catalog has %d", len(seen), len(Catalog()))
+	}
+
+	// One group per distinct OS, not one per entry. Counted from the
+	// catalog rather than hardcoded: asserting "entries minus one" would
+	// encode today's accident that exactly one OS has two variants, and
+	// would fail for the wrong reason the day a second one does.
+	distinct := map[string]bool{}
+	for _, e := range Catalog() {
+		distinct[e.OS] = true
+	}
+	if len(groups) != len(distinct) {
+		t.Errorf("got %d groups, want %d (one per distinct OS)", len(groups), len(distinct))
+	}
+
+	// Groups follow catalog order rather than being sorted.
+	var wantOrder []string
+	for _, e := range Catalog() {
+		if len(wantOrder) == 0 || wantOrder[len(wantOrder)-1] != e.OS {
+			wantOrder = append(wantOrder, e.OS)
+		}
+	}
+	for i, g := range groups {
+		if g.OS != wantOrder[i] {
+			t.Errorf("group %d is %q, want %q — ByOS must preserve catalog order", i, g.OS, wantOrder[i])
+		}
+	}
+
+	// Variants within a group must be distinct, or the second level of the
+	// picker shows two rows reading the same thing.
+	for _, g := range groups {
+		vs := map[string]bool{}
+		for _, e := range g.Entries {
+			if vs[e.Variant] {
+				t.Errorf("group %q has two entries labelled %q", g.OS, e.Variant)
+			}
+			vs[e.Variant] = true
+		}
 	}
 }
 

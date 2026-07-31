@@ -77,10 +77,51 @@ type Entry struct {
 	// entry resolves to (e.g. "alpine-standard", "alpine-virt"). It is
 	// only meaningful when OS == "alpine" — every other entry is a direct
 	// URL and Resolve never looks at it.
-	Flavor      string
+	Flavor string
+	// Variant is what distinguishes this entry from the others sharing its
+	// OS — a version ("24.04 LTS"), a release ("13 (trixie)") or a build
+	// ("standard" vs "virt"). It exists because the catalog stopped having
+	// exactly one entry per OS: alpine has two that differ only in build,
+	// and a picker grouping by OS has to label the second level with
+	// something.
+	//
+	// It is a field rather than something derived from ID because deriving
+	// it works for four entries and produces nonsense for two: stripping
+	// the "<os>-" prefix labels both fedora-cloud and arch-cloud "cloud".
+	Variant     string
 	ChecksumURL string
 	SSHUser     string
 	Notes       string
+}
+
+// OSGroup is one OS and every catalog entry belonging to it, in catalog
+// order.
+type OSGroup struct {
+	OS      string
+	Entries []Entry
+}
+
+// ByOS groups the catalog for a two-level picker: choose an OS, then a
+// variant within it. Both levels keep the catalog's own hand-written order
+// rather than sorting — the catalog is ordered deliberately (the most
+// generally useful image first), and sorting would replace that judgement
+// with alphabetical noise.
+//
+// The flat Catalog() remains the API everything else uses; this is a view of
+// it for display, so nothing downstream has to care that the shape changed.
+func ByOS() []OSGroup {
+	var groups []OSGroup
+	at := map[string]int{} // OS -> index in groups
+	for _, e := range Catalog() {
+		i, seen := at[e.OS]
+		if !seen {
+			at[e.OS] = len(groups)
+			groups = append(groups, OSGroup{OS: e.OS})
+			i = len(groups) - 1
+		}
+		groups[i].Entries = append(groups[i].Entries, e)
+	}
+	return groups
 }
 
 // Catalog returns stoat's curated set of known-good images. It is an
@@ -97,6 +138,7 @@ func Catalog() []Entry {
 		{
 			ID:          "ubuntu-24.04",
 			OS:          "ubuntu",
+			Variant:     "24.04 LTS",
 			Backend:     "cloudinit",
 			URL:         "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
 			ChecksumURL: "https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS",
@@ -109,6 +151,7 @@ func Catalog() []Entry {
 		{
 			ID:      "debian-13",
 			OS:      "debian",
+			Variant: "13 (trixie)",
 			Backend: "cloudinit",
 			URL:     "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
 			// Debian publishes SHA512SUMS (not SHA256) alongside this
@@ -121,8 +164,9 @@ func Catalog() []Entry {
 			Notes:       "Debian 13 (trixie) generic cloud image",
 		},
 		{
-			ID: "fedora-cloud",
-			OS: "fedora",
+			ID:      "fedora-cloud",
+			OS:      "fedora",
+			Variant: "44",
 			// Fedora keeps roughly N/N-1/N-2 under releases/ with no
 			// latest/ symlink for cloud images, so this entry needs a
 			// manual bump every Fedora cycle and WILL break (releases/
@@ -148,6 +192,7 @@ func Catalog() []Entry {
 		{
 			ID:      "arch-cloud",
 			OS:      "arch",
+			Variant: "rolling",
 			Backend: "cloudinit",
 			URL:     "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
 			// Verified 2026-07-30 by GET: this mirror does publish a
@@ -163,6 +208,7 @@ func Catalog() []Entry {
 			Backend: "apkovl",
 			URL:     indexURL,
 			Flavor:  "alpine-standard",
+			Variant: "standard",
 			// Alpine's checksum isn't a separate sums file: each release
 			// in latest-releases.yaml embeds its own sha256 inline, and
 			// Resolve() reads it via Latest(). ChecksumURL is left empty
@@ -178,6 +224,7 @@ func Catalog() []Entry {
 			Backend: "apkovl",
 			URL:     indexURL,
 			Flavor:  "alpine-virt",
+			Variant: "virt",
 			// Same index, different flavor line (see alpine-standard
 			// above) — virt is built for VM guests specifically: virtio
 			// drivers only, no baremetal hardware support, meaningfully
