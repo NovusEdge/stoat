@@ -93,6 +93,7 @@ func (h listHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"p"}, "p", "provision"),
 		plainKey([]string{"/"}, "/", "search"),
 		plainKey([]string{"n"}, "n", "new"),
+		plainKey([]string{"r"}, "r", "recipes"),
 		plainKey([]string{"d"}, "d", "delete"),
 		plainKey([]string{"q"}, "q", "quit"),
 		keyHelp,
@@ -106,6 +107,7 @@ func (h listHelp) FullHelp() [][]key.Binding {
 		{h.ssh(), plainKey([]string{"p"}, "p", "provision")},
 		{plainKey([]string{"/"}, "/", "search by name"), plainKey([]string{"esc"}, "esc", "clear search")},
 		{plainKey([]string{"n"}, "n", "new"), plainKey([]string{"d"}, "d", "delete")},
+		{plainKey([]string{"r"}, "r", "edit recipes in $EDITOR")},
 		{plainKey([]string{"q"}, "q", "quit"), keyCtrlC},
 		{keyHelp},
 	}
@@ -133,8 +135,8 @@ func (h detailHelp) ShortHelp() []key.Binding {
 func (h detailHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
-		{plainKey([]string{"i"}, "i", "installed"), plainKey([]string{"p"}, "p", "provision")},
-		{h.ssh(), plainKey([]string{"p"}, "p", "provision")},
+		{plainKey([]string{"i"}, "i", "installed"), h.ssh()},
+		{plainKey([]string{"p"}, "p", "provision")},
 		{plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"), keyCtrlC},
 		{keyHelp},
 	}

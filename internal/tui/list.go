@@ -152,6 +152,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// No loadVMs here: startVM's vmStartedMsg handler issues one itself,
 		// alongside the ssh watch, so sequencing another would refresh twice.
 		return m, startVM(v)
+	case "r":
+		return m, openRecipesDir()
 	case "n":
 		// A fresh form would reset "fetching" to false while the previous
 		// form's download goroutine is still writing, letting a second fetch
