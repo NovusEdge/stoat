@@ -633,14 +633,9 @@ func createVM(v *config.VM) tea.Cmd {
 
 func (m model) viewForm() string {
 	f := m.form
-	var b strings.Builder
+	b := fields{width: formContentWidth}
 
-	// Rows are single-spaced with a blank line between GROUPS of related
-	// fields, not between every row. The form is the tallest screen — nine
-	// rows plus a title and a download block — so spacing every row both
-	// overflowed a 24-line terminal and read as too airy; grouping gives the
-	// separation without the sprawl, and says which fields belong together.
-	group := func() { b.WriteString("\n") }
+	group := b.gap
 
 	row := func(i int, label, value string) {
 		marker := "  "
@@ -656,7 +651,7 @@ func (m model) viewForm() string {
 				value = selStyle.Render(value)
 			}
 		}
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
+		b.row(marker, label, value)
 	}
 
 	row(fName, "name", f.inputs[fName].View())
@@ -676,11 +671,12 @@ func (m model) viewForm() string {
 	if f.resolvedBackend() == "apkovl" {
 		modeRow := radio(modeLabel("live"), f.mode == "live") + "   " + radio(modeLabel("disk"), f.mode == "disk")
 		row(fMode, "mode", modeRow)
-		b.WriteString(dimStyle.Render("           "+modeHint(f.effectiveMode())) + "\n")
 	} else {
-		b.WriteString(dimStyle.Render("  mode     "+modeLabel(f.effectiveMode())) + "\n")
-		b.WriteString(dimStyle.Render("           "+modeHint(f.effectiveMode())) + "\n")
+		// Not a field: with a non-apkovl image the mode is implied by the
+		// image, so it is shown as a fact rather than something to focus.
+		b.row("", "mode", dimStyle.Render(modeLabel(f.effectiveMode())))
 	}
+	b.hint(modeHint(f.effectiveMode()))
 
 	group()
 
@@ -691,9 +687,9 @@ func (m model) viewForm() string {
 		row(fDisk, "disk", f.inputs[fDisk].View())
 	case "cloud":
 		row(fDisk, "disk", f.inputs[fDisk].View())
-		b.WriteString(dimStyle.Render("           cloud images ship ~2.4G of usable root — raise this to install anything") + "\n")
+		b.hint("cloud images ship ~2.4G of usable root — raise this to install anything")
 	default:
-		b.WriteString(dimStyle.Render("  disk     — (live mode)") + "\n")
+		b.row("", "disk", dimStyle.Render("— (live mode)"))
 	}
 	group()
 
@@ -703,26 +699,28 @@ func (m model) viewForm() string {
 	if f.focus == fRecipes {
 		recipesMarker = selStyle.Render(glyphCursor)
 	}
-	fmt.Fprintf(&b, "%s%-8s %s\n", recipesMarker, "recipes", f.recipesLabel())
+	b.row(recipesMarker, "recipes", f.recipesLabel())
 
 	if f.resolvedBackend() == "cloudinit" {
 		marker := "  "
 		if f.focus == fPassword {
 			marker = selStyle.Render(glyphCursor)
 		}
-		val := radio("stoat", !f.randomPassword) + "  " + radio("random", f.randomPassword)
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, "console", val)
-		b.WriteString(dimStyle.Render("           console login for the stoat user") + "\n")
+		b.row(marker, "console", radio("stoat", !f.randomPassword)+"  "+radio("random", f.randomPassword))
+		b.hint("console login for the stoat user")
 	}
 
+	// The download block and the error are full-width blocks, not field rows,
+	// so they sit under the table rather than inside it.
+	body := b.String()
 	if f.fetching {
-		b.WriteString("\n" + dlView(f.fetchingOS, f.dl))
+		body += "\n\n" + dlView(f.fetchingOS, f.dl)
 	}
 	if f.err != "" {
-		b.WriteString("\n" + errStyle.Render(f.err))
+		body += "\n\n" + errStyle.Render(f.err)
 	}
 
-	box := paneAt("new vm", strings.TrimRight(b.String(), "\n"), formContentWidth, m.width)
+	box := paneAt("new vm", body, formContentWidth, m.width)
 
 	// Center rather than Left: the footer is far wider than the box, so a
 	// left join pins the box to the footer's left edge and the pane reads as
@@ -756,6 +754,5 @@ func (f formModel) recipesLabel() string {
 		}
 		items[i] = item
 	}
-	// 11 = the value column (2-cell marker + 8-cell label + space).
-	return wrapItems(items, formContentWidth-11, strings.Repeat(" ", 11))
+	return wrapItems(items, formContentWidth-fieldValueColumn, strings.Repeat(" ", fieldValueColumn))
 }

@@ -194,23 +194,19 @@ func bar(ratio float64, width int) string {
 	return p.ViewAs(ratio)
 }
 
-// dlValueCol is where the form's value column starts: a 2-cell focus marker
-// plus an 8-cell label plus a space (see viewForm's "%s%-8s %s" rows). The
-// download block indents to the same column so it reads as another row of
-// the form rather than something bolted underneath it.
-const dlValueCol = "           "
-
-// dlView renders the download block as a form row: a "download <os>" label
-// line, then the bar, then the stats. When the server gave no
+// dlView renders the download block as form rows: a "download <os>" label
+// row, then the bar, then the stats — label-less rows land in the same value
+// column as the fields above, so the block reads as part of the form rather
+// than something bolted underneath it. When the server gave no
 // Content-Length there is no bar and no percentage — a fabricated one would
 // be worse than none.
 func dlView(osName string, s dlStats) string {
-	head := fmt.Sprintf("  %-8s %s", "download", dimStyle.Render(osName+"…"))
-	body := dlValueCol + dimStyle.Render(s.line())
-	r := s.ratio()
-	if r < 0 {
-		return head + "\n" + body
+	// The block renders inside the form pane, so it wraps to the form's width.
+	f := fields{width: formContentWidth}
+	f.row("", "download", dimStyle.Render(osName+"…"))
+	if r := s.ratio(); r >= 0 {
+		f.row("", "", bar(r, dlBarWidth)+" "+dimStyle.Render(fmt.Sprintf("%3.0f%%", r*100)))
 	}
-	pct := dimStyle.Render(fmt.Sprintf("%3.0f%%", r*100))
-	return fmt.Sprintf("%s\n%s%s %s\n%s", head, dlValueCol, bar(r, dlBarWidth), pct, body)
+	f.row("", "", dimStyle.Render(s.line()))
+	return f.String()
 }

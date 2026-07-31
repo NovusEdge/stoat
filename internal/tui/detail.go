@@ -150,13 +150,12 @@ func (m model) viewDetail() string {
 		state = upStyle.Render("running")
 	}
 
-	var facts strings.Builder
-	facts.WriteString(dimStyle.Render(modeLabel(v.Mode)) + dimStyle.Render(glyphSep) + state + "\n")
-	facts.WriteString(dimStyle.Render(modeHint(v.Mode)) + "\n\n")
+	var facts fields
+	facts.row("", "", dimStyle.Render(modeLabel(v.Mode))+dimStyle.Render(glyphSep)+state)
+	facts.hint(modeHint(v.Mode))
+	facts.gap()
 
-	line := func(k, val string) {
-		fmt.Fprintf(&facts, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-9s", k)), val)
-	}
+	line := func(k, val string) { facts.row("", k, val) }
 	// A cloud VM has no ISO — it boots an overlay of a base image — so the
 	// row would otherwise render as an empty label.
 	if v.ISO != "" {
@@ -204,18 +203,13 @@ func (m model) viewDetail() string {
 		line("recipes", strings.Join(names, ", "))
 	}
 
-	factsBox := pane(v.Name, strings.TrimRight(facts.String(), "\n"), m.width)
+	factsBox := pane(v.Name, facts.String(), m.width)
 
 	parts := []string{factsBox}
 	if m.detail.log != "" {
-		var log strings.Builder
-		for i, l := range strings.Split(m.detail.log, "\n") {
-			if i > 0 {
-				log.WriteString("\n")
-			}
-			log.WriteString(dimStyle.Render(l))
-		}
-		parts = append(parts, "", pane("last provision", log.String(), m.width))
+		// lipgloss re-applies the style on every line of a multi-line string,
+		// so the log needs no per-line loop of its own.
+		parts = append(parts, "", pane("last provision", dimStyle.Render(m.detail.log), m.width))
 	}
 
 	parts = append(parts, "")

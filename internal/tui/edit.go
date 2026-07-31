@@ -545,7 +545,7 @@ func (m model) viewEdit() string {
 		return pane("edit", dimStyle.Render("no vm selected"), m.width)
 	}
 
-	var b strings.Builder
+	b := fields{width: editContentWidth}
 	// row draws a field. A changed field carries a dim "was X" so the pane
 	// shows what is about to be written versus what is on disk — an edit form
 	// that looks identical whether or not you have touched it makes it far
@@ -565,7 +565,7 @@ func (m model) viewEdit() string {
 				value += warnStyle.Render("  " + glyphWas + " was " + was)
 			}
 		}
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, label, value)
+		b.row(marker, label, value)
 	}
 
 	modeParts := make([]string, len(editModes))
@@ -577,8 +577,8 @@ func (m model) viewEdit() string {
 		modeRow += warnStyle.Render("  " + glyphWas + " was " + e.vm.Mode)
 	}
 	row(eMode, "mode", modeRow)
-	b.WriteString(dimStyle.Render("           "+modeHint(e.mode)) + "\n")
-	b.WriteString("\n")
+	b.hint(modeHint(e.mode))
+	b.gap()
 
 	row(eRAM, "ram", e.inputs[eRAM].View()+dimStyle.Render(" MB"))
 	row(eCPUs, "cpus", e.inputs[eCPUs].View())
@@ -594,11 +594,11 @@ func (m model) viewEdit() string {
 		}
 		row(eDisk, "disk", disk)
 	}
-	b.WriteString("\n")
+	b.gap()
 
 	row(eShare, "share", e.inputs[eShare].View())
 	row(eSSHPort, "ssh", e.inputs[eSSHPort].View())
-	b.WriteString("\n")
+	b.gap()
 
 	// Recipes are only offered when any exist for this VM's os/backend;
 	// an empty row is one more thing to tab through for nothing.
@@ -607,20 +607,24 @@ func (m model) viewEdit() string {
 		if e.focus == eRecipes {
 			marker = selStyle.Render(glyphCursor)
 		}
-		fmt.Fprintf(&b, "%s%-8s %s\n", marker, "recipes", editRecipesLabel(e))
+		b.row(marker, "recipes", editRecipesLabel(e))
 	}
 
+	// Notes about the form as a whole, not about any one field, so they sit
+	// under the table at its left edge rather than in the value column.
+	body := b.String()
+	note := func(s string) { body += "\n" + s }
 	if !e.dirty() {
-		b.WriteString("\n" + dimStyle.Render("no changes"))
+		note(dimStyle.Render("no changes"))
 	}
 	if qemu.Running(e.vm) {
-		b.WriteString("\n" + warnStyle.Render("running — ram/cpus/ssh apply on restart"))
+		note(warnStyle.Render("running — ram/cpus/ssh apply on restart"))
 	}
 	if e.err != "" {
-		b.WriteString("\n" + errStyle.Render(e.err))
+		note(errStyle.Render(e.err))
 	}
 
-	box := paneAt("edit "+e.vm.Name, strings.TrimRight(b.String(), "\n"), editContentWidth, m.width)
+	box := paneAt("edit "+e.vm.Name, body, editContentWidth, m.width)
 
 	parts := []string{box, ""}
 	if m.status != "" {
@@ -646,6 +650,5 @@ func editRecipesLabel(e editModel) string {
 		}
 		items[i] = item
 	}
-	// 11 = the value column (2-cell marker + 8-cell label + space).
-	return wrapItems(items, editContentWidth-11, strings.Repeat(" ", 11))
+	return wrapItems(items, editContentWidth-fieldValueColumn, strings.Repeat(" ", fieldValueColumn))
 }

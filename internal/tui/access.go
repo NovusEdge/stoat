@@ -27,7 +27,7 @@ import (
 const accessWidth = 40
 
 // accessValueWidth is what is left for a value after the label column.
-const accessValueWidth = accessWidth - 9
+const accessValueWidth = accessWidth - fieldValueColumn
 
 // accessMinTerminal is the terminal width below which the box is dropped
 // entirely rather than squeezed: the list pane is listWidth wide and both
@@ -44,10 +44,8 @@ func accessBox(v *config.VM, cloudInit string, ciProg progress.Model, width int)
 		return ""
 	}
 
-	var b strings.Builder
-	line := func(k, val string) {
-		fmt.Fprintf(&b, "%s %s\n", dimStyle.Render(fmt.Sprintf("%-8s", k)), val)
-	}
+	f := fields{width: accessWidth}
+	line := func(k, val string) { f.row("", k, val) }
 	// truncated is for values that carry no styling and may be long.
 	truncated := func(k, val string) {
 		line(k, ansi.Truncate(val, accessValueWidth, "…"))
@@ -73,15 +71,18 @@ func accessBox(v *config.VM, cloudInit string, ciProg progress.Model, width int)
 		line("console", dimStyle.Render("set during install"))
 	}
 
+	body := ""
 	if v.Mode == "cloud" {
 		if l := cloudInitLabel(cloudInit); l != "" {
 			line("setup", l)
-			b.WriteString(strings.Repeat(" ", 9) + cloudInitBar(ciProg, cloudInit) + "\n")
+			// The bar sits in the value column under the word it belongs to,
+			// as its own label-less row.
+			f.row("", "", cloudInitBar(ciProg, cloudInit))
 		}
-		b.WriteString("\n" + dimStyle.Render("password is console-only;\nssh is key-only"))
+		body = "\n\n" + dimStyle.Render("password is console-only;\nssh is key-only")
 	}
 
-	return paneAt("access", strings.TrimRight(b.String(), "\n"), accessWidth, width)
+	return paneAt("access", f.String()+body, accessWidth, width)
 }
 
 // shortenPath swaps the home directory for "~" so a key path fits the box.
