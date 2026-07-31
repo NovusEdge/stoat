@@ -88,11 +88,11 @@ func Install(srcPath, destDir string) (string, error) {
 	defer os.Remove(tmpName) // no-op once the rename succeeds
 
 	if _, err := io.Copy(tmp, src); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return "", err
 	}
 	if err := tmp.Chmod(0o755); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return "", err
 	}
 	if err := tmp.Close(); err != nil {

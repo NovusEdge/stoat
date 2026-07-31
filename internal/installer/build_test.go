@@ -1,8 +1,11 @@
 package installer
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,7 +78,7 @@ func TestVersionFallsBackToDev(t *testing.T) {
 }
 
 // The real thing: building stoat from this repo must succeed and produce a
-// binary that reports the version we stamped.
+// binary that runs and reports the version we stamped.
 func TestBuildProducesRunnableBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("go build is slow; skipped under -short")
@@ -95,5 +98,47 @@ func TestBuildProducesRunnableBinary(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("built file is not executable: mode %v", info.Mode())
+	}
+
+	got, err := exec.Command(out, "--version").Output()
+	if err != nil {
+		t.Fatalf("built binary would not run: %v", err)
+	}
+	if !strings.Contains(string(got), "v0.0.0-test") {
+		t.Errorf("version not stamped: got %q", got)
+	}
+}
+
+// A build failure must surface the compiler's actual output, not just
+// "exit status 1" -- that is the only thing a user could act on.
+func TestBuildFailureSurfacesCompilerOutput(t *testing.T) {
+	repo := t.TempDir()
+	cmdDir := filepath.Join(repo, "cmd", "stoat")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := "package main\n\nfunc main() {\n\tthis is not valid go\n}\n"
+	if err := os.WriteFile(filepath.Join(cmdDir, "main.go"), []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module broken\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "stoat")
+	err := Build(repo, "v0.0.0-test", out)
+	if err == nil {
+		t.Fatal("expected an error building broken source, got nil")
+	}
+
+	var buildErr *BuildError
+	if !errors.As(err, &buildErr) {
+		t.Fatalf("error is not a *BuildError: %v (%T)", err, err)
+	}
+	if buildErr.Output == "" {
+		t.Error("BuildError.Output is empty; compiler output was not captured")
+	}
+	if !strings.Contains(buildErr.Error(), "syntax error") && !strings.Contains(buildErr.Error(), "expected") {
+		t.Errorf("BuildError.Error() does not look like a compiler message: %q", buildErr.Error())
 	}
 }
