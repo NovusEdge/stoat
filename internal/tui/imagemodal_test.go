@@ -2,11 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/iso"
@@ -549,5 +552,132 @@ func TestCatalogRowsAlignTheirSizeColumn(t *testing.T) {
 		if prefix != want {
 			t.Errorf("row %q starts its size at column %d, others at %d", o.label(), prefix, want)
 		}
+	}
+}
+
+// The whole point of the mode: type part of a name and the non-matching
+// images go away. Asserted on drawn output, not on the model's item slice --
+// a filter that matches but does not redraw is the bug this catches.
+func TestFinderFiltersAsYouType(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.finding = true
+	mo.setFound([]foundImage{
+		{path: "/home/u/downloads/alpine-3.20.iso", size: 100},
+		{path: "/home/u/vms/ubuntu-24.04.iso", size: 200},
+		{path: "/home/u/vms/debian-12.qcow2", size: 300},
+	})
+
+	out := ansi.Strip(mo.view())
+	for _, want := range []string{"alpine", "ubuntu", "debian"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the finder does not list %s before filtering:\n%s", want, out)
+		}
+	}
+
+	mo.findList.SetFilterText("ubu")
+	out = ansi.Strip(mo.view())
+	if !strings.Contains(out, "ubuntu") {
+		t.Errorf("filtering for \"ubu\" hid the match:\n%s", out)
+	}
+	for _, gone := range []string{"alpine", "debian"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("filtering for \"ubu\" still shows %s:\n%s", gone, out)
+		}
+	}
+}
+
+// Fuzzy, not substring: "u2404" must find "ubuntu-24.04.iso". This is the
+// difference between bubbles/list's filter and huh's, and the reason the
+// list component was chosen at all.
+func TestFinderMatchesFuzzilyNotJustSubstrings(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.finding = true
+	mo.setFound([]foundImage{
+		{path: "/home/u/vms/ubuntu-24.04.iso", size: 100},
+		{path: "/home/u/vms/alpine-3.20.iso", size: 200},
+	})
+
+	mo.findList.SetFilterText("u2404")
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "ubuntu") {
+		t.Errorf("a fuzzy query did not match; the filter is substring-only:\n%s", out)
+	}
+}
+
+// Results stream in while the walk is still running, so the pane must say so
+// -- an empty box with no explanation reads as "there are no images".
+func TestFinderSaysItIsStillLooking(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.finding = true
+
+	if out := ansi.Strip(mo.view()); !strings.Contains(out, "searching") {
+		t.Errorf("nothing tells the user a scan is running:\n%s", out)
+	}
+
+	mo.setFound([]foundImage{{path: "/home/u/a.iso", size: 1}})
+	mo.scanDone = true
+	if out := ansi.Strip(mo.view()); strings.Contains(out, "searching") {
+		t.Errorf("the finder still claims to be searching after the scan ended:\n%s", out)
+	}
+}
+
+// A finished scan that found nothing must say THAT, rather than sitting
+// blank, or the user waits for results that are never coming.
+func TestFinderSaysWhenItFoundNothing(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.finding = true
+	mo.scanDone = true
+
+	if out := ansi.Strip(mo.view()); !strings.Contains(out, "no disk images") {
+		t.Errorf("a scan that found nothing says nothing:\n%s", out)
+	}
+}
+
+// esc goes back a level rather than closing the modal -- the same rule the
+// tree browser follows (see updateBrowsing's comment), because the user is
+// one step into a choice and dumping them out would discard it.
+func TestFinderEscGoesBackToTheVariantList(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.finding = true
+
+	_, idx, closed := mo.update(keyMsg("esc"))
+	if closed {
+		t.Error("esc closed the whole modal instead of leaving the finder")
+	}
+	if idx != -1 {
+		t.Errorf("esc chose image %d", idx)
+	}
+	if mo.finding {
+		t.Error("esc did not leave the finder")
+	}
+}
+
+// Choosing a found image must produce a real BYO option appended to the
+// modal's own slice, exactly as the tree browser does -- app.go re-adopts
+// mo.images and resolves the returned index against it.
+func TestFinderChoosingAppendsTheImage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "custom.iso")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mo := newImageModal(testImages(), 0)
+	before := len(mo.images)
+	mo.finding = true
+	mo.setFound([]foundImage{{path: path, size: 1}})
+
+	_, idx, closed := mo.update(keyMsg("enter"))
+	if !closed {
+		t.Fatal("choosing an image did not close the modal")
+	}
+	if idx != before {
+		t.Fatalf("index = %d, want %d (appended past the original bounds)", idx, before)
+	}
+	if len(mo.images) != before+1 {
+		t.Fatalf("the chosen image was not appended: %d images", len(mo.images))
+	}
+	if got, err := mo.images[idx].imagePath(); err != nil || got != path {
+		t.Errorf("appended path = %q, err = %v, want %q", got, err, path)
 	}
 }

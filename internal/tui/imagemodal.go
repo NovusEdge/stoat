@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"io"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -53,14 +55,27 @@ type variantItem struct {
 	idx    int
 	opt    imageOption
 	browse bool // the byo group's trailing leaf: opens the filepicker instead of selecting opt
+	find   bool // the byo group's other leaf: opens the fuzzy finder instead of selecting opt
 }
 
 func (i variantItem) FilterValue() string {
-	if i.browse {
+	switch {
+	case i.find:
+		return "find…"
+	case i.browse:
 		return "browse…"
+	default:
+		return i.opt.variantLabel()
 	}
-	return i.opt.variantLabel()
 }
+
+// foundItem is one row of the fuzzy finder. FilterValue is the FULL path, not
+// the base name, so a query can narrow by directory ("dl alp") as well as by
+// file name -- which is the main thing that makes a flat list of every image
+// on the machine usable.
+type foundItem struct{ img foundImage }
+
+func (i foundItem) FilterValue() string { return i.img.path }
 
 // variantLabel is what distinguishes this image from the others sharing its
 // OS: the catalog's own variant label, or the filename for a BYO file, which
@@ -131,6 +146,16 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		}
 		fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
 	case variantItem:
+		if it.find {
+			// No size or status column: it isn't a file, it's a door to the
+			// finder, so those columns would just be blank.
+			label := fmt.Sprintf("%-*s", modalVariantWidth, "find…")
+			if index == m.Index() {
+				label = selStyle.Render(label)
+			}
+			fmt.Fprint(w, cursor+label+dimStyle.Render("search by name"))
+			return
+		}
 		if it.browse {
 			// No size or status column: it isn't a file, it's a door to the
 			// filepicker, so those columns would just be blank.
@@ -153,6 +178,20 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		// then dimmed as a whole segment.
 		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, it.opt.sizeLabel()))
 		fmt.Fprint(w, cursor+label+size+"  "+it.opt.statusLabel())
+	case foundItem:
+		// Base name, then the parent directory dimmed, then the size --
+		// matching the columns the tree browser shows (ShowSize = true). The
+		// directory is what tells apart two files that share a name. Widths
+		// sum to modalContentWidth so the row never wraps.
+		name := ansi.Truncate(filepath.Base(it.img.path), foundNameWidth, "…")
+		label := fmt.Sprintf("%-*s", foundNameWidth, name)
+		if index == m.Index() {
+			label = selStyle.Render(label)
+		}
+		dirText := ansi.Truncate(filepath.Dir(it.img.path), foundDirWidth, "…")
+		dir := dimStyle.Render(fmt.Sprintf("%-*s", foundDirWidth, dirText))
+		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, humanBytes(it.img.size)))
+		fmt.Fprint(w, cursor+label+dir+size)
 	}
 }
 
@@ -177,6 +216,14 @@ const (
 // whole feature exists to make comparable.
 const modalSizeWidth = 9
 
+// foundNameWidth and foundDirWidth are the finder's two text columns. Their
+// sum plus the cursor and modalSizeWidth equals modalContentWidth exactly, so
+// a found row never wraps the way the other rows' fixed columns don't either.
+const (
+	foundNameWidth = 20
+	foundDirWidth  = modalContentWidth - 2 - foundNameWidth - modalSizeWidth
+)
+
 // imageModal is the two-level picker. One list, re-populated on drill-down,
 // rather than two lists: two would mean two cursors to keep consistent and
 // two things to size against the terminal.
@@ -194,6 +241,20 @@ type imageModal struct {
 	// different kinds of input.
 	browsing bool
 	picker   filepicker.Model
+
+	// finding is the fuzzy finder, the byo group's other leaf. It is a
+	// separate sub-mode from browsing for the same reason browsing is one:
+	// it owns the keyboard while open (typing is a filter, not navigation).
+	finding       bool
+	findList      list.Model
+	findListReady bool // whether findList has been built by ensureFindList
+	// scanCh is the channel the running scan streams batches down. Stored so
+	// updateFinding can re-issue waitForImages after each batch; openFinder's
+	// local ch goes out of scope the moment it returns.
+	scanCh <-chan []foundImage
+	// scanDone distinguishes "found nothing yet" from "found nothing" -- an
+	// empty pane means opposite things before and after the walk ends.
+	scanDone bool
 }
 
 // newImageList builds the modal's list component. Filtering is deliberately
@@ -207,11 +268,19 @@ func newImageList() list.Model {
 	l.SetShowHelp(false)
 	l.SetShowFilter(false)
 	l.SetFilteringEnabled(false)
-	l.Styles.NoItems = dimStyle
-	l.Styles.PaginationStyle = lipgloss.NewStyle()
-	l.Styles.ActivePaginationDot = accentStyle
-	l.Styles.InactivePaginationDot = dimStyle
+	l.Styles = listStyles(l.Styles)
 	return l
+}
+
+// listStyles is the styling shared by both of the modal's lists, applied on
+// top of whatever list.New already set, so the OS picker and the finder
+// cannot drift apart visually.
+func listStyles(s list.Styles) list.Styles {
+	s.NoItems = dimStyle
+	s.PaginationStyle = lipgloss.NewStyle()
+	s.ActivePaginationDot = accentStyle
+	s.InactivePaginationDot = dimStyle
+	return s
 }
 
 // groupImages buckets the form's images by OS, preserving the order they
@@ -293,10 +362,12 @@ func (mo *imageModal) drill(g osItem) {
 		items = append(items, variantItem{idx: idx, opt: mo.images[idx]})
 	}
 	if g.os == byoGroup {
-		// Trailing rather than leading: existing BYO files are the images the
-		// user most likely wants, so browse… is the fallback at the bottom,
-		// not the first thing the cursor lands on.
-		items = append(items, variantItem{browse: true})
+		// find… before browse…: typing a name is the common case, walking the
+		// tree is the fallback. Trailing rather than leading relative to the
+		// real files: existing BYO files are the images the user most likely
+		// wants, so these two are the fallback at the bottom, not the first
+		// thing the cursor lands on.
+		items = append(items, variantItem{find: true}, variantItem{browse: true})
 	}
 	mo.level = levelVariant
 	mo.osName = g.os
@@ -329,6 +400,9 @@ func (mo *imageModal) syncHeight(n int) {
 func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 	if mo.browsing {
 		return mo.updateBrowsing(msg)
+	}
+	if mo.finding {
+		return mo.updateFinding(msg)
 	}
 
 	key, ok := msg.(tea.KeyPressMsg)
@@ -374,6 +448,9 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 			it, ok := mo.list.SelectedItem().(variantItem)
 			if !ok {
 				return nil, -1, false
+			}
+			if it.find {
+				return mo.openFinder(), -1, false
 			}
 			if it.browse {
 				return mo.openBrowser(), -1, false
@@ -464,6 +541,120 @@ func (mo *imageModal) updateBrowsing(msg tea.Msg) (tea.Cmd, int, bool) {
 	return cmd, -1, false
 }
 
+// openFinder swaps the variant list for a fuzzy search over every disk image
+// under $HOME. Filtering is enabled here and nowhere else: the OS and variant
+// lists are short, curated and meant to be arrowed through, while this one is
+// every image on the machine and is only usable by typing.
+//
+// The returned cmd pumps the first batch; each imagesFoundMsg re-issues it
+// until the channel closes. Without it the scan runs and nothing ever reads
+// the results.
+func (mo *imageModal) openFinder() tea.Cmd {
+	mo.ensureFindList()
+	mo.finding = true
+	mo.scanDone = false
+
+	ch := scanImages(homeDir())
+	mo.scanCh = ch
+	return waitForImages(ch)
+}
+
+// ensureFindList lazily builds the finder's list on first use. It is
+// separate from openFinder so setFound and view work correctly even when a
+// caller sets mo.finding directly rather than going through the scan (as the
+// tests do), without requiring a live scan to see the finder at all.
+func (mo *imageModal) ensureFindList() {
+	if mo.findListReady {
+		return
+	}
+	// Height is modalRows content rows PLUS one: bubbles/list reserves a
+	// header row whenever filtering is enabled and shown (it doubles as the
+	// filter prompt while typing), even with the title itself off. Without
+	// the +1 that row eats into the item rows instead of the blank space
+	// above them.
+	l := list.New(nil, imageDelegate{}, modalContentWidth, modalRows+1)
+	l.SetShowStatusBar(false)
+	l.SetShowTitle(false)
+	l.SetShowHelp(false)
+	l.SetFilteringEnabled(true)
+	l.SetShowFilter(true)
+	l.Styles = listStyles(l.Styles)
+	mo.findList = l
+	mo.findListReady = true
+}
+
+// setFound appends a batch and re-sorts. Sorting on every batch rather than
+// once at the end keeps the visible order stable while results stream in --
+// rows that jump around under a cursor the user is already moving are worse
+// than a slightly late sort.
+func (mo *imageModal) setFound(found []foundImage) {
+	mo.ensureFindList()
+	items := mo.findList.Items()
+	for _, f := range found {
+		items = append(items, foundItem{img: f})
+	}
+	sort.SliceStable(items, func(a, b int) bool {
+		return items[a].(foundItem).img.path < items[b].(foundItem).img.path
+	})
+	mo.findList.SetItems(items)
+	mo.findList.SetShowPagination(len(items) > modalRows)
+}
+
+// updateFinding owns the keyboard while the finder is open. Keys go to the
+// list first EXCEPT esc and enter: the list would swallow esc to clear its
+// filter and enter to apply it, and neither is what those keys mean here.
+func (mo *imageModal) updateFinding(msg tea.Msg) (tea.Cmd, int, bool) {
+	mo.ensureFindList()
+	if found, ok := msg.(imagesFoundMsg); ok {
+		if found.done {
+			mo.scanDone = true
+			return nil, -1, false
+		}
+		mo.setFound(found.batch)
+		// Pump the next batch. The scan is still running.
+		return waitForImages(mo.scanCh), -1, false
+	}
+
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "esc":
+			// Back a level, not out -- same rule as updateBrowsing. When a
+			// filter is active esc clears it first, which is what the user
+			// means by esc while they are still typing.
+			if mo.findList.FilterState() != list.Unfiltered {
+				break // let the list clear its own filter
+			}
+			mo.finding = false
+			return nil, -1, false
+		case "enter":
+			// While the filter input is open, enter applies the filter --
+			// that is the list's own interaction and must not be stolen, or
+			// the user can never commit a query.
+			if mo.findList.FilterState() == list.Filtering {
+				break
+			}
+			it, ok := mo.findList.SelectedItem().(foundItem)
+			if !ok {
+				return nil, -1, false
+			}
+			opt, err := byoOptionFromPath(it.img.path)
+			if err != nil {
+				// Deleted or unmounted since the scan listed it. Stay open
+				// rather than close on a choice that did not resolve --
+				// same reasoning as updateBrowsing.
+				return nil, -1, false
+			}
+			mo.images = append(mo.images, opt)
+			mo.finding = false
+			return nil, len(mo.images) - 1, true
+		}
+	}
+
+	var cmd tea.Cmd
+	mo.findList, cmd = mo.findList.Update(msg)
+	return cmd, -1, false
+}
+
 // renderModal composites the open modal over an already-composed screen.
 //
 // It uses lipgloss v2's compositor rather than splicing lines by hand: the
@@ -501,6 +692,9 @@ func (mo *imageModal) view() string {
 	if mo.browsing {
 		return mo.viewBrowsing()
 	}
+	if mo.finding {
+		return mo.viewFinding()
+	}
 	title := "image"
 	hint := "enter choose · esc cancel"
 	if mo.level == levelVariant {
@@ -514,6 +708,27 @@ func (mo *imageModal) view() string {
 	body := lipgloss.NewStyle().Width(modalContentWidth).
 		Render(mo.list.View() + "\n\n" + dimStyle.Render(hint))
 	return pane(title, body, modalContentWidth+paneFrame())
+}
+
+// viewFinding renders the fuzzy finder in place of the variant list: the list
+// plus one status line that says whether the scan is still running or came
+// up empty, so an empty pane doesn't read as "there are no images".
+func (mo *imageModal) viewFinding() string {
+	mo.ensureFindList()
+	var status string
+	switch {
+	case !mo.scanDone:
+		status = dimStyle.Render("searching " + homeDir() + "…")
+	case len(mo.findList.Items()) == 0:
+		status = dimStyle.Render("no disk images found under " + homeDir())
+	}
+	hint := dimStyle.Render("enter choose · esc back")
+	if status != "" {
+		hint = status + "\n" + hint
+	}
+	body := lipgloss.NewStyle().Width(modalContentWidth).
+		Render(mo.findList.View() + "\n\n" + hint)
+	return pane("image"+glyphSep+"find", body, modalContentWidth+paneFrame())
 }
 
 // viewBrowsing renders the filepicker in place of the variant list.
