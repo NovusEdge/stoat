@@ -35,6 +35,11 @@ type model struct {
 	toast    toast
 	toastGen int
 
+	// modal is the image picker, non-nil only while it is open. It owns the
+	// keyboard for as long as it is: a modal the user can type past is not a
+	// modal.
+	modal *imageModal
+
 	preflight           string // non-empty when qemu or /dev/kvm is unusable
 	width               int
 	height              int
@@ -132,6 +137,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ctrl+c case.
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+
+	// The image picker takes the keyboard while it is open, before any screen
+	// gets a look. Only key messages are diverted: the download tick, the
+	// cloud-init poll and the spinner all keep running underneath, so opening
+	// the picker mid-download doesn't freeze its progress bar.
+	if m.modal != nil {
+		if _, isKey := msg.(tea.KeyPressMsg); isKey {
+			cmd, chosen, closed := m.modal.update(msg)
+			if chosen >= 0 {
+				m.form.selectImage(chosen)
+			}
+			if closed {
+				m.modal = nil
+			}
+			return m, cmd
+		}
 	}
 
 	switch msg := msg.(type) {
@@ -332,9 +354,10 @@ func (m model) View() tea.View {
 		// Anchor to the top instead so everything stays reachable.
 		vAlign = lipgloss.Top
 	}
-	// The toast goes on last, over the finished screen: it is an overlay, so
-	// it must not be part of what Place centers.
-	return m.newView(m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s)))
+	// Overlays go on last, over the finished screen: they must not be part of
+	// what Place centers. The modal sits under the toast, so a toast raised
+	// while the picker is open is still readable.
+	return m.newView(m.renderToast(m.renderModal(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s))))
 }
 
 // newView wraps a rendered frame in a tea.View with the alt-screen flag set —

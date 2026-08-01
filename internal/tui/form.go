@@ -15,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
@@ -34,20 +35,40 @@ type imageOption struct {
 
 func (o imageOption) isBYO() bool { return o.entry == nil }
 
+// byoFileWidth is the column a BYO filename is truncated into. Fixed so that
+// whatever follows it lands in the same place on every row: the "(byo)" tag
+// used to trail a variable-length filename, which put it at a different
+// column on every line and read as ragged. Real names run long
+// (ubuntu-24.04-server-cloudimg-amd64.img is 38 cells) and an untruncated one
+// pushed the row past the form pane and wrapped it.
+const byoFileWidth = 30
+
+// osUnknown is shown when iso.Infer could not name a BYO file's OS. It used
+// to render as "?", which tells the user neither what happened nor that
+// anything is still selectable — this is a state, not an error.
+const osUnknown = "unknown"
+
 // label renders the image picker row for one option.
+//
+// Padding happens on the PLAIN strings and styling is applied to whole
+// segments afterwards, never inside the format: a styled substring carries
+// ANSI bytes that %-8s counts as width, which is how the `ls` output in this
+// repo once came out visibly skewed.
 func (o imageOption) label() string {
 	if o.entry != nil {
 		status := glyphDownload + " download"
 		if o.file != "" {
 			status = "downloaded"
 		}
-		return fmt.Sprintf("%-8s %-10s %s", o.entry.OS, o.entry.Backend, status)
+		return fmt.Sprintf("%-8s %-10s %s", o.entry.OS, o.entry.Variant, status)
 	}
 	osLabel := o.osName
 	if osLabel == "" {
-		osLabel = "?"
+		osLabel = osUnknown
 	}
-	return fmt.Sprintf("%-8s %-10s %s (byo)", osLabel, o.backend, o.file)
+	file := ansi.Truncate(o.file, byoFileWidth, "…")
+	return fmt.Sprintf("%-8s %-10s %-*s %s",
+		osLabel, o.backend, byoFileWidth, file, dimStyle.Render("byo"))
 }
 
 // localImageFiles lists every plain file under isos/, any extension, so BYO
@@ -293,6 +314,24 @@ func (f *formModel) refreshRecipes() {
 	f.recipeIdx = 0
 }
 
+// selectImage adopts the image at idx, along with everything that has to move
+// with it. Picking an image is not just an index: the BYO backend override
+// belonged to the previous image and would otherwise silently apply to this
+// one, and the recipe list is filtered by the image's OS and backend, so a
+// stale list would offer recipes that cannot run on what is now selected.
+//
+// Out-of-range is ignored rather than clamped: every caller derives idx from
+// the image slice itself, so a bad index means a bug elsewhere, and clamping
+// would select an arbitrary image instead of making that visible.
+func (f *formModel) selectImage(idx int) {
+	if idx < 0 || idx >= len(f.images) {
+		return
+	}
+	f.imgIdx = idx
+	f.byoBackend = ""
+	f.refreshRecipes()
+}
+
 func newForm() formModel {
 	f := formModel{mode: "live", recipeSel: map[string]bool{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
@@ -412,17 +451,19 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left", "right":
 			switch m.form.focus {
 			case fISO:
-				n := len(m.form.images)
-				if n == 0 {
+				// Opens the picker rather than cycling in place. Cycling
+				// modelled one dimension, and the catalog now has two: alpine
+				// ships standard and virt, which differ only in build, so a
+				// flat cycle gave no way to see that a second Alpine even
+				// existed, let alone which one was under the cursor.
+				//
+				// enter is not the opening key: it creates the VM everywhere
+				// else in this form, and a key that submits on eight rows and
+				// opens a picker on the ninth is a trap.
+				if len(m.form.images) == 0 {
 					return m, nil
 				}
-				d := 1
-				if msg.String() == "left" {
-					d = -1
-				}
-				m.form.imgIdx = (m.form.imgIdx + d + n) % n
-				m.form.byoBackend = "" // a new image resets any prior override
-				m.form.refreshRecipes()
+				m.modal = newImageModal(m.form.images, m.form.imgIdx)
 				return m, nil
 			case fBackend:
 				cur := m.form.resolvedBackend()
