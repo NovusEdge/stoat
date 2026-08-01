@@ -125,10 +125,19 @@ func buildImages() []imageOption {
 // byoBackends is the fixed cycle offered on the fBackend override row.
 var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 
-// formContentWidth holds the new-vm pane at a constant width. Sized to the
-// widest thing it ever shows — the download stats line, indented to the
-// value column — so the box never resizes as optional rows appear.
-const formContentWidth = 56
+// formContentWidth holds the new-vm pane at a constant width, so the box
+// never resizes as optional rows appear.
+//
+// Sized off the HINT lines, which are the widest thing the form regularly
+// shows. The mode hints are 44 and 45 cells, so at the old width of 56 —
+// a 44-cell value column — they wrapped by a single character and left a
+// dangling word under every mode row. 60 cells of value column clears all
+// of them but the cloud disk hint, which is 71 and would need a pane too
+// wide to sit in an 80-column terminal.
+//
+// 72 plus the pane frame is 78, which is the point of it: the box still
+// fits an 80-column terminal without paneAt having to clamp it.
+const formContentWidth = 72
 
 type formModel struct {
 	inputs      []textinput.Model // name, ram, cpus, disk, share
