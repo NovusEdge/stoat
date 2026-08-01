@@ -405,6 +405,41 @@ func TestByoOptionFromPathAcceptsAnyDirectory(t *testing.T) {
 	}
 }
 
+// filepath.Join does not special-case an absolute second element, so joining
+// isos/ onto a browsed path would give "…/isos/home/u/custom.iso". imagePath
+// is what keeps the two cases apart.
+func TestImagePathLeavesABrowsedAbsolutePathAlone(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "custom.qcow2")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt, err := byoOptionFromPath(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := opt.imagePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != p {
+		t.Errorf("imagePath() = %q, want the browsed path %q", got, p)
+	}
+}
+
+// A bare name still resolves under isos/, unchanged.
+func TestImagePathResolvesABareNameUnderIsos(t *testing.T) {
+	opt := imageOption{file: "alpine.iso"}
+	got, err := opt.imagePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(config.Root(), "isos", "alpine.iso")
+	if got != want {
+		t.Errorf("imagePath() = %q, want %q", got, want)
+	}
+}
+
 func TestByoOptionFromPathRejectsMissingFile(t *testing.T) {
 	if _, err := byoOptionFromPath(filepath.Join(t.TempDir(), "nope.iso")); err == nil {
 		t.Error("want an error for a path that does not exist")

@@ -34,6 +34,11 @@ type imageOption struct {
 	osName  string     // entry.OS for catalog; iso.Infer's guess for BYO (unrecognised files: "")
 	sshUser string     // entry.SSHUser for catalog; "" for BYO (sshx defaults empty to root)
 
+	// A browsed BYO file (byoOptionFromPath) puts an ABSOLUTE path here
+	// instead, since the whole point is that it lives outside isos/. Anything
+	// resolving this to a real path must go through imagePath, not join it
+	// onto isos/ directly.
+	//
 	// bytes is the image's size and exact is whether it was measured rather
 	// than declared: a file already on disk is stat'd, one still to be
 	// downloaded carries the catalog's approximation. Resolved once in
@@ -57,6 +62,18 @@ func (o imageOption) sizeLabel() string {
 }
 
 func (o imageOption) isBYO() bool { return o.entry == nil }
+
+// imagePath resolves file to an absolute path. A browsed BYO image is already
+// absolute and lives outside isos/; everything else is a bare name under it.
+// filepath.Join does NOT special-case an absolute second element -- joining
+// isos/ onto "/home/u/x.iso" yields "…/isos/home/u/x.iso" -- so the two cases
+// have to be told apart here rather than at each call site.
+func (o imageOption) imagePath() (string, error) {
+	if filepath.IsAbs(o.file) {
+		return o.file, nil
+	}
+	return filepath.Abs(filepath.Join(config.Root(), "isos", o.file))
+}
 
 // byoFileWidth is the column a BYO filename is truncated into. Fixed so that
 // whatever follows it lands in the same place on every row: the "(byo)" tag
@@ -775,7 +792,7 @@ func (f formModel) build() (*config.VM, error) {
 	}
 
 	if vm.Backend == "cloudinit" {
-		abs, err := filepath.Abs(filepath.Join(config.Root(), "isos", opt.file))
+		abs, err := opt.imagePath()
 		if err != nil {
 			return nil, err
 		}
