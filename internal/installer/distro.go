@@ -110,17 +110,25 @@ var installPrefix = map[Distro]string{
 	DistroFedora: "sudo dnf install ",
 }
 
-// InstallCmd is the shell command that installs p, or nil when we cannot say.
-// It returns a slice because a Check's Fix is a command *list* — see checks.go
-// for why that matters.
+// InstallCmd is the shell command that installs p, or -- when the distro is
+// unknown -- the package's names with no command attached. It returns a slice
+// because a Check's Fix is a command *list*, see checks.go for why that
+// matters: a wrong sudo line is worse than no line, but no line at all loses
+// information the user could have used.
 func (d Distro) InstallCmd(p Pkg) []string {
 	name := d.PkgName(p)
 	if name == "" {
-		return nil
+		return namesOnly(p)
 	}
 	prefix, ok := installPrefix[d]
 	if !ok {
-		return nil
+		return namesOnly(p)
 	}
 	return []string{prefix + name}
+}
+
+// namesOnly is what an unrecognised distro gets: every candidate package name
+// we know, joined for a human to pick from, with no package manager invented.
+func namesOnly(p Pkg) []string {
+	return []string{"install: " + p.Arch + " / " + p.Debian + " / " + p.Fedora}
 }

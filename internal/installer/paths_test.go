@@ -53,11 +53,11 @@ func TestShellRC(t *testing.T) {
 		wantRC   string
 		wantLine string
 	}{
-		{"zsh", "/usr/bin/zsh", "/home/x/.zshrc", `export PATH="/home/x/.local/bin:$PATH"`},
-		{"bash", "/bin/bash", "/home/x/.bashrc", `export PATH="/home/x/.local/bin:$PATH"`},
-		{"fish uses its own syntax and path", "/usr/bin/fish", "/home/x/.config/fish/config.fish", "fish_add_path /home/x/.local/bin"},
-		{"unknown shell falls back to profile", "/bin/ksh", "/home/x/.profile", `export PATH="/home/x/.local/bin:$PATH"`},
-		{"empty SHELL falls back to profile", "", "/home/x/.profile", `export PATH="/home/x/.local/bin:$PATH"`},
+		{"zsh", "/usr/bin/zsh", "/home/x/.zshrc", `export PATH='/home/x/.local/bin':"$PATH"`},
+		{"bash", "/bin/bash", "/home/x/.bashrc", `export PATH='/home/x/.local/bin':"$PATH"`},
+		{"fish uses its own syntax and path", "/usr/bin/fish", "/home/x/.config/fish/config.fish", "fish_add_path '/home/x/.local/bin'"},
+		{"unknown shell falls back to profile", "/bin/ksh", "/home/x/.profile", `export PATH='/home/x/.local/bin':"$PATH"`},
+		{"empty SHELL falls back to profile", "", "/home/x/.profile", `export PATH='/home/x/.local/bin':"$PATH"`},
 	}
 
 	for _, tt := range tests {
@@ -159,4 +159,22 @@ func TestAppendRCHandlesMissingTrailingNewline(t *testing.T) {
 		}
 	}
 	t.Errorf("the export is not on a line of its own:\n%s", got)
+}
+
+// A directory with a space and a quote in it is the case that breaks a naive
+// implementation: the space would split fish_add_path's argument in two, and
+// the quote would end the POSIX export's string early. Both branches must
+// quote it correctly enough to round-trip.
+func TestShellRCQuotesSpaceAndQuote(t *testing.T) {
+	dir := `/home/x/my dir's stuff`
+
+	_, posix := ShellRC("/usr/bin/zsh", "/home/x", dir)
+	if want := `export PATH='/home/x/my dir'\''s stuff':"$PATH"`; posix != want {
+		t.Errorf("posix line = %q, want %q", posix, want)
+	}
+
+	_, fish := ShellRC("/usr/bin/fish", "/home/x", dir)
+	if want := `fish_add_path '/home/x/my dir\'s stuff'`; fish != want {
+		t.Errorf("fish line = %q, want %q", fish, want)
+	}
 }

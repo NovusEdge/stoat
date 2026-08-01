@@ -197,3 +197,63 @@ func TestBuildFailureShowsCompilerOutput(t *testing.T) {
 		t.Errorf("view does not show the compiler output:\n%s", m.View().Content)
 	}
 }
+
+// tempBuildDirs finds this package's own leftovers, not just anything in
+// os.TempDir() -- the real temp dir is shared with everything else running
+// on the machine, so a bare entry count would be flaky.
+func tempBuildDirs() []string {
+	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "stoat-build-*"))
+	return matches
+}
+
+// A repo dir with no ./cmd/stoat fails the build immediately, which is the
+// cheap way to drive buildCmd's error path without an actual go build.
+func TestBuildCmdRemovesTempDirOnBuildFailure(t *testing.T) {
+	before := len(tempBuildDirs())
+
+	msg := buildCmd(t.TempDir(), "v0.0.0")()
+	if _, ok := msg.(errMsg); !ok {
+		t.Fatalf("expected errMsg building a dir with no cmd/stoat, got %T: %+v", msg, msg)
+	}
+	if after := len(tempBuildDirs()); after != before {
+		t.Errorf("buildCmd left a stoat-build-* dir behind: before %d, after %d", before, after)
+	}
+}
+
+// installCmd owns the temp dir buildCmd created from the moment it is
+// handed the built binary: it must remove it once the copy is done, success
+// or failure alike.
+func TestInstallCmdRemovesBuildTempDirOnSuccess(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "stoat-build-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tmp, "stoat")
+	if err := os.WriteFile(src, []byte("bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := installCmd(src, t.TempDir())()
+	if _, ok := msg.(installedMsg); !ok {
+		t.Fatalf("expected installedMsg, got %T: %+v", msg, msg)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("installCmd left the build temp dir behind on success: stat err = %v", err)
+	}
+}
+
+func TestInstallCmdRemovesBuildTempDirOnFailure(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "stoat-build-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tmp, "stoat") // never created, so Install's Open fails
+
+	msg := installCmd(src, t.TempDir())()
+	if _, ok := msg.(errMsg); !ok {
+		t.Fatalf("expected errMsg for a missing src binary, got %T: %+v", msg, msg)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("installCmd left the build temp dir behind on failure: stat err = %v", err)
+	}
+}

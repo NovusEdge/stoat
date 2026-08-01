@@ -162,6 +162,10 @@ func buildCmd(repoDir, version string) tea.Cmd {
 		}
 		out := filepath.Join(tmp, "stoat")
 		if err := Build(repoDir, version, out); err != nil {
+			// Nothing will ever call installCmd to clean this up -- the build
+			// never produced a binary to hand it -- so this is the one path
+			// that has to remove the temp dir itself.
+			os.RemoveAll(tmp)
 			return errMsg{err: err}
 		}
 		return builtMsg{tmpPath: out}
@@ -170,6 +174,10 @@ func buildCmd(repoDir, version string) tea.Cmd {
 
 func installCmd(src, destDir string) tea.Cmd {
 	return func() tea.Msg {
+		// The temp dir buildCmd created is done its job the moment the binary
+		// is copied out of it -- whether that copy succeeds or fails -- so it
+		// goes away here unconditionally rather than leaking ~10MB per run.
+		defer os.RemoveAll(filepath.Dir(src))
 		path, err := Install(src, destDir)
 		if err != nil {
 			return errMsg{err: err}
@@ -235,9 +243,21 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.phase {
 	case phaseDir:
 		if key.Matches(msg, keys.Install) {
+			dir := m.dir
 			if v := strings.TrimSpace(m.input.Value()); v != "" {
-				m.dir = expandHome(v, m.home)
+				dir = expandHome(v, m.home)
 			}
+			// Abs runs whether the value came from the prompt or the untouched
+			// default: it is what turns a bare "bin" into a real path instead
+			// of a PATH entry any cwd can shadow, and it is what paths.go's
+			// quoting later trusts to already be a real filesystem path.
+			abs, err := filepath.Abs(dir)
+			if err != nil {
+				m.err = err
+				m.phase = phaseDone
+				return m, tea.Quit
+			}
+			m.dir = abs
 			m.version = Version(m.repoDir)
 			m.phase = phaseBuild
 			return m, buildCmd(m.repoDir, m.version)

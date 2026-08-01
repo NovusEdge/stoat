@@ -73,20 +73,30 @@ func TestRunChecksFindsBinary(t *testing.T) {
 	t.Fatal("no qemu-img check in the list")
 }
 
-// An unknown distro still reports the problem, just without a command to run.
+// An unknown distro still reports the problem, and still names the packages
+// to install -- it just invents no command to run. Iterating binChecks
+// directly (rather than trusting whatever RunChecks(DistroUnknown) returns)
+// is what makes this test able to fail: the previous version ranged over a
+// nil c.Fix and asserted nothing.
 func TestRunChecksUnknownDistroHasNoCommand(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	for _, c := range RunChecks(DistroUnknown) {
-		if c.Name == "/dev/kvm" {
-			continue // kvm's fix is distro-independent
-		}
+	checks := RunChecks(DistroUnknown)
+	for i, b := range binChecks {
+		c := checks[i]
 		if c.OK {
-			continue
+			t.Fatalf("%s: OK with an empty PATH", c.Name)
 		}
-		for _, f := range c.Fix {
-			if strings.Contains(f, "sudo pacman") || strings.Contains(f, "sudo apt") || strings.Contains(f, "sudo dnf") {
-				t.Errorf("%s: invented a package manager command for an unknown distro: %q", c.Name, f)
+		if len(c.Fix) == 0 {
+			t.Fatalf("%s: unknown distro lost the package names entirely", c.Name)
+		}
+		fix := strings.Join(c.Fix, " ")
+		if strings.Contains(fix, "sudo pacman") || strings.Contains(fix, "sudo apt") || strings.Contains(fix, "sudo dnf") {
+			t.Errorf("%s: invented a package manager command for an unknown distro: %q", c.Name, fix)
+		}
+		for _, name := range []string{b.pkg.Arch, b.pkg.Debian, b.pkg.Fedora} {
+			if !strings.Contains(fix, name) {
+				t.Errorf("%s: Fix %q is missing the %s package name", c.Name, fix, name)
 			}
 		}
 	}

@@ -42,12 +42,38 @@ func ShellRC(shell, home, dir string) (rcPath, line string) {
 	case "bash":
 		return filepath.Join(home, ".bashrc"), exportLine(dir)
 	case "fish":
-		return filepath.Join(home, ".config", "fish", "config.fish"), "fish_add_path " + dir
+		return filepath.Join(home, ".config", "fish", "config.fish"), "fish_add_path " + fishQuote(dir)
 	}
 	return filepath.Join(home, ".profile"), exportLine(dir)
 }
 
-func exportLine(dir string) string { return `export PATH="` + dir + `:$PATH"` }
+// exportLine is a POSIX sh/bash/zsh export. dir is single-quoted rather than
+// interpolated into the surrounding double quotes: a bare double-quoted
+// insertion would let a `"`, `$`, or backtick in dir run as shell syntax the
+// moment the rc file is sourced, and an unquoted relative dir would silently
+// make PATH depend on whatever directory the shell happens to be in. The
+// single-quoted segment and the double-quoted ":$PATH" that follows it
+// concatenate into one string -- adjacent quoted strings do that in every
+// POSIX shell -- so $PATH still expands while dir does not.
+func exportLine(dir string) string { return `export PATH=` + shellQuote(dir) + `:"$PATH"` }
+
+// shellQuote wraps s in single quotes for a POSIX shell. Inside single quotes
+// nothing is special except the quote character itself, so the only escape
+// needed is the standard one: close the quote, emit an escaped literal quote,
+// reopen it.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// fishQuote wraps s in single quotes for fish. Fish's single-quote escaping
+// differs from POSIX's: backslash is special there too (it is how you get a
+// literal backslash or a literal quote), so both have to be escaped, in that
+// order so an escaped quote's own backslash is not re-escaped.
+func fishQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return "'" + s + "'"
+}
 
 // AppendRC adds line to rcPath unless it is already there, reporting whether it
 // wrote anything. It is the only place the installer touches a file the user
@@ -86,8 +112,15 @@ func AppendRC(rcPath, line string) (added bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	// Close is checked rather than deferred and ignored, same as build.go's
+	// Install: this is the one function that writes to a file the user owns,
+	// so a close-time failure (a full disk, most plausibly) must not be
+	// reported as added=true.
 	if _, err := f.WriteString(b.String()); err != nil {
+		_ = f.Close()
+		return false, err
+	}
+	if err := f.Close(); err != nil {
 		return false, err
 	}
 	return true, nil

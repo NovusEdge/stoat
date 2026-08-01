@@ -104,7 +104,7 @@ func TestInstallCmd(t *testing.T) {
 		{"arch", DistroArch, []string{"sudo pacman -S --needed qemu-full"}},
 		{"debian", DistroDebian, []string{"sudo apt install qemu-system-x86"}},
 		{"fedora", DistroFedora, []string{"sudo dnf install qemu-kvm"}},
-		{"unknown gets no command", DistroUnknown, nil},
+		{"unknown names the packages, invents no command", DistroUnknown, []string{"install: qemu-full / qemu-system-x86 / qemu-kvm"}},
 	}
 
 	for _, tt := range tests {
