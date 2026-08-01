@@ -54,9 +54,10 @@ func wantsAutoProvisionPrompt(v *config.VM) bool {
 	if v.Mode == "cloud" {
 		return false
 	}
-	// A disk VM has no ssh until its guest OS is installed, so it will never
-	// become reachable — but if it has been installed, only offer when the
-	// last run didn't already succeed.
+	// An uninstalled disk VM is running its installer, whose root is a tmpfs
+	// that the install replaces — sshd there may well answer, which is
+	// exactly why this has to be checked rather than left to reachability.
+	// Once installed, only offer when the last run didn't already succeed.
 	if v.Mode == "disk" && !v.Installed {
 		return false
 	}

@@ -86,6 +86,23 @@ func Uptime(v *config.VM) time.Duration {
 	return time.Since(fi.ModTime()).Truncate(time.Second)
 }
 
+// installedBytes is how much has to be written into a disk VM's qcow2 before
+// stoat believes an OS landed in it. A freshly created 8G qcow2 is ~200 KB of
+// metadata and nothing else; the smallest real install is three orders of
+// magnitude past this, so the gap is not close.
+//
+// ponytail: a size check, not a partition-table read. If an install dies
+// halfway and trips this anyway, "i" on the detail screen forces the ISO back.
+const installedBytes = 10 << 20
+
+// diskWritten reports whether v's disk image has had anything real written to
+// it. qcow2 files grow as guest blocks are allocated, so the host-side size is
+// the whole signal — no qemu-img, no NBD mount.
+func diskWritten(v *config.VM) bool {
+	fi, err := os.Stat(v.DiskPath())
+	return err == nil && fi.Size() > installedBytes
+}
+
 // Start launches QEMU. -daemonize means it detaches itself; stoat supervises
 // nothing and tracks the process by pidfile.
 func Start(v *config.VM) error {
@@ -93,7 +110,21 @@ func Start(v *config.VM) error {
 		return fmt.Errorf("%s is already running", v.Name)
 	}
 	os.Remove(v.MonitorPath())
-	if v.Mode == "live" {
+	// The interactive install happens inside the guest, where stoat cannot
+	// watch it finish. Noticing it here — at the next start, which is the
+	// only moment the boot order matters — means nobody has to report it.
+	if v.Mode == "disk" && !v.Installed && diskWritten(v) {
+		v.Installed = true
+		if err := v.Save(); err != nil {
+			v.Installed = false
+			return fmt.Errorf("marking %s installed: %w", v.Name, err)
+		}
+		logx.L().Info("disk has an OS on it, marking installed", "vm", v.Name)
+	}
+	// A disk VM gets the same overlay while it is still booting its installer:
+	// the key it plants in /root/.ssh is what setup-disk copies onto the
+	// target, and without it the installed guest has no way to let stoat in.
+	if v.Mode == "live" || (v.Mode == "disk" && !v.Installed && v.OS == "alpine") {
 		// Disposable VMs: always rebuild rather than checking staleness.
 		if err := apkovl.Build(v); err != nil {
 			return fmt.Errorf("building apkovl: %w", err)

@@ -170,10 +170,12 @@ func (m model) viewDetail() string {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
-		// Until this is true a disk VM has no sshd and no key (apkovl is
-		// built for live mode only), so "p" cannot work — startProvision
-		// refuses with the same instruction rather than timing out on ssh.
-		installed := warnStyle.Render("no — run " + installerName(v) + " in the qemu window, then press i")
+		// Until this is true the VM boots its installer ISO, so "p" would be
+		// provisioning the installer's tmpfs — startProvision refuses with
+		// the same instruction rather than timing out on ssh. The next start
+		// sets it automatically once the install has written to the disk; "i"
+		// is the override for when that guess is wrong either way.
+		installed := warnStyle.Render("no — run " + installerName(v) + " in the qemu window, then restart")
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}

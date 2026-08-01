@@ -57,14 +57,14 @@ func (m *model) startProvision(v *config.VM) tea.Cmd {
 		// piping it into `sh -s` would just fail.
 		return m.showToast(v.Name+": cloud VMs provision at first boot via cloud-init — recipes are applied automatically; recreate the VM to change them", true)
 	}
-	// A disk VM boots its installer ISO with no key and no sshd: apkovl.Build
-	// runs for live mode only (qemu/run.go), so there is nothing for ssh to
-	// connect to until the guest OS is actually installed. Without this the
-	// user waits the full 90s ssh timeout and gets "ssh not reachable", which
-	// says nothing about the real cause.
+	// A disk VM is still booting its installer ISO until its OS is on disk;
+	// sshd there belongs to the installer, not to the system being built, so
+	// provisioning it would run recipes against a tmpfs about to be thrown
+	// away. Without this the user waits the full 90s ssh timeout and gets
+	// "ssh not reachable", which says nothing about the real cause.
 	if v.Mode == "disk" && !v.Installed {
 		return m.showToast(v.Name+": not installed yet — run "+installerName(v)+
-			" in the qemu window, then press i (marks it installed) before provisioning", true)
+			" in the qemu window, then stop and start it (stoat notices the install itself)", true)
 	}
 	if len(v.Recipes) == 0 {
 		return m.showToast(v.Name+": no recipes selected — nothing to provision", true)

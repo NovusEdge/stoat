@@ -10,23 +10,39 @@ Symptom-first. Find the error text you're seeing and jump to it.
 
 (`internal/sshx/sshx.go`'s `Wait`, with `WaitTimeout` set to 90 seconds.)
 
-**If this happens while provisioning a disk VM:** the apkovl that installs
-your ssh key and enables `sshd` (`internal/apkovl/apkovl.go`) is built
-**live-mode only** — `internal/qemu/run.go`'s `Start` only calls
-`apkovl.Build` when `v.Mode == "live"`. A disk VM boots its installer ISO with
-no key baked in and no `sshd` running, so there is nothing on the other end of
-that port until you actually install the guest OS.
+**If this happens while provisioning a disk VM:** the VM is still booting its
+installer ISO. Its guest OS is not on the disk yet, so there is nothing to
+provision — and `sshd` answering means the *installer's* sshd is up, not the
+system you are building.
 
 **Fix:** open the QEMU window for the VM, run the installer at the console
-(`setup-alpine` on Alpine; check the ISO's own installer otherwise), then back
-in stoat press `i` on the detail screen to mark the VM installed. Only after
-that will ssh — and provisioning — have anything to connect to. Pressing `p`
-before that point is refused outright, with a message pointing at the same
-fix, rather than making you wait out the full timeout to find out:
+(`setup-alpine` on Alpine; check the ISO's own installer otherwise), then stop
+and start the VM in stoat. The next start notices the OS on the disk, marks
+the VM installed and drops the ISO from the boot order. Pressing `p` before
+that is refused outright, with a message pointing at the same fix, rather than
+making you wait out the full timeout to find out:
 
 ```
-<name>: not installed yet — run <installer> in the qemu window, then press i (marks it installed) before provisioning
+<name>: not installed yet — run <installer> in the qemu window, then stop and start it (stoat notices the install itself)
 ```
+
+`i` on the detail screen still toggles `installed` by hand, for when that
+guess goes wrong in either direction — an install that died halfway leaves
+enough bytes on the disk to look finished (the threshold is `installedBytes`
+in `internal/qemu/run.go`), and `i` is how you get the ISO back.
+
+## Provisioning a disk VM fails with `Permission denied (publickey,...)`
+
+An Alpine disk VM gets the same apkovl a live one does
+(`internal/apkovl/apkovl.go`) while it is still uninstalled, precisely so
+`setup-alpine`'s `setup-disk -m sys` — which copies the *running* system onto
+the target — carries `/root/.ssh/authorized_keys` across to the installed
+system. A VM installed before that behaviour existed has no such key.
+
+**Fix:** at the guest console, paste your stoat public key
+(`~/.stoat/id_stoat.pub`) into the installed system's
+`/root/.ssh/authorized_keys`. Or reinstall: the install now carries the key
+over on its own.
 
 ## A binary on `/mnt/host` won't run — confusing "not found"
 

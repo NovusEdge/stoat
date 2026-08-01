@@ -47,9 +47,24 @@ func Args(v *config.VM) []string {
 		// empty overlay and hang instead of falling through to the ISO.
 		a = append(a, "-boot", "d")
 	case "disk":
+		// The qcow2 comes first so it is vda: the installer's disk picker
+		// lists devices in order, and the target must be the obvious answer.
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
 		if !v.Installed {
-			a = append(a, "-cdrom", v.ISOPath(), "-boot", "d")
+			a = append(a, "-cdrom", v.ISOPath())
+			// The same overlay a live VM gets, for the duration of the
+			// install only. Alpine's setup-disk in sys mode copies the
+			// RUNNING system onto the target, so an installer environment
+			// that already has stoat's key in /root/.ssh ends up installing
+			// it — otherwise the guest is unreachable after the install and
+			// provisioning dies on "Permission denied (publickey)".
+			//
+			// Only Alpine's initramfs looks for an apkovl. Any other ISO
+			// would just see a second, useless disk in its target picker.
+			if v.OS == "alpine" {
+				a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
+			}
+			a = append(a, "-boot", "d")
 		}
 	case "cloud":
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")

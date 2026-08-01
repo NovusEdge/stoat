@@ -47,7 +47,7 @@ func TestArgsLive(t *testing.T) {
 func TestArgsDiskNotInstalled(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
-		Name: "work", Mode: "disk", ISO: "isos/alpine.iso",
+		Name: "work", Mode: "disk", OS: "alpine", ISO: "isos/alpine.iso",
 		RAM: 8192, CPUs: 4, Disk: "8G", Installed: false,
 		Share: "/home/u/vms", SSHPort: 2202,
 		Dir: filepath.Join("/data", "work"),
@@ -60,8 +60,23 @@ func TestArgsDiskNotInstalled(t *testing.T) {
 	if !strings.Contains(got, "-cdrom /data/isos/alpine.iso") || !strings.Contains(got, "-boot d") {
 		t.Errorf("uninstalled disk VM must boot the ISO first:\n%s", got)
 	}
-	if strings.Contains(got, "fat:rw:") {
-		t.Error("disk mode must not attach an apkovl overlay")
+	// The overlay is what carries stoat's key into the installer environment,
+	// so that setup-disk copies it onto the target. Without it the installed
+	// guest refuses every key stoat has and provisioning can never work.
+	if !strings.Contains(got, "fat:rw:/data/work/ovl") {
+		t.Errorf("an alpine install needs the apkovl overlay for its key:\n%s", got)
+	}
+	// ...and it must come after the target disk, so the installer's picker
+	// offers the qcow2 as vda rather than the overlay.
+	if strings.Index(got, "disk.qcow2") > strings.Index(got, "fat:rw:") {
+		t.Errorf("the overlay outranks the target disk:\n%s", got)
+	}
+
+	// A BYO ISO's installer has no idea what an apkovl is; the overlay would
+	// only show up in its disk picker as a second, wrong target.
+	v.OS = "fedora"
+	if got := joined(Args(v)); strings.Contains(got, "fat:rw:") {
+		t.Errorf("a non-alpine install was given an apkovl overlay:\n%s", got)
 	}
 }
 

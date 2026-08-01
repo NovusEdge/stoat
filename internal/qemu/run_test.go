@@ -2,8 +2,11 @@ package qemu
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/novusedge/stoat/internal/config"
 )
 
 // TestCmdlineMatchesDirBoundary guards against a name-collision false positive:
@@ -22,5 +25,32 @@ func TestCmdlineMatchesDirBoundary(t *testing.T) {
 	}
 	if !cmdlineMatches(cmdline, work2Dir) {
 		t.Errorf("cmdlineMatches(work2's cmdline, %q) = false, want true", work2Dir)
+	}
+}
+
+// TestDiskWritten pins the two sizes that decide whether Start flips a disk VM
+// to installed: an untouched qcow2 (~200 KB of metadata, which is what a VM
+// whose setup-alpine never reached the disk step looks like) must not count.
+func TestDiskWritten(t *testing.T) {
+	v := &config.VM{Name: "work", Mode: "disk", Dir: t.TempDir()}
+
+	if diskWritten(v) {
+		t.Error("a VM with no disk image at all reports as written")
+	}
+
+	write := func(n int) {
+		if err := os.WriteFile(v.DiskPath(), make([]byte, n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(196736) // a real, freshly created 8G qcow2
+	if diskWritten(v) {
+		t.Error("an empty qcow2 reports as written; the VM would skip its installer")
+	}
+
+	write(installedBytes + 1)
+	if !diskWritten(v) {
+		t.Error("an installed-size qcow2 does not report as written")
 	}
 }
