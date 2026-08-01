@@ -130,6 +130,9 @@ func TestAppendRCCreatesMissingFile(t *testing.T) {
 	if !strings.Contains(string(got), line) {
 		t.Errorf("new file does not contain the line:\n%s", got)
 	}
+	if strings.HasPrefix(string(got), "\n") {
+		t.Errorf("a freshly created file must not start with a blank line:\n%q", got)
+	}
 }
 
 // A file not ending in a newline must not get the export glued onto its last line.

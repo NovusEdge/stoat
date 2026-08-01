@@ -9,6 +9,10 @@ import (
 // print a working install command. Anything we do not recognise stays
 // DistroUnknown, and the installer names the packages without inventing a
 // command for them — a wrong sudo line is worse than no line.
+//
+// Adding a distro touches three places: known() (the ID/ID_LIKE names it
+// answers to), PkgName (which Pkg field is its package name), and
+// installPrefix (its install command, the one place that mapping lives).
 type Distro int
 
 const (
@@ -99,6 +103,13 @@ func (d Distro) PkgName(p Pkg) string {
 	return ""
 }
 
+// installPrefix is each known distro's command up to the package name(s).
+var installPrefix = map[Distro]string{
+	DistroArch:   "sudo pacman -S --needed ",
+	DistroDebian: "sudo apt install ",
+	DistroFedora: "sudo dnf install ",
+}
+
 // InstallCmd is the shell command that installs p, or nil when we cannot say.
 // It returns a slice because a Check's Fix is a command *list* — see checks.go
 // for why that matters.
@@ -107,13 +118,9 @@ func (d Distro) InstallCmd(p Pkg) []string {
 	if name == "" {
 		return nil
 	}
-	switch d {
-	case DistroArch:
-		return []string{"sudo pacman -S --needed " + name}
-	case DistroDebian:
-		return []string{"sudo apt install " + name}
-	case DistroFedora:
-		return []string{"sudo dnf install " + name}
+	prefix, ok := installPrefix[d]
+	if !ok {
+		return nil
 	}
-	return nil
+	return []string{prefix + name}
 }

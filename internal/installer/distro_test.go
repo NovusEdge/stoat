@@ -35,6 +35,17 @@ func TestParseOSRelease(t *testing.T) {
 			wantID:  "debian",
 		},
 		{
+			name:    "single-quoted value",
+			content: "ID='fedora'\n",
+			wantID:  "fedora",
+		},
+		{
+			name:       "CRLF line endings",
+			content:    "ID=debian\r\nID_LIKE=\"debian\"\r\n",
+			wantID:     "debian",
+			wantIDLike: []string{"debian"},
+		},
+		{
 			name:    "empty content yields nothing",
 			content: "",
 		},

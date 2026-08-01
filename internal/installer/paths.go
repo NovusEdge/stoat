@@ -69,10 +69,16 @@ func AppendRC(rcPath, line string) (added bool, err error) {
 	}
 
 	var b strings.Builder
-	if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
+	if len(existing) > 0 {
+		if !strings.HasSuffix(string(existing), "\n") {
+			b.WriteString("\n")
+		}
+		// Separate our block from whatever the file already had. A fresh file
+		// has nothing to separate from, so this blank line only appears when
+		// existing content precedes it.
 		b.WriteString("\n")
 	}
-	b.WriteString("\n# added by the stoat installer\n")
+	b.WriteString("# added by the stoat installer\n")
 	b.WriteString(line)
 	b.WriteString("\n")
 

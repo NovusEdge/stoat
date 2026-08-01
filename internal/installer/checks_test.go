@@ -136,6 +136,26 @@ func TestKVMCheckAt(t *testing.T) {
 	}
 }
 
+// TestKVMCheckAtOtherError drives kvmCheckAt's default branch: an error that
+// is neither fs.ErrNotExist nor fs.ErrPermission. A path whose parent is a
+// regular file rather than a directory reliably yields ENOTDIR.
+func TestKVMCheckAtOtherError(t *testing.T) {
+	dir := t.TempDir()
+
+	notADir := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(notADir, nil, 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	c := kvmCheckAt(filepath.Join(notADir, "kvm"))
+	if c.OK {
+		t.Error("a path through a non-directory should fail")
+	}
+	if c.Detail == "" || strings.Contains(c.Detail, "not present") || c.Detail == "permission denied" {
+		t.Errorf("Detail = %q, want the underlying error text, not the not-exist/permission-denied cases", c.Detail)
+	}
+}
+
 func TestProblems(t *testing.T) {
 	cs := []Check{
 		{Name: "a", OK: true},
