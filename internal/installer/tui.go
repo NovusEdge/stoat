@@ -112,6 +112,15 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 	in := textinput.New()
 	in.SetValue(dir)
 	in.Prompt = ""
+	// Clear the text style bubbles v2 hardcodes (DefaultDarkStyles paints text
+	// ANSI colour 7, grey-on-white on a light terminal) so the value inherits
+	// the terminal's own foreground instead. See internal/tui/theme.go's
+	// newTextInput, which does the same thing for the main TUI; that helper is
+	// package-private, so the installer repeats the fix locally.
+	st := in.Styles()
+	st.Focused.Text = lipgloss.NewStyle()
+	st.Blurred.Text = lipgloss.NewStyle()
+	in.SetStyles(st)
 	in.Focus()
 
 	sp := spinner.New()
