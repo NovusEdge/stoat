@@ -36,6 +36,38 @@ func TestChecksAdvanceToDirPrompt(t *testing.T) {
 	}
 }
 
+// checkTable's own comment documents a real lipgloss v2.0.5 bug: a headerless
+// table that ever calls .Height() silently drops its last row. This is the
+// regression test that comment promises but does not enforce on its own --
+// internal/tui/fields_test.go's TestFieldsKeepsEveryRow is the sibling for
+// the main TUI's equivalent landmine. It fails the moment someone adds a
+// width/height clamp to checkTable to fit a narrow terminal without
+// re-reading the warning.
+func TestCheckTableKeepsEveryRow(t *testing.T) {
+	m := Model{checks: []Check{
+		{Name: "qemu-system-x86_64", OK: true, Detail: "/usr/bin"},
+		{Name: "qemu-img", OK: true, Detail: "/usr/bin"},
+		{Name: "ssh", OK: true, Detail: "/usr/bin"},
+		{Name: "xorriso", OK: false, Detail: "not found"},
+		{Name: "/dev/kvm", OK: true, Detail: "read/write"},
+	}}
+	out := m.checkTable()
+
+	for _, c := range m.checks {
+		if !strings.Contains(out, c.Name) {
+			t.Errorf("checkTable is missing %q:\n%s", c.Name, out)
+		}
+	}
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != len(m.checks) {
+		t.Fatalf("got %d rows, want %d:\n%s", len(lines), len(m.checks), out)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "/dev/kvm") {
+		t.Errorf("last row is not /dev/kvm -- the row v2.0.5 drops once .Height() is set: %q", last)
+	}
+}
+
 // Typing a relative path and pressing enter must resolve it to an absolute
 // path before it becomes m.dir -- a bare "bin" left relative would write a
 // PATH entry any cwd can shadow. This is the test that would have caught it:
@@ -114,6 +146,56 @@ func TestDirPromptExpandsHome(t *testing.T) {
 				t.Errorf("dir = %q, want %q", m.dir, tt.want)
 			}
 		})
+	}
+}
+
+// Ctrl+C at the dir prompt -- before anything is built or installed -- must
+// not let `just setup` report success. binPath is still empty at this point,
+// which is exactly what Failed() and done() key on to tell this apart from
+// quitting after a successful install.
+func TestCtrlCAtDirPromptFailsTheRun(t *testing.T) {
+	m := newTestModel(t, "/usr/bin")
+	next, _ := m.Update(checksDoneMsg{checks: nil})
+	m = next.(Model)
+
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(Model)
+
+	if !m.Failed() {
+		t.Error("Failed() = false after ctrl+c before anything was installed")
+	}
+	if m.phase != phaseDone {
+		t.Errorf("phase = %v, want phaseDone", m.phase)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+c must still quit the program")
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "cancelled") || !strings.Contains(view, "nothing was installed") {
+		t.Errorf("view does not say the run was cancelled:\n%s", view)
+	}
+}
+
+// Ctrl+C at the rc prompt is different: the binary is already on disk by
+// then, so walking away from the optional PATH question must stay as
+// non-fatal as answering "n" to it -- see the settled design in Failed's
+// comment.
+func TestCtrlCAfterInstallStaysNonFatal(t *testing.T) {
+	m := newTestModel(t, "/usr/bin")
+	m.dir = "/home/x/.local/bin"
+	m.phase = phaseRC
+	m.binPath = "/home/x/.local/bin/stoat"
+	m.rcPath, m.rcLine = ShellRC("/usr/bin/zsh", "/home/x", m.dir)
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m = next.(Model)
+
+	if m.Failed() {
+		t.Error("Failed() = true after ctrl+c once the binary was already installed")
+	}
+	view := m.View().Content
+	if !strings.Contains(view, m.binPath) {
+		t.Errorf("done view lost the install confirmation after ctrl+c:\n%s", view)
 	}
 }
 

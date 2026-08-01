@@ -5,7 +5,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/novusedge/stoat/internal/qemu"
 )
+
+// binChecks hardcodes "qemu-system-x86_64" as a literal rather than
+// importing internal/qemu.Binary: that package drags in cloudinit/config/
+// recipes, which checks.go has no business depending on for a string. The
+// test binary can afford the import that production code can't, so this is
+// the guard against the two names drifting apart if stoat ever renames the
+// binary it shells out to.
+func TestFirstBinCheckMatchesQemuBinary(t *testing.T) {
+	if got := binChecks[0].name; got != qemu.Binary {
+		t.Errorf("binChecks[0].name = %q, want internal/qemu.Binary %q", got, qemu.Binary)
+	}
+}
 
 // An empty PATH guarantees exec.LookPath fails for everything, regardless of
 // what happens to be installed on the machine running tests. Same trick as

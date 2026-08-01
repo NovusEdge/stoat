@@ -64,7 +64,12 @@ var keys = struct {
 	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 }
 
-var helpModel = help.New()
+// helpModel returns a fresh help.Model rather than sharing one package-level
+// value: ShortHelpView never mutates it in practice, but a mutable
+// package-level UI model is exactly the kind of shared state that looks
+// harmless right up until something does. help.New() is a small struct
+// literal, so building one per render costs nothing.
+func helpModel() help.Model { return help.New() }
 
 type phase int
 
@@ -108,6 +113,11 @@ type Model struct {
 	rcErr error
 	err   error
 	width int
+	// cancelled is set by ctrl+c/q leaving before the run reached its own
+	// completion (phaseDone via the normal message flow). See Failed and
+	// done: whether that counts as a failure depends on whether binPath was
+	// already set when it happened.
+	cancelled bool
 }
 
 // New builds the model. Every environment value it depends on is a parameter so
@@ -150,7 +160,12 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 // exit code. A failed rc write does not count: the binary is already built and
 // installed by the time that can happen, so it exits 0 with a warning rather
 // than reporting a hard failure over a recoverable one.
-func (m Model) Failed() bool { return m.err != nil }
+//
+// Quitting before binPath is set is also a failure: nothing was installed, so
+// `just setup` reporting success would be a lie. Quitting after binPath is
+// set is not -- the install already succeeded, and walking away from the
+// optional PATH question is the same non-fatal outcome as answering it "n".
+func (m Model) Failed() bool { return m.err != nil || (m.cancelled && m.binPath == "") }
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.spin.Tick, runChecksCmd())
@@ -247,10 +262,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// into — at the dir prompt it is a character — so it is checked separately
 	// and only outside phaseDir.
 	if key.Matches(msg, keys.Interrupt) {
-		return m, tea.Quit
+		return m.cancel()
 	}
 	if key.Matches(msg, keys.Quit) && m.phase != phaseDir {
-		return m, tea.Quit
+		return m.cancel()
 	}
 
 	switch m.phase {
@@ -300,6 +315,16 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// cancel is ctrl+c/q leaving before the run reached phaseDone on its own.
+// It still needs a phase to render the final frame from, so it goes to
+// phaseDone like every other terminal state; Failed and done tell an abort
+// apart from a normal finish by m.cancelled and m.binPath.
+func (m Model) cancel() (tea.Model, tea.Cmd) {
+	m.cancelled = true
+	m.phase = phaseDone
+	return m, tea.Quit
 }
 
 func expandHome(p, home string) string {
@@ -383,7 +408,7 @@ func (m Model) active() string {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			"  install to: "+m.input.View(),
 			"",
-			"  "+helpModel.ShortHelpView([]key.Binding{keys.Install, keys.Interrupt}),
+			"  "+helpModel().ShortHelpView([]key.Binding{keys.Install, keys.Interrupt}),
 		)
 
 	case phaseBuild:
@@ -398,7 +423,7 @@ func (m Model) active() string {
 			"    "+dimStyle.Render(m.rcLine),
 			"",
 			"  append it? [Y/n]",
-			"  "+helpModel.ShortHelpView([]key.Binding{keys.Accept, keys.Decline}),
+			"  "+helpModel().ShortHelpView([]key.Binding{keys.Accept, keys.Decline}),
 		)
 
 	case phaseDone:
@@ -414,9 +439,15 @@ func (m Model) done() string {
 	// what to fix before their first VM -- that guidance is meant to be given
 	// once, not only on a clean run.
 	var lines []string
-	if m.err != nil {
+	switch {
+	case m.cancelled && m.binPath == "":
+		// Left before the build/install ever finished: unlike every other
+		// branch here, nothing was actually installed, which is exactly what
+		// Failed() keys on too.
+		lines = []string{"", errStyle.Render("cancelled") + " — nothing was installed"}
+	case m.err != nil:
 		lines = []string{"", errStyle.Render("failed") + " — " + m.err.Error()}
-	} else {
+	default:
 		lines = []string{
 			"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
 			"",
