@@ -3,6 +3,11 @@
 *.iso
 *.qcow2
 /stoat
+/installer
+
+# the installer copies to a temp file in the destination dir and renames, so a
+# kill mid-copy can orphan one. Only lands here if $PREFIX points into the repo.
+.stoat-*
 
 # agent / planning cruft — local only
 docs/superpowers/
