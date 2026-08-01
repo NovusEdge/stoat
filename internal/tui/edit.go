@@ -14,6 +14,7 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
+	"github.com/novusedge/stoat/internal/theme"
 )
 
 // editModel is the in-TUI editor for an existing VM, replacing the round trip
@@ -65,7 +66,7 @@ func newEdit(v *config.VM) editModel {
 		strconv.Itoa(v.SSHPort),
 	}
 	for i := 0; i < eFieldCount; i++ {
-		ti := newTextInput()
+		ti := theme.TextInput()
 		ti.SetValue(vals[i])
 		e.inputs = append(e.inputs, ti)
 	}

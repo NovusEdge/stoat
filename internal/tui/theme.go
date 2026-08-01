@@ -3,22 +3,25 @@ package tui
 import (
 	"image/color"
 
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
+
+	"github.com/novusedge/stoat/internal/theme"
 )
 
-// theme is the only place in the program that names a color.
-type theme struct {
+// th names the colors this package draws with. The values live in
+// internal/theme, which the installer draws from too — a color is defined
+// once, in one package, or the two binaries drift apart.
+type themeColors struct {
 	accent, up, down, warn, err, dim color.Color
 }
 
-var th = theme{
-	accent: lipgloss.Color("#C98A5B"),
-	up:     lipgloss.Color("#7FB069"),
-	down:   lipgloss.Color("#6C7086"),
-	warn:   lipgloss.Color("#E0A458"),
-	err:    lipgloss.Color("#D16969"),
-	dim:    lipgloss.Color("#7A7A7A"),
+var th = themeColors{
+	accent: theme.Accent,
+	up:     theme.Up,
+	down:   theme.Down,
+	warn:   theme.Warn,
+	err:    theme.Err,
+	dim:    theme.Dim,
 }
 
 var (
@@ -75,25 +78,6 @@ func pane(title, body string, maxWidth int) string {
 	return style.Render(content)
 }
 
-// newTextInput builds a bubbles text input styled the way stoat wants every
-// one of them.
-//
-// It exists because bubbles v2's textinput.New() hardcodes DefaultDarkStyles(),
-// which paints unfocused text ANSI colour 7 — on a light terminal that is grey
-// on white. v1's TextStyle was a zero Style, so the value simply inherited the
-// terminal's own foreground, which is right on any background and is what the
-// rest of stoat relies on (theme.go names six colours and none of them is a
-// plain foreground). Clearing Text restores that.
-func newTextInput() textinput.Model {
-	ti := textinput.New()
-	ti.Prompt = ""
-	st := ti.Styles()
-	st.Focused.Text = lipgloss.NewStyle()
-	st.Blurred.Text = lipgloss.NewStyle()
-	ti.SetStyles(st)
-	return ti
-}
-
 // Glyphs are named here for the same reason colours are: so a symbol means
 // one thing across every screen and changing it is one edit, not a grep.
 //
@@ -145,11 +129,4 @@ func paneAt(title, body string, width, maxWidth int) string {
 	return pane(title, lipgloss.NewStyle().Width(width).Render(body), maxWidth)
 }
 
-const bannerArt = `███████╗████████╗ ██████╗  █████╗ ████████╗
-██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚══██╔══╝
-███████╗   ██║   ██║   ██║███████║   ██║
-╚════██║   ██║   ██║   ██║██╔══██║   ██║
-███████║   ██║   ╚██████╔╝██║  ██║   ██║
-╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝   ╚═╝   `
-
-func banner() string { return accentStyle.Render(bannerArt) }
+func banner() string { return accentStyle.Render(theme.BannerArt) }

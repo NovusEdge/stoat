@@ -21,6 +21,7 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/recipes"
+	"github.com/novusedge/stoat/internal/theme"
 )
 
 // imageOption is one entry in the new-VM form's image picker: either a
@@ -448,7 +449,7 @@ func newForm() formModel {
 	f := formModel{mode: "live", recipeSel: map[string]bool{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
-		ti := newTextInput()
+		ti := theme.TextInput()
 		ti.SetValue(labels[i])
 		f.inputs = append(f.inputs, ti)
 	}
