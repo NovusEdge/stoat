@@ -151,11 +151,14 @@ func TestInstalledAsksAboutRCWhenNotOnPath(t *testing.T) {
 	}
 }
 
-// Declining must write nothing and still finish cleanly.
+// Declining must write nothing, still finish cleanly, and -- since the user
+// said they will add it by hand -- still show them the line to add.
 func TestDecliningRCGoesToDone(t *testing.T) {
 	m := newTestModel(t, "/usr/bin")
 	m.dir = "/home/x/.local/bin"
 	m.phase = phaseRC
+	m.binPath = "/home/x/.local/bin/stoat"
+	m.rcPath, m.rcLine = ShellRC("/usr/bin/zsh", "/home/x", m.dir)
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = next.(Model)
@@ -165,6 +168,10 @@ func TestDecliningRCGoesToDone(t *testing.T) {
 	}
 	if m.rcAdded {
 		t.Error("declining must not report a write")
+	}
+	view := m.View().Content
+	if !strings.Contains(view, m.rcLine) {
+		t.Errorf("done view drops the line after declining it:\n%s", view)
 	}
 }
 
@@ -276,6 +283,27 @@ func TestBuildFailureShowsCompilerOutput(t *testing.T) {
 	}
 	if !strings.Contains(m.View().Content, "syntax error") {
 		t.Errorf("view does not show the compiler output:\n%s", m.View().Content)
+	}
+}
+
+// A hard failure must not swallow the host advice: a user whose install died
+// on, say, a permission error still needs to know what to fix before their
+// first VM, and this is the only place that guidance is ever given.
+func TestFailedInstallStillShowsHostAdvice(t *testing.T) {
+	m := newTestModel(t, "/home/x/.local/bin")
+	m.checks = []Check{
+		{Name: "xorriso", OK: false, Detail: "not found", Fix: []string{"sudo pacman -S --needed libisoburn"}},
+	}
+
+	next, _ := m.Update(errMsg{err: &BuildError{Output: "internal/qemu/run.go:1:1: syntax error"}})
+	m = next.(Model)
+
+	view := m.View().Content
+	if !strings.Contains(view, "before your first VM:") {
+		t.Errorf("failed install view drops the host advice:\n%s", view)
+	}
+	if !strings.Contains(view, "sudo pacman -S --needed libisoburn") {
+		t.Errorf("failed install view drops the fix command:\n%s", view)
 	}
 }
 

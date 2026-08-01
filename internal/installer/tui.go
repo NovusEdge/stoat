@@ -16,12 +16,18 @@ import (
 	"github.com/novusedge/stoat/internal/theme"
 )
 
-// bannerArt is drawn above the transcript. It is deliberately empty: when it is
-// blank the banner line is skipped and the layout still works, so filling it in
-// later costs nothing.
-//
-// ponytail: stub. Drop a small ASCII mark in here when there is one.
-const bannerArt = ""
+// bannerArt is drawn above the transcript. It is the same mark
+// internal/tui/theme.go draws above the main TUI, repeated here rather than
+// imported: that constant is package-private, same reason New() repeats
+// newTextInput's style fix locally instead of importing internal/tui for it.
+// At 43 columns it fits comfortably under defaultWidth, so there was no need
+// to shrink it for this layout.
+const bannerArt = `███████╗████████╗ ██████╗  █████╗ ████████╗
+██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚══██╔══╝
+███████╗   ██║   ██║   ██║███████║   ██║
+╚════██║   ██║   ██║   ██║██╔══██║   ██║
+███████║   ██║   ╚██████╔╝██║  ██║   ██║
+╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝   ╚═╝   `
 
 // defaultWidth is used until the first WindowSizeMsg arrives, and as the floor
 // for a terminal that reports something unusably narrow.
@@ -219,6 +225,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
+		// Only phaseChecks and phaseBuild ever render the spinner. Ticking on
+		// through phaseDir and phaseRC would repaint the whole transcript
+		// ~10x/s for a frame nothing shows, so the chain is left to die here
+		// and phaseBuild's dispatch in key() restarts it explicitly.
+		if m.phase != phaseChecks && m.phase != phaseBuild {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
@@ -260,7 +273,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.dir = abs
 			m.version = Version(m.repoDir)
 			m.phase = phaseBuild
-			return m, buildCmd(m.repoDir, m.version)
+			// The tick chain died when checks landed (see the TickMsg case in
+			// Update); phaseBuild renders the spinner again, so it has to be
+			// restarted here.
+			return m, tea.Batch(buildCmd(m.repoDir, m.version), m.spin.Tick)
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -392,29 +408,46 @@ func (m Model) active() string {
 }
 
 func (m Model) done() string {
+	// A hard failure still gets the host advice below: the checks already ran
+	// by the time anything can fail (build, install, or a bad dir), and a
+	// user whose install died on e.g. a permission error still needs to know
+	// what to fix before their first VM -- that guidance is meant to be given
+	// once, not only on a clean run.
+	var lines []string
 	if m.err != nil {
-		return "\n" + errStyle.Render("failed") + " — " + m.err.Error()
-	}
-
-	lines := []string{
-		"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
-		"",
-		"done — stoat " + m.version,
-	}
-	if m.rcAdded {
-		lines = append(lines,
+		lines = []string{"", errStyle.Render("failed") + " — " + m.err.Error()}
+	} else {
+		lines = []string{
+			"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
 			"",
-			"  added the PATH line to "+m.rcPath,
-			"  open a new shell, or source it, to pick it up",
-		)
-	}
-	if m.rcErr != nil {
-		lines = append(lines,
-			"",
-			"  "+warnStyle.Render("warn")+"  could not write "+m.rcPath+": "+m.rcErr.Error(),
-			"        add this line yourself:",
-			"          "+dimStyle.Render(m.rcLine),
-		)
+			"done — stoat " + m.version,
+		}
+		switch {
+		case m.rcAdded:
+			lines = append(lines,
+				"",
+				"  added the PATH line to "+m.rcPath,
+				"  open a new shell, or source it, to pick it up",
+			)
+		case m.rcErr != nil:
+			lines = append(lines,
+				"",
+				"  "+warnStyle.Render("warn")+"  could not write "+m.rcPath+": "+m.rcErr.Error(),
+				"        add this line yourself:",
+				"          "+dimStyle.Render(m.rcLine),
+			)
+		case m.rcLine != "":
+			// Declined: rcLine is only ever set once the rc prompt has been
+			// shown (see the installedMsg case in Update), so this is
+			// reachable only after a real "n". Mirrors the failed-write
+			// branch above, which already got this right -- a user who
+			// skipped it still needs the line to add by hand.
+			lines = append(lines,
+				"",
+				"  skipped — add this yourself:",
+				"        "+dimStyle.Render(m.rcLine),
+			)
+		}
 	}
 
 	if problems := Problems(m.checks); len(problems) > 0 {

@@ -4,42 +4,17 @@
 // builds from source, so it only makes sense from a checkout.
 package main
 
-import (
-	"fmt"
-	"os"
-	"runtime"
+import "os"
 
-	tea "charm.land/bubbletea/v2"
-
-	"github.com/novusedge/stoat/internal/installer"
-)
-
+// main just dispatches to run, which is defined per platform:
+// main_linux.go builds and installs stoat, main_other.go prints the friendly
+// "Linux-only" message. Splitting it this way, rather than gating the
+// message with a runtime.GOOS check here, is what makes the message
+// reachable at all -- internal/installer imports kvm_linux.go's KVMCheck
+// unconditionally, so this package does not compile on a non-Linux GOOS in
+// the first place, and an import that never compiles can never run its
+// runtime check. See kvm_linux.go's comment: this is the same platform-seam
+// pattern stoat already uses.
 func main() {
-	if runtime.GOOS != "linux" {
-		fmt.Fprintln(os.Stderr, "stoat is Linux-only: it needs KVM, and it does not compile for "+runtime.GOOS+" yet.")
-		os.Exit(1)
-	}
-
-	repoDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot determine the working directory:", err)
-		os.Exit(1)
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot determine your home directory:", err)
-		os.Exit(1)
-	}
-
-	m := installer.New(repoDir, home, os.Getenv("SHELL"), os.Getenv("PATH"), os.Getenv("PREFIX"))
-
-	final, err := tea.NewProgram(m).Run()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "installer failed:", err)
-		os.Exit(1)
-	}
-	if fm, ok := final.(installer.Model); ok && fm.Failed() {
-		os.Exit(1)
-	}
+	os.Exit(run())
 }
