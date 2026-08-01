@@ -143,10 +143,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// gets a look. Only key messages are diverted: the download tick, the
 	// cloud-init poll and the spinner all keep running underneath, so opening
 	// the picker mid-download doesn't freeze its progress bar.
+	//
+	// While the modal is browsing (its bubbles/filepicker sub-state), non-key
+	// messages are diverted too: the picker's own directory listing arrives
+	// as one, and without this it would never populate — filepicker.Init()
+	// fires the read, but only the modal's own update() ever calls it back.
 	if m.modal != nil {
-		if _, isKey := msg.(tea.KeyPressMsg); isKey {
+		_, isKey := msg.(tea.KeyPressMsg)
+		if isKey || m.modal.browsing {
 			cmd, chosen, closed := m.modal.update(msg)
 			if chosen >= 0 {
+				// A browsed file isn't in m.form.images — it can live
+				// anywhere on disk, that's the point — so the modal appends
+				// it to its own copy and returns an index past the form's
+				// original bounds. Re-adopting mo.images first is a no-op
+				// whenever nothing was browsed, since it's otherwise the same
+				// slice the modal was opened with.
+				m.form.images = m.modal.images
 				m.form.selectImage(chosen)
 			}
 			if closed {
