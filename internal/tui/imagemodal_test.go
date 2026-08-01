@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -679,5 +680,48 @@ func TestFinderChoosingAppendsTheImage(t *testing.T) {
 	}
 	if got, err := mo.images[idx].imagePath(); err != nil || got != path {
 		t.Errorf("appended path = %q, err = %v, want %q", got, err, path)
+	}
+}
+
+// The scan pumps itself: every batch message carries the command that fetches
+// the next one. A gate that drops non-key messages does not merely delay
+// results, it ENDS the chain -- so drive it through the real app.Update, not
+// the modal in isolation.
+func TestScanResultsReachTheFinderThroughTheApp(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mm.(model)
+
+	m.modal = newImageModal(testImages(), 0)
+	m.modal.finding = true
+
+	mm, _ = m.Update(imagesFoundMsg{batch: []foundImage{
+		{path: "/home/u/vms/found-by-scan.iso", size: 10},
+	}})
+	m = mm.(model)
+
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "found-by-scan") {
+		t.Errorf("a scan result never reached the finder:\n%s", out)
+	}
+}
+
+// And the pump must keep going: the command returned alongside the batch is
+// what fetches the next one.
+func TestScanKeepsPumpingAfterABatch(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = mm.(model)
+
+	ch := make(chan []foundImage, 1)
+	ch <- []foundImage{{path: "/home/u/second.iso", size: 1}}
+	m.modal = newImageModal(testImages(), 0)
+	m.modal.finding = true
+	m.modal.scanCh = ch
+
+	_, cmd := m.Update(imagesFoundMsg{batch: []foundImage{{path: "/home/u/first.iso", size: 1}}})
+	if cmd == nil {
+		t.Fatal("a batch did not re-issue the command that fetches the next one")
 	}
 }

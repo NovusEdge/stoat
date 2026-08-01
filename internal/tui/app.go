@@ -128,18 +128,20 @@ func Run() error {
 
 func (m model) Init() tea.Cmd { return loadVMs }
 
-// Update feeds a browsing file picker without consuming the message, then
-// runs the normal update.
+// Update feeds a browsing file picker or the fuzzy finder without consuming
+// the message, then runs the normal update.
 //
-// The picker's directory listing arrives as a NON-key message, so it has to
-// reach the modal somehow. But a diverted message must not be swallowed: a
-// tick chain only continues because its handler returns the next tick cmd, so
-// consuming one dlTickMsg here does not pause the download bar, it ends the
-// chain for good. (dlTickMsg's own case carries the same warning about
-// routing by screen, which broke this once already.) Copy, then carry on.
+// Both modes run an asynchronous read whose results arrive as a NON-key
+// message -- a directory listing for the browser, a filesystem walk batch for
+// the finder -- so it has to reach the modal somehow. But a diverted message
+// must not be swallowed: a tick chain only continues because its handler
+// returns the next tick cmd, so consuming one dlTickMsg here does not pause
+// the download bar, it ends the chain for good. (dlTickMsg's own case carries
+// the same warning about routing by screen, which broke this once already.)
+// Copy, then carry on.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var browseCmd tea.Cmd
-	if m.modal != nil && m.modal.browsing {
+	if m.modal != nil && (m.modal.browsing || m.modal.finding) {
 		if _, isKey := msg.(tea.KeyPressMsg); !isKey {
 			cmd, chosen, closed := m.modal.update(msg)
 			browseCmd = cmd
@@ -175,8 +177,9 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// gets a look. Only key messages are diverted: the download tick, the
 	// cloud-init poll and the spinner all keep running underneath, so opening
 	// the picker mid-download doesn't freeze its progress bar. A browsing
-	// picker still needs its non-key directory listing; Update handles that
-	// above by copying rather than consuming.
+	// picker or a running finder still needs its non-key results (a directory
+	// listing, a scan batch); Update handles that above by copying rather
+	// than consuming.
 	if m.modal != nil {
 		if _, isKey := msg.(tea.KeyPressMsg); isKey {
 			cmd, chosen, closed := m.modal.update(msg)
