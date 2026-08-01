@@ -19,6 +19,11 @@ install: build
     @echo "installed {{prefix}}/stoat ({{version}})"
     @command -v stoat >/dev/null || echo "note: {{prefix}} is not on your PATH"
 
+# build and install stoat, interactively — checks the host too
+[group('build')]
+setup:
+    go run ./cmd/installer
+
 # remove the installed binary — never touches ~/.stoat
 [group('build')]
 uninstall:

@@ -42,6 +42,16 @@ old-vm          -     broken   -     -      -    unexpected EOF
 Build from source:
 
 ```
+just setup
+```
+
+This builds stoat, installs it to `~/.local/bin` (override with `$PREFIX`),
+offers to add that directory to your `PATH`, and tells you which of qemu, ssh,
+xorriso, and `/dev/kvm` still need attention.
+
+For a non-interactive install — CI, Nix, scripts:
+
+```
 just build && just install    # or: make build && make install
 ```
 
