@@ -19,6 +19,16 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 )
 
+// User is the account the seed creates, and therefore the account anything
+// provisioned through this backend must connect as. Cloud images lock root,
+// so connecting as anything else fails — sshx defaults an empty VM.SSHUser to
+// root, which is exactly the wrong answer here.
+//
+// Exported so the TUI can record it on the VM instead of repeating the
+// literal. userDataTemplate below must name this same user; TestSeedUserMatchesUser
+// pins that.
+const User = "stoat"
+
 // userDataTemplate declares the account stoat connects as. The password
 // block is filled in by consolePasswordBlock below.
 //

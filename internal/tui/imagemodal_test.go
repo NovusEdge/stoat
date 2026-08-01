@@ -6,7 +6,9 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/iso"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // testImages is a fixture with the shape that motivated the modal: one OS
@@ -188,5 +190,118 @@ func TestBYOLabelIsBoundedAndNamesTheUnknown(t *testing.T) {
 	}
 	if w := lipgloss.Width(label); w > formContentWidth {
 		t.Errorf("byo label is %d cells, wider than the form's %d-cell pane", w, formContentWidth)
+	}
+}
+
+// A BYO image used to be offered no recipes at all, ever: iso.Infer names an
+// OS only for *alpine*.iso, so every qcow2/img arrives with osName "", and
+// both branches of recipes.List compare against a real OS name parsed off a
+// recipe filename. The fOS row is what lets the user say what the file is.
+func TestBYOOSOverrideDrivesResolvedOS(t *testing.T) {
+	f := formModel{images: []imageOption{{file: "mystery.qcow2", backend: "cloudinit", osName: ""}}}
+
+	if got := f.resolvedOS(); got != "" {
+		t.Fatalf("unset override resolved to %q, want empty (iso.Infer's guess)", got)
+	}
+	f.byoOS = "ubuntu"
+	if got := f.resolvedOS(); got != "ubuntu" {
+		t.Errorf("resolvedOS = %q, want the override %q", got, "ubuntu")
+	}
+}
+
+// The override must not leak across images — it described the previous file.
+func TestSelectImageClearsTheBYOOverrides(t *testing.T) {
+	f := formModel{
+		images: []imageOption{
+			{file: "one.qcow2", backend: "cloudinit"},
+			{file: "two.iso", backend: "ssh"},
+		},
+		byoOS:      "ubuntu",
+		byoBackend: "cloudinit",
+		recipeSel:  map[string]bool{},
+	}
+	f.selectImage(1)
+	if f.byoOS != "" || f.byoBackend != "" {
+		t.Errorf("after selectImage: byoOS=%q byoBackend=%q, want both cleared", f.byoOS, f.byoBackend)
+	}
+}
+
+// The cycle must offer every OS the catalog knows, plus a way back to "unset".
+func TestBYOOSNamesCoverTheCatalogAndAllowUnset(t *testing.T) {
+	names := byoOSNames()
+	if len(names) == 0 || names[0] != "" {
+		t.Fatalf("byoOSNames = %v, want it to lead with \"\" so the override is reversible", names)
+	}
+	have := map[string]bool{}
+	for _, n := range names {
+		have[n] = true
+	}
+	for _, g := range iso.ByOS() {
+		if !have[g.OS] {
+			t.Errorf("byoOSNames omits %q, which the catalog ships", g.OS)
+		}
+	}
+}
+
+// A BYO image declared to be a cloud image must record the account the seed
+// actually creates. Left empty, sshx defaults to root, and cloud images lock
+// root — so ssh and provisioning both fail on a VM that looks fine.
+func TestBYOCloudinitConnectsAsTheSeedUser(t *testing.T) {
+	f := formModel{images: []imageOption{{file: "mystery.qcow2", backend: "cloudinit", sshUser: ""}}}
+	if got := f.resolvedSSHUser(); got != cloudinit.User {
+		t.Errorf("resolvedSSHUser = %q, want %q — the account the seed creates", got, cloudinit.User)
+	}
+}
+
+// The row only appears for BYO images; a catalog entry's OS is declared.
+func TestOSRowIsBYOOnly(t *testing.T) {
+	catalogEntry := iso.Entry{ID: "ubuntu-24.04", OS: "ubuntu", Variant: "24.04 LTS", Backend: "cloudinit"}
+	f := formModel{images: []imageOption{{entry: &catalogEntry, backend: "cloudinit", osName: "ubuntu"}}}
+	for _, focus := range f.order() {
+		if focus == fOS {
+			t.Error("the os override row is offered for a catalog image, whose OS is declared")
+		}
+	}
+
+	f = formModel{images: []imageOption{{file: "mystery.qcow2", backend: "ssh"}}}
+	var found bool
+	for _, focus := range f.order() {
+		if focus == fOS {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the os override row is missing for a BYO image")
+	}
+}
+
+// The outcome the whole row exists for: declaring the OS turns an empty
+// recipe list into a real one. Goes through refreshRecipes and the installed
+// recipe directory rather than asserting on resolvedOS, so it proves what the
+// user actually gets.
+func TestDeclaringTheOSMakesRecipesAppear(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+	f := formModel{
+		images:    []imageOption{{file: "mystery.qcow2", backend: "cloudinit", osName: ""}},
+		recipeSel: map[string]bool{},
+	}
+
+	f.refreshRecipes()
+	if len(f.recipeNames) != 0 {
+		t.Fatalf("an un-declared BYO image was offered %v; expected none", f.recipeNames)
+	}
+
+	f.byoOS = "ubuntu"
+	f.refreshRecipes()
+	if len(f.recipeNames) == 0 {
+		t.Fatal("declaring the OS still offered no recipes")
+	}
+	for _, n := range f.recipeNames {
+		if !strings.HasSuffix(n, ".cloud.yaml") {
+			t.Errorf("cloudinit backend offered %q, which is not a cloud fragment", n)
+		}
 	}
 }

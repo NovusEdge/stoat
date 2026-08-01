@@ -208,3 +208,14 @@ func TestSeedErrorsWithoutXorriso(t *testing.T) {
 		t.Error("seed.iso must not exist when Seed errored")
 	}
 }
+
+// TestSeedUserMatchesUser pins the exported User constant to the account the
+// template actually creates. They are two literals that must agree: the TUI
+// records User on the VM as its SSH user, and sshx defaults an empty one to
+// root — which cloud images lock. If they drift, every cloud VM connects as
+// an account that does not exist, and nothing else in the suite would notice.
+func TestSeedUserMatchesUser(t *testing.T) {
+	if !strings.Contains(userDataTemplate, "- name: "+User) {
+		t.Errorf("userDataTemplate does not create the account named by User (%q)", User)
+	}
+}

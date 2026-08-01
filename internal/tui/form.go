@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -146,6 +147,32 @@ func buildImages() []imageOption {
 // byoBackends is the fixed cycle offered on the fBackend override row.
 var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 
+// byoOSNames is the cycle offered on the fOS override row: every OS the
+// catalog knows, in catalog order, led by "" meaning "whatever iso.Infer
+// guessed".
+//
+// This row exists because Infer names an OS in exactly one case — a filename
+// containing "alpine" that ends in .iso. Every qcow2, every img and every
+// unrecognised file comes back with an empty OS, which flows into
+// recipes.List, where both branches compare against a real OS name parsed off
+// a recipe's filename. An empty OS matches nothing, so before this row a BYO
+// image was offered NO recipes at all, ever — a hand-downloaded Ubuntu cloud
+// image got none while the byte-identical catalog entry got xfce and
+// devtools.
+//
+// Letting the user say so is the safe half of a choice the form already
+// offers: fBackend lets them override the BACKEND guess, and getting that
+// wrong yields an unbootable VM, where a wrong OS yields a recipe that fails
+// loudly on apt-get. Permitting the dangerous override and forbidding the
+// safe one was an oversight, not a guard.
+func byoOSNames() []string {
+	out := []string{""}
+	for _, g := range iso.ByOS() {
+		out = append(out, g.OS)
+	}
+	return out
+}
+
 // formContentWidth holds the new-vm pane at a constant width, so the box
 // never resizes as optional rows appear.
 //
@@ -166,6 +193,7 @@ type formModel struct {
 	images      []imageOption
 	imgIdx      int
 	byoBackend  string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
+	byoOS       string // override for the selected BYO image's OS; "" means "use iso.Infer's guess"
 	mode        string // "live" | "disk" — meaningful only while the selected image's backend is apkovl
 	err         string
 	fetching    bool
@@ -194,6 +222,7 @@ const (
 	fISO = fieldCount + iota
 	fMode
 	fBackend
+	fOS
 	fRecipes
 	fPassword
 )
@@ -214,7 +243,7 @@ type focusOrder []int
 func (f formModel) order() focusOrder {
 	o := focusOrder{fName, fISO}
 	if opt := f.selected(); opt != nil && opt.isBYO() {
-		o = append(o, fBackend)
+		o = append(o, fBackend, fOS)
 	}
 	if f.resolvedBackend() == "apkovl" {
 		o = append(o, fMode)
@@ -274,18 +303,37 @@ func (f formModel) resolvedBackend() string {
 	return opt.backend
 }
 
+// resolvedOS is the OS build() will record and recipes.List will filter by:
+// entry.OS for a catalog image, iso.Infer's guess for BYO unless overridden
+// via fOS. Mirrors resolvedBackend.
 func (f formModel) resolvedOS() string {
-	if opt := f.selected(); opt != nil {
-		return opt.osName
+	opt := f.selected()
+	if opt == nil {
+		return ""
 	}
-	return ""
+	if opt.isBYO() && f.byoOS != "" {
+		return f.byoOS
+	}
+	return opt.osName
 }
 
 func (f formModel) resolvedSSHUser() string {
-	if opt := f.selected(); opt != nil {
-		return opt.sshUser
+	opt := f.selected()
+	if opt == nil {
+		return ""
 	}
-	return ""
+	// The cloud-init seed creates exactly one account, cloudinit.User, so
+	// anything provisioned through that backend connects as it — including a
+	// BYO file the user has just declared to be a cloud image via fBackend.
+	// Left to fall through, a BYO image would record an empty SSHUser, sshx
+	// would default that to root, and cloud images lock root: ssh and
+	// provisioning would both fail on a VM that looked correctly configured.
+	// Catalog cloud entries already carry this same user, so this changes
+	// nothing for them.
+	if f.resolvedBackend() == "cloudinit" {
+		return cloudinit.User
+	}
+	return opt.sshUser
 }
 
 // effectiveMode is the Mode build() will write. cloudinit is always "cloud"
@@ -315,10 +363,10 @@ func (f *formModel) refreshRecipes() {
 }
 
 // selectImage adopts the image at idx, along with everything that has to move
-// with it. Picking an image is not just an index: the BYO backend override
-// belonged to the previous image and would otherwise silently apply to this
-// one, and the recipe list is filtered by the image's OS and backend, so a
-// stale list would offer recipes that cannot run on what is now selected.
+// with it. Picking an image is not just an index: the BYO backend and OS
+// overrides belonged to the previous image and would otherwise silently apply
+// to this one, and the recipe list is filtered by the image's OS and backend,
+// so a stale list would offer recipes that cannot run on what is now selected.
 //
 // Out-of-range is ignored rather than clamped: every caller derives idx from
 // the image slice itself, so a bad index means a bug elsewhere, and clamping
@@ -329,6 +377,7 @@ func (f *formModel) selectImage(idx int) {
 	}
 	f.imgIdx = idx
 	f.byoBackend = ""
+	f.byoOS = ""
 	f.refreshRecipes()
 }
 
@@ -478,6 +527,22 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					d = -1
 				}
 				m.form.byoBackend = byoBackends[(idx+d+len(byoBackends))%len(byoBackends)]
+				m.form.refreshRecipes()
+				return m, nil
+			case fOS:
+				names := byoOSNames()
+				cur := m.form.resolvedOS()
+				idx := 0
+				for i, o := range names {
+					if o == cur {
+						idx = i
+					}
+				}
+				d := 1
+				if msg.String() == "left" {
+					d = -1
+				}
+				m.form.byoOS = names[(idx+d+len(names))%len(names)]
 				m.form.refreshRecipes()
 				return m, nil
 			case fMode:
@@ -721,6 +786,18 @@ func (m model) viewForm() string {
 
 	if opt != nil && opt.isBYO() {
 		row(fBackend, "backend", f.resolvedBackend())
+		// A BYO file's OS is almost never inferable from its name, and an
+		// unset one silently means "no recipes at all" — so the row says
+		// "unknown" rather than rendering blank, and the hint says what
+		// setting it buys.
+		osValue := f.resolvedOS()
+		if osValue == "" {
+			osValue = dimStyle.Render(osUnknown)
+		}
+		row(fOS, "os", osValue)
+		if f.resolvedOS() == "" {
+			b.hint("set the os to be offered recipes for it")
+		}
 	}
 
 	if f.resolvedBackend() == "apkovl" {
