@@ -135,6 +135,28 @@ func localImageFiles() []string {
 	return out
 }
 
+// byoOptionFromPath turns a path the user browsed to into the same option
+// shape localImageFiles produces for a file already in isos/. It must stay
+// the same shape: everything downstream (backend/OS inference, and the ssh
+// user resolution fixed in b6593b3) keys off entry == nil.
+func byoOptionFromPath(path string) (imageOption, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return imageOption{}, err
+	}
+	if st.IsDir() {
+		return imageOption{}, fmt.Errorf("%s is a directory", path)
+	}
+	backend, osName := iso.Infer(filepath.Base(path))
+	return imageOption{
+		file:    path,
+		backend: backend,
+		osName:  osName,
+		bytes:   st.Size(),
+		exact:   true,
+	}, nil
+}
+
 // matchLocalImage reports which local file (if any) satisfies catalog entry
 // e: either the exact basename of e.URL (direct-URL entries), or, for
 // entries resolved through an index rather than a fixed filename (Alpine),

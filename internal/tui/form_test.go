@@ -367,3 +367,46 @@ func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 		t.Errorf("toast = %q, want the failure reported", m.toast.text)
 	}
 }
+
+// A browsed path must produce exactly the same shape of option as a file
+// found in isos/, or downstream code (backend/OS inference, ssh user
+// resolution) silently behaves differently for the two.
+func TestByoOptionFromPathMatchesLocalDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "alpine-virt-3.20.0-x86_64.iso")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opt, err := byoOptionFromPath(p)
+	if err != nil {
+		t.Fatalf("byoOptionFromPath: %v", err)
+	}
+	if !opt.isBYO() {
+		t.Error("a browsed path must be marked BYO (entry == nil)")
+	}
+	if opt.file != p {
+		t.Errorf("file = %q, want the absolute path %q", opt.file, p)
+	}
+	if opt.osName == "" {
+		t.Error("iso.Infer should have named the OS for an alpine filename")
+	}
+}
+
+// A path outside isos/ is the entire point of the feature.
+func TestByoOptionFromPathAcceptsAnyDirectory(t *testing.T) {
+	dir := t.TempDir() // deliberately NOT the stoat isos dir
+	p := filepath.Join(dir, "custom.qcow2")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := byoOptionFromPath(p); err != nil {
+		t.Fatalf("a path outside isos/ must be accepted: %v", err)
+	}
+}
+
+func TestByoOptionFromPathRejectsMissingFile(t *testing.T) {
+	if _, err := byoOptionFromPath(filepath.Join(t.TempDir(), "nope.iso")); err == nil {
+		t.Error("want an error for a path that does not exist")
+	}
+}
