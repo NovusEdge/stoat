@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -66,7 +66,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// is trying to type into it. The list component also needs non-key
 	// messages (its filter resolves through a Cmd), so those are forwarded
 	// before the key switch below ever runs.
-	key, ok := msg.(tea.KeyMsg)
+	key, ok := msg.(tea.KeyPressMsg)
 	if !ok || m.filterActive() {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)

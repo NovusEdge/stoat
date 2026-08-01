@@ -6,11 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-
 	"github.com/novusedge/stoat/internal/config"
 )
+
+// resetSeq is the SGR reset sequence lipgloss emits at the end of a styled
+// substring. v1 wrote it as "\x1b[0m"; v2's ANSI writer omits the redundant
+// "0" parameter and writes "\x1b[m" instead — both mean the same thing to a
+// terminal, but a literal string match has to pick one.
+const resetSeq = "\x1b[m"
 
 // TestSelectedRowIsFullyHighlighted covers a highlight that was silently
 // dead: the row was built starting with the styled status dot, and a styled
@@ -19,9 +22,11 @@ import (
 // the selected row was marked by the ❯ alone. The row's own colours make it
 // invisible in a plain string comparison, hence the escape-sequence check.
 func TestSelectedRowIsFullyHighlighted(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
-
+	// v1 forced true-color output here because a Renderer could otherwise
+	// downsample styles for a "dumb" terminal (relevant in CI, where stdout
+	// isn't a tty). v2 removed the Renderer entirely — Style is a plain
+	// value type that always renders full ANSI escapes, so there is nothing
+	// left to force.
 	vms := []*config.VM{
 		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
 		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
@@ -42,7 +47,7 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 	if esc < 0 {
 		t.Fatal("no escape sequence before the selected row's name")
 	}
-	if strings.HasPrefix(prefix[esc:], "\x1b[0m") {
+	if strings.HasPrefix(prefix[esc:], resetSeq) {
 		t.Error("selected row's name is preceded by a reset: the highlight dies at the status dot")
 	}
 	if !strings.Contains(prefix[esc:], "1;") {
@@ -55,7 +60,7 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 		t.Fatal("second vm missing from the rendered list")
 	}
 	seg := out[i:j]
-	if strings.Count(seg, "\x1b[0m") == 0 {
+	if strings.Count(seg, resetSeq) == 0 {
 		t.Error("selected row's style is never closed before the next row")
 	}
 }

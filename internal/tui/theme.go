@@ -1,10 +1,15 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
+)
 
 // theme is the only place in the program that names a color.
 type theme struct {
-	accent, up, down, warn, err, dim lipgloss.Color
+	accent, up, down, warn, err, dim color.Color
 }
 
 var th = theme{
@@ -68,6 +73,25 @@ func pane(title, body string, maxWidth int) string {
 		}
 	}
 	return style.Render(content)
+}
+
+// newTextInput builds a bubbles text input styled the way stoat wants every
+// one of them.
+//
+// It exists because bubbles v2's textinput.New() hardcodes DefaultDarkStyles(),
+// which paints unfocused text ANSI colour 7 — on a light terminal that is grey
+// on white. v1's TextStyle was a zero Style, so the value simply inherited the
+// terminal's own foreground, which is right on any background and is what the
+// rest of stoat relies on (theme.go names six colours and none of them is a
+// plain foreground). Clearing Text restores that.
+func newTextInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	st := ti.Styles()
+	st.Focused.Text = lipgloss.NewStyle()
+	st.Blurred.Text = lipgloss.NewStyle()
+	ti.SetStyles(st)
+	return ti
 }
 
 // Glyphs are named here for the same reason colours are: so a symbol means

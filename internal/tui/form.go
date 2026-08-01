@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
@@ -288,13 +288,18 @@ func newForm() formModel {
 	f := formModel{mode: "live", recipeSel: map[string]bool{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
-		ti := textinput.New()
+		ti := newTextInput()
 		ti.SetValue(labels[i])
-		ti.Prompt = ""
 		f.inputs = append(f.inputs, ti)
 	}
 	f.inputs[fName].SetValue("")
 	f.inputs[fName].Placeholder = "name"
+	// An explicit width is required, not cosmetic: bubbles v2.1.1 sizes an
+	// internal buffer to Width()+1 when rendering a placeholder, so with the
+	// width unset the placeholder is cut to its first rune ("name" -> "n").
+	// Only safe on rows that append nothing after the input — a width also
+	// pads the VALUE out to it, which would push the " MB" after ram far right.
+	f.inputs[fName].SetWidth(formContentWidth - fieldValueColumn)
 	f.inputs[fName].Focus()
 
 	f.images = buildImages()
@@ -372,7 +377,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.showToast(string(msg), true)
 		return m, cmd
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.screen = screenList

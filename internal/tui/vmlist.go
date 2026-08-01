@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -122,13 +122,18 @@ func newVMList() list.Model {
 	l.SetStatusBarItemName("vm", "vms")
 
 	l.Styles.NoItems = dimStyle
-	l.Styles.FilterPrompt = accentStyle
-	l.Styles.FilterCursor = accentStyle
+	l.Styles.Filter.Focused.Prompt = accentStyle
+	l.Styles.Filter.Blurred.Prompt = accentStyle
+	l.Styles.Filter.Cursor.Color = th.accent
 	l.Styles.PaginationStyle = lipgloss.NewStyle()
 	l.Styles.ActivePaginationDot = accentStyle
 	l.Styles.InactivePaginationDot = dimStyle
-	l.FilterInput.PromptStyle = accentStyle
-	l.FilterInput.Cursor.Style = accentStyle
+
+	fs := l.FilterInput.Styles()
+	fs.Focused.Prompt = accentStyle
+	fs.Blurred.Prompt = accentStyle
+	fs.Cursor.Color = th.accent
+	l.FilterInput.SetStyles(fs)
 	l.FilterInput.Prompt = "search "
 	l.FilterInput.Placeholder = "vm name"
 	return l

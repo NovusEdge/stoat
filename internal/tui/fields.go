@@ -1,8 +1,10 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 )
 
 // Every screen that shows rows of "label   value" renders through fields.
@@ -51,10 +53,54 @@ func (f *fields) hint(text string) {
 // screen, and spacing every row overflowed a 24-line terminal.
 func (f *fields) gap() { f.rows = append(f.rows, []string{"", "", ""}) }
 
+// noteMark tags a row as a note rather than a field. It sits in the marker
+// cell, which a note never uses, so it cannot collide with a focus cursor.
+const noteMark = "\x00note"
+
+// note adds a dim remark under the row above, starting at the LABEL column
+// rather than the value column — it is a remark ABOUT the field, not another
+// value for it, so it reads wrong indented under the value.
+//
+// Notes are drawn as their own full-width lines rather than table rows: a
+// lipgloss table cannot span columns, and the text is wider than the label
+// cell, so in a cell it would wrap mid-word. Splitting the table around them
+// is safe precisely because every column here has a FIXED width — the
+// segments either side of a note still line up. Callers that leave width at
+// zero (the value column then auto-sizes) must not use notes; only the two
+// forms do, and both set a width.
+func (f *fields) note(text string) {
+	f.rows = append(f.rows, []string{noteMark, text, ""})
+}
+
+// String renders the block: table segments for runs of field rows, with each
+// note on its own line between them.
 func (f *fields) String() string {
 	if len(f.rows) == 0 {
 		return ""
 	}
+	var out []string
+	var run [][]string
+	flush := func() {
+		if len(run) > 0 {
+			out = append(out, f.renderRows(run))
+			run = nil
+		}
+	}
+	for _, r := range f.rows {
+		if r[0] == noteMark {
+			flush()
+			// Indented to the label column, so it lines up with the name of
+			// the field it is talking about.
+			out = append(out, strings.Repeat(" ", fieldMarkerWidth)+dimStyle.Render(r[1]))
+			continue
+		}
+		run = append(run, r)
+	}
+	flush()
+	return strings.Join(out, "\n")
+}
+
+func (f *fields) renderRows(rows [][]string) string {
 	return table.New().
 		// An all-empty border: the table is a layout grid here, not a drawn
 		// box — the pane around it owns the only border on screen.
@@ -90,6 +136,6 @@ func (f *fields) String() string {
 			}
 			return lipgloss.NewStyle()
 		}).
-		Rows(f.rows...).
+		Rows(rows...).
 		String()
 }

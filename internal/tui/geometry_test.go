@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/help"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 )
@@ -48,7 +48,7 @@ func TestListPaneFitsTheTerminal(t *testing.T) {
 		mm, _ = m.Update(vmsLoadedMsg{vms: geoVMs(t, c.vms)})
 		m = mm.(model)
 
-		if got := lipgloss.Height(m.View()); got > c.height {
+		if got := lipgloss.Height(m.View().Content); got > c.height {
 			t.Errorf("%d vms at height %d rendered %d lines — the footer is cut off",
 				c.vms, c.height, got)
 		}

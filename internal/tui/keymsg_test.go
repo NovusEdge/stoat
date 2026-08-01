@@ -3,39 +3,43 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // keyMsg builds the key message for a key named exactly as the Update
-// switches name it — the string tea.KeyMsg.String() returns.
+// switches name it — the string tea.KeyPressMsg.String() returns.
 //
-// Every test goes through this rather than constructing a tea.KeyMsg itself.
-// The literal form, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")}, is the
-// one piece of bubbletea surface in this package that changes shape rather
-// than name in v2 (KeyMsg becomes an interface; KeyPressMsg carries Code and
-// Text instead of Type and Runes). Funnelled here, that is one edit instead of
-// nineteen spread over four files.
-func keyMsg(name string) tea.KeyMsg {
-	if t, ok := namedKeys[name]; ok {
-		return tea.KeyMsg{Type: t}
+// Every test goes through this rather than constructing a tea.KeyPressMsg
+// itself. The literal form, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")},
+// is the one piece of bubbletea surface in this package that changes shape
+// rather than name in v2 (KeyMsg becomes an interface; KeyPressMsg carries
+// Code and Text instead of Type and Runes). Funnelled here, that is one edit
+// instead of nineteen spread over four files.
+func keyMsg(name string) tea.KeyPressMsg {
+	if k, ok := namedKeys[name]; ok {
+		return tea.KeyPressMsg(k)
 	}
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name)}
+	r := []rune(name)
+	return tea.KeyPressMsg{Code: r[0], Text: name}
 }
 
-// namedKeys are the keys bubbletea reports by name rather than as runes.
-var namedKeys = map[string]tea.KeyType{
-	"enter":     tea.KeyEnter,
-	"esc":       tea.KeyEsc,
-	"tab":       tea.KeyTab,
-	"shift+tab": tea.KeyShiftTab,
-	"up":        tea.KeyUp,
-	"down":      tea.KeyDown,
-	"left":      tea.KeyLeft,
-	"right":     tea.KeyRight,
-	"pgup":      tea.KeyPgUp,
-	"pgdown":    tea.KeyPgDown,
-	"home":      tea.KeyHome,
-	"end":       tea.KeyEnd,
+// namedKeys are the keys bubbletea reports by name rather than as printable
+// text — anything with no Text of its own, so String() falls through to
+// Keystroke() and depends on Code (and, for shift+tab, Mod).
+var namedKeys = map[string]tea.Key{
+	"enter":     {Code: tea.KeyEnter},
+	"esc":       {Code: tea.KeyEsc},
+	"tab":       {Code: tea.KeyTab},
+	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
+	"up":        {Code: tea.KeyUp},
+	"down":      {Code: tea.KeyDown},
+	"left":      {Code: tea.KeyLeft},
+	"right":     {Code: tea.KeyRight},
+	"pgup":      {Code: tea.KeyPgUp},
+	"pgdown":    {Code: tea.KeyPgDown},
+	"home":      {Code: tea.KeyHome},
+	"end":       {Code: tea.KeyEnd},
+	"space":     {Code: tea.KeySpace},
 }
 
 // TestKeyMsgRoundTrips is what makes keyMsg trustworthy: a key it builds must

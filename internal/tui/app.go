@@ -1,11 +1,11 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
@@ -117,7 +117,7 @@ func Run() error {
 	if err := qemu.Preflight(); err != nil {
 		m.preflight = err.Error()
 	}
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(m).Run()
 	return err
 }
 
@@ -130,7 +130,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// exactly how it has regressed before: a new screen or sub-mode gets
 	// added, and whoever writes its key switch doesn't think to repeat the
 	// ctrl+c case.
-	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "ctrl+c" {
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
 
@@ -291,15 +291,15 @@ const (
 	smallHeight = 20
 )
 
-func (m model) View() string {
+func (m model) View() tea.View {
 	if m.width == 0 || m.height == 0 {
 		// No WindowSizeMsg has arrived yet (bubbletea renders once before
 		// the first one); nothing sensible to size a pane against.
-		return ""
+		return m.newView("")
 	}
 	if m.width < smallWidth || m.height < smallHeight {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			warnStyle.Render("terminal too small — resize to at least 60x20"))
+		return m.newView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			warnStyle.Render("terminal too small — resize to at least 60x20")))
 	}
 
 	var body string
@@ -334,5 +334,14 @@ func (m model) View() string {
 	}
 	// The toast goes on last, over the finished screen: it is an overlay, so
 	// it must not be part of what Place centers.
-	return m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s))
+	return m.newView(m.renderToast(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s)))
+}
+
+// newView wraps a rendered frame in a tea.View with the alt-screen flag set —
+// the v1 equivalent of passing tea.WithAltScreen() to tea.NewProgram, which
+// v2 moved from a program-startup option to a per-frame View field.
+func (m model) newView(s string) tea.View {
+	v := tea.NewView(s)
+	v.AltScreen = true
+	return v
 }

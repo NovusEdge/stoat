@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/sshx"
@@ -100,8 +100,8 @@ func cloudInitBar(p progress.Model, status string) string {
 
 // newCloudInitProgress is the bar used for cloud-init staging.
 func newCloudInitProgress() progress.Model {
-	p := progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage())
-	p.Width = accessValueWidth
+	p := fullBlockBar()
+	p.SetWidth(accessValueWidth)
 	return p
 }
 

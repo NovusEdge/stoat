@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 )
@@ -18,9 +18,9 @@ func TestToastOverlayKeepsScreenShape(t *testing.T) {
 		width: 100, height: 30}
 	m.list.SetItems(vmItems([]*config.VM{{Name: "vm1", Mode: "live", RAM: 1024, CPUs: 2, SSHPort: 2200}}, nil))
 
-	plain := m.View()
+	plain := m.View().Content
 	m.showToast("vm1 stopped", false)
-	withToast := m.View()
+	withToast := m.View().Content
 
 	if got, want := lipgloss.Height(withToast), lipgloss.Height(plain); got != want {
 		t.Errorf("height %d, want %d", got, want)

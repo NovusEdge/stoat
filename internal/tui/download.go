@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 )
 
 // dlProgress carries byte counts from the download goroutine (iso.Download's
@@ -179,7 +179,19 @@ const dlBarWidth = 32
 // dlBar is the component both progress bars are drawn with. ViewAs is fed a
 // ratio computed from real byte counts, so none of its spring animation runs
 // — it is used for its gradient and width handling, not its motion.
-var dlBar = progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage())
+// fullBlockBar is the progress bar every bar in stoat is built from.
+//
+// bubbles v2 changed the default fill character from a full block to a HALF
+// block (DefaultFullCharHalfBlock, '▌'), which renders as a dotted-looking
+// row of gaps rather than a solid bar. v2 still exports the full block for
+// exactly this reason, so the bars keep the look they had.
+func fullBlockBar() progress.Model {
+	p := progress.New(progress.WithDefaultBlend(), progress.WithoutPercentage())
+	p.Full = progress.DefaultFullCharFullBlock
+	return p
+}
+
+var dlBar = fullBlockBar()
 
 // bar renders the filled/empty track at ratio, clamped to [0,1].
 func bar(ratio float64, width int) string {
@@ -190,7 +202,7 @@ func bar(ratio float64, width int) string {
 		ratio = 1
 	}
 	p := dlBar
-	p.Width = width
+	p.SetWidth(width)
 	return p.ViewAs(ratio)
 }
 

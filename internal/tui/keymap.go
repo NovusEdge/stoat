@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -12,7 +12,7 @@ import (
 // bubbletea rather than by us — v2 reports it as "space" rather than " ".
 // Every switch case, key.Binding and test that means "space" goes through
 // this, so that change is one edit and not a silent no-match at runtime.
-const keySpace = " "
+const keySpace = "space"
 
 // footerHelp renders both the short (single-line) and full (toggled by "?")
 // help footers. Its Styles are intentionally blank: every color still comes
@@ -47,10 +47,10 @@ func renderFooter(km help.KeyMap, width int, showAll bool) string {
 		if inner < 1 {
 			inner = 1
 		}
-		h.Width = inner
+		h.SetWidth(inner)
 		return pane("", h.View(km), width)
 	}
-	h.Width = width
+	h.SetWidth(width)
 	// help.Model gives up truncating once its running total passes the width
 	// (it can only cut where an ellipsis still fits), and then appends every
 	// remaining binding — so the short footer can come back WIDER than the

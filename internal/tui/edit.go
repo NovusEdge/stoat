@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -65,8 +65,7 @@ func newEdit(v *config.VM) editModel {
 		strconv.Itoa(v.SSHPort),
 	}
 	for i := 0; i < eFieldCount; i++ {
-		ti := textinput.New()
-		ti.Prompt = ""
+		ti := newTextInput()
 		ti.SetValue(vals[i])
 		e.inputs = append(e.inputs, ti)
 	}
@@ -74,6 +73,10 @@ func newEdit(v *config.VM) editModel {
 	// placeholder says what leaving it that way means.
 	if v.Mode == "cloud" {
 		e.inputs[eDisk].Placeholder = "unchanged"
+		// See the note in newForm: without a width v2 cuts the placeholder to
+		// one rune. viewEdit draws "grow only" as a hint line rather than after
+		// the value so that this row appends nothing to the input.
+		e.inputs[eDisk].SetWidth(editContentWidth - fieldValueColumn)
 	}
 	e.inputs[eRAM].Focus()
 
@@ -454,7 +457,7 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 
 func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.screen = screenDetail
@@ -586,13 +589,12 @@ func (m model) viewEdit() string {
 	// in disk mode, an optional "grow the overlay to" in cloud mode, and
 	// nothing at all for a live VM, which has no disk.
 	if e.mode != "live" {
-		disk := e.inputs[eDisk].View()
+		row(eDisk, "disk", e.inputs[eDisk].View())
 		// The hint is dropped once the field is changed, so the "was X"
-		// marker sits right next to the value it refers to.
+		// marker sits alone next to the value it refers to.
 		if e.changed(eDisk) == "" {
-			disk += dimStyle.Render("  (grow only)")
+			b.note("(grow only)")
 		}
-		row(eDisk, "disk", disk)
 	}
 	b.gap()
 
