@@ -11,6 +11,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
 )
@@ -443,5 +444,24 @@ func TestImagePathResolvesABareNameUnderIsos(t *testing.T) {
 func TestByoOptionFromPathRejectsMissingFile(t *testing.T) {
 	if _, err := byoOptionFromPath(filepath.Join(t.TempDir(), "nope.iso")); err == nil {
 		t.Error("want an error for a path that does not exist")
+	}
+}
+
+// b6593b3: a BYO image in cloudinit mode must resolve to cloudinit.User, not
+// root -- cloud images lock root. A browsed path takes a different route into
+// imageOption than localImageFiles, so it needs its own guard.
+func TestBrowsedByoCloudinitResolvesSSHUser(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "custom.qcow2")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt, err := byoOptionFromPath(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := formModel{images: []imageOption{opt}}
+	if got := f.resolvedSSHUser(); got != cloudinit.User {
+		t.Errorf("resolvedSSHUser = %q, want %q (root is locked on cloud images)", got, cloudinit.User)
 	}
 }
