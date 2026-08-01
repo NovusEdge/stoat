@@ -1,12 +1,10 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // A toast reports something that already happened — "created X", "X stopped",
@@ -74,43 +72,32 @@ func toastStyle(isErr bool) lipgloss.Style {
 		Width(toastWidth)
 }
 
-// overlayTopRight draws box over the top-right of content, replacing what is
-// under it rather than pushing it aside — content keeps its exact line count
-// and width, so nothing below the toast moves while it is up. Lines are
-// spliced with the ANSI-aware cutters: content carries styling, and cutting a
-// styled line by byte offset would slice an escape sequence in half.
-func overlayTopRight(content, box string, width int) string {
-	lines := strings.Split(content, "\n")
-	boxLines := strings.Split(box, "\n")
-	// One cell of margin off the right edge, and one line down from the top.
-	const marginTop, marginRight = 1, 2
-	left := width - lipgloss.Width(box) - marginRight
-	if left < 0 {
-		// Too narrow to inset it; give the toast the full width instead of
-		// letting it hang off the screen.
-		left = 0
-	}
-	for i, bl := range boxLines {
-		row := i + marginTop
-		if row >= len(lines) {
-			break
-		}
-		line := lines[row]
-		// Pad short lines out to the splice point, so a toast still lands in
-		// the right place over a line that ends early.
-		if w := lipgloss.Width(line); w < left {
-			line += strings.Repeat(" ", left-w)
-		}
-		lines[row] = ansi.Truncate(line, left, "") + bl +
-			ansi.TruncateLeft(line, left+lipgloss.Width(bl), "")
-	}
-	return strings.Join(lines, "\n")
-}
-
-// renderToast overlays the active toast onto an already-composed screen.
+// renderToast draws the active toast over the top-right of an already-composed
+// screen, replacing what is under it rather than pushing it aside — the screen
+// keeps its exact line count and width, so nothing below the toast moves while
+// it is up.
+//
+// This used to splice the lines by hand with the ANSI-aware cutters, because
+// Lipgloss v1 had no way to put one rendered string on top of another. v2's
+// compositor does it natively and does the same careful cutting internally
+// (content carries styling, and cutting a styled line by byte offset slices an
+// escape sequence in half), so the hand-rolled version is gone — along with
+// its need to pad short lines out to the splice point by hand.
 func (m model) renderToast(screen string) string {
 	if m.toast.text == "" {
 		return screen
 	}
-	return overlayTopRight(screen, toastStyle(m.toast.err).Render(m.toast.text), m.width)
+	box := toastStyle(m.toast.err).Render(m.toast.text)
+	// One line down from the top, two cells off the right edge.
+	const marginTop, marginRight = 1, 2
+	x := m.width - lipgloss.Width(box) - marginRight
+	if x < 0 {
+		// Too narrow to inset it; sit flush left rather than let it hang off
+		// the screen at a negative offset.
+		x = 0
+	}
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(screen),
+		lipgloss.NewLayer(box).X(x).Y(marginTop).Z(1),
+	).Render()
 }
