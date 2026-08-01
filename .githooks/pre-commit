@@ -2,10 +2,9 @@
 # ponytail: gofmt + vet + build is the whole gate. No linter framework.
 set -e
 [ -f go.mod ] || exit 0        # no Go code yet
-# Only our own code: vendor/ holds third-party sources that are not all
-# gofmt-clean and are not ours to reformat. Without this exclusion the hook
-# starts failing the moment anything is vendored.
-unformatted=$(gofmt -l $(git ls-files '*.go' | grep -v '^vendor/') 2>/dev/null)
+# git ls-files only lists tracked files, so this is already just our own code.
+# The repo does not vendor: it builds from the module cache, same as CI.
+unformatted=$(gofmt -l $(git ls-files '*.go') 2>/dev/null)
 [ -z "$unformatted" ] || { echo "gofmt needed:"; echo "$unformatted"; exit 1; }
 go vet ./...
 go build ./...
