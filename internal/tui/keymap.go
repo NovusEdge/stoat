@@ -120,33 +120,49 @@ func (h listHelp) FullHelp() [][]key.Binding {
 	}
 }
 
-// detailHelp is the help.KeyMap for the detail screen.
-type detailHelp struct{ sshAvailable bool }
+// detailHelp is the help.KeyMap for the detail screen. consolePassword
+// reflects whether the selected VM is running and has a console password set
+// — the "t" (type into guest) and "c" (copy to host clipboard) bindings only
+// do anything then, so they are only listed then.
+type detailHelp struct {
+	sshAvailable    bool
+	consolePassword bool
+}
 
 func (h detailHelp) ssh() key.Binding {
 	return styledKey([]string{"s"}, "s", "ssh", sshKeyStyle(h.sshAvailable))
 }
 
 func (h detailHelp) ShortHelp() []key.Binding {
-	return []key.Binding{
+	keys := []key.Binding{
 		plainKey([]string{"e"}, "e", "edit"),
 		plainKey([]string{"E"}, "E", "raw toml"),
 		plainKey([]string{"i"}, "i", "installed"),
 		h.ssh(),
 		plainKey([]string{"p"}, "p", "provision"),
+	}
+	if h.consolePassword {
+		keys = append(keys, plainKey([]string{"t"}, "t", "type password"))
+	}
+	return append(keys,
 		plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"),
 		keyHelp,
-	}
+	)
 }
 
 func (h detailHelp) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
+	rows := [][]key.Binding{
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
 		{plainKey([]string{"i"}, "i", "installed"), h.ssh()},
 		{plainKey([]string{"p"}, "p", "provision")},
-		{plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"), keyCtrlC},
-		{keyHelp},
 	}
+	if h.consolePassword {
+		rows = append(rows, []key.Binding{plainKey([]string{"t"}, "t", "type console password into guest")})
+	}
+	return append(rows,
+		[]key.Binding{plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"), keyCtrlC},
+		[]key.Binding{keyHelp},
+	)
 }
 
 // formHelp is the help.KeyMap for the new-VM form.

@@ -124,6 +124,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "p":
 			return m, m.startProvision(m.detail.vm)
+		case "t":
+			v := m.detail.vm
+			if !consolePasswordAvailable(v) {
+				cmd := m.showToast("no console password to type", true)
+				return m, cmd
+			}
+			return m, typeConsolePassword(v)
 		}
 	case vmReloadedMsg:
 		m.detail.vm = msg.vm
@@ -133,6 +140,28 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 type vmReloadedMsg struct{ vm *config.VM }
+
+// consolePasswordAvailable reports whether v has a console password that
+// could be typed or copied right now: the VM must be running (the monitor
+// socket and the login prompt both only exist then), and it must actually
+// have one set. This is the same rule the "console" row in viewDetail and
+// qemu.consoleCredential's log line already use.
+func consolePasswordAvailable(v *config.VM) bool {
+	return v != nil && qemu.Running(v) && v.ConsolePassword != ""
+}
+
+// typeConsolePassword has qemu type v's console password into the guest, off
+// the UI goroutine: sending it can take a while (one monitor round trip per
+// character, deliberately paced — see qemu.TypeConsolePassword), and the TUI
+// must stay responsive while that happens.
+func typeConsolePassword(v *config.VM) tea.Cmd {
+	return func() tea.Msg {
+		if err := qemu.TypeConsolePassword(v); err != nil {
+			return errMsg(err.Error())
+		}
+		return statusMsg(v.Name + ": typed console password into the guest")
+	}
+}
 
 func (m model) viewDetail() string {
 	v := m.detail.vm
@@ -222,7 +251,10 @@ func (m model) viewDetail() string {
 	if m.status != "" {
 		parts = append(parts, warnStyle.Render(m.status))
 	}
-	parts = append(parts, renderFooter(detailHelp{sshAvailable: qemu.Running(v)}, m.width, m.showHelp))
+	parts = append(parts, renderFooter(detailHelp{
+		sshAvailable:    qemu.Running(v),
+		consolePassword: consolePasswordAvailable(v),
+	}, m.width, m.showHelp))
 	// Center for the same reason as the list: the footer is wider than the
 	// pane, and a left join would pin the pane to the footer's left edge.
 	return lipgloss.JoinVertical(lipgloss.Center, parts...)

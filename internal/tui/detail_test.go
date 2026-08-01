@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -131,6 +133,46 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	}
 	if got, want := string(b), "installed = false"; !contains(got, want) {
 		t.Fatalf("vm.toml on disk does not contain %q:\n%s", want, got)
+	}
+}
+
+// TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable proves the footer only
+// advertises "t" (type console password into guest) when the VM actually has
+// one to send — a stopped VM or one with no console password set must not
+// show it, since pressing it then can never succeed.
+func TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
+	cases := []struct {
+		name  string
+		vm    *config.VM
+		shows bool
+	}{
+		{"stopped, has password", &config.VM{Name: "a", Mode: "cloud", ConsolePassword: "stoat", Dir: t.TempDir()}, false},
+		{"running (fake), no password", &config.VM{Name: "b", Mode: "cloud", Dir: t.TempDir()}, false},
+	}
+	for _, c := range cases {
+		m := model{screen: screenDetail, width: 100, height: 40, showHelp: true}
+		m.detail = newDetail(c.vm)
+		out := ansi.Strip(m.viewDetail())
+		got := strings.Contains(out, "type password") || strings.Contains(out, "type console password")
+		if got != c.shows {
+			t.Errorf("%s: footer shows type-password key = %v, want %v", c.name, got, c.shows)
+		}
+	}
+}
+
+// TestTypeConsolePasswordKeyRefusesWhenUnavailable proves "t" reports a clear
+// toast instead of silently doing nothing (or attempting to dial a monitor
+// socket that cannot exist) when the VM is stopped or has no console
+// password.
+func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
+	v := &config.VM{Name: "stopped-vm", Mode: "cloud", ConsolePassword: "stoat", Dir: t.TempDir()}
+	m := model{screen: screenDetail, detail: detailModel{vm: v}}
+
+	newM, cmd := m.updateDetail(keyMsg("t"))
+	got := newM.(model)
+
+	if got.toast.text == "" || !got.toast.err {
+		t.Fatalf("expected an error toast refusing to type the password, got %+v (cmd nil=%v)", got.toast, cmd == nil)
 	}
 }
 

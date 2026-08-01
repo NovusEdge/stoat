@@ -3,7 +3,6 @@ package qemu
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -239,7 +238,7 @@ func Stop(v *config.VM) error {
 	if !Running(v) {
 		return nil
 	}
-	if c, err := net.Dial("unix", v.MonitorPath()); err == nil {
+	if c, err := dialMonitor(v); err == nil {
 		fmt.Fprintln(c, "system_powerdown")
 		c.Close()
 		for i := 0; i < 100; i++ {
