@@ -63,12 +63,25 @@ func (o imageOption) isBYO() bool { return o.entry == nil }
 // column on every line and read as ragged. Real names run long
 // (ubuntu-24.04-server-cloudimg-amd64.img is 38 cells) and an untruncated one
 // pushed the row past the form pane and wrapped it.
-const byoFileWidth = 30
+//
+// 24, down from 30, to make room for the size column: the BYO row is the
+// widest the form draws (os, backend, filename, size, tag) and at 30 the whole
+// row came to 65 cells against a 60-cell value column. The filename is the
+// only one of the five with slack — every other column is sized to its
+// content — so it is the one that gives.
+const byoFileWidth = 24
 
 // osUnknown is shown when iso.Infer could not name a BYO file's OS. It used
 // to render as "?", which tells the user neither what happened nor that
 // anything is still selectable — this is a state, not an error.
 const osUnknown = "unknown"
+
+// imageMetaWidth is the second column of an image row: the catalog entry's
+// variant, or a BYO file's backend. It must fit the widest of BOTH, which is
+// "13 (trixie)" at 11 — at 10 that one row overflowed by a single cell and
+// pushed debian's size column one right of every other row's.
+// TestImageMetaColumnFitsEveryValue keeps it honest.
+const imageMetaWidth = 11
 
 // label renders the image picker row for one option.
 //
@@ -77,20 +90,26 @@ const osUnknown = "unknown"
 // ANSI bytes that %-8s counts as width, which is how the `ls` output in this
 // repo once came out visibly skewed.
 func (o imageOption) label() string {
+	// Size shares the picker's column width so the form row and the modal
+	// agree, and is right-aligned for the same reason: sizes exist to be
+	// compared, and comparing is easier when the digits line up.
+	size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, o.sizeLabel()))
+
 	if o.entry != nil {
 		status := glyphDownload + " download"
 		if o.file != "" {
 			status = "downloaded"
 		}
-		return fmt.Sprintf("%-8s %-10s %s", o.entry.OS, o.entry.Variant, status)
+		return fmt.Sprintf("%-8s %-*s", o.entry.OS, imageMetaWidth, o.entry.Variant) +
+			size + "  " + status
 	}
 	osLabel := o.osName
 	if osLabel == "" {
 		osLabel = osUnknown
 	}
 	file := ansi.Truncate(o.file, byoFileWidth, "…")
-	return fmt.Sprintf("%-8s %-10s %-*s %s",
-		osLabel, o.backend, byoFileWidth, file, dimStyle.Render("byo"))
+	return fmt.Sprintf("%-8s %-*s %-*s", osLabel, imageMetaWidth, o.backend, byoFileWidth, file) +
+		size + "  " + dimStyle.Render("byo")
 }
 
 // localImageFiles lists every plain file under isos/, any extension, so BYO

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -188,8 +189,34 @@ func TestBYOLabelIsBoundedAndNamesTheUnknown(t *testing.T) {
 	if strings.Contains(label, "?") {
 		t.Errorf("label %q still renders the unnamed OS as a bare question mark", label)
 	}
-	if w := lipgloss.Width(label); w > formContentWidth {
-		t.Errorf("byo label is %d cells, wider than the form's %d-cell pane", w, formContentWidth)
+	// The label renders in the form's VALUE column, not the whole pane, so
+	// that is the width it has to fit — a row one cell over wraps.
+	if w, avail := lipgloss.Width(label), formContentWidth-fieldValueColumn; w > avail {
+		t.Errorf("byo label is %d cells, wider than the %d-cell value column", w, avail)
+	}
+}
+
+// The BYO row is the widest the form draws — os, backend, filename, size,
+// tag — so it is the one that overflows first when a column is added.
+func TestImageRowsFitTheValueColumn(t *testing.T) {
+	avail := formContentWidth - fieldValueColumn
+	longest := imageOption{
+		file:    "ubuntu-24.04-server-cloudimg-amd64-with-a-long-suffix.img",
+		backend: "cloudinit",
+		osName:  "ubuntu",
+		bytes:   66 * 1024 * 1024, // the widest size label, "~66.0 MiB"
+	}
+	if w := lipgloss.Width(longest.label()); w > avail {
+		t.Errorf("widest byo row is %d cells, value column is %d", w, avail)
+	}
+
+	e := iso.Entry{OS: "debian", Variant: "13 (trixie)", Backend: "cloudinit", Size: 66 * 1024 * 1024}
+	catalog := imageOption{entry: &e, backend: e.Backend, osName: e.OS, bytes: e.Size}
+	if w := lipgloss.Width(catalog.label()); w > avail {
+		t.Errorf("widest catalog row is %d cells, value column is %d", w, avail)
+	}
+	if !strings.Contains(catalog.label(), "MiB") {
+		t.Errorf("catalog row %q shows no size", catalog.label())
 	}
 }
 
@@ -358,6 +385,45 @@ func TestSingleVariantGroupCarriesItsImage(t *testing.T) {
 	for _, g := range groups {
 		if len(g.idxs) == 1 && g.only.variantLabel() == "" && g.only.file == "" {
 			t.Errorf("group %q has one image but does not carry it, so its size cannot render", g.os)
+		}
+	}
+}
+
+// The second column holds a catalog variant OR a BYO backend, and every value
+// must fit it. One that does not overflows by a cell and shifts the size
+// column on that row alone — which is what "13 (trixie)" did against a
+// 10-cell column, and which no width test catches, because the ROW still fits
+// the pane. Only the alignment breaks.
+func TestImageMetaColumnFitsEveryValue(t *testing.T) {
+	for _, e := range iso.Catalog() {
+		if w := lipgloss.Width(e.Variant); w > imageMetaWidth {
+			t.Errorf("catalog variant %q is %d cells, column is %d — its size will misalign",
+				e.Variant, w, imageMetaWidth)
+		}
+	}
+	for _, b := range byoBackends {
+		if w := lipgloss.Width(b); w > imageMetaWidth {
+			t.Errorf("backend %q is %d cells, column is %d", b, w, imageMetaWidth)
+		}
+	}
+}
+
+// The real invariant the column width serves: every catalog row puts its size
+// in the same place.
+func TestCatalogRowsAlignTheirSizeColumn(t *testing.T) {
+	var want int
+	for i, e := range iso.Catalog() {
+		e := e
+		o := imageOption{entry: &e, backend: e.Backend, osName: e.OS, bytes: e.Size}
+		// Everything before the size is fixed-width, so its width is where the
+		// size column starts.
+		prefix := lipgloss.Width(fmt.Sprintf("%-8s %-*s", e.OS, imageMetaWidth, e.Variant))
+		if i == 0 {
+			want = prefix
+			continue
+		}
+		if prefix != want {
+			t.Errorf("row %q starts its size at column %d, others at %d", o.label(), prefix, want)
 		}
 	}
 }
