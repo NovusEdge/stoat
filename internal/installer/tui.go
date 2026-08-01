@@ -16,19 +16,6 @@ import (
 	"github.com/novusedge/stoat/internal/theme"
 )
 
-// bannerArt is drawn above the transcript. It is the same mark
-// internal/tui/theme.go draws above the main TUI, repeated here rather than
-// imported: that constant is package-private, same reason New() repeats
-// newTextInput's style fix locally instead of importing internal/tui for it.
-// At 43 columns it fits comfortably under defaultWidth, so there was no need
-// to shrink it for this layout.
-const bannerArt = `███████╗████████╗ ██████╗  █████╗ ████████╗
-██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚══██╔══╝
-███████╗   ██║   ██║   ██║███████║   ██║
-╚════██║   ██║   ██║   ██║██╔══██║   ██║
-███████║   ██║   ╚██████╔╝██║  ██║   ██║
-╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝   ╚═╝   `
-
 // defaultWidth is used until the first WindowSizeMsg arrives, and as the floor
 // for a terminal that reports something unusably narrow.
 const defaultWidth = 60
@@ -125,18 +112,8 @@ type Model struct {
 func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 	dir := DefaultDir(home, prefixEnv)
 
-	in := textinput.New()
+	in := theme.TextInput()
 	in.SetValue(dir)
-	in.Prompt = ""
-	// Clear the text style bubbles v2 hardcodes (DefaultDarkStyles paints text
-	// ANSI colour 7, grey-on-white on a light terminal) so the value inherits
-	// the terminal's own foreground instead. See internal/tui/theme.go's
-	// newTextInput, which does the same thing for the main TUI; that helper is
-	// package-private, so the installer repeats the fix locally.
-	st := in.Styles()
-	st.Focused.Text = lipgloss.NewStyle()
-	st.Blurred.Text = lipgloss.NewStyle()
-	in.SetStyles(st)
 	in.Focus()
 
 	sp := spinner.New()
@@ -327,6 +304,21 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+// rcLineLines renders m.rcLine indented by indent, breaking it across
+// physical lines (see WrapRCLine) so it never gets clipped by Bubble Tea's
+// per-line width clamp. indent is repeated on every line, continuation
+// lines included: a shell reading a `\`-continued paste treats leading
+// whitespace before the reopened quote as ordinary inter-token whitespace,
+// not part of the quoted value, so this is invisible to what gets pasted.
+func (m Model) rcLineLines(indent string) []string {
+	chunks := WrapRCLine(m.shell, m.dir, m.width-len(indent))
+	lines := make([]string, len(chunks))
+	for i, c := range chunks {
+		lines[i] = indent + dimStyle.Render(c)
+	}
+	return lines
+}
+
 func expandHome(p, home string) string {
 	if p == "~" {
 		return home
@@ -340,9 +332,7 @@ func expandHome(p, home string) string {
 func (m Model) View() tea.View {
 	var blocks []string
 
-	if bannerArt != "" {
-		blocks = append(blocks, accentStyle.Render(bannerArt), "")
-	}
+	blocks = append(blocks, accentStyle.Render(theme.BannerArt), "")
 
 	if len(m.checks) > 0 {
 		blocks = append(blocks,
@@ -415,16 +405,19 @@ func (m Model) active() string {
 		return "    " + m.spin.View() + "  building    " + m.version
 
 	case phaseRC:
-		return lipgloss.JoinVertical(lipgloss.Left,
-			"    "+okStyle.Render("ok")+"    installed   "+m.binPath,
+		lines := []string{
+			"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
 			"",
-			"  "+m.dir+" is not on your PATH",
-			"  append to "+m.rcPath+":",
-			"    "+dimStyle.Render(m.rcLine),
+			"  " + m.dir + " is not on your PATH",
+			"  append to " + m.rcPath + ":",
+		}
+		lines = append(lines, m.rcLineLines("    ")...)
+		lines = append(lines,
 			"",
 			"  append it? [Y/n]",
 			"  "+helpModel().ShortHelpView([]key.Binding{keys.Accept, keys.Decline}),
 		)
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	case phaseDone:
 		return m.done()
@@ -465,8 +458,8 @@ func (m Model) done() string {
 				"",
 				"  "+warnStyle.Render("warn")+"  could not write "+m.rcPath+": "+m.rcErr.Error(),
 				"        add this line yourself:",
-				"          "+dimStyle.Render(m.rcLine),
 			)
+			lines = append(lines, m.rcLineLines("          ")...)
 		case m.rcLine != "":
 			// Declined: rcLine is only ever set once the rc prompt has been
 			// shown (see the installedMsg case in Update), so this is
@@ -476,8 +469,8 @@ func (m Model) done() string {
 			lines = append(lines,
 				"",
 				"  skipped — add this yourself:",
-				"        "+dimStyle.Render(m.rcLine),
 			)
+			lines = append(lines, m.rcLineLines("        ")...)
 		}
 	}
 

@@ -161,6 +161,153 @@ func TestAppendRCHandlesMissingTrailingNewline(t *testing.T) {
 	t.Errorf("the export is not on a line of its own:\n%s", got)
 }
 
+// unquotePosixRun reverses a posix "word" made only of adjacent single-quoted
+// runs and backslash-escaped single characters outside of quotes -- exactly
+// the two constructs shellQuote ever produces, whether called once on the
+// whole dir or once per chunk. It is written from posix quoting rules
+// directly, not derived from shellQuote, so it is an independent check of
+// what a real shell would assign, not a tautology against the code under
+// test. It stops at the first byte that starts neither construct, returning
+// that remainder unconsumed.
+func unquotePosixRun(s string) (value, rest string) {
+	var b strings.Builder
+	for len(s) > 0 {
+		switch {
+		case s[0] == '\'':
+			end := strings.IndexByte(s[1:], '\'')
+			if end == -1 {
+				return b.String(), s
+			}
+			b.WriteString(s[1 : 1+end])
+			s = s[1+end+1:]
+		case s[0] == '\\' && len(s) > 1:
+			b.WriteByte(s[1])
+			s = s[2:]
+		default:
+			return b.String(), s
+		}
+	}
+	return b.String(), s
+}
+
+// unquoteFishRun reverses a fish word made of adjacent single-quoted runs --
+// what fishQuote produces per chunk -- unescaping fish's own `\\` and `\'`
+// within each run. Independent of fishQuote for the same reason
+// unquotePosixRun is independent of shellQuote.
+func unquoteFishRun(s string) (value, rest string) {
+	var b strings.Builder
+outer:
+	for len(s) > 0 && s[0] == '\'' {
+		s = s[1:]
+		for {
+			switch {
+			case len(s) == 0:
+				break outer // malformed input; stop rather than loop forever
+			case strings.HasPrefix(s, `\\`):
+				b.WriteByte('\\')
+				s = s[2:]
+			case strings.HasPrefix(s, `\'`):
+				b.WriteByte('\'')
+				s = s[2:]
+			case s[0] == '\'':
+				s = s[1:]
+				continue outer
+			default:
+				b.WriteByte(s[0])
+				s = s[1:]
+			}
+		}
+	}
+	return b.String(), s
+}
+
+// pasteValue simulates what a real shell assigns after a WrapRCLine result
+// is pasted: it deletes each line's trailing "\" continuation marker (a real
+// paste carries the newline that marker precedes; a shell deletes a
+// backslash-newline pair outright, before any tokenizing), concatenates the
+// lines with no separator, confirms the fixed prefix and suffix survived
+// untouched, and unquotes whatever sits between them. This is the ground
+// truth WrapRCLine's paste-safety claim rests on.
+func pasteValue(t *testing.T, shell string, wrapped []string) string {
+	t.Helper()
+	var joined strings.Builder
+	for _, l := range wrapped {
+		joined.WriteString(strings.TrimSuffix(l, `\`))
+	}
+	line := joined.String()
+
+	prefix, _, suffix := rcLineParts(shell)
+	rest, ok := strings.CutPrefix(line, prefix)
+	if !ok {
+		t.Fatalf("reassembled line %q does not start with %q", line, prefix)
+	}
+
+	var value string
+	if filepath.Base(shell) == "fish" {
+		value, rest = unquoteFishRun(rest)
+	} else {
+		value, rest = unquotePosixRun(rest)
+	}
+	if rest != suffix {
+		t.Fatalf("reassembled line %q: after unquoting the value, %q is left over, want the suffix %q", line, rest, suffix)
+	}
+	return value
+}
+
+// However WrapRCLine chooses to break a line, pasting the result into a real
+// shell must always assign the exact same PATH value ShellRC's unbroken line
+// would have -- and whenever it actually did break the line (more than one
+// physical line came back), every one of those lines must fit the width it
+// was asked for, or the whole point of wrapping (avoiding Bubble Tea's
+// per-line clip) is defeated.
+//
+// This covers both shell syntaxes ShellRC emits, and directories containing
+// the characters each one's quoting escapes (a single quote for posix, a
+// backslash and a single quote for fish) at arbitrary points a chunk
+// boundary could land on.
+func TestWrapRCLineReassembles(t *testing.T) {
+	tests := []struct {
+		name  string
+		shell string
+		dir   string
+	}{
+		{"posix", "/usr/bin/zsh", "/home/exampleuser/" + strings.Repeat("nested/", 10) + "bin"},
+		{"posix with a quote", "/usr/bin/bash", `/home/x/my dir's stuff/` + strings.Repeat("pad-", 15)},
+		{"fish", "/usr/bin/fish", "/home/exampleuser/" + strings.Repeat("nested/", 10) + "bin"},
+		{"fish with backslash and quote", "/usr/bin/fish", `/home/x/odd\dir'name/` + strings.Repeat("pad-", 15)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, width := range []int{15, 20, 30, 60, 200} {
+				lines := WrapRCLine(tt.shell, tt.dir, width)
+				if len(lines) > 1 {
+					for _, l := range lines {
+						if len(l) > width {
+							t.Errorf("width=%d: line %q is %d chars, wider than the terminal", width, l, len(l))
+						}
+					}
+				}
+				if got := pasteValue(t, tt.shell, lines); got != tt.dir {
+					t.Errorf("width=%d: pasting %v assigns %q, want %q", width, lines, got, tt.dir)
+				}
+			}
+		})
+	}
+}
+
+// A width too narrow to fit even a single quoted byte has no safe break:
+// WrapRCLine must hand back the line unbroken rather than corrupt it. A
+// terminal's own soft-wrap of that unbroken line is fine -- unlike Bubble
+// Tea's clip, it never inserts a real newline into what gets pasted.
+func TestWrapRCLineFallsBackWhenNoSafeBreakFits(t *testing.T) {
+	_, want := ShellRC("/usr/bin/zsh", "/home/x", "/home/x/.local/bin")
+	got := WrapRCLine("/usr/bin/zsh", "/home/x/.local/bin", 1)
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("WrapRCLine at width=1 = %q, want the unbroken line %q", got, want)
+	}
+}
+
 // A directory with a space and a quote in it is the case that breaks a naive
 // implementation: the space would split fish_add_path's argument in two, and
 // the quote would end the POSIX export's string early. Both branches must

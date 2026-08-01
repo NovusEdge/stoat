@@ -1,8 +1,11 @@
 package installer
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -333,7 +336,7 @@ func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
 	// both the read and the MkdirAll inside AppendRC — without touching
 	// anything outside t.TempDir().
 	m.rcPath = filepath.Join(blocker, ".zshrc")
-	m.rcLine = `export PATH="/home/x/.local/bin:$PATH"`
+	_, m.rcLine = ShellRC(m.shell, m.home, m.dir)
 
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = next.(Model)
@@ -350,6 +353,131 @@ func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
 	}
 	if !strings.Contains(view, m.rcLine) {
 		t.Errorf("done view does not tell the user the line to add themselves:\n%s", view)
+	}
+}
+
+// ansiRE strips SGR colour codes so pastedRCLine can read a rendered line's
+// real text -- it must not care which colours the theme picked, only what
+// characters would land in the terminal, since those are what a paste
+// carries.
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// longRCDir is long enough that its rc line overflows both 60 and 80
+// columns at every one of tui.go's three render indents, so every test
+// below actually exercises wrapping rather than the single-line fast path.
+var longRCDir = "/home/exampleuser/" + strings.Repeat("wide-prefix-segment/", 6) + "bin"
+
+// rcLineBlock finds the rc-line block in a rendered View: every ANSI-
+// stripped physical line indented by exactly indent, immediately following
+// the line containing anchor. Each returned line still carries its own
+// indent and, but for the last, its trailing `\` continuation marker --
+// pasteValue (paths_test.go) is what interprets those.
+//
+// It also fails the test directly if any such physical line, once
+// lipgloss.JoinVertical's own trailing space padding is discounted (it
+// right-pads every line in a block to the block's widest line -- here,
+// that's the unrelated and unwrapped "<dir> is not on your PATH" status
+// line, since dir is deliberately huge in these tests; trailing spaces are
+// inert padding a terminal clips for free, never part of what a paste
+// carries), is wider than width: that's the payload Bubble Tea's real
+// per-line clip would truncate, which this in-process View() call does not
+// reproduce on its own -- so this check is what actually stands in for
+// "did not get silently clipped."
+func rcLineBlock(t *testing.T, view, anchor, indent string, width int) []string {
+	t.Helper()
+	lines := strings.Split(ansiRE.ReplaceAllString(view, ""), "\n")
+
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, anchor) {
+			start = i + 1
+			break
+		}
+	}
+	if start == -1 {
+		t.Fatalf("anchor %q not found in view:\n%s", anchor, view)
+	}
+
+	var block []string
+	for _, l := range lines[start:] {
+		if !strings.HasPrefix(l, indent) {
+			break
+		}
+		payload := strings.TrimPrefix(strings.TrimRight(l, " "), indent)
+		if len(indent)+len(payload) > width {
+			t.Errorf("drawn line's payload is %d chars, wider than the %d-column terminal -- Bubble Tea would clip this: %q", len(indent)+len(payload), width, indent+payload)
+		}
+		block = append(block, payload)
+	}
+	return block
+}
+
+// The active rc prompt (phaseRC) must show the complete, pasteable rc line
+// even on a narrow terminal -- not silently clipped by Bubble Tea's per-line
+// width clamp, and not corrupted by a naive wrap that breaks the line
+// inside its quotes.
+func TestRCPromptLinePastesSafelyAtNarrowWidths(t *testing.T) {
+	for _, width := range []int{60, 80} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			m := newTestModel(t, "/usr/bin")
+			m.dir = longRCDir
+			m.width = width
+
+			next, _ := m.Update(installedMsg{path: m.dir + "/stoat"})
+			m = next.(Model)
+			if m.phase != phaseRC {
+				t.Fatalf("phase = %v, want phaseRC", m.phase)
+			}
+
+			block := rcLineBlock(t, m.View().Content, "append to "+m.rcPath+":", "    ", width)
+			if got := pasteValue(t, m.shell, block); got != m.dir {
+				t.Errorf("pasting the rc prompt's line assigns %q, want %q", got, m.dir)
+			}
+		})
+	}
+}
+
+// The done screen's "could not write the rc file" branch must show the same
+// complete, pasteable line -- this is the one case where the rc line is the
+// user's only way to finish the PATH change themselves.
+func TestDoneRCErrLinePastesSafelyAtNarrowWidths(t *testing.T) {
+	for _, width := range []int{60, 80} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			m := newTestModel(t, "/usr/bin")
+			m.dir = longRCDir
+			m.phase = phaseDone
+			m.binPath = longRCDir + "/stoat"
+			m.width = width
+			m.rcPath, m.rcLine = ShellRC(m.shell, m.home, m.dir)
+			m.rcErr = errors.New("disk full")
+
+			block := rcLineBlock(t, m.View().Content, "add this line yourself:", "          ", width)
+			if got := pasteValue(t, m.shell, block); got != m.dir {
+				t.Errorf("pasting the recovery line assigns %q, want %q", got, m.dir)
+			}
+		})
+	}
+}
+
+// The done screen's declined branch is the other place the line is the
+// user's only record of what to add -- same requirement, different indent.
+func TestDoneDeclinedRCLinePastesSafelyAtNarrowWidths(t *testing.T) {
+	for _, width := range []int{60, 80} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			m := newTestModel(t, "/usr/bin")
+			m.dir = longRCDir
+			m.phase = phaseDone
+			m.binPath = longRCDir + "/stoat"
+			m.width = width
+			m.rcPath, m.rcLine = ShellRC(m.shell, m.home, m.dir)
+			// rcAdded stays false and rcErr stays nil -- this is the
+			// declined branch, distinct from the rcErr branch above.
+
+			block := rcLineBlock(t, m.View().Content, "add this yourself:", "        ", width)
+			if got := pasteValue(t, m.shell, block); got != m.dir {
+				t.Errorf("pasting the declined line assigns %q, want %q", got, m.dir)
+			}
+		})
 	}
 }
 
