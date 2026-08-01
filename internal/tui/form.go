@@ -791,13 +791,25 @@ func (f formModel) build() (*config.VM, error) {
 		Recipes: selected,
 	}
 
+	// Refused the same way parseSize refuses it on the edit path: a relative
+	// size ("+8G") reads to qemu-img as "grow by", not "resize to", so
+	// `qemu-img create -f qcow2 disk.qcow2 +8G` silently allocates 2x. Empty
+	// is left alone here — it means "use the default" and is handled by
+	// buildVM/qemu-img the same way it always has.
+	disk := strings.TrimSpace(f.inputs[fDisk].Value())
+	if disk != "" {
+		if _, err := parseSize(disk); err != nil {
+			return nil, fmt.Errorf("disk size: %v", err)
+		}
+	}
+
 	if vm.Backend == "cloudinit" {
 		abs, err := opt.imagePath()
 		if err != nil {
 			return nil, err
 		}
 		vm.Base = abs
-		vm.Disk = strings.TrimSpace(f.inputs[fDisk].Value())
+		vm.Disk = disk
 		// Only a cloud image needs this. cloud-init locks every account by
 		// default, so without a console password the qemu window shows a
 		// login prompt with no valid answer. A live Alpine VM already logs
@@ -813,7 +825,7 @@ func (f formModel) build() (*config.VM, error) {
 		vm.ConsolePassword = pw
 	} else {
 		vm.ISO = "isos/" + opt.file
-		vm.Disk = strings.TrimSpace(f.inputs[fDisk].Value())
+		vm.Disk = disk
 	}
 
 	return vm, nil

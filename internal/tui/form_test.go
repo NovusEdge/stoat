@@ -181,6 +181,69 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 	})
 }
 
+// TestBuildRejectsRelativeDiskSize is a regression test: build() used to hand
+// the disk field straight to config.VM.Disk unchecked, so a relative size
+// like "+8G" reached qemu-img's resize, which reads a leading "+" as "grow
+// by" rather than "resize to" — silently doubling a fresh overlay. edit.go's
+// parseSize already refuses this on the edit path; build() must refuse it
+// too, the same way it refuses other invalid input (returning an error from
+// build(), surfaced by the caller as m.form.err).
+func TestBuildRejectsRelativeDiskSize(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	f := newForm()
+	f.inputs[fName].SetValue("relsize")
+	f.images = []imageOption{{file: "alpine-standard-3.20.0-x86_64.iso", backend: "apkovl", osName: "alpine"}}
+	f.imgIdx = 0
+	f.mode = "disk"
+	f.inputs[fDisk].SetValue("+8G")
+
+	_, err := f.build()
+	if err == nil {
+		t.Fatal("expected build() to reject a relative disk size (+8G)")
+	}
+}
+
+// TestFormAndParseSizeAgreeOnDiskStrings asserts build()'s disk validation and
+// edit.go's parseSize accept and reject the exact same strings, so the two
+// validators cannot silently drift apart and disagree about what the same
+// disk size means.
+func TestFormAndParseSizeAgreeOnDiskStrings(t *testing.T) {
+	cases := []string{
+		"8G", "512M", "1T", "1024K", // valid
+		"+8G", "-8G", // relative, refused
+		"8Gigs", "", "abc", "0G", "-1G", // otherwise invalid
+	}
+
+	for _, s := range cases {
+		t.Run(s, func(t *testing.T) {
+			t.Setenv("STOAT_HOME", t.TempDir())
+			f := newForm()
+			f.inputs[fName].SetValue("agree")
+			f.images = []imageOption{{file: "alpine-standard-3.20.0-x86_64.iso", backend: "apkovl", osName: "alpine"}}
+			f.imgIdx = 0
+			f.mode = "disk"
+			f.inputs[fDisk].SetValue(s)
+
+			_, buildErr := f.build()
+			_, sizeErr := parseSize(s)
+
+			// Empty is a special case on the form: it means "use the default",
+			// not "invalid" — parseSize alone would refuse it, but build() must
+			// not, so the two are only compared when the string isn't empty.
+			if s == "" {
+				if buildErr != nil {
+					t.Fatalf("build() rejected empty disk size, want default: %v", buildErr)
+				}
+				return
+			}
+
+			if (buildErr == nil) != (sizeErr == nil) {
+				t.Fatalf("disagreement on %q: build() err=%v, parseSize err=%v", s, buildErr, sizeErr)
+			}
+		})
+	}
+}
+
 // TestFormPaneWidthIsStable pins the fix for the box resizing (and
 // re-centering) the moment the download block appears: pane() hugs its
 // content, and the download stats line is wider than any form row, so the
