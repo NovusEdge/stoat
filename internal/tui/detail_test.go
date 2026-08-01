@@ -176,6 +176,37 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 }
 
+// TestCopyConsolePasswordKeyOnlyOfferedWhenAvailable mirrors the "t" case:
+// the footer must not advertise "c" (copy to clipboard) for a VM that has no
+// console password to copy.
+func TestCopyConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
+	v := &config.VM{Name: "b", Mode: "cloud", Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 100, height: 40, showHelp: true}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+	if strings.Contains(out, "copy password") || strings.Contains(out, "copy console password") {
+		t.Errorf("footer shows copy-password key for a VM with no console password")
+	}
+}
+
+// TestCopyConsolePasswordKeyRefusesWhenUnavailable proves "c" reports a clear
+// toast, and issues no clipboard command, when there is no console password
+// to copy.
+func TestCopyConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
+	v := &config.VM{Name: "stopped-vm", Mode: "cloud", Dir: t.TempDir()}
+	m := model{screen: screenDetail, detail: detailModel{vm: v}}
+
+	newM, _ := m.updateDetail(keyMsg("c"))
+	got := newM.(model)
+
+	if got.toast.text == "" || !got.toast.err {
+		t.Fatalf("expected an error toast refusing to copy, got %+v", got.toast)
+	}
+	if strings.Contains(got.toast.text, "stoat") {
+		t.Fatalf("toast must not contain the password itself: %q", got.toast.text)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {

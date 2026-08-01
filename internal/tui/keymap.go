@@ -142,7 +142,10 @@ func (h detailHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"p"}, "p", "provision"),
 	}
 	if h.consolePassword {
-		keys = append(keys, plainKey([]string{"t"}, "t", "type password"))
+		keys = append(keys,
+			plainKey([]string{"t"}, "t", "type password"),
+			plainKey([]string{"c"}, "c", "copy password"),
+		)
 	}
 	return append(keys,
 		plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"),
@@ -157,7 +160,10 @@ func (h detailHelp) FullHelp() [][]key.Binding {
 		{plainKey([]string{"p"}, "p", "provision")},
 	}
 	if h.consolePassword {
-		rows = append(rows, []key.Binding{plainKey([]string{"t"}, "t", "type console password into guest")})
+		rows = append(rows, []key.Binding{
+			plainKey([]string{"t"}, "t", "type console password into guest"),
+			plainKey([]string{"c"}, "c", "copy console password to clipboard"),
+		})
 	}
 	return append(rows,
 		[]key.Binding{plainKey([]string{"esc", "left", "h", "q"}, "esc/←/h/q", "back"), keyCtrlC},

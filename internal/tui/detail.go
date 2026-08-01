@@ -131,6 +131,18 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			return m, typeConsolePassword(v)
+		case "c":
+			v := m.detail.vm
+			if !consolePasswordAvailable(v) {
+				cmd := m.showToast("no console password to copy", true)
+				return m, cmd
+			}
+			// tea.SetClipboard uses OSC 52: no xclip/wl-copy dependency, no
+			// X11-vs-Wayland branch, and it works over ssh. Never toast the
+			// password itself — just confirm it moved.
+			copied := tea.SetClipboard(v.ConsolePassword)
+			toasted := m.showToast(v.Name+": console password copied to clipboard", false)
+			return m, tea.Batch(copied, toasted)
 		}
 	case vmReloadedMsg:
 		m.detail.vm = msg.vm
