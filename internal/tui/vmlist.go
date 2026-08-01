@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -60,6 +61,15 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		// even when the row isn't selected, while the text stays muted so a
 		// whole line of red isn't shouting from the list.
 		plain := fmt.Sprintf("%-14s broken: %s", it.broken.Name, brokenReason(it.broken.Err))
+		// A long reason wraps inside the pane. paneAt wraps the whole rendered
+		// list as one blob and has no idea this line starts 4 columns in (the
+		// cursor, the glyph, and the space after it) — left to it, the
+		// continuation lands flush against the pane's padding, under the
+		// cursor instead of under the text. Wrapping here first, with a
+		// hanging indent matching that prefix, means every physical line
+		// already fits listWidth and paneAt has nothing left to rewrap.
+		prefixWidth := lipgloss.Width(cursor) + lipgloss.Width(glyphBroken) + 1 // +1 for the space after the glyph
+		plain = strings.ReplaceAll(lipgloss.Wrap(plain, listWidth-prefixWidth, ""), "\n", "\n"+strings.Repeat(" ", prefixWidth))
 		if selected {
 			plain = selStyle.Render(plain)
 		} else {

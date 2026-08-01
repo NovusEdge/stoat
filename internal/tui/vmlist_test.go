@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/config"
 )
@@ -216,5 +219,68 @@ func TestFirstRunSaysHowToStart(t *testing.T) {
 	}
 	if strings.Contains(out, "No vms.") {
 		t.Error("first-run pane fell through to the component's own empty message")
+	}
+}
+
+// TestBrokenRowContinuationAlignsUnderText pins the wrap alignment on a
+// broken VM's parse error. vmDelegate.Render's plain row for a good VM is
+// sized to fit listWidth (TestListWidthFitsARunningRow guards that), but
+// brokenReason allows up to 60 characters of TOML error on top of a
+// "%-14s broken: " prefix, so a real parse error routinely needs a second
+// line. Left to paneAt's own word-wrap over the whole rendered list, the
+// continuation used to land flush against the pane's padding — under the
+// cursor rather than under the row's own text — and read as a second broken
+// entry instead of a continuation of the first.
+func TestBrokenRowContinuationAlignsUnderText(t *testing.T) {
+	m := model{screen: screenList, width: 80, height: 30, list: newVMList(), provisioning: map[string]provState{}}
+	m = drainCmds(m, vmsLoadedMsg{broken: []config.Broken{
+		{Name: "old-vm", Err: errors.New("toml: line 1: expected '.' or '=', but got 'i' instead")},
+	}})
+
+	var lines []string
+	for _, l := range strings.Split(m.viewList(), "\n") {
+		lines = append(lines, ansi.Strip(l))
+	}
+
+	first := -1
+	for i, l := range lines {
+		if strings.Contains(l, "old-vm") {
+			first = i
+			break
+		}
+	}
+	if first == -1 || first+1 >= len(lines) {
+		t.Fatalf("broken row did not render, or its error did not wrap:\n%s", strings.Join(lines, "\n"))
+	}
+
+	// Columns are counted in runes, not bytes: the pane's border and glyphs
+	// (│, ❯, ✗) are multi-byte, so a byte offset would overstate every column
+	// past them.
+	col := func(s, substr string) int {
+		i := strings.Index(s, substr)
+		if i < 0 {
+			return -1
+		}
+		return utf8.RuneCountInString(s[:i])
+	}
+
+	textCol := col(lines[first], "old-vm")
+	border := col(lines[first], "│") // the pane's left border; same column on every row
+	if border < 0 {
+		t.Fatalf("no left border found on the broken row:\n%s", lines[first])
+	}
+
+	// The continuation's column, measured the same way: the first non-space
+	// rune after the border, not after column 0 (which would just find the
+	// border itself, or the terminal's own left margin).
+	contRunes := []rune(lines[first+1])
+	contCol := border + 1
+	for contCol < len(contRunes) && contRunes[contCol] == ' ' {
+		contCol++
+	}
+
+	if contCol != textCol {
+		t.Errorf("continuation line starts at column %d, want %d (under the row's text, not the cursor):\n%s\n%s",
+			contCol, textCol, lines[first], lines[first+1])
 	}
 }
