@@ -43,13 +43,19 @@ var (
 // both the Bubbles idiom and the thing that survives the v2 migration: v2
 // renames space from " " to "space", and key.Matches goes on working while a
 // `case " ":` silently stops.
+//
+// Quit is split from Interrupt rather than one binding covering both "ctrl+c"
+// and "q": "q" is a character at the dir prompt, so it can only quit outside
+// phaseDir, and that has to be a second key.Matches call rather than a raw
+// msg.String() check on the combined binding.
 var keys = struct {
-	Install, Accept, Decline, Quit key.Binding
+	Install, Accept, Decline, Interrupt, Quit key.Binding
 }{
-	Install: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "install here")),
-	Accept:  key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "append it")),
-	Decline: key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "skip")),
-	Quit:    key.NewBinding(key.WithKeys("ctrl+c", "q"), key.WithHelp("ctrl+c", "quit")),
+	Install:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "install here")),
+	Accept:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "append it")),
+	Decline:   key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "skip")),
+	Interrupt: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 }
 
 var helpModel = help.New()
@@ -89,8 +95,13 @@ type Model struct {
 	rcPath  string
 	rcLine  string
 	rcAdded bool
-	err     error
-	width   int
+	// rcErr is a failed rc write. It is kept apart from err deliberately: by
+	// the time AppendRC runs, the build and install already succeeded, so
+	// this is a recoverable failure the user can finish by hand — not a
+	// reason to report the whole run as failed. See Failed and done.
+	rcErr error
+	err   error
+	width int
 }
 
 // New builds the model. Every environment value it depends on is a parameter so
@@ -121,7 +132,9 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 }
 
 // Failed reports whether the installer stopped on an error, so main can pick an
-// exit code.
+// exit code. A failed rc write does not count: the binary is already built and
+// installed by the time that can happen, so it exits 0 with a warning rather
+// than reporting a hard failure over a recoverable one.
 func (m Model) Failed() bool { return m.err != nil }
 
 func (m Model) Init() tea.Cmd {
@@ -200,9 +213,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// "q" only quits once there is nothing left to type into; at the dir prompt
-	// it is a character.
-	if key.Matches(msg, keys.Quit) && (msg.String() != "q" || m.phase != phaseDir) {
+	// ctrl+c always quits. "q" only quits once there is nothing left to type
+	// into — at the dir prompt it is a character — so it is checked separately
+	// and only outside phaseDir.
+	if key.Matches(msg, keys.Interrupt) {
+		return m, tea.Quit
+	}
+	if key.Matches(msg, keys.Quit) && m.phase != phaseDir {
 		return m, tea.Quit
 	}
 
@@ -228,11 +245,11 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.phase = phaseDone
 			return m, tea.Quit
 		case key.Matches(msg, keys.Accept):
+			// A failed write here is not fatal — see the rcErr field comment —
+			// so it goes to rcErr, not err.
 			added, err := AppendRC(m.rcPath, m.rcLine)
-			if err != nil {
-				m.err = err
-			}
 			m.rcAdded = added
+			m.rcErr = err
 			m.phase = phaseDone
 			return m, tea.Quit
 		}
@@ -277,6 +294,15 @@ func (m Model) View() tea.View {
 // pre-colored status cells still line up -- it measures cells ANSI-aware, which
 // a hand-rolled pad using len() would get wrong the moment a detail string
 // contains anything non-ASCII.
+//
+// BorderBottom(false) with no header is the exact combination internal/tui's
+// fields.go documents as buggy in lipgloss v2.0.5's table: computeHeight()
+// undercounts a headerless table by one, and Render() clamps to
+// min(t.height, computeHeight()). It's silent here only because this table
+// never calls .Height(), so t.height stays 0 and the clamp is skipped
+// (lipgloss treats MaxHeight(0) as unset). The moment something calls
+// .Height() on this table, the last row — /dev/kvm, most often — disappears.
+// See fields.go's BorderBottom(true) comment for the full mechanism.
 func (m Model) checkTable() string {
 	t := table.New().
 		BorderTop(false).BorderBottom(false).
@@ -312,7 +338,7 @@ func (m Model) active() string {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			"  install to: "+m.input.View(),
 			"",
-			"  "+helpModel.ShortHelpView([]key.Binding{keys.Install, keys.Quit}),
+			"  "+helpModel.ShortHelpView([]key.Binding{keys.Install, keys.Interrupt}),
 		)
 
 	case phaseBuild:
@@ -350,7 +376,15 @@ func (m Model) done() string {
 		lines = append(lines,
 			"",
 			"  added the PATH line to "+m.rcPath,
-			"  "+dimStyle.Render("open a new shell, or source it, to pick it up"),
+			"  open a new shell, or source it, to pick it up",
+		)
+	}
+	if m.rcErr != nil {
+		lines = append(lines,
+			"",
+			"  "+warnStyle.Render("warn")+"  could not write "+m.rcPath+": "+m.rcErr.Error(),
+			"        add this line yourself:",
+			"          "+dimStyle.Render(m.rcLine),
 		)
 	}
 

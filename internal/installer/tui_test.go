@@ -1,6 +1,8 @@
 package installer
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -139,6 +141,45 @@ func TestDoneDedupesIdenticalFixCommands(t *testing.T) {
 	want := "sudo pacman -S --needed qemu-full"
 	if got := strings.Count(view, want); got != 1 {
 		t.Errorf("fix command appears %d times, want 1:\n%s", got, view)
+	}
+}
+
+// A failed rc write is recoverable — the build and install already succeeded
+// by the time AppendRC runs — so it must not be reported as a hard failure:
+// Failed() must stay false, and the done screen must still show the install
+// alongside the line the user needs to add themselves.
+func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newTestModel(t, "/usr/bin")
+	m.dir = "/home/x/.local/bin"
+	m.phase = phaseRC
+	m.binPath = "/home/x/.local/bin/stoat"
+	// blocker is a regular file, so anything under it as a parent dir fails
+	// both the read and the MkdirAll inside AppendRC — without touching
+	// anything outside t.TempDir().
+	m.rcPath = filepath.Join(blocker, ".zshrc")
+	m.rcLine = `export PATH="/home/x/.local/bin:$PATH"`
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m = next.(Model)
+
+	if m.Failed() {
+		t.Error("Failed() = true after a recoverable rc-write failure")
+	}
+	if m.phase != phaseDone {
+		t.Errorf("phase = %v, want phaseDone", m.phase)
+	}
+	view := m.View().Content
+	if !strings.Contains(view, m.binPath) {
+		t.Errorf("done view lost the install confirmation after a failed rc write:\n%s", view)
+	}
+	if !strings.Contains(view, m.rcLine) {
+		t.Errorf("done view does not tell the user the line to add themselves:\n%s", view)
 	}
 }
 
