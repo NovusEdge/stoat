@@ -128,7 +128,39 @@ func Run() error {
 
 func (m model) Init() tea.Cmd { return loadVMs }
 
+// Update feeds a browsing file picker without consuming the message, then
+// runs the normal update.
+//
+// The picker's directory listing arrives as a NON-key message, so it has to
+// reach the modal somehow. But a diverted message must not be swallowed: a
+// tick chain only continues because its handler returns the next tick cmd, so
+// consuming one dlTickMsg here does not pause the download bar, it ends the
+// chain for good. (dlTickMsg's own case carries the same warning about
+// routing by screen, which broke this once already.) Copy, then carry on.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var browseCmd tea.Cmd
+	if m.modal != nil && m.modal.browsing {
+		if _, isKey := msg.(tea.KeyPressMsg); !isKey {
+			cmd, chosen, closed := m.modal.update(msg)
+			browseCmd = cmd
+			if chosen >= 0 {
+				m.form.images = m.modal.images
+				m.form.selectImage(chosen)
+			}
+			if closed {
+				m.modal = nil
+			}
+		}
+	}
+
+	next, cmd := m.updateApp(msg)
+	if browseCmd == nil {
+		return next, cmd
+	}
+	return next, tea.Batch(cmd, browseCmd)
+}
+
+func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ctrl+c must quit from every screen and every sub-mode (delete
 	// confirmation, full help, the form, ...). It's handled centrally, once,
 	// here — rather than duplicated per-screen — because that duplication is
@@ -142,15 +174,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The image picker takes the keyboard while it is open, before any screen
 	// gets a look. Only key messages are diverted: the download tick, the
 	// cloud-init poll and the spinner all keep running underneath, so opening
-	// the picker mid-download doesn't freeze its progress bar.
-	//
-	// While the modal is browsing (its bubbles/filepicker sub-state), non-key
-	// messages are diverted too: the picker's own directory listing arrives
-	// as one, and without this it would never populate — filepicker.Init()
-	// fires the read, but only the modal's own update() ever calls it back.
+	// the picker mid-download doesn't freeze its progress bar. A browsing
+	// picker still needs its non-key directory listing; Update handles that
+	// above by copying rather than consuming.
 	if m.modal != nil {
-		_, isKey := msg.(tea.KeyPressMsg)
-		if isKey || m.modal.browsing {
+		if _, isKey := msg.(tea.KeyPressMsg); isKey {
 			cmd, chosen, closed := m.modal.update(msg)
 			if chosen >= 0 {
 				// A browsed file isn't in m.form.images — it can live

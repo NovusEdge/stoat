@@ -16,6 +16,29 @@ import (
 // testImages is a fixture with the shape that motivated the modal: one OS
 // with two variants, several with one, and a BYO file whose OS iso.Infer
 // could not name.
+// A tick chain continues only because its handler hands back the next tick
+// cmd. Diverting every non-key message into the browsing modal swallowed the
+// download tick and returned the modal's cmd instead, which does not just
+// stall the progress bar -- it ends the chain for good. app.go:299 already
+// carries this warning for the by-screen routing that caused it once before.
+func TestBrowsingDoesNotKillTheDownloadTick(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	m := model{screen: screenForm, form: newForm()}
+	m.form.fetching = true
+	m.modal = newImageModal(testImages(), 0)
+	m.modal.openBrowser()
+
+	if !m.modal.browsing {
+		t.Fatal("openBrowser did not enter the browsing state")
+	}
+
+	_, cmd := m.Update(dlTickMsg{})
+	if cmd == nil {
+		t.Fatal("dlTickMsg while browsing returned no cmd: the download tick chain is dead")
+	}
+}
+
 func testImages() []imageOption {
 	std := iso.Entry{ID: "alpine-standard", OS: "alpine", Variant: "standard", Backend: "apkovl"}
 	virt := iso.Entry{ID: "alpine-virt", OS: "alpine", Variant: "virt", Backend: "apkovl"}
