@@ -36,18 +36,33 @@ type foundImage struct {
 // WalkDir, not Walk: it reads directory entries in bulk and skips one Lstat
 // per file. It also does not follow symlinks, which is what keeps a symlink
 // loop from hanging the scan.
-func scanImages(root string) <-chan []foundImage {
+//
+// cancel, when closed, ends the walk at the next batch boundary. Without it a
+// caller who stops reading (the finder is left, or the modal closes on a
+// selection) leaves the goroutine parked forever on an unconsumed send once
+// four batches (128 images) pile up in the buffer -- out is capacity 4 and a
+// bare send blocks. A nil cancel is fine; the send just never has a second
+// case to race against.
+func scanImages(root string, cancel <-chan struct{}) <-chan []foundImage {
 	out := make(chan []foundImage, 4)
 
 	go func() {
 		defer close(out)
 		batch := make([]foundImage, 0, scanBatch)
-		flush := func() {
+		// flush reports whether the batch was delivered. false means cancel
+		// fired first and the walk must stop -- returning fs.SkipAll from the
+		// WalkDirFunc is what actually ends filepath.WalkDir.
+		flush := func() bool {
 			if len(batch) == 0 {
-				return
+				return true
 			}
-			out <- batch
-			batch = make([]foundImage, 0, scanBatch)
+			select {
+			case out <- batch:
+				batch = make([]foundImage, 0, scanBatch)
+				return true
+			case <-cancel:
+				return false
+			}
 		}
 
 		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -84,7 +99,9 @@ func scanImages(root string) <-chan []foundImage {
 			}
 			batch = append(batch, foundImage{path: path, size: info.Size()})
 			if len(batch) >= scanBatch {
-				flush()
+				if !flush() {
+					return fs.SkipAll
+				}
 			}
 			return nil
 		})
@@ -106,18 +123,25 @@ func hasImageExt(name string) bool {
 
 // imagesFoundMsg carries one batch. done is set once the channel closes, which
 // is how the modal knows to stop saying it is still looking.
+//
+// gen is the scan generation waitForImages was issued for. The modal stamps
+// its current generation into every waitForImages call and drops any message
+// whose gen doesn't match -- a message parked on a scan that has since been
+// abandoned (esc, or re-entering the finder) would otherwise be delivered
+// against the NEW scan, doubling its results or ending it early.
 type imagesFoundMsg struct {
 	batch []foundImage
 	done  bool
+	gen   int
 }
 
 // waitForImages reads ONE batch and returns it as a message. The receiver
 // re-issues it until done, which is the standard way to pump a channel into
 // Bubbletea: a command that blocks forever would never let the UI redraw.
-func waitForImages(ch <-chan []foundImage) tea.Cmd {
+func waitForImages(ch <-chan []foundImage, gen int) tea.Cmd {
 	return func() tea.Msg {
 		batch, ok := <-ch
-		return imagesFoundMsg{batch: batch, done: !ok}
+		return imagesFoundMsg{batch: batch, done: !ok, gen: gen}
 	}
 }
 

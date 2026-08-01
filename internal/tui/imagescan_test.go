@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // drainScan collects every batch the scanner emits, so a test can assert on
@@ -57,7 +59,7 @@ func TestScanImagesFindsOnlyImagesOutsideHiddenDirs(t *testing.T) {
 	write(".cache/stale.iso")
 	write(".local/share/deep/hidden.qcow2")
 
-	found := drainScan(scanImages(root))
+	found := drainScan(scanImages(root, nil))
 
 	for _, want := range []string{"alpine.iso", "disk.qcow2", "raw.img"} {
 		if !has(found, want) {
@@ -84,7 +86,7 @@ func TestScanImagesReportsSize(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "big.iso"), make([]byte, 4096), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	found := drainScan(scanImages(root))
+	found := drainScan(scanImages(root, nil))
 	if len(found) != 1 {
 		t.Fatalf("want exactly one image, got %v", paths(found))
 	}
@@ -109,15 +111,49 @@ func TestScanImagesSurvivesAnUnreadableDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if found := drainScan(scanImages(root)); !has(found, "after.iso") {
+	if found := drainScan(scanImages(root, nil)); !has(found, "after.iso") {
 		t.Errorf("an unreadable directory ended the walk; found %v", paths(found))
+	}
+}
+
+// If nothing keeps reading (the finder is left, or the modal closes on a
+// selection), the walk must still stop -- otherwise the goroutine blocks
+// forever on the 5th pending batch (out has capacity 4) and leaks, holding an
+// open WalkDir, once per abandoned scan.
+func TestScanImagesStopsWhenCancelled(t *testing.T) {
+	root := t.TempDir()
+	// More than fits in the channel's buffer (4 batches) plus one more, so
+	// the goroutine is guaranteed to still be producing -- and blocked on a
+	// send -- when cancel fires.
+	for i := 0; i < 200; i++ {
+		p := filepath.Join(root, fmt.Sprintf("img%03d.iso", i))
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cancel := make(chan struct{})
+	ch := scanImages(root, cancel)
+	<-ch // one batch read, buffer fills behind it, goroutine blocks on the next send
+	close(cancel)
+
+	done := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the scan goroutine did not stop after cancel; it is blocked forever on a send")
 	}
 }
 
 // The channel must close, or waitForImages blocks forever and the modal
 // never learns the scan is finished.
 func TestScanImagesClosesItsChannel(t *testing.T) {
-	ch := scanImages(t.TempDir())
+	ch := scanImages(t.TempDir(), nil)
 	drainScan(ch)
 	if _, open := <-ch; open {
 		t.Error("the scan channel is still open after the walk finished")

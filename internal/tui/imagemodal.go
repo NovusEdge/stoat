@@ -252,6 +252,13 @@ type imageModal struct {
 	// updateFinding can re-issue waitForImages after each batch; openFinder's
 	// local ch goes out of scope the moment it returns.
 	scanCh <-chan []foundImage
+	// scanCancel, closed by stopScan, tells the scan goroutine to give up
+	// rather than block forever on a send nobody will read (see scanImages).
+	scanCancel chan struct{}
+	// scanGen is the current scan's generation, stamped into every
+	// imagesFoundMsg openFinder issues. updateFinding drops any message whose
+	// generation doesn't match -- see imagesFoundMsg's doc.
+	scanGen int
 	// scanDone distinguishes "found nothing yet" from "found nothing" -- an
 	// empty pane means opposite things before and after the walk ends.
 	scanDone bool
@@ -551,12 +558,32 @@ func (mo *imageModal) updateBrowsing(msg tea.Msg) (tea.Cmd, int, bool) {
 // the results.
 func (mo *imageModal) openFinder() tea.Cmd {
 	mo.ensureFindList()
+	// Cleared, not appended to: re-entering the finder starts a fresh scan,
+	// and the old scan's results are still sitting in findList's items from
+	// last time. Without this every re-entry doubles the whole list.
+	mo.findList.SetItems(nil)
+	mo.stopScan() // in case the previous scan is somehow still running
 	mo.finding = true
 	mo.scanDone = false
+	mo.scanGen++
 
-	ch := scanImages(homeDir())
+	cancel := make(chan struct{})
+	mo.scanCancel = cancel
+	ch := scanImages(homeDir(), cancel)
 	mo.scanCh = ch
-	return waitForImages(ch)
+	return waitForImages(ch, mo.scanGen)
+}
+
+// stopScan tells the running scan's goroutine to give up rather than block
+// forever on a batch nobody will read, and forgets the channel so a stray
+// repump can't be issued against it. Called whenever the finder is left --
+// esc, choosing an image, or the modal closing outright.
+func (mo *imageModal) stopScan() {
+	if mo.scanCancel != nil {
+		close(mo.scanCancel)
+		mo.scanCancel = nil
+	}
+	mo.scanCh = nil
 }
 
 // ensureFindList lazily builds the finder's list on first use. It is
@@ -606,13 +633,23 @@ func (mo *imageModal) setFound(found []foundImage) {
 func (mo *imageModal) updateFinding(msg tea.Msg) (tea.Cmd, int, bool) {
 	mo.ensureFindList()
 	if found, ok := msg.(imagesFoundMsg); ok {
+		if found.gen != mo.scanGen {
+			// A message from an abandoned scan (esc, or re-entering the
+			// finder since it was issued). Dropped outright: repumping it
+			// would read the WRONG channel, and a stale done would mark the
+			// NEW scan finished while it is still running.
+			return nil, -1, false
+		}
 		if found.done {
 			mo.scanDone = true
 			return nil, -1, false
 		}
 		mo.setFound(found.batch)
 		// Pump the next batch. The scan is still running.
-		return waitForImages(mo.scanCh), -1, false
+		if mo.scanCh == nil {
+			return nil, -1, false
+		}
+		return waitForImages(mo.scanCh, mo.scanGen), -1, false
 	}
 
 	if key, ok := msg.(tea.KeyPressMsg); ok {
@@ -624,6 +661,7 @@ func (mo *imageModal) updateFinding(msg tea.Msg) (tea.Cmd, int, bool) {
 			if mo.findList.FilterState() != list.Unfiltered {
 				break // let the list clear its own filter
 			}
+			mo.stopScan()
 			mo.finding = false
 			return nil, -1, false
 		case "enter":
@@ -645,6 +683,7 @@ func (mo *imageModal) updateFinding(msg tea.Msg) (tea.Cmd, int, bool) {
 				return nil, -1, false
 			}
 			mo.images = append(mo.images, opt)
+			mo.stopScan()
 			mo.finding = false
 			return nil, len(mo.images) - 1, true
 		}

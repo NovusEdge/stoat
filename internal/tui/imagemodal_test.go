@@ -638,8 +638,10 @@ func TestFinderSaysWhenItFoundNothing(t *testing.T) {
 // tree browser follows (see updateBrowsing's comment), because the user is
 // one step into a choice and dumping them out would discard it.
 func TestFinderEscGoesBackToTheVariantList(t *testing.T) {
-	mo := newImageModal(testImages(), 0)
-	mo.finding = true
+	imgs := testImages()
+	mo := newImageModal(imgs, 0)
+	mo.drill(mo.groups[len(mo.groups)-1]) // byo group, where find… lives
+	mo.openFinder()
 
 	_, idx, closed := mo.update(keyMsg("esc"))
 	if closed {
@@ -650,6 +652,37 @@ func TestFinderEscGoesBackToTheVariantList(t *testing.T) {
 	}
 	if mo.finding {
 		t.Error("esc did not leave the finder")
+	}
+
+	// State alone would pass even if view() still drew the finder -- assert
+	// on what is actually redrawn.
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "browse…") {
+		t.Errorf("esc left the finder in state but not on screen; drawn:\n%s", out)
+	}
+	if strings.Contains(out, "searching") {
+		t.Errorf("the finder is still drawn after esc:\n%s", out)
+	}
+}
+
+// Re-entering the finder must start clean: leaving it (esc) does not cancel
+// the running scan by itself -- if the old scan's messages keep landing (see
+// TestReEnteringFinderDoesNotDoubleResults), every result would be appended
+// twice, adjacent, because the old list's items survive across openFinder.
+func TestReEnteringFinderDoesNotDoubleResults(t *testing.T) {
+	imgs := testImages()
+	mo := newImageModal(imgs, 0)
+	mo.drill(mo.groups[len(mo.groups)-1])
+	mo.openFinder()
+	mo.setFound([]foundImage{{path: "/home/u/only.iso", size: 1}})
+
+	mo.update(keyMsg("esc"))                                       // leave the finder
+	mo.openFinder()                                                // re-enter: must not carry the old results over
+	mo.setFound([]foundImage{{path: "/home/u/only.iso", size: 1}}) // the new scan finds it again
+
+	out := ansi.Strip(mo.view())
+	if n := strings.Count(out, "only.iso"); n != 1 {
+		t.Errorf("only.iso appears %d times after re-entering the finder, want 1:\n%s", n, out)
 	}
 }
 
@@ -723,5 +756,17 @@ func TestScanKeepsPumpingAfterABatch(t *testing.T) {
 	_, cmd := m.Update(imagesFoundMsg{batch: []foundImage{{path: "/home/u/first.iso", size: 1}}})
 	if cmd == nil {
 		t.Fatal("a batch did not re-issue the command that fetches the next one")
+	}
+
+	// Execute it: a pump re-issued against the wrong channel would still be
+	// non-nil, so only running it and checking what it actually reads proves
+	// it points at THIS scan's channel.
+	next := cmd()
+	found, ok := next.(imagesFoundMsg)
+	if !ok {
+		t.Fatalf("re-issued command produced %T, want imagesFoundMsg", next)
+	}
+	if len(found.batch) != 1 || found.batch[0].path != "/home/u/second.iso" {
+		t.Errorf("re-issued command read the wrong channel; batch = %v, want second.iso", found.batch)
 	}
 }
