@@ -36,6 +36,87 @@ func TestChecksAdvanceToDirPrompt(t *testing.T) {
 	}
 }
 
+// Typing a relative path and pressing enter must resolve it to an absolute
+// path before it becomes m.dir -- a bare "bin" left relative would write a
+// PATH entry any cwd can shadow. This is the test that would have caught it:
+// it drives the real key.Matches(keys.Install) dispatch in m.key, not a
+// phase set by hand.
+func TestDirPromptTypedPathBecomesAbsolute(t *testing.T) {
+	m := newTestModel(t, "/usr/bin")
+	next, _ := m.Update(checksDoneMsg{checks: nil})
+	m = next.(Model)
+
+	// New() pre-fills the input with the default dir; clear it before typing
+	// so the keystroke below is the whole value, not an append to the default.
+	m.input.SetValue("")
+	next, _ = m.Update(tea.KeyPressMsg{Text: "custom/dir"})
+	m = next.(Model)
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+
+	if m.phase != phaseBuild {
+		t.Fatalf("phase = %v, want phaseBuild", m.phase)
+	}
+	if cmd == nil {
+		t.Fatal("enter at the dir prompt must dispatch buildCmd")
+	}
+	want, err := filepath.Abs("custom/dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.dir != want {
+		t.Errorf("dir = %q, want the resolved absolute path %q", m.dir, want)
+	}
+}
+
+// Clearing the prompt and pressing enter must fall back to the default dir,
+// never install to "". This is the TrimSpace/non-empty guard in m.key.
+func TestDirPromptEmptyInputKeepsDefault(t *testing.T) {
+	m := newTestModel(t, "/usr/bin")
+	next, _ := m.Update(checksDoneMsg{checks: nil})
+	m = next.(Model)
+	want := m.dir // the default DefaultDir value New() already put in m.dir
+
+	m.input.SetValue("   ") // whitespace-only counts as "nothing typed"
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+
+	if m.phase != phaseBuild {
+		t.Fatalf("phase = %v, want phaseBuild", m.phase)
+	}
+	if m.dir != want {
+		t.Errorf("dir = %q, want the untouched default %q", m.dir, want)
+	}
+	if m.dir == "" {
+		t.Fatal("dir must never be empty")
+	}
+}
+
+// "~" and "~/sub" must expand against the model's home, not the process's.
+func TestDirPromptExpandsHome(t *testing.T) {
+	tests := []struct{ typed, want string }{
+		{"~", "/home/x"},
+		{"~/sub", "/home/x/sub"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.typed, func(t *testing.T) {
+			m := newTestModel(t, "/usr/bin")
+			next, _ := m.Update(checksDoneMsg{checks: nil})
+			m = next.(Model)
+
+			m.input.SetValue("")
+			next, _ = m.Update(tea.KeyPressMsg{Text: tt.typed})
+			m = next.(Model)
+			next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			m = next.(Model)
+
+			if m.dir != tt.want {
+				t.Errorf("dir = %q, want %q", m.dir, tt.want)
+			}
+		})
+	}
+}
+
 // When the target dir is already on PATH there is nothing to ask, so the rc
 // prompt must be skipped entirely.
 func TestInstalledSkipsRCPromptWhenOnPath(t *testing.T) {
