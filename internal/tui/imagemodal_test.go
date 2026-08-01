@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -405,6 +406,106 @@ func TestImageMetaColumnFitsEveryValue(t *testing.T) {
 		if w := lipgloss.Width(b); w > imageMetaWidth {
 			t.Errorf("backend %q is %d cells, column is %d", b, w, imageMetaWidth)
 		}
+	}
+}
+
+// byoVariants drills the modal into the byo group and returns it positioned
+// at the variant level, where browse… lives.
+func byoVariants(t *testing.T, mo *imageModal) {
+	t.Helper()
+	for i, g := range mo.groups {
+		if g.os == byoGroup {
+			mo.list.Select(i)
+		}
+	}
+	if _, _, closed := mo.update(keyMsg("enter")); closed {
+		t.Fatal("enter on the byo group closed the modal instead of drilling in")
+	}
+	if mo.level != levelVariant || mo.osName != byoGroup {
+		t.Fatalf("after enter: level=%v os=%q, want variant/%q", mo.level, mo.osName, byoGroup)
+	}
+}
+
+// AllowedTypes must actually filter: a .txt sitting next to an .iso is not a
+// bootable image and must not be offerable.
+func TestPickerFiltersToImageTypes(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.openBrowser()
+	want := []string{".iso", ".qcow2", ".img"}
+	if !reflect.DeepEqual(mo.picker.AllowedTypes, want) {
+		t.Errorf("AllowedTypes = %v, want %v", mo.picker.AllowedTypes, want)
+	}
+	if mo.picker.AutoHeight {
+		t.Error("AutoHeight must be false; the modal assigns the rect")
+	}
+}
+
+// Same rule as every other pane: nothing drawn may exceed the box it is in.
+// Mirrors TestModalFitsTheSmallestTerminal's 60x20 check.
+func TestPickerFitsTheModalAtMinimumSize(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.openBrowser()
+	m := model{width: smallWidth, height: smallHeight, modal: mo}
+
+	box := m.modal.view()
+	if w := lipgloss.Width(box); w > smallWidth {
+		t.Errorf("browsing: modal is %d cells wide, terminal is %d", w, smallWidth)
+	}
+	if h := lipgloss.Height(box); h > smallHeight {
+		t.Errorf("browsing: modal is %d lines tall, terminal is %d", h, smallHeight)
+	}
+
+	screen := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, "")
+	out := m.renderModal(screen)
+	if w := lipgloss.Width(out); w > m.width {
+		t.Errorf("browsing: composited frame is %d cells wide, terminal is %d", w, m.width)
+	}
+	if h := lipgloss.Height(out); h > m.height {
+		t.Errorf("browsing: composited frame is %d lines tall, terminal is %d", h, m.height)
+	}
+}
+
+// browse… must be reachable via the normal drill-in even though testImages
+// gives the byo group exactly one real file — the single-variant shortcut
+// that resolves other one-image groups straight from the OS level would
+// otherwise make the entry unreachable whenever there's only one BYO file
+// (or none at all).
+func TestBrowseEntryReachableWithASingleBYOFile(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+
+	items := mo.list.Items()
+	last, ok := items[len(items)-1].(variantItem)
+	if !ok || !last.browse {
+		t.Fatalf("last item in the byo group's variant list is %#v, want the browse… entry", items[len(items)-1])
+	}
+}
+
+// esc while browsing returns to the variant list, not the whole modal --
+// closing outright would be jarring mid-browse, and esc already means "back
+// a level" everywhere else in this modal.
+func TestEscWhileBrowsingReturnsToVariantList(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+
+	items := mo.list.Items()
+	mo.list.Select(len(items) - 1) // browse…
+	if _, _, closed := mo.update(keyMsg("enter")); closed {
+		t.Fatal("enter on browse… closed the modal")
+	}
+	if !mo.browsing {
+		t.Fatal("enter on browse… did not open the picker")
+	}
+
+	_, _, closed := mo.update(keyMsg("esc"))
+	if closed {
+		t.Error("esc while browsing closed the modal; it must return to the variant list")
+	}
+	if mo.browsing {
+		t.Error("esc while browsing left mo.browsing true; the picker should be dismissed")
+	}
+	if mo.level != levelVariant {
+		t.Errorf("esc while browsing left level=%v, want the variant level", mo.level)
 	}
 }
 

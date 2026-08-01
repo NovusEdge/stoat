@@ -3,7 +3,9 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 
+	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -48,11 +50,17 @@ func (i osItem) FilterValue() string { return i.os }
 // taken from the cursor would point at the wrong image the moment a filter is
 // applied.
 type variantItem struct {
-	idx int
-	opt imageOption
+	idx    int
+	opt    imageOption
+	browse bool // the byo group's trailing leaf: opens the filepicker instead of selecting opt
 }
 
-func (i variantItem) FilterValue() string { return i.opt.variantLabel() }
+func (i variantItem) FilterValue() string {
+	if i.browse {
+		return "browse…"
+	}
+	return i.opt.variantLabel()
+}
 
 // variantLabel is what distinguishes this image from the others sharing its
 // OS: the catalog's own variant label, or the filename for a BYO file, which
@@ -109,8 +117,13 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		// single-variant OS resolves straight from this level, so this is the
 		// only place its size would ever be seen.
 		trailer := fmt.Sprintf("%d images", len(it.idxs))
-		if len(it.idxs) == 1 {
+		switch {
+		case len(it.idxs) == 1:
 			trailer = it.only.sizeLabel()
+		case it.os == byoGroup && len(it.idxs) == 0:
+			// No BYO file has been found under isos/ yet, but the group still
+			// has to be selectable — it's the only route to browse….
+			trailer = "browse…"
 		}
 		label := fmt.Sprintf("%-*s", modalVariantWidth, it.os)
 		if index == m.Index() {
@@ -118,6 +131,16 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		}
 		fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
 	case variantItem:
+		if it.browse {
+			// No size or status column: it isn't a file, it's a door to the
+			// filepicker, so those columns would just be blank.
+			label := fmt.Sprintf("%-*s", modalVariantWidth, "browse…")
+			if index == m.Index() {
+				label = selStyle.Render(label)
+			}
+			fmt.Fprint(w, cursor+label+dimStyle.Render("choose a file"))
+			return
+		}
 		// Styled substrings end in \x1b[0m, which resets the ENCLOSING style
 		// too — so the status stays outside the selection wrap, or a
 		// highlighted row would render everything after it unhighlighted.
@@ -163,6 +186,14 @@ type imageModal struct {
 	groups []osItem
 	images []imageOption
 	osName string // the group drilled into; meaningful at levelVariant
+
+	// browsing and picker back the byo group's browse… leaf. A third level
+	// rather than a variantItem that opens something of its own: the picker
+	// needs its own key routing (see update/updateBrowsing), and folding that
+	// into the variant-level switch would make it responsible for two
+	// different kinds of input.
+	browsing bool
+	picker   filepicker.Model
 }
 
 // newImageList builds the modal's list component. Filtering is deliberately
@@ -190,6 +221,15 @@ func newImageList() list.Model {
 func groupImages(images []imageOption) []osItem {
 	var groups []osItem
 	at := map[string]int{}
+	group := func(name string) int {
+		j, seen := at[name]
+		if !seen {
+			at[name] = len(groups)
+			groups = append(groups, osItem{os: name})
+			j = len(groups) - 1
+		}
+		return j
+	}
 	for i, o := range images {
 		name := o.osName
 		if o.isBYO() {
@@ -201,14 +241,13 @@ func groupImages(images []imageOption) []osItem {
 			// nameless one.
 			name = byoGroup
 		}
-		j, seen := at[name]
-		if !seen {
-			at[name] = len(groups)
-			groups = append(groups, osItem{os: name})
-			j = len(groups) - 1
-		}
+		j := group(name)
 		groups[j].idxs = append(groups[j].idxs, i)
 	}
+	// byo always gets a group, even with zero files under isos/ yet: browse…
+	// lives inside it, and browsing for the first BYO image has to work
+	// before there is one on disk to have grouped above.
+	group(byoGroup)
 	// A one-image group carries that image, so the first level can show its
 	// size — it is the only level a single-variant OS is ever seen at.
 	for i := range groups {
@@ -249,9 +288,15 @@ func (mo *imageModal) showOSLevel() {
 
 // drill switches to the variants of one group.
 func (mo *imageModal) drill(g osItem) {
-	items := make([]list.Item, 0, len(g.idxs))
+	items := make([]list.Item, 0, len(g.idxs)+1)
 	for _, idx := range g.idxs {
 		items = append(items, variantItem{idx: idx, opt: mo.images[idx]})
+	}
+	if g.os == byoGroup {
+		// Trailing rather than leading: existing BYO files are the images the
+		// user most likely wants, so browse… is the fallback at the bottom,
+		// not the first thing the cursor lands on.
+		items = append(items, variantItem{browse: true})
 	}
 	mo.level = levelVariant
 	mo.osName = g.os
@@ -282,6 +327,10 @@ func (mo *imageModal) syncHeight(n int) {
 // message switch, and duplicating it per sub-mode is exactly how it has
 // regressed before.
 func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
+	if mo.browsing {
+		return mo.updateBrowsing(msg)
+	}
+
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		var cmd tea.Cmd
@@ -313,7 +362,10 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 			}
 			// A group with one image has nothing to choose between; drilling
 			// in to press enter again would be a keystroke for no decision.
-			if len(g.idxs) == 1 {
+			// byo is exempt even at exactly one: it always drills, because
+			// that one image sits alongside browse…, which the shortcut
+			// would otherwise make unreachable.
+			if len(g.idxs) == 1 && g.os != byoGroup {
 				return nil, g.idxs[0], true
 			}
 			mo.drill(g)
@@ -323,12 +375,92 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 			if !ok {
 				return nil, -1, false
 			}
+			if it.browse {
+				return mo.openBrowser(), -1, false
+			}
 			return nil, it.idx, true
 		}
 	}
 
 	var cmd tea.Cmd
 	mo.list, cmd = mo.list.Update(msg)
+	return cmd, -1, false
+}
+
+// openBrowser swaps the variant list for a file picker. AutoHeight is off
+// because the modal owns the rectangle — a self-sizing component fights the
+// layout, same rule as every other pane. The returned cmd is filepicker's own
+// Init(), which kicks off the directory read; without it the picker would sit
+// showing "no files" forever; nothing else triggers that first read.
+func (mo *imageModal) openBrowser() tea.Cmd {
+	p := filepicker.New()
+	p.AllowedTypes = []string{".iso", ".qcow2", ".img"}
+	p.ShowSize = true
+	p.AutoHeight = false
+	p.DirAllowed = false
+	p.FileAllowed = true
+	p.Cursor = glyphCursor
+	p.Styles = filepickerStyles()
+	p.SetHeight(modalRows)
+	mo.picker = p
+	mo.browsing = true
+	return p.Init()
+}
+
+// filepickerStyles draws the picker in stoat's palette rather than bubbles'
+// stock magenta-and-grey, so it reads as one more pane of this app instead of
+// a different program spliced in.
+func filepickerStyles() filepicker.Styles {
+	s := filepicker.DefaultStyles()
+	s.Cursor = selStyle
+	s.Selected = selStyle
+	s.Directory = accentStyle
+	s.File = lipgloss.NewStyle()
+	s.Symlink = accentStyle
+	s.Permission = dimStyle
+	s.FileSize = dimStyle
+	s.DisabledFile = dimStyle
+	s.DisabledSelected = dimStyle
+	s.DisabledCursor = dimStyle
+	s.EmptyDirectory = dimStyle.SetString("no matching files")
+	return s
+}
+
+// updateBrowsing routes messages to the picker while it is open in place of
+// the variant list. It handles both keys and the picker's own non-key
+// messages (its directory read arrives as one), unlike the top-level update,
+// which only ever sees key presses — app.go widens that gate to include
+// non-key messages for exactly as long as mo.browsing is true.
+func (mo *imageModal) updateBrowsing(msg tea.Msg) (tea.Cmd, int, bool) {
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" {
+		// Back to the variant list, not out of the modal — esc means "back a
+		// level" everywhere else here, and closing outright on it would throw
+		// away the group the user already drilled into.
+		mo.browsing = false
+		return nil, -1, false
+	}
+
+	var cmd tea.Cmd
+	mo.picker, cmd = mo.picker.Update(msg)
+
+	if didSelect, path := mo.picker.DidSelectFile(msg); didSelect {
+		opt, err := byoOptionFromPath(path)
+		if err != nil {
+			// Stat can fail between the picker listing the file and the user
+			// selecting it (deleted, unmounted). Stay open rather than close
+			// the modal on a choice that didn't actually resolve.
+			return cmd, -1, false
+		}
+		// The new option isn't in the slice the modal was opened with — it
+		// came from anywhere on disk, that's the whole feature — so it's
+		// appended here and returned as an index past the caller's original
+		// bounds. The caller (app.go) re-adopts mo.images before resolving
+		// that index; see the comment there.
+		mo.images = append(mo.images, opt)
+		mo.browsing = false
+		return cmd, len(mo.images) - 1, true
+	}
+
 	return cmd, -1, false
 }
 
@@ -366,6 +498,9 @@ func (m model) renderModal(screen string) string {
 // view renders the modal box. The title carries the drilled-into OS so the
 // second level says what it is a list of.
 func (mo *imageModal) view() string {
+	if mo.browsing {
+		return mo.viewBrowsing()
+	}
 	title := "image"
 	hint := "enter choose · esc cancel"
 	if mo.level == levelVariant {
@@ -379,4 +514,20 @@ func (mo *imageModal) view() string {
 	body := lipgloss.NewStyle().Width(modalContentWidth).
 		Render(mo.list.View() + "\n\n" + dimStyle.Render(hint))
 	return pane(title, body, modalContentWidth+paneFrame())
+}
+
+// viewBrowsing renders the filepicker in place of the variant list.
+//
+// filepicker.Model has no width of its own — a row is as wide as its
+// permissions, size and filename happen to add up to — so unlike every other
+// row in this modal, its lines are truncated by hand rather than trusted to
+// stay inside modalContentWidth on their own.
+func (mo *imageModal) viewBrowsing() string {
+	lines := strings.Split(mo.picker.View(), "\n")
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, modalContentWidth, "")
+	}
+	body := lipgloss.NewStyle().Width(modalContentWidth).
+		Render(strings.Join(lines, "\n") + "\n\n" + dimStyle.Render("enter select · esc back"))
+	return pane("image"+glyphSep+"browse", body, modalContentWidth+paneFrame())
 }
