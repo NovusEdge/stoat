@@ -32,6 +32,27 @@ type imageOption struct {
 	backend string     // entry.Backend for catalog; iso.Infer's guess for BYO (overridable via fBackend)
 	osName  string     // entry.OS for catalog; iso.Infer's guess for BYO (unrecognised files: "")
 	sshUser string     // entry.SSHUser for catalog; "" for BYO (sshx defaults empty to root)
+
+	// bytes is the image's size and exact is whether it was measured rather
+	// than declared: a file already on disk is stat'd, one still to be
+	// downloaded carries the catalog's approximation. Resolved once in
+	// buildImages, which runs on form-open and after a download — never per
+	// render, so the stat costs nothing in the draw path.
+	bytes int64
+	exact bool
+}
+
+// sizeLabel renders the image's size for a picker row: exact for a local
+// file, "~" for the catalog's declared approximation, empty when neither is
+// known (a BYO file that vanished between ReadDir and Stat).
+func (o imageOption) sizeLabel() string {
+	if o.bytes <= 0 {
+		return ""
+	}
+	if o.exact {
+		return humanBytes(o.bytes)
+	}
+	return "~" + humanBytes(o.bytes)
 }
 
 func (o imageOption) isBYO() bool { return o.entry == nil }
@@ -127,10 +148,16 @@ func buildImages() []imageOption {
 	var out []imageOption
 	for _, e := range iso.Catalog() {
 		e := e
-		opt := imageOption{entry: &e, backend: e.Backend, osName: e.OS, sshUser: e.SSHUser}
+		opt := imageOption{entry: &e, backend: e.Backend, osName: e.OS, sshUser: e.SSHUser,
+			bytes: e.Size}
 		if f := matchLocalImage(e, files); f != "" {
 			opt.file = f
 			matched[f] = true
+			// A downloaded image knows its own size exactly, so the catalog's
+			// approximation stops being the best answer available.
+			if n, ok := imageBytes(f); ok {
+				opt.bytes, opt.exact = n, true
+			}
 		}
 		out = append(out, opt)
 	}
@@ -139,9 +166,26 @@ func buildImages() []imageOption {
 			continue
 		}
 		backend, osName := iso.Infer(f)
-		out = append(out, imageOption{file: f, backend: backend, osName: osName})
+		opt := imageOption{file: f, backend: backend, osName: osName}
+		// A BYO file is local by definition, so its size is always the exact
+		// one; there is no catalog entry to approximate from.
+		if n, ok := imageBytes(f); ok {
+			opt.bytes, opt.exact = n, true
+		}
+		out = append(out, opt)
 	}
 	return out
+}
+
+// imageBytes is the on-disk size of a file under isos/. Failure is not an
+// error worth surfacing — the file was listed a moment ago and could have
+// been removed since, and a missing size just means the row shows none.
+func imageBytes(file string) (int64, bool) {
+	fi, err := os.Stat(filepath.Join(config.Root(), "isos", file))
+	if err != nil {
+		return 0, false
+	}
+	return fi.Size(), true
 }
 
 // byoBackends is the fixed cycle offered on the fBackend override row.

@@ -305,3 +305,59 @@ func TestDeclaringTheOSMakesRecipesAppear(t *testing.T) {
 		}
 	}
 }
+
+// The size column is right-aligned, and humanBytes keeps a decimal below 100
+// ("66.0 MiB"), so the widest value is "~66.0 MiB" — nine cells, not the eight
+// you would guess from the largest image. Undersized, the status column shifts
+// on exactly the small-image rows, which is alpine-virt, the row the sizes
+// exist to make comparable.
+func TestSizeColumnFitsTheWidestLabel(t *testing.T) {
+	cases := []imageOption{
+		{bytes: 66 * 1024 * 1024},               // ~66.0 MiB — the widest
+		{bytes: 595 * 1024 * 1024},              // ~595 MiB
+		{bytes: 352 * 1024 * 1024, exact: true}, // 352 MiB
+		{bytes: 1288490188, exact: true},        // 1.2 GiB
+	}
+	for _, o := range cases {
+		if w := lipgloss.Width(o.sizeLabel()); w > modalSizeWidth {
+			t.Errorf("sizeLabel %q is %d cells, wider than the %d-cell column",
+				o.sizeLabel(), w, modalSizeWidth)
+		}
+	}
+}
+
+// A declared size is approximate and must say so; a stat'd one must not.
+func TestSizeLabelMarksApproximations(t *testing.T) {
+	declared := imageOption{bytes: 595 * 1024 * 1024}
+	if got := declared.sizeLabel(); !strings.HasPrefix(got, "~") {
+		t.Errorf("declared size rendered %q, want a leading ~", got)
+	}
+	measured := imageOption{bytes: 595 * 1024 * 1024, exact: true}
+	if got := measured.sizeLabel(); strings.HasPrefix(got, "~") {
+		t.Errorf("stat'd size rendered %q, want no ~", got)
+	}
+	if got := (imageOption{}).sizeLabel(); got != "" {
+		t.Errorf("unknown size rendered %q, want empty", got)
+	}
+}
+
+// Every catalog entry needs a declared size, or its row renders blank where
+// every neighbouring row has a number.
+func TestEveryCatalogEntryDeclaresASize(t *testing.T) {
+	for _, e := range iso.Catalog() {
+		if e.Size <= 0 {
+			t.Errorf("catalog entry %q declares no Size", e.ID)
+		}
+	}
+}
+
+// A single-variant OS resolves straight from the first level, so that level is
+// the only place its size is ever seen — the group has to carry it.
+func TestSingleVariantGroupCarriesItsImage(t *testing.T) {
+	groups := groupImages(testImages())
+	for _, g := range groups {
+		if len(g.idxs) == 1 && g.only.variantLabel() == "" && g.only.file == "" {
+			t.Errorf("group %q has one image but does not carry it, so its size cannot render", g.os)
+		}
+	}
+}

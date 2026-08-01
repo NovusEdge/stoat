@@ -88,11 +88,27 @@ type Entry struct {
 	// It is a field rather than something derived from ID because deriving
 	// it works for four entries and produces nonsense for two: stripping
 	// the "<os>-" prefix labels both fedora-cloud and arch-cloud "cloud".
-	Variant     string
+	Variant string
+	// Size is the download's approximate size, for display only. It is
+	// DECLARED rather than fetched because Catalog() promises that listing or
+	// picking needs no network access, and a HEAD per entry when the form
+	// opens would cost four round trips and break the picker offline.
+	//
+	// It is therefore approximate and drifts as images are rebuilt in place.
+	// Nothing may allocate, verify or preallocate against it — the real size
+	// comes from Content-Length at download time, and the real check is the
+	// checksum. It exists so the picker can say why alpine-virt is worth
+	// choosing over alpine-standard, which is 5x its size.
+	//
+	// Measured 2026-08-01 by Content-Length, rounded to whole MiB.
+	Size        int64
 	ChecksumURL string
 	SSHUser     string
 	Notes       string
 }
+
+// mib is a readable way to write the declared sizes above.
+const mib = 1 << 20
 
 // OSGroup is one OS and every catalog entry belonging to it, in catalog
 // order.
@@ -139,6 +155,7 @@ func Catalog() []Entry {
 			ID:          "ubuntu-24.04",
 			OS:          "ubuntu",
 			Variant:     "24.04 LTS",
+			Size:        595 * mib,
 			Backend:     "cloudinit",
 			URL:         "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
 			ChecksumURL: "https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS",
@@ -152,6 +169,7 @@ func Catalog() []Entry {
 			ID:      "debian-13",
 			OS:      "debian",
 			Variant: "13 (trixie)",
+			Size:    328 * mib,
 			Backend: "cloudinit",
 			URL:     "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
 			// Debian publishes SHA512SUMS (not SHA256) alongside this
@@ -167,6 +185,7 @@ func Catalog() []Entry {
 			ID:      "fedora-cloud",
 			OS:      "fedora",
 			Variant: "44",
+			Size:    557 * mib,
 			// Fedora keeps roughly N/N-1/N-2 under releases/ with no
 			// latest/ symlink for cloud images, so this entry needs a
 			// manual bump every Fedora cycle and WILL break (releases/
@@ -193,6 +212,7 @@ func Catalog() []Entry {
 			ID:      "arch-cloud",
 			OS:      "arch",
 			Variant: "rolling",
+			Size:    530 * mib,
 			Backend: "cloudinit",
 			URL:     "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
 			// Verified 2026-07-30 by GET: this mirror does publish a
@@ -209,6 +229,7 @@ func Catalog() []Entry {
 			URL:     indexURL,
 			Flavor:  "alpine-standard",
 			Variant: "standard",
+			Size:    352 * mib,
 			// Alpine's checksum isn't a separate sums file: each release
 			// in latest-releases.yaml embeds its own sha256 inline, and
 			// Resolve() reads it via Latest(). ChecksumURL is left empty
@@ -225,6 +246,7 @@ func Catalog() []Entry {
 			URL:     indexURL,
 			Flavor:  "alpine-virt",
 			Variant: "virt",
+			Size:    66 * mib,
 			// Same index, different flavor line (see alpine-standard
 			// above) — virt is built for VM guests specifically: virtio
 			// drivers only, no baremetal hardware support, meaningfully

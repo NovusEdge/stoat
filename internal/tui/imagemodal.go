@@ -37,6 +37,7 @@ const byoGroup = "byo"
 type osItem struct {
 	os   string
 	idxs []int
+	only imageOption // the sole image, when len(idxs) == 1; zero otherwise
 }
 
 func (i osItem) FilterValue() string { return i.os }
@@ -69,8 +70,8 @@ func (o imageOption) variantLabel() string {
 }
 
 // modalVariantWidth is the label column inside the modal: the box's content
-// width less the cursor and the status that follows it.
-const modalVariantWidth = 22
+// width less the cursor, the size column and the status that follow it.
+const modalVariantWidth = 20
 
 // statusLabel says whether the image is on disk yet. A BYO file is local by
 // definition — that is what makes it BYO — so it reports no download state.
@@ -102,27 +103,33 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 
 	switch it := item.(type) {
 	case osItem:
-		// The count is the whole point of this level: it is what tells the
-		// user there is a second Alpine to choose between.
-		n := dimStyle.Render(fmt.Sprintf("%d images", len(it.idxs)))
+		// A group with several variants shows the count, because that is what
+		// says there is a second Alpine to choose between. A group with one
+		// shows its size instead: "1 image" tells the user nothing, and a
+		// single-variant OS resolves straight from this level, so this is the
+		// only place its size would ever be seen.
+		trailer := fmt.Sprintf("%d images", len(it.idxs))
 		if len(it.idxs) == 1 {
-			n = dimStyle.Render("1 image")
+			trailer = it.only.sizeLabel()
 		}
-		label := fmt.Sprintf("%-12s", it.os)
+		label := fmt.Sprintf("%-*s", modalVariantWidth, it.os)
 		if index == m.Index() {
 			label = selStyle.Render(label)
 		}
-		fmt.Fprint(w, cursor+label+n)
+		fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
 	case variantItem:
 		// Styled substrings end in \x1b[0m, which resets the ENCLOSING style
 		// too — so the status stays outside the selection wrap, or a
 		// highlighted row would render everything after it unhighlighted.
 		// Padded plain and styled afterwards, for the same reason.
-		label := fmt.Sprintf("%-*s ", modalVariantWidth, it.opt.variantLabel())
+		label := fmt.Sprintf("%-*s", modalVariantWidth, it.opt.variantLabel())
 		if index == m.Index() {
 			label = selStyle.Render(label)
 		}
-		fmt.Fprint(w, cursor+label+it.opt.statusLabel())
+		// Size right-aligned so the digits line up column-wise; padded plain,
+		// then dimmed as a whole segment.
+		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, it.opt.sizeLabel()))
+		fmt.Fprint(w, cursor+label+size+"  "+it.opt.statusLabel())
 	}
 }
 
@@ -132,9 +139,20 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 // modalContentWidth+paneFrame() wide and modalRows+6 tall, which leaves room
 // at that size rather than assuming the developer's window.
 const (
-	modalContentWidth = 40
+	modalContentWidth = 46
 	modalRows         = 6
 )
+
+// modalSizeWidth is the size column, right-aligned so the digits line up down
+// the list — the whole point of showing sizes is comparing them, and a ragged
+// left edge makes that harder than it needs to be.
+//
+// Nine, not eight: humanBytes keeps one decimal below 100 ("66.0 MiB"), so the
+// widest value is "~66.0 MiB" rather than the "~595 MiB" you would guess from
+// the biggest image. Sized to eight, the status column shifted a cell on
+// exactly the rows with a small image — which is alpine-virt, the row this
+// whole feature exists to make comparable.
+const modalSizeWidth = 9
 
 // imageModal is the two-level picker. One list, re-populated on drill-down,
 // rather than two lists: two would mean two cursors to keep consistent and
@@ -190,6 +208,13 @@ func groupImages(images []imageOption) []osItem {
 			j = len(groups) - 1
 		}
 		groups[j].idxs = append(groups[j].idxs, i)
+	}
+	// A one-image group carries that image, so the first level can show its
+	// size — it is the only level a single-variant OS is ever seen at.
+	for i := range groups {
+		if len(groups[i].idxs) == 1 {
+			groups[i].only = images[groups[i].idxs[0]]
+		}
 	}
 	return groups
 }
