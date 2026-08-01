@@ -539,8 +539,10 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // editContentWidth matches the create form, so moving between the two panes
-// doesn't shift the layout under the user.
-const editContentWidth = 56
+// doesn't shift the layout under the user. Derived rather than restated: as
+// a second literal it had already drifted once, leaving this comment
+// claiming a match that wasn't there.
+const editContentWidth = formContentWidth
 
 func (m model) viewEdit() string {
 	e := m.edit
