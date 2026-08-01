@@ -1,14 +1,14 @@
 // Package theme holds the colors stoat names. The TUI and the installer both
 // draw from here, so there is exactly one place a color is defined.
 //
-// The hex constants are the source of truth. The lipgloss values are derived
-// from them, which is also what keeps this file portable across the Bubble Tea
-// v2 migration: lipgloss.Color is a type in v1 and a function in v2, but
+// The hex constants are the source of truth and the lipgloss values are derived
+// from them, which is what carried this file across the Bubble Tea v2 migration
+// unchanged: lipgloss.Color is a type in v1 and a function in v2, but
 // `lipgloss.Color(AccentHex)` compiles and means the same thing under both, so
-// only the import line changes.
+// only the import line below had to change.
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 const (
 	AccentHex = "#C98A5B"
