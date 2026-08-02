@@ -21,14 +21,31 @@ import (
 // live boot plus dhcp is slower than a warm one, so this is generous.
 const WaitTimeout = 90 * time.Second
 
+// User returns the account to ssh into v as: v.SSHUser when it was recorded
+// at build time (the catalog entry's account, or cloudinit.User for a cloud
+// image), otherwise "root".
+//
+// This deliberately does NOT consult guest.DefaultSSHUser as a second
+// fallback. An empty v.SSHUser is not "unknown" — for the cloudinit backend
+// it seeds a real account, so it is only ever empty for the apkovl/ssh
+// backends, both of which are unlocked-root images (a live Alpine apkovl, or
+// a BYO disk image awaiting a manual install). Guessing an OS's registry
+// default there would be wrong: a BYO file can be labelled e.g. "ubuntu" via
+// iso.Infer or a form override while still going through the ssh backend
+// (no cloud-init, no seeded account), and that image has no "stoat" user —
+// only whatever the installer itself created. See form.go's
+// resolvedSSHUser for the one place that decides the recorded value.
+func User(v *config.VM) string {
+	if v.SSHUser != "" {
+		return v.SSHUser
+	}
+	return "root"
+}
+
 // Args returns the argv (excluding argv[0]) for ssh into v. Host key checks
 // are off on purpose: this is a loopback forward to a VM stoat just built,
 // and live VMs are recreated constantly.
 func Args(v *config.VM, extra ...string) []string {
-	user := v.SSHUser
-	if user == "" {
-		user = "root"
-	}
 	a := []string{
 		"-p", fmt.Sprint(v.SSHPort),
 		"-o", "StrictHostKeyChecking=no",
@@ -37,7 +54,7 @@ func Args(v *config.VM, extra ...string) []string {
 		"-o", "ConnectTimeout=5",
 		"-o", "BatchMode=yes",
 		"-i", keys.PrivatePath(),
-		user + "@127.0.0.1",
+		User(v) + "@127.0.0.1",
 	}
 	return append(a, extra...)
 }

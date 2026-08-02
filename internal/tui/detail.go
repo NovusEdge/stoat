@@ -13,6 +13,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 type detailModel struct {
@@ -222,10 +223,7 @@ func (m model) viewDetail() string {
 		}
 		line("installed", installed)
 	}
-	sshUser := v.SSHUser
-	if sshUser == "" {
-		sshUser = "root"
-	}
+	sshUser := sshx.User(v)
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
 	// qemu.NeedsWindow is the one case that gets a real qemu window (a
 	// disk-mode VM mid-install); every other VM is headless, and the VNC

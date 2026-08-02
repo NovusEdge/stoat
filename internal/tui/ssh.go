@@ -33,22 +33,7 @@ const reachabilityProbe = 800 * time.Millisecond
 // never answers (no sshd yet, still booting) fails fast instead of hanging
 // the terminal forever.
 func sshInto(v *config.VM) tea.Cmd {
-	key := keys.PrivatePath()
-	args := []string{
-		"-p", fmt.Sprint(v.SSHPort),
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "LogLevel=ERROR",
-		"-o", "ConnectTimeout=5",
-		"-o", "ServerAliveInterval=5",
-		"-o", "ServerAliveCountMax=3",
-	}
-	if _, err := os.Stat(key); err == nil {
-		args = append(args, "-i", key)
-	}
-	args = append(args, "root@127.0.0.1")
-
-	c := exec.Command("ssh", args...)
+	c := exec.Command("ssh", sshIntoArgs(v)...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
 			var exitErr *exec.ExitError
@@ -64,12 +49,40 @@ func sshInto(v *config.VM) tea.Cmd {
 						"%s: still booting — sshd not reachable yet on port %d, try again shortly",
 						v.Name, v.SSHPort))
 				}
-				return errMsg(fmt.Sprintf(
-					"ssh: couldn't reach root@127.0.0.1:%d — a disk VM needs setup-alpine run at its console first, or the key isn't installed",
-					v.SSHPort))
+				return errMsg(unreachableMsg(v))
 			}
 			return errMsg("ssh: " + err.Error())
 		}
 		return statusMsg("")
 	})
+}
+
+// sshIntoArgs is the argv (excluding argv[0]) for the interactive ssh
+// process. Split out from sshInto so the target user can be asserted on
+// directly without driving a tea.ExecProcess.
+func sshIntoArgs(v *config.VM) []string {
+	key := keys.PrivatePath()
+	args := []string{
+		"-p", fmt.Sprint(v.SSHPort),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
+		"-o", "ConnectTimeout=5",
+		"-o", "ServerAliveInterval=5",
+		"-o", "ServerAliveCountMax=3",
+	}
+	if _, err := os.Stat(key); err == nil {
+		args = append(args, "-i", key)
+	}
+	return append(args, sshx.User(v)+"@127.0.0.1")
+}
+
+// unreachableMsg is what sshInto reports when ssh itself fails to connect
+// (exit 255) and the guest is not still booting. It names the actual
+// installer for v's OS (installerName, internal/tui/provision.go) instead
+// of hardcoding "setup-alpine", which was wrong on every non-Alpine guest.
+func unreachableMsg(v *config.VM) string {
+	return fmt.Sprintf(
+		"ssh: couldn't reach %s@127.0.0.1:%d — a disk VM needs %s run at its console first, or the key isn't installed",
+		sshx.User(v), v.SSHPort, installerName(v))
 }
