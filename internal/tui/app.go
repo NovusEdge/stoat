@@ -128,20 +128,20 @@ func Run() error {
 
 func (m model) Init() tea.Cmd { return loadVMs }
 
-// Update feeds a browsing file picker or the fuzzy finder without consuming
-// the message, then runs the normal update.
+// Update feeds a browsing file picker, the fuzzy finder or the path field
+// without consuming the message, then runs the normal update.
 //
-// Both modes run an asynchronous read whose results arrive as a NON-key
-// message -- a directory listing for the browser, a filesystem walk batch for
-// the finder -- so it has to reach the modal somehow. But a diverted message
-// must not be swallowed: a tick chain only continues because its handler
-// returns the next tick cmd, so consuming one dlTickMsg here does not pause
-// the download bar, it ends the chain for good. (dlTickMsg's own case carries
-// the same warning about routing by screen, which broke this once already.)
-// Copy, then carry on.
+// All three modes run on NON-key messages that have to reach the modal
+// somehow: a directory listing for the browser, a filesystem walk batch for
+// the finder, and a cursor blink for the path field's focused textinput. But
+// a diverted message must not be swallowed: a tick chain only continues
+// because its handler returns the next tick cmd, so consuming one dlTickMsg
+// here does not pause the download bar, it ends the chain for good.
+// (dlTickMsg's own case carries the same warning about routing by screen,
+// which broke this once already.) Copy, then carry on.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var browseCmd tea.Cmd
-	if m.modal != nil && (m.modal.browsing || m.modal.finding) {
+	if m.modal != nil && (m.modal.browsing || m.modal.finding || m.modal.typing) {
 		if _, isKey := msg.(tea.KeyPressMsg); !isKey {
 			cmd, chosen, closed := m.modal.update(msg)
 			browseCmd = cmd

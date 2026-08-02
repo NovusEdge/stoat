@@ -770,3 +770,208 @@ func TestScanKeepsPumpingAfterABatch(t *testing.T) {
 		t.Errorf("re-issued command read the wrong channel; batch = %v, want second.iso", found.batch)
 	}
 }
+
+// enter a path… must be reachable and lead the byo group -- it is the way to
+// type or paste an exact path, so it goes before find… and browse… rather
+// than sitting behind them.
+func TestTypePathLeadsTheByoGroup(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+
+	items := mo.list.Items()
+	first, ok := items[0].(variantItem)
+	if !ok || !first.typeIn {
+		t.Fatalf("first item in the byo group's variant list is %#v, want the enter a path… entry", items[0])
+	}
+}
+
+// Choosing enter a path… must swap the variant list for a focused text
+// field -- asserted on the drawn output, not the mode flag, since a flag
+// that flips without a redraw is invisible to the user.
+func TestChoosingTypePathDrawsAFocusedInput(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+	mo.list.Select(0) // enter a path…
+
+	if _, _, closed := mo.update(keyMsg("enter")); closed {
+		t.Fatal("enter on enter a path… closed the modal")
+	}
+	if !mo.typing {
+		t.Fatal("enter on enter a path… did not open the text field")
+	}
+	if !mo.pathInput.Focused() {
+		t.Error("the path field was not focused")
+	}
+
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "path/to/image") {
+		t.Errorf("the path field's placeholder is not on screen:\n%s", out)
+	}
+}
+
+// Typing a real path and pressing enter must select it: the image is
+// appended, and the returned index/close signal must match what app.go
+// expects from openBrowser/openFinder's equivalents.
+func TestTypingARealPathSelectsIt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "custom.qcow2")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mo := newImageModal(testImages(), 0)
+	before := len(mo.images)
+	mo.openTyping()
+	mo.pathInput.SetValue(path)
+
+	_, idx, closed := mo.update(keyMsg("enter"))
+	if !closed {
+		t.Fatal("choosing a typed path did not close the modal")
+	}
+	if idx != before {
+		t.Fatalf("index = %d, want %d (appended past the original bounds)", idx, before)
+	}
+	if len(mo.images) != before+1 {
+		t.Fatalf("the typed path was not appended: %d images", len(mo.images))
+	}
+	if got, err := mo.images[idx].imagePath(); err != nil || got != path {
+		t.Errorf("appended path = %q, err = %v, want %q", got, err, path)
+	}
+}
+
+// ~ and ~/... must expand to the user's home directory before the path is
+// resolved -- typed paths are the one entry point in this modal that takes
+// free text, so it's the one place a user is likely to type it.
+func TestTypingATildePathExpands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "custom.iso")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mo := newImageModal(testImages(), 0)
+	mo.openTyping()
+	mo.pathInput.SetValue("~/custom.iso")
+
+	_, idx, closed := mo.update(keyMsg("enter"))
+	if !closed {
+		t.Fatal("choosing a ~-path did not close the modal")
+	}
+	if got, err := mo.images[idx].imagePath(); err != nil || got != path {
+		t.Errorf("appended path = %q, err = %v, want %q", got, err, path)
+	}
+}
+
+// A path that doesn't exist must stay open and say why, right on screen --
+// not close the modal, not silently do nothing.
+func TestTypingANonexistentPathShowsAnErrorAndStaysOpen(t *testing.T) {
+	dir := t.TempDir()
+	mo := newImageModal(testImages(), 0)
+	before := len(mo.images)
+	mo.openTyping()
+	mo.pathInput.SetValue(filepath.Join(dir, "nope.iso"))
+
+	_, idx, closed := mo.update(keyMsg("enter"))
+	if closed {
+		t.Fatal("a bad path closed the modal")
+	}
+	if idx != -1 {
+		t.Fatalf("a bad path resolved an index: %d", idx)
+	}
+	if len(mo.images) != before {
+		t.Fatalf("a bad path was appended anyway: %d images", len(mo.images))
+	}
+	if !mo.typing {
+		t.Fatal("a bad path left the text field")
+	}
+
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "no such file") && !strings.Contains(out, "nope.iso") {
+		t.Errorf("the error is not drawn on screen:\n%s", out)
+	}
+}
+
+// A directory must also be rejected, with the reason drawn -- byoOptionFromPath
+// is the authority on this rule, and it is doing it right below.
+func TestTypingADirectoryShowsAnErrorAndStaysOpen(t *testing.T) {
+	dir := t.TempDir()
+	mo := newImageModal(testImages(), 0)
+	mo.openTyping()
+	mo.pathInput.SetValue(dir)
+
+	_, _, closed := mo.update(keyMsg("enter"))
+	if closed {
+		t.Fatal("a directory closed the modal")
+	}
+	if !mo.typing {
+		t.Fatal("a directory left the text field")
+	}
+
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "directory") {
+		t.Errorf("the directory error is not drawn on screen:\n%s", out)
+	}
+}
+
+// Empty input plus enter must be a no-op: no crash, no close.
+func TestTypingEmptyPathDoesNothing(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.openTyping()
+
+	_, idx, closed := mo.update(keyMsg("enter"))
+	if closed {
+		t.Fatal("enter on an empty path field closed the modal")
+	}
+	if idx != -1 {
+		t.Fatalf("enter on an empty path field resolved an index: %d", idx)
+	}
+	if !mo.typing {
+		t.Fatal("enter on an empty path field left the text field")
+	}
+}
+
+// esc from the text field must return to the variant list, not out of the
+// modal -- same rule updateBrowsing and updateFinding follow, asserted on
+// what's actually redrawn.
+func TestEscWhileTypingReturnsToVariantList(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+	mo.list.Select(0) // enter a path…
+	if _, _, closed := mo.update(keyMsg("enter")); closed {
+		t.Fatal("enter on enter a path… closed the modal")
+	}
+
+	_, _, closed := mo.update(keyMsg("esc"))
+	if closed {
+		t.Error("esc while typing closed the modal; it must return to the variant list")
+	}
+	if mo.typing {
+		t.Error("esc while typing left mo.typing true; the field should be dismissed")
+	}
+	if mo.level != levelVariant {
+		t.Errorf("esc while typing left level=%v, want the variant level", mo.level)
+	}
+
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "browse…") {
+		t.Errorf("esc left the text field in state but not on screen; drawn:\n%s", out)
+	}
+}
+
+// The non-key message gate in app.go must widen to cover typing, the same
+// way it already does for browsing and finding, or the field's cursor blink
+// never reaches it and it never blinks -- see 81cbd92 for the shape of bug
+// this guards against (a swallowed non-key message that ended a chain).
+func TestTypingReceivesNonKeyMessages(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	m := model{screen: screenForm, form: newForm()}
+	m.form.fetching = true
+	m.modal = newImageModal(testImages(), 0)
+	m.modal.openTyping()
+
+	_, cmd := m.Update(dlTickMsg{})
+	if cmd == nil {
+		t.Fatal("dlTickMsg while typing returned no cmd: the download tick chain is dead")
+	}
+}

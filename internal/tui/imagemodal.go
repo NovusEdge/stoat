@@ -9,9 +9,12 @@ import (
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/novusedge/stoat/internal/theme"
 )
 
 // The image picker is two levels — choose an OS, then a variant within it —
@@ -56,10 +59,13 @@ type variantItem struct {
 	opt    imageOption
 	browse bool // the byo group's trailing leaf: opens the filepicker instead of selecting opt
 	find   bool // the byo group's other leaf: opens the fuzzy finder instead of selecting opt
+	typeIn bool // the byo group's leading leaf: opens a text field instead of selecting opt
 }
 
 func (i variantItem) FilterValue() string {
 	switch {
+	case i.typeIn:
+		return "enter a path…"
 	case i.find:
 		return "find…"
 	case i.browse:
@@ -146,6 +152,16 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		}
 		fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
 	case variantItem:
+		if it.typeIn {
+			// No size or status column: it isn't a file, it's a door to the
+			// text field, so those columns would just be blank.
+			label := fmt.Sprintf("%-*s", modalVariantWidth, "enter a path…")
+			if index == m.Index() {
+				label = selStyle.Render(label)
+			}
+			fmt.Fprint(w, cursor+label+dimStyle.Render("type or paste"))
+			return
+		}
 		if it.find {
 			// No size or status column: it isn't a file, it's a door to the
 			// finder, so those columns would just be blank.
@@ -262,6 +278,14 @@ type imageModal struct {
 	// scanDone distinguishes "found nothing yet" from "found nothing" -- an
 	// empty pane means opposite things before and after the walk ends.
 	scanDone bool
+
+	// typing backs the byo group's enter a path… leaf, the same structural
+	// move as browsing and finding: a mode flag, its own update func, its own
+	// branch in view(). It owns the keyboard while open for the same reason
+	// they do -- typing here is text entry, not navigation.
+	typing    bool
+	pathInput textinput.Model
+	typingErr string // set when the last enter's path failed to resolve; cleared on the next edit
 }
 
 // newImageList builds the modal's list component. Filtering is deliberately
@@ -369,11 +393,14 @@ func (mo *imageModal) drill(g osItem) {
 		items = append(items, variantItem{idx: idx, opt: mo.images[idx]})
 	}
 	if g.os == byoGroup {
-		// find… before browse…: typing a name is the common case, walking the
-		// tree is the fallback. Trailing rather than leading relative to the
-		// real files: existing BYO files are the images the user most likely
-		// wants, so these two are the fallback at the bottom, not the first
-		// thing the cursor lands on.
+		// enter a path… leads: it's a door of its own (typing/pasting an
+		// exact path), so it goes first as a fixed doorway rather than mixed
+		// in with the files it isn't one of. find… before browse…: typing a
+		// name is the common case, walking the tree is the fallback. Both
+		// trailing relative to the real files: existing BYO files are the
+		// images the user most likely wants, so these are the fallback at
+		// the bottom, not the first thing the cursor lands on.
+		items = append([]list.Item{variantItem{typeIn: true}}, items...)
 		items = append(items, variantItem{find: true}, variantItem{browse: true})
 	}
 	mo.level = levelVariant
@@ -410,6 +437,9 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 	}
 	if mo.finding {
 		return mo.updateFinding(msg)
+	}
+	if mo.typing {
+		return mo.updateTyping(msg)
 	}
 
 	key, ok := msg.(tea.KeyPressMsg)
@@ -455,6 +485,9 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 			it, ok := mo.list.SelectedItem().(variantItem)
 			if !ok {
 				return nil, -1, false
+			}
+			if it.typeIn {
+				return mo.openTyping(), -1, false
 			}
 			if it.find {
 				return mo.openFinder(), -1, false
@@ -545,6 +578,69 @@ func (mo *imageModal) updateBrowsing(msg tea.Msg) (tea.Cmd, int, bool) {
 		return cmd, len(mo.images) - 1, true
 	}
 
+	return cmd, -1, false
+}
+
+// openTyping swaps the variant list for a focused text field the user types
+// or pastes a path into. theme.TextInput, the same constructor form.go and
+// edit.go use, so the field matches every other one in the app rather than
+// bubbles' stock styling.
+func (mo *imageModal) openTyping() tea.Cmd {
+	ti := theme.TextInput()
+	ti.Placeholder = "/path/to/image.qcow2"
+	ti.SetWidth(modalContentWidth)
+	mo.pathInput = ti
+	mo.typing = true
+	mo.typingErr = ""
+	return mo.pathInput.Focus()
+}
+
+// expandHome resolves a leading ~ or ~/... to the user's home directory. Only
+// that form: ~user/... names someone else's home, which this never had a way
+// to look up, so it is left untouched and will simply fail to stat like any
+// other bad path.
+func expandHome(path string) string {
+	if path == "~" {
+		return homeDir()
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(homeDir(), path[2:])
+	}
+	return path
+}
+
+// updateTyping owns the keyboard while the path field is open.
+func (mo *imageModal) updateTyping(msg tea.Msg) (tea.Cmd, int, bool) {
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "esc":
+			// Back to the variant list, not out of the modal -- same rule as
+			// updateBrowsing and updateFinding.
+			mo.typing = false
+			return nil, -1, false
+		case "enter":
+			path := strings.TrimSpace(mo.pathInput.Value())
+			if path == "" {
+				// Nothing typed yet; enter on an empty field does nothing
+				// rather than trying to resolve "" as a path.
+				return nil, -1, false
+			}
+			opt, err := byoOptionFromPath(expandHome(path))
+			if err != nil {
+				// Stay open and say why -- closing or going silent on a bad
+				// path would leave the user guessing what happened.
+				mo.typingErr = err.Error()
+				return nil, -1, false
+			}
+			mo.images = append(mo.images, opt)
+			mo.typing = false
+			return nil, len(mo.images) - 1, true
+		}
+	}
+
+	var cmd tea.Cmd
+	mo.pathInput, cmd = mo.pathInput.Update(msg)
+	mo.typingErr = ""
 	return cmd, -1, false
 }
 
@@ -734,6 +830,9 @@ func (mo *imageModal) view() string {
 	if mo.finding {
 		return mo.viewFinding()
 	}
+	if mo.typing {
+		return mo.viewTyping()
+	}
 	title := "image"
 	hint := "enter choose · esc cancel"
 	if mo.level == levelVariant {
@@ -768,6 +867,19 @@ func (mo *imageModal) viewFinding() string {
 	body := lipgloss.NewStyle().Width(modalContentWidth).
 		Render(mo.findList.View() + "\n\n" + hint)
 	return pane("image"+glyphSep+"find", body, modalContentWidth+paneFrame())
+}
+
+// viewTyping renders the path field in place of the variant list. The error
+// from the last failed enter, if any, sits under the field rather than
+// replacing the hint, so it doesn't disappear the moment the user looks away.
+func (mo *imageModal) viewTyping() string {
+	hint := dimStyle.Render("enter select · esc back")
+	if mo.typingErr != "" {
+		hint = errStyle.Render(mo.typingErr) + "\n" + hint
+	}
+	body := lipgloss.NewStyle().Width(modalContentWidth).
+		Render(mo.pathInput.View() + "\n\n" + hint)
+	return pane("image"+glyphSep+"path", body, modalContentWidth+paneFrame())
 }
 
 // viewBrowsing renders the filepicker in place of the variant list.
