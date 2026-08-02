@@ -14,6 +14,7 @@ func TestArgsLive(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
 		Name: "live1", Mode: "live", ISO: "isos/alpine.iso",
+		OS: "alpine", Backend: "apkovl",
 		RAM: 4096, CPUs: 4, Share: "/home/u/vms", SSHPort: 2201,
 		Dir: filepath.Join("/data", "live1"),
 	}
@@ -99,6 +100,7 @@ func TestArgsCloud(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
 		Name: "cloudy", Mode: "cloud", Base: "/data/base/alpine.qcow2",
+		OS: "alpine", Backend: "cloudinit",
 		RAM: 2048, CPUs: 2, Share: "/home/u/vms", SSHPort: 2204,
 		Dir: filepath.Join("/data", "cloudy"),
 	}

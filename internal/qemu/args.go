@@ -3,7 +3,6 @@ package qemu
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
@@ -77,55 +76,44 @@ func Args(v *config.VM) []string {
 			fmt.Sprintf("local,path=%s,mount_tag=host,security_model=none", v.Share))
 	}
 
+	// Mode owns the BOOT MEDIA -- the qcow2, the installer ISO, the boot
+	// order. It deliberately does not decide anything about how the guest is
+	// provisioned; that is the backend's, below.
 	switch v.Mode {
 	case "live":
 		a = append(a, "-cdrom", v.ISOPath())
-		// The initramfs looks for *.apkovl.tar.gz at the root of a mountable
-		// filesystem, so the tarball is served through vvfat as a fake FAT disk.
-		// This is unconditional on Mode alone, not on the backend: unlike the
-		// disk-mode branch below, no OS other than Alpine can even reach live
-		// mode today (internal/tui/form.go's effectiveMode keeps the live/disk
-		// toggle live only while the selected image's backend is apkovl), so
-		// there was never a "which backend" decision here to make.
-		a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
 		// vvfat synthesizes a valid MBR signature but no boot code, so without
 		// an explicit boot order QEMU's disk-first default can select the
-		// empty overlay and hang instead of falling through to the ISO.
+		// empty overlay the apkovl backend attaches and hang instead of
+		// falling through to the ISO.
 		a = append(a, "-boot", "d")
 	case "disk":
 		// The qcow2 comes first so it is vda: the installer's disk picker
 		// lists devices in order, and the target must be the obvious answer.
+		// Everything appended after this point is a later device, which is
+		// why the backend's drive goes on the end rather than inline here.
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
 		if !v.Installed {
 			a = append(a, "-cdrom", v.ISOPath())
-			// The same overlay a live VM gets, for the duration of the
-			// install only. Alpine's setup-disk in sys mode copies the
-			// RUNNING system onto the target, so an installer environment
-			// that already has stoat's key in /root/.ssh ends up installing
-			// it — otherwise the guest is unreachable after the install and
-			// provisioning dies on "Permission denied (publickey)".
-			//
-			// This is the one case where the guest OS genuinely decides
-			// whether the drive belongs here: only Alpine's initramfs looks
-			// for an apkovl, so a BYO ISO with any other backend would just
-			// see a second, useless disk in its target picker. Asking the
-			// backend rather than comparing v.OS == "alpine" directly is what
-			// makes alpine-cloud's override (backend cloudinit despite OS
-			// alpine, see internal/backend.For) resolve correctly too.
-			a = append(a, backend.For(v).Args(v)...)
 			a = append(a, "-boot", "d")
 		}
 	case "cloud":
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
-		// The xorriso seed has no El Torito boot record, so BIOS skips it and
-		// boots the qcow2 without needing an explicit -boot order. cloud-init's
-		// NoCloud datasource finds it by scanning cdrom devices for the CIDATA
-		// volume label. Unconditional on Mode alone, like the live-mode
-		// overlay above: cloud mode is cloudinit's only mode (form.go's
-		// effectiveMode forces it), so there is no other backend this could
-		// resolve to.
-		seedISO := filepath.Join(v.OvlDir(), "seed.iso")
-		a = append(a, "-drive", "file="+seedISO+",media=cdrom")
 	}
-	return a
+
+	// The provisioning artifact's drive: the apkovl overlay, the cloud-init
+	// seed, or nothing. Appended last, and unconditionally -- each backend
+	// decides for itself which of v's modes it applies to, so this single
+	// call covers the vvfat overlay a live boot and an uninstalled disk VM
+	// both need, and the seed cdrom a cloud VM needs.
+	//
+	// Asking the backend rather than comparing v.OS == "alpine" is also what
+	// makes alpine-cloud resolve correctly: it is OS "alpine" but backend
+	// "cloudinit" (see internal/backend.For), so an OS comparison would hand
+	// it an apkovl it does not boot from.
+	//
+	// Order is safe to leave until the end: the seed is a cdrom, and the
+	// overlay is only ever a second virtio disk behind either the installer
+	// ISO or the qcow2 that must stay vda.
+	return append(a, backend.For(v).Args(v)...)
 }

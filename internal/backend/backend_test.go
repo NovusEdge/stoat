@@ -71,6 +71,42 @@ func TestUbuntuDiskGetsNoSeedCdrom(t *testing.T) {
 	}
 }
 
+// The alpine-cloud catalog entry is OS "alpine" but Backend "cloudinit": it
+// is the one image whose backend contradicts its OS's registry default. It
+// is the entire reason For keys off v.Backend rather than v.OS, so pin it —
+// dispatching on OS would hand this VM an apkovl overlay it does not boot
+// from, and no seed at all, which is a VM that comes up unprovisioned with
+// nothing saying why.
+func TestAlpineCloudUsesItsEntrysBackendNotItsOSDefault(t *testing.T) {
+	v := &config.VM{
+		Name: "alpcloud", Mode: "cloud", OS: "alpine", Backend: "cloudinit",
+		Dir: filepath.Join(t.TempDir(), "alpcloud"),
+	}
+	b := For(v)
+	if b.Name() != "cloudinit" {
+		t.Fatalf("Name() = %q, want cloudinit — v.Backend must win over the registry's apkovl default for alpine", b.Name())
+	}
+	got := strings.Join(b.Args(v), " ")
+	if !strings.Contains(got, "seed.iso") {
+		t.Errorf("no cloud-init seed attached: %q", got)
+	}
+	if strings.Contains(got, "fat:rw:") {
+		t.Errorf("attached an apkovl overlay to a cloud VM: %q", got)
+	}
+}
+
+// A VM whose Backend was never populated still has to resolve, or an older
+// vm.toml stops working. Falling back to the registry is only for that case.
+func TestEmptyBackendFallsBackToTheRegistry(t *testing.T) {
+	v := &config.VM{
+		Name: "old", Mode: "live", OS: "alpine",
+		Dir: filepath.Join(t.TempDir(), "old"),
+	}
+	if got := For(v).Name(); got != "apkovl" {
+		t.Errorf("Name() = %q, want apkovl from guest.Lookup", got)
+	}
+}
+
 func TestUnknownOSGetsNothingAndDoesNotPanic(t *testing.T) {
 	v := &config.VM{
 		Name: "mystery", Mode: "live", OS: "plan9",

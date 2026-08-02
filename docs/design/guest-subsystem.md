@@ -6,7 +6,7 @@
 
 **Scope note:** this is a rewrite of how stoat models guests and provisioning, not a patch over the existing shape. Where the current structure is wrong it gets replaced. The affected surface is ~1,000 lines of production code (`qemu` 450, `cloudinit` 231, `apkovl` 159, `recipes` 131), plus the orchestration currently embedded in `internal/tui/form.go`.
 
-**Product context that drives §10.** stoat exists because VirtualBox is heavy and hand-downloading ISOs is tedious: the point is a quick, convenient local VM with a TUI for people who want one. The stated direction is to also expose stoat over an **MCP server so agents can drive it**. That is not a later bolt-on — it decides where the orchestration logic has to live, and today it lives in the wrong place.
+**Product context that drives §9.** stoat exists because VirtualBox is heavy and hand-downloading ISOs is tedious: the point is a quick, convenient local VM with a TUI for people who want one. The stated direction is to also expose stoat over an **MCP server so agents can drive it**. That is not a later bolt-on — it decides where the orchestration logic has to live, and today it lives in the wrong place.
 
 ---
 
@@ -272,9 +272,9 @@ For phase-2 recipes, progress comes from the declared `stages` plus emitted mark
 
 ---
 
-## 10. The core API layer
+## 9. The core API layer
 
-### 10.1 The problem
+### 9.1 The problem
 
 **Creating a VM is only possible by driving a Bubbletea form.** `internal/tui/form.go`'s `build()` (:753+) resolves the image, infers the OS, picks the backend, allocates an SSH port via `config.FreePort()`, writes `vm.toml` and creates the qcow2. The CLI has `ls`, `up`, `down`, `ssh`, `provision`, `rm`, `recipe`, `logs`, `doctor` — and **no `create`**.
 
@@ -282,7 +282,7 @@ So orchestration sits *above* the layer any programmatic caller would enter at. 
 
 This is a layering defect, not a missing feature.
 
-### 10.2 The layering
+### 9.2 The layering
 
 ```
         TUI            CLI            MCP server
@@ -302,7 +302,7 @@ This is a layering defect, not a missing feature.
 
 `guest` (§3) is necessary but not sufficient: it fixes *how a guest is provisioned*, not *who can ask for one*. The core API is what makes stoat a library that happens to ship a TUI, rather than a TUI with some packages under it.
 
-### 10.3 Surface
+### 9.3 Surface
 
 Deliberately small, and shaped so every operation is one call with no interactive state.
 
@@ -348,7 +348,7 @@ func Destroy(ctx, name) error
 func Images(ctx) ([]Image, error)   // catalog + local, with download state
 ```
 
-### 10.4 What the agent use-case demands beyond a TUI
+### 9.4 What the agent use-case demands beyond a TUI
 
 These are requirements the TUI never forced, and each one is a real change:
 
@@ -362,7 +362,7 @@ These are requirements the TUI never forced, and each one is a real change:
 
 **Cancellation.** Every operation takes a `context.Context`. Downloads and boot-waits are long; an agent that abandons a task must be able to stop them. Today `esc` leaves a download goroutine running (a known open item).
 
-### 10.5 Concurrency — new, and load-bearing
+### 9.5 Concurrency — new, and load-bearing
 
 A TUI has one user doing one thing. An MCP server plus a TUI plus a CLI can act **at the same time**, and two current mechanisms are not safe under that:
 
@@ -371,7 +371,7 @@ A TUI has one user doing one thing. An MCP server plus a TUI plus a CLI can act 
 
 The core API needs a data-root lock — a lockfile under `$STOAT_HOME` held across the allocate-and-write section of `Create`, and per-VM locks for state transitions. This is not optional once a second caller exists, and it is invisible until it corrupts something.
 
-### 10.6 What moves, and what does not
+### 9.6 What moves, and what does not
 
 **Moves out of `internal/tui` into `core`:** image resolution and download state, OS/backend derivation, port allocation, `vm.toml` construction, disk creation, the provisioning decision, and the readiness/progress state machine.
 
@@ -379,7 +379,7 @@ The core API needs a data-root lock — a lockfile under `$STOAT_HOME` held acro
 
 **Stays where it is:** `config` (types and paths), `iso` (catalog and downloads), `qemu` (process handling), `sshx` (ssh mechanics). These are already libraries; they just get a coherent caller.
 
-### 10.7 MCP shape (sketch, not scope)
+### 9.7 MCP shape (sketch, not scope)
 
 Once `core` exists, the MCP server is a thin mapping — which is the test of whether the layering is right:
 
@@ -398,13 +398,13 @@ If any of these needs logic that is not already in `core`, the layering is wrong
 
 `stoat_run` is the one genuinely new capability (run a command in a guest, get structured output). It is also the one with a real safety question — arbitrary command execution in a VM on the user's machine — which deserves its own decision rather than riding along here.
 
-### 10.8 Sequencing note
+### 9.8 Sequencing note
 
-`guest` (§3) and `core` (§10) are separable. `guest` can land first and is useful on its own; `core` depends on it, because `Create` needs OS/backend derivation to be a library call rather than eight string comparisons. MCP depends on `core`. Doing `core` before `guest` would mean building the API on top of the scattered logic and then rewriting its internals — possible, but wasteful.
+`guest` (§3) and `core` (§9) are separable. `guest` can land first and is useful on its own; `core` depends on it, because `Create` needs OS/backend derivation to be a library call rather than eight string comparisons. MCP depends on `core`. Doing `core` before `guest` would mean building the API on top of the scattered logic and then rewriting its internals — possible, but wasteful.
 
 ---
 
-## 11. Risks
+## 10. Risks
 
 - **This is a real refactor**, touching `qemu`, `cloudinit`, `apkovl`, `recipes`, `iso` and `tui`. The mitigation is that behaviour must not change except where a bug is named here — existing tests are the contract, and any test that needs updating is a signal to stop and check rather than to edit.
 - **`Backend.Prepare`'s call frequency differs by backend** (apkovl every boot; cloudinit once, ever). That asymmetry is load-bearing — a cloud VM whose seed is rebuilt would have its instance identity change under it. The interface hides it, which is right, but the implementations must be explicit about it and tested for it.

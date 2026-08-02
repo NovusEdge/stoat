@@ -21,7 +21,7 @@ import (
 // requires. Only Prepare and Args are implemented here — Ready (today:
 // sshx.Wait plus cloud-init polling) and Provision (today:
 // internal/tui/provstep.go) are entangled with TUI code and belong with the
-// core-API work (docs/design/guest-subsystem.md §10).
+// core-API work (docs/design/guest-subsystem.md §9).
 type Backend interface {
 	Name() string
 

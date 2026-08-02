@@ -28,7 +28,7 @@ func (cloudinitBackend) Name() string { return "cloudinit" }
 // no-op outside cloud mode: once created, the overlay accumulates real guest
 // state (installed packages, home directories, ...) that must never be
 // discarded the way apkovlBackend's overlay is rebuilt on every start -- see
-// docs/design/guest-subsystem.md §11 ("Risks") for why that asymmetry
+// docs/design/guest-subsystem.md §10 ("Risks") for why that asymmetry
 // between the two backends is intentional.
 func (cloudinitBackend) Prepare(v *config.VM) error {
 	if v.Mode != "cloud" {
