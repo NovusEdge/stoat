@@ -179,20 +179,29 @@ func TestOnlyManualInstallsGetAWindow(t *testing.T) {
 			v := tc.vm
 			v.Name, v.Dir, v.RAM, v.CPUs, v.SSHPort = "vm", t.TempDir(), 1024, 2, 2222
 			got := strings.Join(Args(&v), " ")
-			hasGTK := strings.Contains(got, "gtk")
-			if hasGTK != tc.wantsWindow {
-				t.Errorf("gtk window = %v, want %v:\n%s", hasGTK, tc.wantsWindow, got)
-			}
+
+			// A bare Contains(got, "gtk") passes on a malformed display
+			// string too (e.g. a typo'd "-display gtk-broken,gl=on" or a
+			// stray "gtk" in an unrelated flag). Pin the exact display
+			// arguments both forms must produce instead.
+			windowed := "-vga virtio -display gtk,gl=on"
+			headless := "-display none -vnc unix:" + v.VNCPath()
+
 			if tc.wantsWindow {
+				if !strings.Contains(got, windowed) {
+					t.Errorf("want exact windowed display args %q in:\n%s", windowed, got)
+				}
+				if strings.Contains(got, "-display none") || strings.Contains(got, "-vnc") {
+					t.Errorf("a windowed VM must not also bind vnc or -display none:\n%s", got)
+				}
 				return
 			}
-			if !strings.Contains(got, "-display none") && !strings.Contains(got, "display none") {
-				t.Errorf("headless VM does not ask for -display none:\n%s", got)
+
+			if !strings.Contains(got, headless) {
+				t.Errorf("want exact headless display args %q in:\n%s", headless, got)
 			}
-			// -display none cannot be undone on a running qemu, so the
-			// display has to stay reachable some other way.
-			if !strings.Contains(got, "vnc") {
-				t.Errorf("headless VM has no way to get a display back:\n%s", got)
+			if strings.Contains(got, "-vga") || strings.Contains(got, "gtk") {
+				t.Errorf("a headless VM must not also open a gtk window:\n%s", got)
 			}
 		})
 	}
