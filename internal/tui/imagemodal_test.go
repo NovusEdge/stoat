@@ -704,6 +704,71 @@ func TestChoosingByoDrawsAFocusedInput(t *testing.T) {
 	}
 }
 
+// TestByoScreenFitsTheSmallestTerminal is the geometry check for the byo
+// screen, mirroring TestModalFitsTheSmallestTerminal: a modal's failure mode
+// is that it renders fine at the developer's window and corrupts at someone
+// else's, and app.go still draws panes at 60x20. Covers every state that
+// differs in height -- scanning, results present, empty-after-scan, and the
+// inline-error state, which is the tallest: a rejected path can be long
+// enough (a t.TempDir() directory) to wrap the error line to two.
+func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
+	dir := t.TempDir()
+
+	cases := []struct {
+		name  string
+		setup func(mo *imageModal)
+	}{
+		{"scanning", func(mo *imageModal) {
+			mo.openByo()
+		}},
+		{"results", func(mo *imageModal) {
+			mo.openByo()
+			mo.setFound([]foundImage{
+				{path: "/home/u/alpine.iso", size: 1},
+				{path: "/home/u/debian.iso", size: 2},
+			})
+		}},
+		{"empty after scan", func(mo *imageModal) {
+			mo.openByo()
+			mo.scanDone = true
+		}},
+		{"inline error", func(mo *imageModal) {
+			mo.openByo()
+			// A directory, not a nonexistent path: byoOptionFromPath's
+			// rejection embeds the full path, and a temp dir's is long
+			// enough to actually wrap inside modalContentWidth -- the worst
+			// case for height, unlike a short hand-typed bad path.
+			mo.byoInput.SetValue(dir)
+			mo.update(keyMsg("enter"))
+		}},
+	}
+
+	for _, c := range cases {
+		mo := newImageModal(testImages(), 0)
+		byoVariants(t, mo)
+		c.setup(mo)
+
+		m := model{width: smallWidth, height: smallHeight, modal: mo}
+		box := m.modal.view()
+		if w := lipgloss.Width(box); w > smallWidth {
+			t.Errorf("%s: modal is %d cells wide, terminal is %d", c.name, w, smallWidth)
+		}
+		if h := lipgloss.Height(box); h > smallHeight {
+			t.Errorf("%s: modal is %d lines tall, terminal is %d", c.name, h, smallHeight)
+		}
+
+		// The composited frame must not grow the screen it is drawn over.
+		screen := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, "")
+		out := m.renderModal(screen)
+		if w := lipgloss.Width(out); w > m.width {
+			t.Errorf("%s: composited frame is %d cells wide, terminal is %d", c.name, w, m.width)
+		}
+		if h := lipgloss.Height(out); h > m.height {
+			t.Errorf("%s: composited frame is %d lines tall, terminal is %d", c.name, h, m.height)
+		}
+	}
+}
+
 // Arrow keys must move the list's selection, not the text field -- and the
 // DRAWN highlight must follow, since a cursor that moves in state but not on
 // screen is invisible to the user.
