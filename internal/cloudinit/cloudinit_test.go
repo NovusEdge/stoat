@@ -276,3 +276,39 @@ func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
 		t.Errorf("recipe package was dropped:\n%s", got)
 	}
 }
+
+// countTopLevelKey counts line-anchored occurrences of "key:" -- i.e. lines
+// that are NOT indented -- so it doesn't also match "  - packages:" style
+// indented text or substrings elsewhere in the document.
+func countTopLevelKey(doc, key string) int {
+	n := 0
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(line, key+":") {
+			n++
+		}
+	}
+	return n
+}
+
+// Two top-level packages: keys is valid YAML -- cloud-init's parser just
+// takes the last one and silently discards the first. If extraPackages(v.OS)
+// were ever concatenated onto the base block as raw text ahead of
+// mergeCloudRecipes(recipeBodies), instead of being merged INTO it, an
+// Alpine VM with a recipe that also declares packages: would end up with two
+// competing packages: keys -- the recipe's winning, Alpine's sudo silently
+// vanishing, and every recipe that escalates via sudo failing on a guest
+// that never got it. This pins the merge stays single-key.
+func TestSeedMergesAlpineSudoWithRecipePackages(t *testing.T) {
+	v := &config.VM{Name: "vm", OS: "alpine"}
+	fragment := "packages:\n  - git\n  - tmux\n\nruncmd:\n  - echo hi\n"
+	got := userData(v, "ssh-ed25519 AAAA test", []string{fragment})
+
+	if n := countTopLevelKey(got, "packages"); n != 1 {
+		t.Errorf("want exactly one top-level packages: key, got %d:\n%s", n, got)
+	}
+	for _, want := range []string{"sudo", "git", "tmux"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("merged packages missing %q:\n%s", want, got)
+		}
+	}
+}
