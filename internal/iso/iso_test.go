@@ -505,3 +505,69 @@ func TestDownloadOutlastsMetadataTimeout(t *testing.T) {
 		t.Error("checksum should have verified")
 	}
 }
+
+// TestResolve_AlpineDirectURLEntry guards against gating Resolve's
+// index-vs-direct-URL choice on OS == "alpine": alpine-cloud is an alpine
+// entry with a direct URL and no Flavor, so a bare OS check would send it
+// through Latest("") and fail to find any release in the index, even though
+// the entry itself is perfectly resolvable as a direct URL.
+func TestResolve_AlpineDirectURLEntry(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	body := []byte("hello, this stands in for an alpine cloud qcow2")
+	const filename = "alpine-cloud.qcow2"
+
+	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Write(body)
+	}))
+	defer fileSrv.Close()
+
+	entry := Entry{
+		ID:      "alpine-cloud",
+		OS:      "alpine",
+		Backend: "cloudinit",
+		URL:     fileSrv.URL + "/" + filename,
+		SSHUser: "stoat",
+	}
+
+	r, err := Resolve(entry)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if r.File != filename {
+		t.Fatalf("Resolve File = %q, want %q", r.File, filename)
+	}
+	if r.URL != entry.URL {
+		t.Fatalf("Resolve URL = %q, want %q (direct-URL path, not the flavor index)", r.URL, entry.URL)
+	}
+}
+
+// Alpine belongs in the catalog as a CLOUD image, not only as an ISO. It is
+// the one distro stoat offers in both shapes, and the cloud one is the only
+// path to a persistent Alpine VM that needs no manual install.
+func TestCatalogOffersAlpineCloud(t *testing.T) {
+	var got *Entry
+	for i, e := range Catalog() {
+		if e.OS == "alpine" && e.Backend == "cloudinit" {
+			got = &Catalog()[i]
+		}
+	}
+	if got == nil {
+		t.Fatal("no alpine cloudinit entry in the catalog")
+	}
+	if !strings.HasSuffix(got.URL, ".qcow2") {
+		t.Errorf("URL is not a qcow2: %s", got.URL)
+	}
+	// The tiny-cloud flavor has no sudo key, no cloud-init status and no
+	// plaintext password support -- everything stoat's seed and its polling
+	// depend on. Only the cloudinit flavor works.
+	if !strings.Contains(got.URL, "cloudinit") {
+		t.Errorf("must be the cloudinit flavor, got %s", got.URL)
+	}
+	if strings.Contains(got.URL, "-uefi-") {
+		t.Errorf("bios flavor only -- stoat boots SeaBIOS, not OVMF: %s", got.URL)
+	}
+	if got.SSHUser != "stoat" {
+		t.Errorf("SSHUser = %q, want stoat (the seed creates that account)", got.SSHUser)
+	}
+}

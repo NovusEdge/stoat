@@ -257,6 +257,46 @@ func Catalog() []Entry {
 			SSHUser:     "root",
 			Notes:       "Alpine virt live ISO (smaller, virtio-only, built for VM guests)",
 		},
+		{
+			ID:      "alpine-cloud",
+			OS:      "alpine",
+			Variant: "3.24 cloud",
+			// Measured 2026-08-02 by Content-Length (183,697,408 bytes),
+			// rounded to whole MiB.
+			Size:    175 * mib,
+			Backend: "cloudinit",
+			// The bios + cloudinit flavor specifically. Alpine also publishes
+			// a "tiny" bootstrap that runs tiny-cloud instead of cloud-init:
+			// it has no sudo key, no `cloud-init status` and no
+			// plaintext-password support, so stoat's seed and its
+			// boot-progress polling would both need a second implementation.
+			// The uefi flavor needs OVMF, which stoat does not configure.
+			//
+			// The patch version is in the filename and dl-cdn prunes older
+			// point releases, so this pins 3.24.1 the same way the Fedora
+			// entry pins its build. Verified by boot 2026-08-02: ssh
+			// reachable, cloud-init reached status: done.
+			//
+			// Ordered LAST among the alpine entries deliberately:
+			// internal/tui/form.go's newForm() defaults a fresh form to the
+			// first catalog entry with OS == "alpine", to preserve the
+			// pre-cloud-image default of the apkovl/live picker. Putting
+			// this entry before alpine-standard would silently flip that
+			// default to the cloud image.
+			URL: "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/cloud/generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2",
+			// Alpine's per-image ".sha512" sidecar is a BARE hex digest with
+			// no filename column (verified 2026-08-02 by GET: a single
+			// 128-hex token, nothing else on the line). parseChecksum
+			// requires either the BSD "NAME (file) = hex" form or at least
+			// two whitespace-separated fields for the GNU form; a lone hex
+			// string satisfies neither, so it would never match and Resolve
+			// would fail outright. Left empty deliberately, per this
+			// function's doc comment: Download() then fetches without
+			// verification rather than failing on a guessed URL.
+			ChecksumURL: "",
+			SSHUser:     "stoat",
+			Notes:       "Alpine 3.24 cloud image — persistent, no manual install",
+		},
 	}
 }
 
@@ -334,15 +374,18 @@ func Latest(flavor string) (*Release, error) {
 
 // Resolve turns a catalog Entry into a concrete Release ready for Download.
 //
-// Alpine (the one entry backed by a "latest" index rather than a direct
-// file) is resolved via Latest(), exactly as before this generalization.
-// Every other entry is a direct URL: the filename is taken from the URL's
-// path, and when ChecksumURL is set, Resolve fetches that sums file and
-// parses out the matching SHA256 line. An entry with no ChecksumURL
+// An entry backed by a "latest" index rather than a direct file is resolved
+// via Latest(), exactly as before this generalization. That's determined by
+// Flavor being set, not by OS == "alpine": alpine-cloud is an alpine entry
+// with a direct URL and no Flavor (see the Flavor field's doc comment), so
+// gating on OS alone would send it through Latest("") and fail to find any
+// release. Every other entry is a direct URL: the filename is taken from the
+// URL's path, and when ChecksumURL is set, Resolve fetches that sums file
+// and parses out the matching SHA256 line. An entry with no ChecksumURL
 // resolves with an empty SHA256, which Download() treats as "fetch without
 // verification" rather than an error.
 func Resolve(e Entry) (*Release, error) {
-	if e.OS == "alpine" {
+	if e.Flavor != "" {
 		return Latest(e.Flavor)
 	}
 
