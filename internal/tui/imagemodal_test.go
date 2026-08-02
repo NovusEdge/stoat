@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -20,29 +19,6 @@ import (
 // testImages is a fixture with the shape that motivated the modal: one OS
 // with two variants, several with one, and a BYO file whose OS iso.Infer
 // could not name.
-// A tick chain continues only because its handler hands back the next tick
-// cmd. Diverting every non-key message into the browsing modal swallowed the
-// download tick and returned the modal's cmd instead, which does not just
-// stall the progress bar -- it ends the chain for good. app.go:299 already
-// carries this warning for the by-screen routing that caused it once before.
-func TestBrowsingDoesNotKillTheDownloadTick(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-
-	m := model{screen: screenForm, form: newForm()}
-	m.form.fetching = true
-	m.modal = newImageModal(testImages(), 0)
-	m.modal.openBrowser()
-
-	if !m.modal.browsing {
-		t.Fatal("openBrowser did not enter the browsing state")
-	}
-
-	_, cmd := m.Update(dlTickMsg{})
-	if cmd == nil {
-		t.Fatal("dlTickMsg while browsing returned no cmd: the download tick chain is dead")
-	}
-}
-
 func testImages() []imageOption {
 	std := iso.Entry{ID: "alpine-standard", OS: "alpine", Variant: "standard", Backend: "apkovl"}
 	virt := iso.Entry{ID: "alpine-virt", OS: "alpine", Variant: "virt", Backend: "apkovl"}
@@ -437,7 +413,7 @@ func TestImageMetaColumnFitsEveryValue(t *testing.T) {
 }
 
 // byoVariants drills the modal into the byo group and returns it positioned
-// at the variant level, where browse… lives.
+// at the variant level, where choose an image… lives.
 func byoVariants(t *testing.T, mo *imageModal) {
 	t.Helper()
 	for i, g := range mo.groups {
@@ -453,86 +429,19 @@ func byoVariants(t *testing.T, mo *imageModal) {
 	}
 }
 
-// AllowedTypes must actually filter: a .txt sitting next to an .iso is not a
-// bootable image and must not be offerable.
-func TestPickerFiltersToImageTypes(t *testing.T) {
-	mo := newImageModal(testImages(), 0)
-	mo.openBrowser()
-	want := []string{".iso", ".qcow2", ".img"}
-	if !reflect.DeepEqual(mo.picker.AllowedTypes, want) {
-		t.Errorf("AllowedTypes = %v, want %v", mo.picker.AllowedTypes, want)
-	}
-	if mo.picker.AutoHeight {
-		t.Error("AutoHeight must be false; the modal assigns the rect")
-	}
-}
-
-// Same rule as every other pane: nothing drawn may exceed the box it is in.
-// Mirrors TestModalFitsTheSmallestTerminal's 60x20 check.
-func TestPickerFitsTheModalAtMinimumSize(t *testing.T) {
-	mo := newImageModal(testImages(), 0)
-	mo.openBrowser()
-	m := model{width: smallWidth, height: smallHeight, modal: mo}
-
-	box := m.modal.view()
-	if w := lipgloss.Width(box); w > smallWidth {
-		t.Errorf("browsing: modal is %d cells wide, terminal is %d", w, smallWidth)
-	}
-	if h := lipgloss.Height(box); h > smallHeight {
-		t.Errorf("browsing: modal is %d lines tall, terminal is %d", h, smallHeight)
-	}
-
-	screen := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, "")
-	out := m.renderModal(screen)
-	if w := lipgloss.Width(out); w > m.width {
-		t.Errorf("browsing: composited frame is %d cells wide, terminal is %d", w, m.width)
-	}
-	if h := lipgloss.Height(out); h > m.height {
-		t.Errorf("browsing: composited frame is %d lines tall, terminal is %d", h, m.height)
-	}
-}
-
-// browse… must be reachable via the normal drill-in even though testImages
-// gives the byo group exactly one real file — the single-variant shortcut
-// that resolves other one-image groups straight from the OS level would
-// otherwise make the entry unreachable whenever there's only one BYO file
-// (or none at all).
-func TestBrowseEntryReachableWithASingleBYOFile(t *testing.T) {
+// choose an image… must be reachable via the normal drill-in even though
+// testImages gives the byo group exactly one real file — the single-variant
+// shortcut that resolves other one-image groups straight from the OS level
+// would otherwise make the entry unreachable whenever there's only one BYO
+// file (or none at all).
+func TestChooseImageLeafReachableWithASingleBYOFile(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	byoVariants(t, mo)
 
 	items := mo.list.Items()
 	last, ok := items[len(items)-1].(variantItem)
-	if !ok || !last.browse {
-		t.Fatalf("last item in the byo group's variant list is %#v, want the browse… entry", items[len(items)-1])
-	}
-}
-
-// esc while browsing returns to the variant list, not the whole modal --
-// closing outright would be jarring mid-browse, and esc already means "back
-// a level" everywhere else in this modal.
-func TestEscWhileBrowsingReturnsToVariantList(t *testing.T) {
-	mo := newImageModal(testImages(), 0)
-	byoVariants(t, mo)
-
-	items := mo.list.Items()
-	mo.list.Select(len(items) - 1) // browse…
-	if _, _, closed := mo.update(keyMsg("enter")); closed {
-		t.Fatal("enter on browse… closed the modal")
-	}
-	if !mo.browsing {
-		t.Fatal("enter on browse… did not open the picker")
-	}
-
-	_, _, closed := mo.update(keyMsg("esc"))
-	if closed {
-		t.Error("esc while browsing closed the modal; it must return to the variant list")
-	}
-	if mo.browsing {
-		t.Error("esc while browsing left mo.browsing true; the picker should be dismissed")
-	}
-	if mo.level != levelVariant {
-		t.Errorf("esc while browsing left level=%v, want the variant level", mo.level)
+	if !ok || !last.chooseImage {
+		t.Fatalf("last item in the byo group's variant list is %#v, want the choose an image… entry", items[len(items)-1])
 	}
 }
 
@@ -561,7 +470,7 @@ func TestCatalogRowsAlignTheirSizeColumn(t *testing.T) {
 // a filter that matches but does not redraw is the bug this catches.
 func TestFinderFiltersAsYouType(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
-	mo.finding = true
+	mo.byo = true
 	mo.setFound([]foundImage{
 		{path: "/home/u/downloads/alpine-3.20.iso", size: 100},
 		{path: "/home/u/vms/ubuntu-24.04.iso", size: 200},
@@ -575,7 +484,7 @@ func TestFinderFiltersAsYouType(t *testing.T) {
 		}
 	}
 
-	mo.findList.SetFilterText("ubu")
+	mo.byoList.SetFilterText("ubu")
 	out = ansi.Strip(mo.view())
 	if !strings.Contains(out, "ubuntu") {
 		t.Errorf("filtering for \"ubu\" hid the match:\n%s", out)
@@ -592,13 +501,13 @@ func TestFinderFiltersAsYouType(t *testing.T) {
 // list component was chosen at all.
 func TestFinderMatchesFuzzilyNotJustSubstrings(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
-	mo.finding = true
+	mo.byo = true
 	mo.setFound([]foundImage{
 		{path: "/home/u/vms/ubuntu-24.04.iso", size: 100},
 		{path: "/home/u/vms/alpine-3.20.iso", size: 200},
 	})
 
-	mo.findList.SetFilterText("u2404")
+	mo.byoList.SetFilterText("u2404")
 	out := ansi.Strip(mo.view())
 	if !strings.Contains(out, "ubuntu") {
 		t.Errorf("a fuzzy query did not match; the filter is substring-only:\n%s", out)
@@ -609,7 +518,7 @@ func TestFinderMatchesFuzzilyNotJustSubstrings(t *testing.T) {
 // -- an empty box with no explanation reads as "there are no images".
 func TestFinderSaysItIsStillLooking(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
-	mo.finding = true
+	mo.byo = true
 
 	if out := ansi.Strip(mo.view()); !strings.Contains(out, "searching") {
 		t.Errorf("nothing tells the user a scan is running:\n%s", out)
@@ -626,7 +535,7 @@ func TestFinderSaysItIsStillLooking(t *testing.T) {
 // blank, or the user waits for results that are never coming.
 func TestFinderSaysWhenItFoundNothing(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
-	mo.finding = true
+	mo.byo = true
 	mo.scanDone = true
 
 	if out := ansi.Strip(mo.view()); !strings.Contains(out, "no disk images") {
@@ -634,50 +543,50 @@ func TestFinderSaysWhenItFoundNothing(t *testing.T) {
 	}
 }
 
-// esc goes back a level rather than closing the modal -- the same rule the
-// tree browser follows (see updateBrowsing's comment), because the user is
+// esc goes back a level rather than closing the modal -- the byo screen
+// follows the same rule as every other sub-mode here, because the user is
 // one step into a choice and dumping them out would discard it.
-func TestFinderEscGoesBackToTheVariantList(t *testing.T) {
+func TestByoEscGoesBackToTheVariantList(t *testing.T) {
 	imgs := testImages()
 	mo := newImageModal(imgs, 0)
-	mo.drill(mo.groups[len(mo.groups)-1]) // byo group, where find… lives
-	mo.openFinder()
+	mo.drill(mo.groups[len(mo.groups)-1]) // byo group, where choose an image… lives
+	mo.openByo()
 
 	_, idx, closed := mo.update(keyMsg("esc"))
 	if closed {
-		t.Error("esc closed the whole modal instead of leaving the finder")
+		t.Error("esc closed the whole modal instead of leaving the byo screen")
 	}
 	if idx != -1 {
 		t.Errorf("esc chose image %d", idx)
 	}
-	if mo.finding {
-		t.Error("esc did not leave the finder")
+	if mo.byo {
+		t.Error("esc did not leave the byo screen")
 	}
 
-	// State alone would pass even if view() still drew the finder -- assert
-	// on what is actually redrawn.
+	// State alone would pass even if view() still drew the byo screen --
+	// assert on what is actually redrawn.
 	out := ansi.Strip(mo.view())
-	if !strings.Contains(out, "browse…") {
-		t.Errorf("esc left the finder in state but not on screen; drawn:\n%s", out)
+	if !strings.Contains(out, "choose an image…") {
+		t.Errorf("esc left the byo screen in state but not on screen; drawn:\n%s", out)
 	}
 	if strings.Contains(out, "searching") {
-		t.Errorf("the finder is still drawn after esc:\n%s", out)
+		t.Errorf("the byo screen is still drawn after esc:\n%s", out)
 	}
 }
 
 // Re-entering the finder must start clean: leaving it (esc) does not cancel
 // the running scan by itself -- if the old scan's messages keep landing (see
 // TestReEnteringFinderDoesNotDoubleResults), every result would be appended
-// twice, adjacent, because the old list's items survive across openFinder.
-func TestReEnteringFinderDoesNotDoubleResults(t *testing.T) {
+// twice, adjacent, because the old list's items survive across openByo.
+func TestReEnteringByoDoesNotDoubleResults(t *testing.T) {
 	imgs := testImages()
 	mo := newImageModal(imgs, 0)
 	mo.drill(mo.groups[len(mo.groups)-1])
-	mo.openFinder()
+	mo.openByo()
 	mo.setFound([]foundImage{{path: "/home/u/only.iso", size: 1}})
 
-	mo.update(keyMsg("esc"))                                       // leave the finder
-	mo.openFinder()                                                // re-enter: must not carry the old results over
+	mo.update(keyMsg("esc"))                                       // leave the byo screen
+	mo.openByo()                                                   // re-enter: must not carry the old results over
 	mo.setFound([]foundImage{{path: "/home/u/only.iso", size: 1}}) // the new scan finds it again
 
 	out := ansi.Strip(mo.view())
@@ -687,9 +596,9 @@ func TestReEnteringFinderDoesNotDoubleResults(t *testing.T) {
 }
 
 // Choosing a found image must produce a real BYO option appended to the
-// modal's own slice, exactly as the tree browser does -- app.go re-adopts
-// mo.images and resolves the returned index against it.
-func TestFinderChoosingAppendsTheImage(t *testing.T) {
+// modal's own slice -- app.go re-adopts mo.images and resolves the returned
+// index against it.
+func TestByoChoosingAppendsTheImage(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "custom.iso")
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
@@ -698,7 +607,7 @@ func TestFinderChoosingAppendsTheImage(t *testing.T) {
 
 	mo := newImageModal(testImages(), 0)
 	before := len(mo.images)
-	mo.finding = true
+	mo.byo = true
 	mo.setFound([]foundImage{{path: path, size: 1}})
 
 	_, idx, closed := mo.update(keyMsg("enter"))
@@ -720,14 +629,14 @@ func TestFinderChoosingAppendsTheImage(t *testing.T) {
 // the next one. A gate that drops non-key messages does not merely delay
 // results, it ENDS the chain -- so drive it through the real app.Update, not
 // the modal in isolation.
-func TestScanResultsReachTheFinderThroughTheApp(t *testing.T) {
+func TestScanResultsReachTheByoScreenThroughTheApp(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mm.(model)
 
 	m.modal = newImageModal(testImages(), 0)
-	m.modal.finding = true
+	m.modal.byo = true
 
 	mm, _ = m.Update(imagesFoundMsg{batch: []foundImage{
 		{path: "/home/u/vms/found-by-scan.iso", size: 10},
@@ -735,7 +644,7 @@ func TestScanResultsReachTheFinderThroughTheApp(t *testing.T) {
 	m = mm.(model)
 
 	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "found-by-scan") {
-		t.Errorf("a scan result never reached the finder:\n%s", out)
+		t.Errorf("a scan result never reached the byo screen:\n%s", out)
 	}
 }
 
@@ -750,7 +659,7 @@ func TestScanKeepsPumpingAfterABatch(t *testing.T) {
 	ch := make(chan []foundImage, 1)
 	ch <- []foundImage{{path: "/home/u/second.iso", size: 1}}
 	m.modal = newImageModal(testImages(), 0)
-	m.modal.finding = true
+	m.modal.byo = true
 	m.modal.scanCh = ch
 
 	_, cmd := m.Update(imagesFoundMsg{batch: []foundImage{{path: "/home/u/first.iso", size: 1}}})
@@ -771,47 +680,86 @@ func TestScanKeepsPumpingAfterABatch(t *testing.T) {
 	}
 }
 
-// enter a path… must be reachable and lead the byo group -- it is the way to
-// type or paste an exact path, so it goes before find… and browse… rather
-// than sitting behind them.
-func TestTypePathLeadsTheByoGroup(t *testing.T) {
+// Choosing choose an image… must swap the variant list for a focused text
+// field over a result list -- asserted on the drawn output, not the mode
+// flag, since a flag that flips without a redraw is invisible to the user.
+func TestChoosingByoDrawsAFocusedInput(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	byoVariants(t, mo)
-
-	items := mo.list.Items()
-	first, ok := items[0].(variantItem)
-	if !ok || !first.typeIn {
-		t.Fatalf("first item in the byo group's variant list is %#v, want the enter a path… entry", items[0])
-	}
-}
-
-// Choosing enter a path… must swap the variant list for a focused text
-// field -- asserted on the drawn output, not the mode flag, since a flag
-// that flips without a redraw is invisible to the user.
-func TestChoosingTypePathDrawsAFocusedInput(t *testing.T) {
-	mo := newImageModal(testImages(), 0)
-	byoVariants(t, mo)
-	mo.list.Select(0) // enter a path…
+	mo.list.Select(len(mo.list.Items()) - 1) // choose an image…, trailing the real BYO file
 
 	if _, _, closed := mo.update(keyMsg("enter")); closed {
-		t.Fatal("enter on enter a path… closed the modal")
+		t.Fatal("enter on choose an image… closed the modal")
 	}
-	if !mo.typing {
-		t.Fatal("enter on enter a path… did not open the text field")
+	if !mo.byo {
+		t.Fatal("enter on choose an image… did not open the byo screen")
 	}
-	if !mo.pathInput.Focused() {
-		t.Error("the path field was not focused")
+	if !mo.byoInput.Focused() {
+		t.Error("the byo text field was not focused")
 	}
 
 	out := ansi.Strip(mo.view())
-	if !strings.Contains(out, "path/to/image") {
-		t.Errorf("the path field's placeholder is not on screen:\n%s", out)
+	if !strings.Contains(out, "type to search") {
+		t.Errorf("the byo field's placeholder is not on screen:\n%s", out)
 	}
 }
 
-// Typing a real path and pressing enter must select it: the image is
-// appended, and the returned index/close signal must match what app.go
-// expects from openBrowser/openFinder's equivalents.
+// Arrow keys must move the list's selection, not the text field -- and the
+// DRAWN highlight must follow, since a cursor that moves in state but not on
+// screen is invisible to the user.
+func TestArrowKeysMoveTheByoSelectionAndTheHighlightFollows(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.openByo()
+	mo.setFound([]foundImage{
+		{path: "/home/u/alpine.iso", size: 1},
+		{path: "/home/u/debian.iso", size: 2},
+	})
+
+	if it, ok := mo.byoList.SelectedItem().(foundItem); !ok || !strings.HasSuffix(it.img.path, "alpine.iso") {
+		t.Fatalf("selection starts on %v, want alpine.iso", mo.byoList.SelectedItem())
+	}
+
+	mo.update(keyMsg("down"))
+	it, ok := mo.byoList.SelectedItem().(foundItem)
+	if !ok || !strings.HasSuffix(it.img.path, "debian.iso") {
+		t.Fatalf("down did not move the selection to debian.iso: %v", mo.byoList.SelectedItem())
+	}
+	out := ansi.Strip(mo.view())
+	var debianLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "debian") {
+			debianLine = line
+		}
+	}
+	if !strings.Contains(debianLine, glyphCursor) {
+		t.Errorf("debian's row is not drawn as selected after down:\n%s", out)
+	}
+
+	mo.update(keyMsg("up"))
+	if it, ok := mo.byoList.SelectedItem().(foundItem); !ok || !strings.HasSuffix(it.img.path, "alpine.iso") {
+		t.Fatalf("up did not move the selection back to alpine.iso: %v", mo.byoList.SelectedItem())
+	}
+}
+
+// Up/down must reach the list rather than being swallowed by the focused
+// text field -- bubbles/textinput ignores them, but this is the contract
+// that matters, not an assumption about the component's own key handling.
+func TestArrowKeysDoNotLeakIntoTheByoTextField(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	mo.openByo()
+	mo.setFound([]foundImage{{path: "/home/u/alpine.iso", size: 1}})
+
+	before := mo.byoInput.Value()
+	mo.update(keyMsg("down"))
+	mo.update(keyMsg("up"))
+	if mo.byoInput.Value() != before {
+		t.Errorf("arrow keys changed the text field's value: %q, want %q", mo.byoInput.Value(), before)
+	}
+}
+
+// Typing a real path and pressing enter must select it even with no results
+// list match -- this is how an image OUTSIDE $HOME (never found by the scan)
+// gets chosen now that the tree browser is gone.
 func TestTypingARealPathSelectsIt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "custom.qcow2")
@@ -821,8 +769,8 @@ func TestTypingARealPathSelectsIt(t *testing.T) {
 
 	mo := newImageModal(testImages(), 0)
 	before := len(mo.images)
-	mo.openTyping()
-	mo.pathInput.SetValue(path)
+	mo.openByo()
+	mo.byoInput.SetValue(path)
 
 	_, idx, closed := mo.update(keyMsg("enter"))
 	if !closed {
@@ -851,8 +799,8 @@ func TestTypingATildePathExpands(t *testing.T) {
 	}
 
 	mo := newImageModal(testImages(), 0)
-	mo.openTyping()
-	mo.pathInput.SetValue("~/custom.iso")
+	mo.openByo()
+	mo.byoInput.SetValue("~/custom.iso")
 
 	_, idx, closed := mo.update(keyMsg("enter"))
 	if !closed {
@@ -869,8 +817,8 @@ func TestTypingANonexistentPathShowsAnErrorAndStaysOpen(t *testing.T) {
 	dir := t.TempDir()
 	mo := newImageModal(testImages(), 0)
 	before := len(mo.images)
-	mo.openTyping()
-	mo.pathInput.SetValue(filepath.Join(dir, "nope.iso"))
+	mo.openByo()
+	mo.byoInput.SetValue(filepath.Join(dir, "nope.iso"))
 
 	_, idx, closed := mo.update(keyMsg("enter"))
 	if closed {
@@ -882,8 +830,8 @@ func TestTypingANonexistentPathShowsAnErrorAndStaysOpen(t *testing.T) {
 	if len(mo.images) != before {
 		t.Fatalf("a bad path was appended anyway: %d images", len(mo.images))
 	}
-	if !mo.typing {
-		t.Fatal("a bad path left the text field")
+	if !mo.byo {
+		t.Fatal("a bad path left the byo screen")
 	}
 
 	out := ansi.Strip(mo.view())
@@ -897,15 +845,15 @@ func TestTypingANonexistentPathShowsAnErrorAndStaysOpen(t *testing.T) {
 func TestTypingADirectoryShowsAnErrorAndStaysOpen(t *testing.T) {
 	dir := t.TempDir()
 	mo := newImageModal(testImages(), 0)
-	mo.openTyping()
-	mo.pathInput.SetValue(dir)
+	mo.openByo()
+	mo.byoInput.SetValue(dir)
 
 	_, _, closed := mo.update(keyMsg("enter"))
 	if closed {
 		t.Fatal("a directory closed the modal")
 	}
-	if !mo.typing {
-		t.Fatal("a directory left the text field")
+	if !mo.byo {
+		t.Fatal("a directory left the byo screen")
 	}
 
 	out := ansi.Strip(mo.view())
@@ -914,10 +862,11 @@ func TestTypingADirectoryShowsAnErrorAndStaysOpen(t *testing.T) {
 	}
 }
 
-// Empty input plus enter must be a no-op: no crash, no close.
+// Empty input plus enter, with no result selected, must be a no-op: no
+// crash, no close.
 func TestTypingEmptyPathDoesNothing(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
-	mo.openTyping()
+	mo.openByo()
 
 	_, idx, closed := mo.update(keyMsg("enter"))
 	if closed {
@@ -926,52 +875,52 @@ func TestTypingEmptyPathDoesNothing(t *testing.T) {
 	if idx != -1 {
 		t.Fatalf("enter on an empty path field resolved an index: %d", idx)
 	}
-	if !mo.typing {
-		t.Fatal("enter on an empty path field left the text field")
+	if !mo.byo {
+		t.Fatal("enter on an empty path field left the byo screen")
 	}
 }
 
-// esc from the text field must return to the variant list, not out of the
-// modal -- same rule updateBrowsing and updateFinding follow, asserted on
-// what's actually redrawn.
-func TestEscWhileTypingReturnsToVariantList(t *testing.T) {
+// esc from the byo screen must return to the variant list, not out of the
+// modal -- same rule every sub-mode here follows, asserted on what's
+// actually redrawn.
+func TestEscWhileByoReturnsToVariantList(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	byoVariants(t, mo)
-	mo.list.Select(0) // enter a path…
+	mo.list.Select(len(mo.list.Items()) - 1) // choose an image…, trailing the real BYO file
 	if _, _, closed := mo.update(keyMsg("enter")); closed {
-		t.Fatal("enter on enter a path… closed the modal")
+		t.Fatal("enter on choose an image… closed the modal")
 	}
 
 	_, _, closed := mo.update(keyMsg("esc"))
 	if closed {
-		t.Error("esc while typing closed the modal; it must return to the variant list")
+		t.Error("esc while on the byo screen closed the modal; it must return to the variant list")
 	}
-	if mo.typing {
-		t.Error("esc while typing left mo.typing true; the field should be dismissed")
+	if mo.byo {
+		t.Error("esc left mo.byo true; the screen should be dismissed")
 	}
 	if mo.level != levelVariant {
-		t.Errorf("esc while typing left level=%v, want the variant level", mo.level)
+		t.Errorf("esc while on the byo screen left level=%v, want the variant level", mo.level)
 	}
 
 	out := ansi.Strip(mo.view())
-	if !strings.Contains(out, "browse…") {
-		t.Errorf("esc left the text field in state but not on screen; drawn:\n%s", out)
+	if !strings.Contains(out, "choose an image…") {
+		t.Errorf("esc left the byo screen in state but not on screen; drawn:\n%s", out)
 	}
 }
 
-// The non-key message gate in app.go must widen to cover typing, the same
-// way it already does for browsing and finding, or the field's cursor blink
-// never reaches it and it never blinks -- see 81cbd92 for the shape of bug
-// this guards against (a swallowed non-key message that ended a chain).
-func TestTypingReceivesNonKeyMessages(t *testing.T) {
+// The non-key message gate in app.go must cover the byo screen, or neither
+// the scan's batches nor the field's cursor blink ever reach it -- see
+// 81cbd92 for the shape of bug this guards against (a swallowed non-key
+// message that ended a chain rather than stalling it).
+func TestByoReceivesNonKeyMessages(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	m := model{screen: screenForm, form: newForm()}
 	m.form.fetching = true
 	m.modal = newImageModal(testImages(), 0)
-	m.modal.openTyping()
+	m.modal.openByo()
 
 	_, cmd := m.Update(dlTickMsg{})
 	if cmd == nil {
-		t.Fatal("dlTickMsg while typing returned no cmd: the download tick chain is dead")
+		t.Fatal("dlTickMsg while on the byo screen returned no cmd: the download tick chain is dead")
 	}
 }

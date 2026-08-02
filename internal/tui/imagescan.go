@@ -9,9 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// imageExts is what counts as a disk image. Same set the tree browser
-// already allows (imagemodal.go's openBrowser), kept in one place so the two
-// entry points cannot drift into offering different files.
+// imageExts is what counts as a disk image. Same set byoOptionFromPath
+// resolves, kept in one place so the two entry points cannot drift into
+// offering different files.
 var imageExts = []string{".iso", ".qcow2", ".img"}
 
 // scanBatch is how many files pile up before a batch is sent. One message per

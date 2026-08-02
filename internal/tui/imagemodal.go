@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -55,24 +54,16 @@ func (i osItem) FilterValue() string { return i.os }
 // taken from the cursor would point at the wrong image the moment a filter is
 // applied.
 type variantItem struct {
-	idx    int
-	opt    imageOption
-	browse bool // the byo group's trailing leaf: opens the filepicker instead of selecting opt
-	find   bool // the byo group's other leaf: opens the fuzzy finder instead of selecting opt
-	typeIn bool // the byo group's leading leaf: opens a text field instead of selecting opt
+	idx         int
+	opt         imageOption
+	chooseImage bool // the byo group's trailing leaf: opens the fuzzy path picker instead of selecting opt
 }
 
 func (i variantItem) FilterValue() string {
-	switch {
-	case i.typeIn:
-		return "enter a path…"
-	case i.find:
-		return "find…"
-	case i.browse:
-		return "browse…"
-	default:
-		return i.opt.variantLabel()
+	if i.chooseImage {
+		return "choose an image…"
 	}
+	return i.opt.variantLabel()
 }
 
 // foundItem is one row of the fuzzy finder. FilterValue is the FULL path, not
@@ -143,8 +134,8 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 			trailer = it.only.sizeLabel()
 		case it.os == byoGroup && len(it.idxs) == 0:
 			// No BYO file has been found under isos/ yet, but the group still
-			// has to be selectable — it's the only route to browse….
-			trailer = "browse…"
+			// has to be selectable — it's the only route to choose an image….
+			trailer = "choose an image…"
 		}
 		label := fmt.Sprintf("%-*s", modalVariantWidth, it.os)
 		if index == m.Index() {
@@ -152,34 +143,14 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		}
 		fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
 	case variantItem:
-		if it.typeIn {
+		if it.chooseImage {
 			// No size or status column: it isn't a file, it's a door to the
-			// text field, so those columns would just be blank.
-			label := fmt.Sprintf("%-*s", modalVariantWidth, "enter a path…")
+			// picker screen, so those columns would just be blank.
+			label := fmt.Sprintf("%-*s", modalVariantWidth, "choose an image…")
 			if index == m.Index() {
 				label = selStyle.Render(label)
 			}
-			fmt.Fprint(w, cursor+label+dimStyle.Render("type or paste"))
-			return
-		}
-		if it.find {
-			// No size or status column: it isn't a file, it's a door to the
-			// finder, so those columns would just be blank.
-			label := fmt.Sprintf("%-*s", modalVariantWidth, "find…")
-			if index == m.Index() {
-				label = selStyle.Render(label)
-			}
-			fmt.Fprint(w, cursor+label+dimStyle.Render("search by name"))
-			return
-		}
-		if it.browse {
-			// No size or status column: it isn't a file, it's a door to the
-			// filepicker, so those columns would just be blank.
-			label := fmt.Sprintf("%-*s", modalVariantWidth, "browse…")
-			if index == m.Index() {
-				label = selStyle.Render(label)
-			}
-			fmt.Fprint(w, cursor+label+dimStyle.Render("choose a file"))
+			fmt.Fprint(w, cursor+label+dimStyle.Render("search or paste"))
 			return
 		}
 		// Styled substrings end in \x1b[0m, which resets the ENCLOSING style
@@ -250,42 +221,35 @@ type imageModal struct {
 	images []imageOption
 	osName string // the group drilled into; meaningful at levelVariant
 
-	// browsing and picker back the byo group's browse… leaf. A third level
-	// rather than a variantItem that opens something of its own: the picker
-	// needs its own key routing (see update/updateBrowsing), and folding that
-	// into the variant-level switch would make it responsible for two
-	// different kinds of input.
-	browsing bool
-	picker   filepicker.Model
+	// byo backs the byo group's one leaf: a focused text field over a
+	// fuzzy-filtered list of every disk image under $HOME, the single screen
+	// that replaced the separate path field, finder and tree browser. It is a
+	// sub-mode for the same reason those were: it owns the keyboard while
+	// open, since arrow keys here mean "move the selection", not whatever
+	// they mean at the OS/variant levels.
+	byo      bool
+	byoInput textinput.Model
+	// byoList is the fuzzy-filtered result list. Its own filter prompt is
+	// hidden (SetShowFilter(false)) -- byoInput is the one visible text
+	// field, and its value drives byoList.SetFilterText on every keystroke.
+	byoList      list.Model
+	byoListReady bool   // whether byoList has been built by ensureByoList
+	byoErr       string // set when the last enter's typed path failed to resolve; cleared on the next edit
 
-	// finding is the fuzzy finder, the byo group's other leaf. It is a
-	// separate sub-mode from browsing for the same reason browsing is one:
-	// it owns the keyboard while open (typing is a filter, not navigation).
-	finding       bool
-	findList      list.Model
-	findListReady bool // whether findList has been built by ensureFindList
 	// scanCh is the channel the running scan streams batches down. Stored so
-	// updateFinding can re-issue waitForImages after each batch; openFinder's
-	// local ch goes out of scope the moment it returns.
+	// updateByo can re-issue waitForImages after each batch; openByo's local
+	// ch goes out of scope the moment it returns.
 	scanCh <-chan []foundImage
 	// scanCancel, closed by stopScan, tells the scan goroutine to give up
 	// rather than block forever on a send nobody will read (see scanImages).
 	scanCancel chan struct{}
 	// scanGen is the current scan's generation, stamped into every
-	// imagesFoundMsg openFinder issues. updateFinding drops any message whose
+	// imagesFoundMsg openByo issues. updateByo drops any message whose
 	// generation doesn't match -- see imagesFoundMsg's doc.
 	scanGen int
 	// scanDone distinguishes "found nothing yet" from "found nothing" -- an
 	// empty pane means opposite things before and after the walk ends.
 	scanDone bool
-
-	// typing backs the byo group's enter a path… leaf, the same structural
-	// move as browsing and finding: a mode flag, its own update func, its own
-	// branch in view(). It owns the keyboard while open for the same reason
-	// they do -- typing here is text entry, not navigation.
-	typing    bool
-	pathInput textinput.Model
-	typingErr string // set when the last enter's path failed to resolve; cleared on the next edit
 }
 
 // newImageList builds the modal's list component. Filtering is deliberately
@@ -393,15 +357,11 @@ func (mo *imageModal) drill(g osItem) {
 		items = append(items, variantItem{idx: idx, opt: mo.images[idx]})
 	}
 	if g.os == byoGroup {
-		// enter a path… leads: it's a door of its own (typing/pasting an
-		// exact path), so it goes first as a fixed doorway rather than mixed
-		// in with the files it isn't one of. find… before browse…: typing a
-		// name is the common case, walking the tree is the fallback. Both
-		// trailing relative to the real files: existing BYO files are the
-		// images the user most likely wants, so these are the fallback at
-		// the bottom, not the first thing the cursor lands on.
-		items = append([]list.Item{variantItem{typeIn: true}}, items...)
-		items = append(items, variantItem{find: true}, variantItem{browse: true})
+		// choose an image… trails: existing BYO files are the images the
+		// user most likely wants, so the door to typing or searching for a
+		// different one is the fallback at the bottom, not the first thing
+		// the cursor lands on.
+		items = append(items, variantItem{chooseImage: true})
 	}
 	mo.level = levelVariant
 	mo.osName = g.os
@@ -432,14 +392,8 @@ func (mo *imageModal) syncHeight(n int) {
 // message switch, and duplicating it per sub-mode is exactly how it has
 // regressed before.
 func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
-	if mo.browsing {
-		return mo.updateBrowsing(msg)
-	}
-	if mo.finding {
-		return mo.updateFinding(msg)
-	}
-	if mo.typing {
-		return mo.updateTyping(msg)
+	if mo.byo {
+		return mo.updateByo(msg)
 	}
 
 	key, ok := msg.(tea.KeyPressMsg)
@@ -474,8 +428,8 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 			// A group with one image has nothing to choose between; drilling
 			// in to press enter again would be a keystroke for no decision.
 			// byo is exempt even at exactly one: it always drills, because
-			// that one image sits alongside browse…, which the shortcut
-			// would otherwise make unreachable.
+			// that one image sits alongside choose an image…, which the
+			// shortcut would otherwise make unreachable.
 			if len(g.idxs) == 1 && g.os != byoGroup {
 				return nil, g.idxs[0], true
 			}
@@ -486,14 +440,8 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 			if !ok {
 				return nil, -1, false
 			}
-			if it.typeIn {
-				return mo.openTyping(), -1, false
-			}
-			if it.find {
-				return mo.openFinder(), -1, false
-			}
-			if it.browse {
-				return mo.openBrowser(), -1, false
+			if it.chooseImage {
+				return mo.openByo(), -1, false
 			}
 			return nil, it.idx, true
 		}
@@ -502,97 +450,6 @@ func (mo *imageModal) update(msg tea.Msg) (tea.Cmd, int, bool) {
 	var cmd tea.Cmd
 	mo.list, cmd = mo.list.Update(msg)
 	return cmd, -1, false
-}
-
-// openBrowser swaps the variant list for a file picker. AutoHeight is off
-// because the modal owns the rectangle — a self-sizing component fights the
-// layout, same rule as every other pane. The returned cmd is filepicker's own
-// Init(), which kicks off the directory read; without it the picker would sit
-// showing "no files" forever; nothing else triggers that first read.
-func (mo *imageModal) openBrowser() tea.Cmd {
-	p := filepicker.New()
-	p.AllowedTypes = []string{".iso", ".qcow2", ".img"}
-	p.ShowSize = true
-	p.AutoHeight = false
-	p.DirAllowed = false
-	p.FileAllowed = true
-	p.Cursor = glyphCursor
-	p.Styles = filepickerStyles()
-	p.SetHeight(modalRows)
-	mo.picker = p
-	mo.browsing = true
-	return p.Init()
-}
-
-// filepickerStyles draws the picker in stoat's palette rather than bubbles'
-// stock magenta-and-grey, so it reads as one more pane of this app instead of
-// a different program spliced in.
-func filepickerStyles() filepicker.Styles {
-	s := filepicker.DefaultStyles()
-	s.Cursor = selStyle
-	s.Selected = selStyle
-	s.Directory = accentStyle
-	s.File = lipgloss.NewStyle()
-	s.Symlink = accentStyle
-	s.Permission = dimStyle
-	s.FileSize = dimStyle
-	s.DisabledFile = dimStyle
-	s.DisabledSelected = dimStyle
-	s.DisabledCursor = dimStyle
-	s.EmptyDirectory = dimStyle.SetString("no matching files")
-	return s
-}
-
-// updateBrowsing routes messages to the picker while it is open in place of
-// the variant list. It handles both keys and the picker's own non-key
-// messages (its directory read arrives as one), unlike the top-level update,
-// which only ever sees key presses — app.go widens that gate to include
-// non-key messages for exactly as long as mo.browsing is true.
-func (mo *imageModal) updateBrowsing(msg tea.Msg) (tea.Cmd, int, bool) {
-	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" {
-		// Back to the variant list, not out of the modal — esc means "back a
-		// level" everywhere else here, and closing outright on it would throw
-		// away the group the user already drilled into.
-		mo.browsing = false
-		return nil, -1, false
-	}
-
-	var cmd tea.Cmd
-	mo.picker, cmd = mo.picker.Update(msg)
-
-	if didSelect, path := mo.picker.DidSelectFile(msg); didSelect {
-		opt, err := byoOptionFromPath(path)
-		if err != nil {
-			// Stat can fail between the picker listing the file and the user
-			// selecting it (deleted, unmounted). Stay open rather than close
-			// the modal on a choice that didn't actually resolve.
-			return cmd, -1, false
-		}
-		// The new option isn't in the slice the modal was opened with — it
-		// came from anywhere on disk, that's the whole feature — so it's
-		// appended here and returned as an index past the caller's original
-		// bounds. The caller (app.go) re-adopts mo.images before resolving
-		// that index; see the comment there.
-		mo.images = append(mo.images, opt)
-		mo.browsing = false
-		return cmd, len(mo.images) - 1, true
-	}
-
-	return cmd, -1, false
-}
-
-// openTyping swaps the variant list for a focused text field the user types
-// or pastes a path into. theme.TextInput, the same constructor form.go and
-// edit.go use, so the field matches every other one in the app rather than
-// bubbles' stock styling.
-func (mo *imageModal) openTyping() tea.Cmd {
-	ti := theme.TextInput()
-	ti.Placeholder = "/path/to/image.qcow2"
-	ti.SetWidth(modalContentWidth)
-	mo.pathInput = ti
-	mo.typing = true
-	mo.typingErr = ""
-	return mo.pathInput.Focus()
 }
 
 // expandHome resolves a leading ~ or ~/... to the user's home directory. Only
@@ -609,57 +466,28 @@ func expandHome(path string) string {
 	return path
 }
 
-// updateTyping owns the keyboard while the path field is open.
-func (mo *imageModal) updateTyping(msg tea.Msg) (tea.Cmd, int, bool) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "esc":
-			// Back to the variant list, not out of the modal -- same rule as
-			// updateBrowsing and updateFinding.
-			mo.typing = false
-			return nil, -1, false
-		case "enter":
-			path := strings.TrimSpace(mo.pathInput.Value())
-			if path == "" {
-				// Nothing typed yet; enter on an empty field does nothing
-				// rather than trying to resolve "" as a path.
-				return nil, -1, false
-			}
-			opt, err := byoOptionFromPath(expandHome(path))
-			if err != nil {
-				// Stay open and say why -- closing or going silent on a bad
-				// path would leave the user guessing what happened.
-				mo.typingErr = err.Error()
-				return nil, -1, false
-			}
-			mo.images = append(mo.images, opt)
-			mo.typing = false
-			return nil, len(mo.images) - 1, true
-		}
-	}
-
-	var cmd tea.Cmd
-	mo.pathInput, cmd = mo.pathInput.Update(msg)
-	mo.typingErr = ""
-	return cmd, -1, false
-}
-
-// openFinder swaps the variant list for a fuzzy search over every disk image
-// under $HOME. Filtering is enabled here and nowhere else: the OS and variant
-// lists are short, curated and meant to be arrowed through, while this one is
-// every image on the machine and is only usable by typing.
+// openByo swaps the variant list for the byo screen: a focused text field
+// over a fuzzy-filtered list of every disk image under $HOME. theme.TextInput
+// is the same constructor form.go and edit.go use, so the field matches every
+// other one in the app rather than bubbles' stock styling.
 //
-// The returned cmd pumps the first batch; each imagesFoundMsg re-issues it
-// until the channel closes. Without it the scan runs and nothing ever reads
-// the results.
-func (mo *imageModal) openFinder() tea.Cmd {
-	mo.ensureFindList()
-	// Cleared, not appended to: re-entering the finder starts a fresh scan,
-	// and the old scan's results are still sitting in findList's items from
+// The returned cmd batches the input's cursor blink with the scan's first
+// pump; each imagesFoundMsg re-issues the latter until the channel closes.
+// Without it the scan runs and nothing ever reads the results.
+func (mo *imageModal) openByo() tea.Cmd {
+	mo.ensureByoList()
+	// Cleared, not appended to: re-entering the screen starts a fresh scan,
+	// and the old scan's results are still sitting in byoList's items from
 	// last time. Without this every re-entry doubles the whole list.
-	mo.findList.SetItems(nil)
+	mo.byoList.SetItems(nil)
 	mo.stopScan() // in case the previous scan is somehow still running
-	mo.finding = true
+
+	ti := theme.TextInput()
+	ti.Placeholder = "type to search, or paste a path"
+	ti.SetWidth(modalContentWidth)
+	mo.byoInput = ti
+	mo.byo = true
+	mo.byoErr = ""
 	mo.scanDone = false
 	mo.scanGen++
 
@@ -667,13 +495,13 @@ func (mo *imageModal) openFinder() tea.Cmd {
 	mo.scanCancel = cancel
 	ch := scanImages(homeDir(), cancel)
 	mo.scanCh = ch
-	return waitForImages(ch, mo.scanGen)
+	return tea.Batch(mo.byoInput.Focus(), waitForImages(ch, mo.scanGen))
 }
 
 // stopScan tells the running scan's goroutine to give up rather than block
 // forever on a batch nobody will read, and forgets the channel so a stray
-// repump can't be issued against it. Called whenever the finder is left --
-// esc, choosing an image, or the modal closing outright.
+// repump can't be issued against it. Called whenever the byo screen is left
+// -- esc, choosing an image, or the modal closing outright.
 func (mo *imageModal) stopScan() {
 	if mo.scanCancel != nil {
 		close(mo.scanCancel)
@@ -682,28 +510,27 @@ func (mo *imageModal) stopScan() {
 	mo.scanCh = nil
 }
 
-// ensureFindList lazily builds the finder's list on first use. It is
-// separate from openFinder so setFound and view work correctly even when a
-// caller sets mo.finding directly rather than going through the scan (as the
-// tests do), without requiring a live scan to see the finder at all.
-func (mo *imageModal) ensureFindList() {
-	if mo.findListReady {
+// ensureByoList lazily builds the byo screen's result list on first use. It
+// is separate from openByo so setFound and view work correctly even when a
+// caller sets mo.byo directly rather than going through the scan (as the
+// tests do), without requiring a live scan to see the screen at all.
+//
+// Its own filter prompt stays hidden (SetShowFilter(false)): byoInput is the
+// one visible text field, and updateByo drives the list's filter from its
+// value via SetFilterText rather than letting the list manage its own.
+func (mo *imageModal) ensureByoList() {
+	if mo.byoListReady {
 		return
 	}
-	// Height is modalRows content rows PLUS one: bubbles/list reserves a
-	// header row whenever filtering is enabled and shown (it doubles as the
-	// filter prompt while typing), even with the title itself off. Without
-	// the +1 that row eats into the item rows instead of the blank space
-	// above them.
-	l := list.New(nil, imageDelegate{}, modalContentWidth, modalRows+1)
+	l := list.New(nil, imageDelegate{}, modalContentWidth, modalRows)
 	l.SetShowStatusBar(false)
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
+	l.SetShowFilter(false)
 	l.SetFilteringEnabled(true)
-	l.SetShowFilter(true)
 	l.Styles = listStyles(l.Styles)
-	mo.findList = l
-	mo.findListReady = true
+	mo.byoList = l
+	mo.byoListReady = true
 }
 
 // setFound appends a batch and re-sorts. Sorting on every batch rather than
@@ -711,27 +538,34 @@ func (mo *imageModal) ensureFindList() {
 // rows that jump around under a cursor the user is already moving are worse
 // than a slightly late sort.
 func (mo *imageModal) setFound(found []foundImage) {
-	mo.ensureFindList()
-	items := mo.findList.Items()
+	mo.ensureByoList()
+	items := mo.byoList.Items()
 	for _, f := range found {
 		items = append(items, foundItem{img: f})
 	}
 	sort.SliceStable(items, func(a, b int) bool {
 		return items[a].(foundItem).img.path < items[b].(foundItem).img.path
 	})
-	mo.findList.SetItems(items)
-	mo.findList.SetShowPagination(len(items) > modalRows)
+	mo.byoList.SetItems(items)
+	mo.byoList.SetShowPagination(len(items) > modalRows)
+	// A live filter must keep matching the grown item set, or a batch that
+	// lands after the user has already typed a query would silently show
+	// unfiltered results until the next keystroke.
+	mo.byoList.SetFilterText(mo.byoInput.Value())
 }
 
-// updateFinding owns the keyboard while the finder is open. Keys go to the
-// list first EXCEPT esc and enter: the list would swallow esc to clear its
-// filter and enter to apply it, and neither is what those keys mean here.
-func (mo *imageModal) updateFinding(msg tea.Msg) (tea.Cmd, int, bool) {
-	mo.ensureFindList()
+// updateByo owns the keyboard while the byo screen is open. Up/down (and
+// ctrl+p/ctrl+n) move byoList's cursor directly rather than going through its
+// Update, because the field above it must stay focused for typing to keep
+// filtering -- routing arrow keys through the list's own Update would risk
+// its filter-input handling stealing them instead. Every other key press
+// goes to byoInput, and its value re-drives byoList's filter live.
+func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
+	mo.ensureByoList()
 	if found, ok := msg.(imagesFoundMsg); ok {
 		if found.gen != mo.scanGen {
-			// A message from an abandoned scan (esc, or re-entering the
-			// finder since it was issued). Dropped outright: repumping it
+			// A message from an abandoned scan (esc, or re-entering the byo
+			// screen since it was issued). Dropped outright: repumping it
 			// would read the WRONG channel, and a stale done would mark the
 			// NEW scan finished while it is still running.
 			return nil, -1, false
@@ -751,42 +585,56 @@ func (mo *imageModal) updateFinding(msg tea.Msg) (tea.Cmd, int, bool) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "esc":
-			// Back a level, not out -- same rule as updateBrowsing. When a
-			// filter is active esc clears it first, which is what the user
-			// means by esc while they are still typing.
-			if mo.findList.FilterState() != list.Unfiltered {
-				break // let the list clear its own filter
-			}
+			// Back to the variant list, not out of the modal -- esc means
+			// "back a level" everywhere else here, and closing outright on
+			// it would throw away the group the user already drilled into.
 			mo.stopScan()
-			mo.finding = false
+			mo.byo = false
+			return nil, -1, false
+		case "up", "ctrl+p":
+			mo.byoList.CursorUp()
+			return nil, -1, false
+		case "down", "ctrl+n":
+			mo.byoList.CursorDown()
 			return nil, -1, false
 		case "enter":
-			// While the filter input is open, enter applies the filter --
-			// that is the list's own interaction and must not be stolen, or
-			// the user can never commit a query.
-			if mo.findList.FilterState() == list.Filtering {
-				break
+			if it, ok := mo.byoList.SelectedItem().(foundItem); ok {
+				opt, err := byoOptionFromPath(it.img.path)
+				if err == nil {
+					mo.images = append(mo.images, opt)
+					mo.stopScan()
+					mo.byo = false
+					return nil, len(mo.images) - 1, true
+				}
+				// Deleted or unmounted since the scan listed it, or the list
+				// is simply empty (no filter match). Either way fall through
+				// to resolving the typed text as a path directly -- that is
+				// how an image outside $HOME gets chosen.
 			}
-			it, ok := mo.findList.SelectedItem().(foundItem)
-			if !ok {
+			path := strings.TrimSpace(mo.byoInput.Value())
+			if path == "" {
+				// Nothing typed and nothing selected; enter does nothing
+				// rather than trying to resolve "" as a path.
 				return nil, -1, false
 			}
-			opt, err := byoOptionFromPath(it.img.path)
+			opt, err := byoOptionFromPath(expandHome(path))
 			if err != nil {
-				// Deleted or unmounted since the scan listed it. Stay open
-				// rather than close on a choice that did not resolve --
-				// same reasoning as updateBrowsing.
+				// Stay open and say why -- closing or going silent on a bad
+				// path would leave the user guessing what happened.
+				mo.byoErr = err.Error()
 				return nil, -1, false
 			}
 			mo.images = append(mo.images, opt)
 			mo.stopScan()
-			mo.finding = false
+			mo.byo = false
 			return nil, len(mo.images) - 1, true
 		}
 	}
 
 	var cmd tea.Cmd
-	mo.findList, cmd = mo.findList.Update(msg)
+	mo.byoInput, cmd = mo.byoInput.Update(msg)
+	mo.byoErr = ""
+	mo.byoList.SetFilterText(mo.byoInput.Value())
 	return cmd, -1, false
 }
 
@@ -824,14 +672,8 @@ func (m model) renderModal(screen string) string {
 // view renders the modal box. The title carries the drilled-into OS so the
 // second level says what it is a list of.
 func (mo *imageModal) view() string {
-	if mo.browsing {
-		return mo.viewBrowsing()
-	}
-	if mo.finding {
-		return mo.viewFinding()
-	}
-	if mo.typing {
-		return mo.viewTyping()
+	if mo.byo {
+		return mo.viewByo()
 	}
 	title := "image"
 	hint := "enter choose · esc cancel"
@@ -848,52 +690,29 @@ func (mo *imageModal) view() string {
 	return pane(title, body, modalContentWidth+paneFrame())
 }
 
-// viewFinding renders the fuzzy finder in place of the variant list: the list
-// plus one status line that says whether the scan is still running or came
-// up empty, so an empty pane doesn't read as "there are no images".
-func (mo *imageModal) viewFinding() string {
-	mo.ensureFindList()
+// viewByo renders the text field and its fuzzy-filtered result list in place
+// of the variant list: the field, the list, then one status line that says
+// whether the scan is still running or came up empty, so an empty pane
+// doesn't read as "there are no images". A typed-path error, if any, takes
+// that status line's place rather than sitting alongside it, so the user
+// sees why the last enter didn't work rather than a stale "searching".
+func (mo *imageModal) viewByo() string {
+	mo.ensureByoList()
 	var status string
 	switch {
 	case !mo.scanDone:
 		status = dimStyle.Render("searching " + homeDir() + "…")
-	case len(mo.findList.Items()) == 0:
+	case len(mo.byoList.Items()) == 0:
 		status = dimStyle.Render("no disk images found under " + homeDir())
 	}
-	hint := dimStyle.Render("enter choose · esc back")
-	if status != "" {
+	hint := dimStyle.Render("enter select · esc back")
+	switch {
+	case mo.byoErr != "":
+		hint = errStyle.Render(mo.byoErr) + "\n" + hint
+	case status != "":
 		hint = status + "\n" + hint
 	}
 	body := lipgloss.NewStyle().Width(modalContentWidth).
-		Render(mo.findList.View() + "\n\n" + hint)
-	return pane("image"+glyphSep+"find", body, modalContentWidth+paneFrame())
-}
-
-// viewTyping renders the path field in place of the variant list. The error
-// from the last failed enter, if any, sits under the field rather than
-// replacing the hint, so it doesn't disappear the moment the user looks away.
-func (mo *imageModal) viewTyping() string {
-	hint := dimStyle.Render("enter select · esc back")
-	if mo.typingErr != "" {
-		hint = errStyle.Render(mo.typingErr) + "\n" + hint
-	}
-	body := lipgloss.NewStyle().Width(modalContentWidth).
-		Render(mo.pathInput.View() + "\n\n" + hint)
-	return pane("image"+glyphSep+"path", body, modalContentWidth+paneFrame())
-}
-
-// viewBrowsing renders the filepicker in place of the variant list.
-//
-// filepicker.Model has no width of its own — a row is as wide as its
-// permissions, size and filename happen to add up to — so unlike every other
-// row in this modal, its lines are truncated by hand rather than trusted to
-// stay inside modalContentWidth on their own.
-func (mo *imageModal) viewBrowsing() string {
-	lines := strings.Split(mo.picker.View(), "\n")
-	for i, l := range lines {
-		lines[i] = ansi.Truncate(l, modalContentWidth, "")
-	}
-	body := lipgloss.NewStyle().Width(modalContentWidth).
-		Render(strings.Join(lines, "\n") + "\n\n" + dimStyle.Render("enter select · esc back"))
-	return pane("image"+glyphSep+"browse", body, modalContentWidth+paneFrame())
+		Render(mo.byoInput.View() + "\n" + mo.byoList.View() + "\n\n" + hint)
+	return pane("image"+glyphSep+"byo", body, modalContentWidth+paneFrame())
 }

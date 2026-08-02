@@ -128,20 +128,19 @@ func Run() error {
 
 func (m model) Init() tea.Cmd { return loadVMs }
 
-// Update feeds a browsing file picker, the fuzzy finder or the path field
-// without consuming the message, then runs the normal update.
+// Update feeds the open byo screen without consuming the message, then runs
+// the normal update.
 //
-// All three modes run on NON-key messages that have to reach the modal
-// somehow: a directory listing for the browser, a filesystem walk batch for
-// the finder, and a cursor blink for the path field's focused textinput. But
-// a diverted message must not be swallowed: a tick chain only continues
-// because its handler returns the next tick cmd, so consuming one dlTickMsg
-// here does not pause the download bar, it ends the chain for good.
-// (dlTickMsg's own case carries the same warning about routing by screen,
-// which broke this once already.) Copy, then carry on.
+// The byo screen runs on NON-key messages that have to reach the modal
+// somehow: a filesystem walk batch for the scan, and a cursor blink for the
+// focused textinput. But a diverted message must not be swallowed: a tick
+// chain only continues because its handler returns the next tick cmd, so
+// consuming one dlTickMsg here does not pause the download bar, it ends the
+// chain for good. (dlTickMsg's own case carries the same warning about
+// routing by screen, which broke this once already.) Copy, then carry on.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var browseCmd tea.Cmd
-	if m.modal != nil && (m.modal.browsing || m.modal.finding || m.modal.typing) {
+	if m.modal != nil && m.modal.byo {
 		if _, isKey := msg.(tea.KeyPressMsg); !isKey {
 			cmd, chosen, closed := m.modal.update(msg)
 			browseCmd = cmd
@@ -176,10 +175,9 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The image picker takes the keyboard while it is open, before any screen
 	// gets a look. Only key messages are diverted: the download tick, the
 	// cloud-init poll and the spinner all keep running underneath, so opening
-	// the picker mid-download doesn't freeze its progress bar. A browsing
-	// picker or a running finder still needs its non-key results (a directory
-	// listing, a scan batch); Update handles that above by copying rather
-	// than consuming.
+	// the picker mid-download doesn't freeze its progress bar. An open byo
+	// screen still needs its non-key results (a scan batch, a cursor blink);
+	// Update handles that above by copying rather than consuming.
 	if m.modal != nil {
 		if _, isKey := msg.(tea.KeyPressMsg); isKey {
 			cmd, chosen, closed := m.modal.update(msg)
