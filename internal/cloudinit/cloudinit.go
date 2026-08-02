@@ -35,9 +35,11 @@ const User = "stoat"
 // guest (see guestShell). The password block is filled in by
 // consolePasswordBlock below.
 //
-// ssh_pwauth stays false on purpose: the password exists so the qemu WINDOW
-// is usable, not so the forwarded port accepts one. Key-only over the
-// network, password at the console.
+// ssh_pwauth stays false on purpose: the password exists so the VNC console
+// is usable -- a cloud VM never gets a qemu window (qemu.NeedsWindow), so
+// that socket is the only place a console login happens -- not so the
+// forwarded port accepts one. Key-only over the network, password at the
+// console.
 const userDataTemplate = `#cloud-config
 users:
   - name: stoat

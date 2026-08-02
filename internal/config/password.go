@@ -7,9 +7,10 @@ import (
 
 // DefaultConsolePassword is what a new cloud VM gets unless a random one is
 // asked for. A fixed, documented value is the point: you are looking at a
-// login prompt in a qemu window on your own machine, usually because ssh
-// isn't working, and having to go and look something up in that moment is the
-// failure this is meant to prevent.
+// login prompt at the VM's VNC console on your own machine (a cloud VM never
+// gets a qemu window — qemu.NeedsWindow), usually because ssh isn't working,
+// and having to go and look something up in that moment is the failure this
+// is meant to prevent.
 //
 // It is safe here in a way it would not be on a server: the seed sets
 // ssh_pwauth: false, so this password is refused over the forwarded port and

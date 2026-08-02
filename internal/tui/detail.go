@@ -227,12 +227,23 @@ func (m model) viewDetail() string {
 		sshUser = "root"
 	}
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
+	// qemu.NeedsWindow is the one case that gets a real qemu window (a
+	// disk-mode VM mid-install); every other VM is headless, and the VNC
+	// socket bound in that case (internal/qemu/args.go) is otherwise
+	// invisible anywhere in the UI — surface it, since it's the only way to
+	// get a display on a headless VM.
+	if !qemu.NeedsWindow(v) {
+		line("vnc", v.VNCPath()+dimStyle.Render("  connect a VNC viewer here for a display"))
+	}
 	// How to get in. The console line matters most for cloud images: they
-	// lock every account, so without a password the qemu window shows a
-	// login prompt with no valid answer — and the moment you need it is the
-	// moment ssh isn't working, which is the worst time to go looking.
+	// lock every account, so without a password the console shows a login
+	// prompt with no valid answer — and the moment you need it is the moment
+	// ssh isn't working, which is the worst time to go looking. This
+	// password is only ever set for the cloudinit backend (form.go), which
+	// is always cloud mode, so it is always reached over VNC, never a qemu
+	// window.
 	if v.ConsolePassword != "" {
-		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (qemu window only)"))
+		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (over vnc, above)"))
 	} else if v.Mode == "cloud" {
 		line("console", warnStyle.Render("no password set — console login is not possible"))
 	}

@@ -30,9 +30,15 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 		t.Errorf("detail pane does not show the credential pair:\n%s", out)
 	}
 	// It must be clear the password is not an ssh credential — the seed
-	// refuses password auth over the forwarded port.
-	if !strings.Contains(out, "qemu window only") {
-		t.Error("detail pane does not say the password is console-only")
+	// refuses password auth over the forwarded port. Cloud VMs never get a
+	// qemu window (qemu.NeedsWindow), so the row must point at the vnc
+	// socket the detail screen also surfaces, not a window that never
+	// appears — see IMPORTANT 3 in the final review.
+	if !strings.Contains(out, "vnc") {
+		t.Error("detail pane does not say the password is reached over vnc")
+	}
+	if strings.Contains(out, "qemu window only") {
+		t.Error("cloud VMs never get a qemu window; the console row must not claim one")
 	}
 
 	// A cloud VM without one (created before this existed) must say so

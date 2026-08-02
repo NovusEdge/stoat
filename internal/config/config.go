@@ -41,7 +41,9 @@ type VM struct {
 	SSHUser string `toml:"sshuser"`
 
 	// ConsolePassword is the password for SSHUser at the VM's GRAPHICAL
-	// CONSOLE — the qemu window — not over ssh. Cloud images lock every
+	// CONSOLE — reached over VNC (qemu.NeedsWindow is false for every VM
+	// this gets set on: it's only ever written for the cloudinit backend,
+	// which is always cloud mode) — not over ssh. Cloud images lock every
 	// account by default (cloud-init's lock_passwd defaults to true) and
 	// stoat's seed sets ssh_pwauth: false, so without this a cloud VM shows
 	// a login prompt nobody on earth can answer: root is locked and the

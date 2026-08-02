@@ -820,10 +820,11 @@ func (f formModel) build() (*config.VM, error) {
 		vm.Base = abs
 		vm.Disk = disk
 		// Only a cloud image needs this. cloud-init locks every account by
-		// default, so without a console password the qemu window shows a
-		// login prompt with no valid answer. A live Alpine VM already logs
-		// root in at the console with no password, and a disk VM's password
-		// is whatever the user sets during the guest's own installer.
+		// default, so without a console password the VNC console (a cloud
+		// VM never gets a qemu window — qemu.NeedsWindow) shows a login
+		// prompt with no valid answer. A live Alpine VM already logs root in
+		// at the console with no password, and a disk VM's password is
+		// whatever the user sets during the guest's own installer.
 		pw := config.DefaultConsolePassword
 		if f.randomPassword {
 			var err error
@@ -963,7 +964,10 @@ func (m model) viewForm() string {
 			marker = selStyle.Render(glyphCursor)
 		}
 		b.row(marker, "console", radio("stoat", !f.randomPassword)+"  "+radio("random", f.randomPassword))
-		b.hint("console login for the stoat user")
+		// cloudinit is always cloud mode (effectiveMode above), and a cloud VM
+		// never gets a QEMU window (qemu.NeedsWindow) -- this password is only
+		// ever typed at the VNC socket the detail screen surfaces.
+		b.hint("stoat user's login over VNC — cloud VMs have no qemu window")
 	}
 
 	// The download block and the error are full-width blocks, not field rows,

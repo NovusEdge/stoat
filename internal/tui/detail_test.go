@@ -176,6 +176,44 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 }
 
+// A cloud VM never gets a qemu window (qemu.NeedsWindow), so the detail
+// screen must surface the VNC socket as the actual way to get a display --
+// before this fix nothing anywhere told the user that socket exists, and
+// the console-password row claimed a "(qemu window only)" that never
+// appears for a VM this password is ever set on (it's only written for the
+// cloudinit backend, which is always cloud mode). See IMPORTANT 3 in the
+// final review.
+func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
+	v := &config.VM{Name: "cloudy", Mode: "cloud", ConsolePassword: "stoat", Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if !strings.Contains(out, "vnc") {
+		t.Fatalf("headless VM's detail screen must show a vnc row:\n%s", out)
+	}
+	if !strings.Contains(out, v.VNCPath()) {
+		t.Fatalf("vnc row must show the actual socket path %q:\n%s", v.VNCPath(), out)
+	}
+	if strings.Contains(out, "qemu window only") {
+		t.Errorf("cloud VMs never get a qemu window; the console row must not claim one:\n%s", out)
+	}
+}
+
+// The one case that DOES get a real qemu window is an uninstalled disk VM
+// (qemu.NeedsWindow). It should not additionally advertise a VNC row that
+// implies the display lives at a socket instead.
+func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
+	v := &config.VM{Name: "installing", Mode: "disk", Installed: false, Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if strings.Contains(out, "vnc") {
+		t.Errorf("a windowed VM (qemu window shows) must not also claim a vnc row:\n%s", out)
+	}
+}
+
 // TestCopyConsolePasswordKeyOnlyOfferedWhenAvailable mirrors the "t" case:
 // the footer must not advertise "c" (copy to clipboard) for a VM that has no
 // console password to copy.

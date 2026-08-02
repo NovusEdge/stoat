@@ -11,13 +11,16 @@ import (
 // Binary is the QEMU executable stoat drives.
 const Binary = "qemu-system-x86_64"
 
-// needsWindow reports whether a human has to look at this VM's screen. Only
+// NeedsWindow reports whether a human has to look at this VM's screen. Only
 // one case does: a disk-mode VM that has not been installed yet, where the
 // user is driving an OS installer that draws to VGA and would be invisible
 // on a serial console. live and cloud reach ssh with no console interaction
 // at all, and an installed disk VM boots the same way -- for those the
 // window only opens, steals focus, and gets alt-tabbed away from.
-func needsWindow(v *config.VM) bool {
+//
+// Exported so the TUI can describe the right escape hatch (a GTK window vs.
+// the VNC socket) without duplicating this rule.
+func NeedsWindow(v *config.VM) bool {
 	return v.Mode == "disk" && !v.Installed
 }
 
@@ -57,7 +60,7 @@ func Args(v *config.VM) []string {
 		"-device", "virtio-net,netdev=n0",
 	}
 
-	if needsWindow(v) {
+	if NeedsWindow(v) {
 		a = append(a, "-vga", "virtio", "-display", "gtk,gl=on")
 	} else {
 		// -display none is irreversible on a running qemu, so bind VNC to a
