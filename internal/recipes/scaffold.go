@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // Dir is where recipes live. Exported so the TUI and CLI can point a user at
@@ -59,21 +61,10 @@ runcmd:
 
 // osSetup is the package-manager preamble per OS, or "" where none is needed.
 func osSetup(osName string) (setup, install string) {
-	switch osName {
-	case "alpine":
-		return "# -c enables the community repository (docker, tailscale and most of what\n" +
-				"# you would want live there, not in main); -1 picks a mirror and refreshes\n" +
-				"# the indexes, so a separate `apk update` is redundant.\nsetup-apkrepos -c -1\n",
-			"apk add "
-	case "ubuntu", "debian":
-		return "export DEBIAN_FRONTEND=noninteractive\napt-get update\n", "apt-get install -y "
-	case "arch":
-		return "pacman -Sy --noconfirm\n", "pacman -S --noconfirm "
-	case "fedora":
-		return "", "dnf install -y "
-	default:
-		return "", "# install: "
+	if os, ok := guest.Lookup(osName); ok {
+		return os.PkgSetup, os.PkgInstall
 	}
+	return "", "# install: "
 }
 
 // New writes a skeleton recipe and returns its path. It refuses to overwrite:
