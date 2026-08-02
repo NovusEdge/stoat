@@ -29,8 +29,11 @@ import (
 // pins that.
 const User = "stoat"
 
-// userDataTemplate declares the account stoat connects as. The password
-// block is filled in by consolePasswordBlock below.
+// userDataTemplate declares the account stoat connects as. The shell is not
+// a constant: cloud-init's user module fails outright when the shell it is
+// told to assign does not exist in the image, so the shell has to match the
+// guest (see guestShell). The password block is filled in by
+// consolePasswordBlock below.
 //
 // ssh_pwauth stays false on purpose: the password exists so the qemu WINDOW
 // is usable, not so the forwarded port accepts one. Key-only over the
@@ -39,11 +42,57 @@ const userDataTemplate = `#cloud-config
 users:
   - name: stoat
     sudo: "ALL=(ALL) NOPASSWD:ALL"
-    shell: /bin/bash
+    shell: %s
     ssh_authorized_keys:
       - %s
 %sssh_pwauth: false
 `
+
+// guestShell is the login shell for the account the seed creates. It must be
+// a shell that EXISTS in the target image: cloud-init's user module fails
+// outright on a missing shell, leaving no account and no authorized_keys, so
+// the only symptom is "Permission denied (publickey)" forever. Boot-tested
+// against Alpine's 3.24.1 cloud image: /bin/bash refused every connection,
+// /bin/ash connected on the first try.
+func guestShell(osName string) string {
+	if osName == "alpine" {
+		// Alpine's base image is busybox ash and ships no bash.
+		return "/bin/ash"
+	}
+	// Ubuntu, Debian, Fedora and Arch cloud images all ship bash as the
+	// login shell, so this stays the default for anything unrecognised.
+	return "/bin/bash"
+}
+
+// extraPackages covers what the base block ASSUMES is present but isn't. The
+// users: sudo key writes a sudoers fragment; on Alpine the sudo binary is not
+// installed (the cloud-init aport prefers doas), so without this the fragment
+// refers to a command that does not exist and every escalating recipe fails.
+//
+// Returned as a #cloud-config-shaped fragment body, not raw text spliced
+// onto the base block: it goes through mergeCloudRecipes alongside any
+// recipe bodies so a recipe's own packages: list still ends up as a single,
+// valid YAML packages: key instead of two competing ones.
+func extraPackages(osName string) string {
+	if osName == "alpine" {
+		return "packages:\n  - sudo\n"
+	}
+	return ""
+}
+
+// userData builds the #cloud-config body: the hardware-proven users: block
+// (parameterized by the guest's shell), followed by whatever packages:/
+// runcmd: the OS needs for itself and the VM's selected cloud recipes ask
+// for, merged into a single valid document by mergeCloudRecipes.
+func userData(v *config.VM, pubkey string, recipeBodies []string) string {
+	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
+
+	bodies := recipeBodies
+	if extra := extraPackages(v.OS); extra != "" {
+		bodies = append([]string{extra}, bodies...)
+	}
+	return base + mergeCloudRecipes(bodies)
+}
 
 // consolePasswordBlock renders the two lines that make console login work,
 // or nothing when no password is set.
@@ -159,9 +208,8 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 		return "", err
 	}
 
-	userData := fmt.Sprintf(userDataTemplate, pubkey, consolePasswordBlock(v.ConsolePassword)) +
-		mergeCloudRecipes(recipeBodies)
-	if err := os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(userData), 0o644); err != nil {
+	ud := userData(v, pubkey, recipeBodies)
+	if err := os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(ud), 0o644); err != nil {
 		return "", err
 	}
 

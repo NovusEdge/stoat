@@ -130,7 +130,7 @@ func TestSeedNoRecipesByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fmt.Sprintf(userDataTemplate, testPubkey, "")
+	want := fmt.Sprintf(userDataTemplate, "/bin/bash", testPubkey, "")
 	if string(got) != want {
 		t.Errorf("no-recipe user-data changed from the proven baseline:\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -169,7 +169,7 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 	}
 	ud := string(got)
 
-	provenUsersBlock := fmt.Sprintf(userDataTemplate, testPubkey, "")
+	provenUsersBlock := fmt.Sprintf(userDataTemplate, "/bin/bash", testPubkey, "")
 	if !strings.Contains(ud, provenUsersBlock) {
 		t.Errorf("merged user-data does not contain the proven users block verbatim:\n%s", ud)
 	}
@@ -217,5 +217,62 @@ func TestSeedErrorsWithoutXorriso(t *testing.T) {
 func TestSeedUserMatchesUser(t *testing.T) {
 	if !strings.Contains(userDataTemplate, "- name: "+User) {
 		t.Errorf("userDataTemplate does not create the account named by User (%q)", User)
+	}
+}
+
+// Alpine ships no bash. cloud-init's user module FAILS on a nonexistent
+// shell, so the account is never created and the key never lands -- the
+// symptom is "Permission denied (publickey)" forever, not a fallback shell.
+// Boot-tested against generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2:
+// /bin/bash refused every connection, /bin/ash connected first try.
+func TestSeedUsesTheGuestsOwnShell(t *testing.T) {
+	for _, tc := range []struct {
+		os, want, notWant string
+	}{
+		{"alpine", "/bin/ash", "/bin/bash"},
+		{"ubuntu", "/bin/bash", ""},
+		{"fedora", "/bin/bash", ""},
+		{"debian", "/bin/bash", ""},
+		{"", "/bin/bash", ""}, // unknown OS keeps the old default
+	} {
+		v := &config.VM{Name: "vm", OS: tc.os}
+		got := userData(v, "ssh-ed25519 AAAA test", nil)
+		if !strings.Contains(got, "shell: "+tc.want) {
+			t.Errorf("os=%q: want shell %s, got:\n%s", tc.os, tc.want, got)
+		}
+		if tc.notWant != "" && strings.Contains(got, "shell: "+tc.notWant) {
+			t.Errorf("os=%q: still asks for %s, which does not exist there", tc.os, tc.notWant)
+		}
+	}
+}
+
+// The sudo: key writes a sudoers fragment. On Alpine the sudo binary is not
+// installed (doas is), so the fragment points at nothing and every recipe
+// that escalates fails. Verified on the booted guest: command -v sudo was
+// empty, command -v doas was /usr/bin/doas.
+func TestSeedInstallsSudoWhereItIsMissing(t *testing.T) {
+	v := &config.VM{Name: "vm", OS: "alpine"}
+	got := userData(v, "ssh-ed25519 AAAA test", nil)
+	if !strings.Contains(got, "sudo") {
+		t.Fatalf("alpine seed does not provide for sudo at all:\n%s", got)
+	}
+	if !strings.Contains(got, "packages:") {
+		t.Errorf("alpine seed never installs the sudo the sudoers fragment needs:\n%s", got)
+	}
+
+	// Ubuntu already ships sudo; adding a packages block for it is noise.
+	u := userData(&config.VM{Name: "vm", OS: "ubuntu"}, "ssh-ed25519 AAAA test", nil)
+	if strings.Contains(u, "packages:") && strings.Contains(u, "sudo") {
+		t.Errorf("ubuntu seed installs sudo it already has:\n%s", u)
+	}
+}
+
+// Recipe fragments must still merge after the base block, whatever the OS --
+// this is the existing contract and the reason mergeCloudRecipes exists.
+func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
+	v := &config.VM{Name: "vm", OS: "alpine"}
+	got := userData(v, "ssh-ed25519 AAAA test", []string{"packages:\n  - git\n"})
+	if !strings.Contains(got, "git") {
+		t.Errorf("recipe package was dropped:\n%s", got)
 	}
 }
