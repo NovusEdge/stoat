@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 //go:embed *.sh *.yaml
@@ -47,44 +48,37 @@ func Install() error {
 	return nil
 }
 
-// cloudOS is the set of os values the SHARED cloud-config fragment
-// ("<name>.cloud.yaml") supports. cloud-init's packages: list has no
-// per-distro syntax, so one fragment only works across OSes whose package
-// names happen to match. An OS outside this set is served by a per-OS
-// fragment instead ("<name>.<os>.cloud.yaml") — Fedora has one for xfce,
-// because it has no package literally named "xfce4"; the desktop is the
-// comps group @xfce-desktop.
-//
-// Fedora stays out of this set rather than being added to it, for two
-// independent reasons:
-//
-//  1. List below resolves a shared fragment and a per-OS fragment
-//     separately: a name with BOTH (xfce does) would offer Fedora two
-//     entries for the same recipe the instant cloudOS["fedora"] is true —
-//     the shared one (now wrongly in scope) and the per-OS one. Nothing in
-//     List makes the per-OS file suppress the shared one; that only holds
-//     today because Fedora is absent here.
-//  2. It would also silently break any FUTURE shared-only fragment (no
-//     per-OS override) whose package names happen not to hold on dnf —
-//     devtools.cloud.yaml is one: git/curl/ca-certificates/tmux/less match,
-//     but Fedora's vim package is "vim-enhanced", not "vim".
-//
-// Giving Fedora its own devtools.fedora.cloud.yaml (like xfce's) would work
-// around both, but wasn't judged worth a whole extra file for one divergent
-// package name — revisit if a second Fedora-only fragment shows up.
-var cloudOS = map[string]bool{"ubuntu": true, "debian": true, "arch": true}
-
 // List returns installed recipe names offered for osName on backend.
 //
 // Shell recipes are named "xfce.<os>.sh" and only make sense pushed
 // interactively over a live shell, so they're offered on the apkovl/ssh
 // backends, filtered to the exact matching OS. The cloud-config fragment
 // ("xfce.cloud.yaml") only makes sense merged into a cloud-init seed, so
-// it's offered only on the cloudinit backend, filtered to cloudOS — unless a
-// per-OS fragment ("xfce.fedora.cloud.yaml") exists for that OS. A
-// recipe with no file for the (osName, backend) combination is not
-// offered — e.g. List("ubuntu", "cloudinit") never returns xfce.ubuntu.sh,
-// and List("alpine", "apkovl") never returns the cloud fragment.
+// it's offered only on the cloudinit backend, filtered to
+// guest.Lookup(osName).CloudRecipes — unless a per-OS fragment
+// ("xfce.fedora.cloud.yaml") exists for that OS. A recipe with no file for
+// the (osName, backend) combination is not offered — e.g.
+// List("ubuntu", "cloudinit") never returns xfce.ubuntu.sh, and
+// List("alpine", "apkovl") never returns the cloud fragment.
+//
+// CloudRecipes is a single bool per OS, but "the shared fragment set" is
+// really cloud-init's packages: list having no per-distro syntax: one
+// fragment only works across OSes whose package names happen to match, so an
+// OS can be safe for one shared fragment and not another (see
+// guest.OS.CloudRecipes and devtools.cloud.yaml vs xfce.cloud.yaml). Fedora
+// is kept out of the shared set entirely rather than being added to it, for
+// two reasons that matter if this ever grows past a single bool:
+//
+//  1. The switch below resolves a shared fragment and a per-OS fragment
+//     separately: a name with BOTH (xfce does) would offer Fedora two
+//     entries for the same recipe the instant CloudRecipes were true for it
+//     — the shared one (now wrongly in scope) and the per-OS one. Nothing
+//     here makes the per-OS file suppress the shared one; that only holds
+//     today because Fedora's CloudRecipes is false.
+//  2. It would also silently break any shared-only fragment (no per-OS
+//     override) whose package names happen not to hold on dnf —
+//     devtools.cloud.yaml is one: git/curl/ca-certificates/tmux/less match,
+//     but Fedora's vim package is "vim-enhanced", not "vim".
 func List(osName, backend string) ([]string, error) {
 	entries, err := os.ReadDir(dir())
 	if err != nil {
@@ -99,7 +93,8 @@ func List(osName, backend string) ([]string, error) {
 		switch {
 		case backend == "cloudinit" && strings.HasSuffix(name, ".cloud.yaml"):
 			// "xfce.fedora.cloud.yaml" -> per-OS, offered only to fedora.
-			// "xfce.cloud.yaml"        -> shared, offered to cloudOS.
+			// "xfce.cloud.yaml"        -> shared, offered to CloudRecipes
+			// OSes.
 			// A per-OS fragment and the shared one therefore never both
 			// appear for the same OS, so the picker shows one xfce entry.
 			base := strings.TrimSuffix(name, ".cloud.yaml")
@@ -107,7 +102,7 @@ func List(osName, backend string) ([]string, error) {
 				if base[i+1:] == osName {
 					out = append(out, name)
 				}
-			} else if cloudOS[osName] {
+			} else if g, ok := guest.Lookup(osName); ok && g.CloudRecipes {
 				out = append(out, name)
 			}
 		case backend != "cloudinit" && strings.HasSuffix(name, ".sh"):

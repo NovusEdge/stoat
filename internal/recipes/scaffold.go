@@ -85,7 +85,8 @@ func New(name, osName, backend string) (string, error) {
 	var file, body string
 	if backend == "cloudinit" {
 		file = name + ".cloud.yaml"
-		if osName != "" && !cloudOS[osName] {
+		g, ok := guest.Lookup(osName)
+		if osName != "" && (!ok || !g.CloudRecipes) {
 			// An OS the shared fragment cannot serve needs its own file, for
 			// the same reason Fedora has one: its package names differ.
 			file = name + "." + osName + ".cloud.yaml"
