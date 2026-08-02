@@ -371,7 +371,12 @@ func TestCloudFragmentsParse(t *testing.T) {
 // installs before runcmd runs, and a stock Alpine cloud image ships with the
 // community repo (where every desktop package here lives) commented out —
 // it must not rely on a packages: list at all; everything has to happen
-// through runcmd instead.
+// through runcmd instead. It also pins the dbus-before-lightdm ordering a
+// real boot test caught missing on the first version of this fragment (see
+// the dbus-openrc checks below) — that failure produced cloud-init exit
+// status "error" with no desktop and no diagnosis beyond a log file, exactly
+// the class of silent failure this whole file exists to catch before a boot
+// test has to.
 func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := Install(); err != nil {
@@ -407,8 +412,9 @@ func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 	// Checked against the parsed runcmd items, not the raw file text, so an
 	// explanatory mention of "systemctl" in a comment (as above) doesn't
 	// trip this.
-	var haveRCUpdate, haveXorgBase bool
-	for _, c := range runcmd {
+	var haveRCUpdate, haveXorgBase, haveDbusOpenrc bool
+	var dbusStartIdx, lightdmStartIdx = -1, -1
+	for i, c := range runcmd {
 		cmd, _ := c.(string)
 		if strings.Contains(cmd, "systemctl") {
 			t.Errorf("xfce.alpine.cloud.yaml runs %q, which does not exist under Alpine's OpenRC", cmd)
@@ -418,10 +424,36 @@ func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 		}
 		if strings.Contains(cmd, "setup-xorg-base") {
 			haveXorgBase = true
+			if strings.Contains(cmd, "dbus-openrc") {
+				haveDbusOpenrc = true
+			}
+		}
+		if strings.Contains(cmd, "rc-service dbus start") {
+			dbusStartIdx = i
+		}
+		if strings.Contains(cmd, "rc-service lightdm start") {
+			lightdmStartIdx = i
 		}
 	}
 	if !haveRCUpdate {
 		t.Error("xfce.alpine.cloud.yaml never calls rc-update to enable lightdm under OpenRC")
+	}
+	// A real boot test caught this: apk's dbus package installs the daemon
+	// but not its OpenRC init script (that's the separate dbus-openrc
+	// subpackage), so lightdm's `need dbus` never resolved and it refused
+	// to start with "dbus would not start". Pinned here so a future edit
+	// can't silently drop the fix without a second boot-test round trip.
+	if !haveDbusOpenrc {
+		t.Error("xfce.alpine.cloud.yaml does not install dbus-openrc — lightdm's `need dbus` has no OpenRC service to resolve to, and it will refuse to start")
+	}
+	if dbusStartIdx == -1 {
+		t.Error("xfce.alpine.cloud.yaml never starts dbus — lightdm depends on it")
+	}
+	if lightdmStartIdx == -1 {
+		t.Error("xfce.alpine.cloud.yaml never starts lightdm")
+	}
+	if dbusStartIdx != -1 && lightdmStartIdx != -1 && dbusStartIdx > lightdmStartIdx {
+		t.Error("xfce.alpine.cloud.yaml starts lightdm before dbus — lightdm needs a running dbus to start")
 	}
 	if !haveXorgBase {
 		t.Error("xfce.alpine.cloud.yaml does not install an X server (expected via setup-xorg-base) — a desktop with no X server is the black-screen failure this fragment must avoid")

@@ -42,13 +42,46 @@
 # minimal.
 #
 # elogind + polkit-elogind stand in for systemd-logind's session-management
-# role, which Alpine does not have; without them lightdm has no seat/session
-# backend to hand a graphical login to.
+# role, which Alpine does not have.
 #
-# Checked against alpine-conf's upstream source, not against real hardware —
-# unverified pending a boot test.
+# dbus-openrc: a first boot-test on real Alpine 3.24.1 (cloud-init's own
+# log) showed `setup-xorg-base` and `rc-update add lightdm` both succeeding,
+# then "ERROR: cannot start lightdm as dbus would not start". apk's `dbus`
+# package (a dependency of both lightdm and elogind) installs the daemon
+# binary, but its OpenRC init script ships in a SEPARATE subpackage,
+# dbus-openrc — confirmed against pkgs.alpinelinux.org's file listing for
+# it (/etc/init.d/dbus) — and nothing here was pulling that subpackage in.
+# lightdm's own init script declares `need dbus`; without dbus-openrc
+# installed there is no "dbus" service for that dependency to resolve to.
+# Two independently-published Alpine xfce/lightdm setup guides both
+# explicitly `rc-update add dbus` before lightdm for exactly this reason,
+# which is what below now does too.
+#
+# elogind, by contrast, does NOT need its own rc-update: alpine-conf's
+# setup-desktop.in and both of those guides enable only dbus and lightdm,
+# never elogind, and elogind's own package ships
+# /usr/share/dbus-1/system-services/org.freedesktop.login1.service —
+# confirmed against pkgs.alpinelinux.org's file listing for the elogind
+# package — a D-Bus activation file. Once dbus itself is running, dbus
+# launches elogind on demand the first time something calls
+# org.freedesktop.login1; no persistently-running elogind service is
+# required for lightdm to get a working session backend.
+#
+# rc-service ... start (not just rc-update add ...) is deliberate here, not
+# left for next boot: cloud images are always a real disk install (never
+# the diskless/live case), so a start-now attempt costs nothing if it fails
+# — both services are also added to the default runlevel, so a subsequent
+# boot brings them up regardless — and it matches the shared
+# xfce.cloud.yaml's own goal of a desktop on the console in THIS boot, not
+# a promise redeemed only after a manual reboot.
+#
+# Checked against alpine-conf's upstream source and against a real
+# boot-test failure (the dbus gap above) — the rest of this fragment is
+# unverified until the corrected version passes its own boot test.
 runcmd:
-  - setup-xorg-base xfce4 elogind gvfs lightdm lightdm-gtk-greeter polkit-elogind xfce4-terminal
+  - setup-xorg-base xfce4 elogind gvfs lightdm lightdm-gtk-greeter polkit-elogind xfce4-terminal dbus-openrc
+  - rc-update add dbus default
+  - rc-service dbus start
   # A cloud image has a real user account (stoat), so this gets a login
   # screen rather than the single-user autologin the live-ISO Alpine recipe
   # uses — same reasoning as the shared xfce.cloud.yaml. Log in as stoat
