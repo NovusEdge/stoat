@@ -137,6 +137,28 @@ func TestArgsAlwaysLogTheConsole(t *testing.T) {
 	}
 }
 
+// -serial file:<path> TRUNCATES on every QEMU start (verified against real
+// QEMU: a pre-filled console.log became 0 bytes on next launch). The
+// realistic failure sequence is exactly the one this log exists for -- a
+// headless VM fails to come up, the user restarts it, and the only evidence
+// is destroyed before anyone reads it. -chardev file,...,append=on is the
+// fix; plain "-serial file:" must never come back.
+func TestConsoleLogAppendsRatherThanTruncates(t *testing.T) {
+	v := &config.VM{Name: "vm", Dir: t.TempDir(), Mode: "cloud", RAM: 1024, CPUs: 2, SSHPort: 2222}
+	got := strings.Join(Args(v), " ")
+
+	if strings.Contains(got, "-serial file:") {
+		t.Errorf("-serial file: truncates the console log on every start:\n%s", got)
+	}
+	wantChardev := "-chardev file,id=con0,path=" + v.ConsoleLogPath() + ",append=on"
+	if !strings.Contains(got, wantChardev) {
+		t.Errorf("want chardev %q in:\n%s", wantChardev, got)
+	}
+	if !strings.Contains(got, "-serial chardev:con0") {
+		t.Errorf("want -serial chardev:con0 in:\n%s", got)
+	}
+}
+
 // live and cloud are automated end to end: sshd comes up with the user's key
 // already installed, and nobody ever needs to touch the console. The window
 // only steals focus. An installed disk VM is the same. But an UNINSTALLED

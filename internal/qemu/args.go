@@ -43,7 +43,14 @@ func Args(v *config.VM) []string {
 		// the first place to look when a guest never comes up -- an empty log
 		// here is a real, non-buggy outcome for some guests, not a sign this
 		// broke.
-		"-serial", "file:" + v.ConsoleLogPath(),
+		//
+		// "-serial file:<path>" TRUNCATES on every start (verified against
+		// real QEMU). The realistic sequence this log exists for is a
+		// headless VM failing to come up and the user restarting it -- with
+		// plain file: that restart destroys the only evidence before anyone
+		// reads it. append=on on an explicit chardev keeps it.
+		"-chardev", "file,id=con0,path=" + v.ConsoleLogPath() + ",append=on",
+		"-serial", "chardev:con0",
 		// Bind loopback explicitly: the QEMU default is 0.0.0.0, which would
 		// publish every guest's SSH to the LAN.
 		"-netdev", fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort),
