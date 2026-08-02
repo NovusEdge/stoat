@@ -883,6 +883,38 @@ func grepLine(out, needle string) string {
 	return "(not found)"
 }
 
+// The only situation the name is allowed to lose characters: it alone
+// already reaches or exceeds the row's full width, even at the floor. It is
+// middle-elided rather than cut from the tail, keeping both ends -- the
+// base name up front and the version/extension at the back, which is what
+// TestByoScreenNeverTruncatesTheFileName's 33-cell name never has to
+// exercise since it always fits.
+func TestFoundRowMiddleElidesAPathologicallyLongName(t *testing.T) {
+	name := "an-extremely-long-hypothetical-disk-image-file-name-that-exceeds-the-floor-width-3.24.1-x86_64.iso"
+	if lipgloss.Width(name) <= modalContentWidth {
+		t.Fatalf("fixture name is %d cells, want it longer than the %d-cell floor", lipgloss.Width(name), modalContentWidth)
+	}
+
+	row := foundRow(foundImage{path: "/home/u/" + name, size: 1}, modalContentWidth, false)
+	stripped := ansi.Strip(row)
+
+	if strings.Contains(stripped, name) {
+		t.Fatalf("fixture is unchanged by foundRow; the test proves nothing:\n%s", stripped)
+	}
+	if w := lipgloss.Width(stripped); w > modalContentWidth {
+		t.Errorf("elided row is %d cells, wider than the %d-cell content width", w, modalContentWidth)
+	}
+	if !strings.Contains(stripped, "…") {
+		t.Errorf("an elided name should carry a \"…\": %q", stripped)
+	}
+	if !strings.HasPrefix(stripped, "an-extremely") {
+		t.Errorf("elision dropped the identifying HEAD of the name: %q", stripped)
+	}
+	if !strings.HasSuffix(strings.TrimRight(stripped, " "), "x86_64.iso") {
+		t.Errorf("elision dropped the identifying TAIL (version/extension) of the name: %q", stripped)
+	}
+}
+
 // The box must also grow sanely at an ordinary "bigger than the floor but
 // nowhere near huge" terminal -- centred, and never overflowing it, the
 // same invariant TestByoScreenFitsTheSmallestTerminal and

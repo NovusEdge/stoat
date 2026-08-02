@@ -247,6 +247,15 @@ const modalSizeWidth = 9
 // name is the one thing here that must not give.
 func foundRow(img foundImage, width int, selected bool) string {
 	name := filepath.Base(img.path)
+
+	if lipgloss.Width(name) >= width {
+		// The one situation the name is allowed to lose characters: it
+		// alone already reaches or exceeds the row's full width, so there
+		// is nowhere else to take space from. Middle-elided, not cut from
+		// the tail -- the version and extension near the end are what
+		// actually identifies the file, so the head gives way first.
+		name = middleElide(name, width)
+	}
 	label := name
 	if selected {
 		label = selStyle.Render(label)
@@ -254,9 +263,6 @@ func foundRow(img foundImage, width int, selected bool) string {
 
 	rest := width - lipgloss.Width(name)
 	if rest <= 0 {
-		// The name alone reaches or exceeds the available width. It still
-		// renders whole rather than being cut -- an overlong row on a
-		// pathologically narrow terminal beats a truncated file name.
 		return label
 	}
 	rest -= foundGap
@@ -306,6 +312,33 @@ func dirTail(dir string, width int) string {
 		return dir
 	}
 	return ansi.TruncateLeft(dir, w-(width-1), "…")
+}
+
+// middleElide shortens s to width cells by cutting out of the MIDDLE and
+// marking the cut with "…", e.g. "alpine-stand…x86_64.iso" -- unlike dirTail
+// (which only ever needs to keep one end), a file name's identifying parts
+// sit at both ends: the base name up front, the version and extension at
+// the back. The tail gets the larger half of what's kept, since the
+// extension is what a user scans for first when several files share a
+// prefix.
+//
+// Only called when nothing else can be dropped to make the name fit --
+// every other case in foundRow keeps the name whole.
+func middleElide(s string, width int) string {
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width <= 1 {
+		if width == 1 {
+			return "…"
+		}
+		return ""
+	}
+	keep := width - 1 // one cell for the "…"
+	tail := (keep + 1) / 2
+	head := keep - tail
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
 }
 
 // imageModal is the two-level picker. One list, re-populated on drill-down,
