@@ -129,7 +129,9 @@ func Installed() ([]string, error) {
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		// Dotfiles are stoat's own bookkeeping (ManifestName), not
+		// something anyone wants offered as a recipe to edit.
+		if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
 			out = append(out, e.Name())
 		}
 	}

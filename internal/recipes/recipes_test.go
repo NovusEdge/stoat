@@ -46,6 +46,142 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 	}
 }
 
+// A recipe stoat wrote and nobody touched must be refreshed when the bundled
+// copy changes. This is the whole point of the manifest: before it, a shipped
+// fix never reached anyone who already had the broken version — the
+// xfce.cloud.yaml that produced a black screen kept being served long after
+// the bundled copy was fixed.
+func TestInstallRefreshesItsOwnStaleCopy(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for "an older stoat shipped this": overwrite the file AND
+	// record its checksum, which is exactly the state an older release left
+	// behind.
+	stale := "#cloud-config\n# from an older stoat\n"
+	if err := os.WriteFile(Path("xfce.cloud.yaml"), []byte(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := readManifest()
+	m["xfce.cloud.yaml"] = sum([]byte(stale))
+	if err := writeManifest(m); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fresh {
+		t.Error("Install left its own stale copy in place; a shipped recipe fix will never reach a user who already has the old one")
+	}
+	if _, err := os.Stat(Path("xfce.cloud.yaml.bak")); err == nil {
+		t.Error("Install kept a .bak of a file it knew was its own — the backup is only for the one-time pre-manifest adoption")
+	}
+}
+
+// The upgrade path: recipes on disk from before the manifest existed. There is
+// no way to tell an edited one from an untouched one, so they are refreshed
+// but the old contents are kept alongside.
+func TestInstallAdoptsPreManifestRecipesAndKeepsABackup(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := "#cloud-config\n# predates the manifest\n"
+	if err := os.WriteFile(Path("xfce.cloud.yaml"), []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(Path(ManifestName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fresh {
+		t.Error("Install did not refresh a pre-manifest recipe")
+	}
+	bak, err := os.ReadFile(Path("xfce.cloud.yaml.bak"))
+	if err != nil {
+		t.Fatalf("Install overwrote a pre-manifest recipe without keeping a backup: %v", err)
+	}
+	if string(bak) != old {
+		t.Errorf("backup holds %q, want the pre-manifest contents", bak)
+	}
+
+	// Adoption is once. With a manifest now on disk, a later edit is
+	// recognised as an edit and left alone.
+	edit := "#cloud-config\n# mine\n"
+	if err := os.WriteFile(Path("xfce.cloud.yaml"), []byte(edit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Read("xfce.cloud.yaml"); got != edit {
+		t.Error("Install reverted an edit made after adoption")
+	}
+	// And keeps leaving it alone: recording the bundled sum for a file it
+	// did not write would make the next Install think the edit was its own.
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Read("xfce.cloud.yaml"); got != edit {
+		t.Error("Install reverted an edit on the second run after adoption")
+	}
+}
+
+// A .bak left by adoption must not be offered as a recipe, and neither must
+// the manifest.
+func TestBookkeepingFilesAreNotRecipes(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path("xfce.cloud.yaml.bak"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, osName := range []string{"alpine", "ubuntu", "arch"} {
+		got, err := List(osName, "cloudinit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range got {
+			if strings.HasSuffix(n, ".bak") || n == ManifestName {
+				t.Errorf("List(%q) offered bookkeeping file %q", osName, n)
+			}
+		}
+	}
+	installed, err := Installed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range installed {
+		if n == ManifestName {
+			t.Errorf("Installed listed %q, which is stoat's own bookkeeping", n)
+		}
+	}
+}
+
 func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 	// go:embed must pick up exactly the per-OS shell recipes plus the cloud
 	// fragments — no strays (recipes.go/recipes_test.go must NOT be swept up
