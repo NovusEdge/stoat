@@ -95,9 +95,20 @@ func Lookup(name string) (OS, bool)
 func All() []OS
 ```
 
-### 3.2 `guest.Backend` — behaviour
+### 3.2 `Backend` — behaviour
 
 The part a struct of fields cannot express. Three implementations, one interface.
+
+**This interface does not live in package `guest`.** `guest` must stay a
+zero-import leaf so every package that needs OS facts can depend on it
+without risk — and `internal/cloudinit`, `internal/recipes` and
+`internal/iso` already import `guest` today. An implementation needs
+`apkovl`, `cloudinit`, `recipes` and `keys`; putting `Backend` in `guest`
+would make `guest` import those back, closing a cycle. It lives in a new
+package, `internal/backend`, which imports `guest` (for `OS.Backend`) plus
+everything an implementation needs; `internal/qemu` imports `internal/backend`
+in turn. The type sketch below is otherwise unchanged from the original
+design.
 
 ```go
 type BackendName string
@@ -261,7 +272,7 @@ For phase-2 recipes, progress comes from the declared `stages` plus emitted mark
 
 ---
 
-## 9. The core API layer
+## 10. The core API layer
 
 ### 10.1 The problem
 
@@ -393,7 +404,7 @@ If any of these needs logic that is not already in `core`, the layering is wrong
 
 ---
 
-## 10. Risks
+## 11. Risks
 
 - **This is a real refactor**, touching `qemu`, `cloudinit`, `apkovl`, `recipes`, `iso` and `tui`. The mitigation is that behaviour must not change except where a bug is named here — existing tests are the contract, and any test that needs updating is a signal to stop and check rather than to edit.
 - **`Backend.Prepare`'s call frequency differs by backend** (apkovl every boot; cloudinit once, ever). That asymmetry is load-bearing — a cloud VM whose seed is rebuilt would have its instance identity change under it. The interface hides it, which is right, but the implementations must be explicit about it and tested for it.

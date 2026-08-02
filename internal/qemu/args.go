@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -81,6 +82,11 @@ func Args(v *config.VM) []string {
 		a = append(a, "-cdrom", v.ISOPath())
 		// The initramfs looks for *.apkovl.tar.gz at the root of a mountable
 		// filesystem, so the tarball is served through vvfat as a fake FAT disk.
+		// This is unconditional on Mode alone, not on the backend: unlike the
+		// disk-mode branch below, no OS other than Alpine can even reach live
+		// mode today (internal/tui/form.go's effectiveMode keeps the live/disk
+		// toggle live only while the selected image's backend is apkovl), so
+		// there was never a "which backend" decision here to make.
 		a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
 		// vvfat synthesizes a valid MBR signature but no boot code, so without
 		// an explicit boot order QEMU's disk-first default can select the
@@ -99,11 +105,14 @@ func Args(v *config.VM) []string {
 			// it — otherwise the guest is unreachable after the install and
 			// provisioning dies on "Permission denied (publickey)".
 			//
-			// Only Alpine's initramfs looks for an apkovl. Any other ISO
-			// would just see a second, useless disk in its target picker.
-			if v.OS == "alpine" {
-				a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
-			}
+			// This is the one case where the guest OS genuinely decides
+			// whether the drive belongs here: only Alpine's initramfs looks
+			// for an apkovl, so a BYO ISO with any other backend would just
+			// see a second, useless disk in its target picker. Asking the
+			// backend rather than comparing v.OS == "alpine" directly is what
+			// makes alpine-cloud's override (backend cloudinit despite OS
+			// alpine, see internal/backend.For) resolve correctly too.
+			a = append(a, backend.For(v).Args(v)...)
 			a = append(a, "-boot", "d")
 		}
 	case "cloud":
@@ -111,7 +120,10 @@ func Args(v *config.VM) []string {
 		// The xorriso seed has no El Torito boot record, so BIOS skips it and
 		// boots the qcow2 without needing an explicit -boot order. cloud-init's
 		// NoCloud datasource finds it by scanning cdrom devices for the CIDATA
-		// volume label.
+		// volume label. Unconditional on Mode alone, like the live-mode
+		// overlay above: cloud mode is cloudinit's only mode (form.go's
+		// effectiveMode forces it), so there is no other backend this could
+		// resolve to.
 		seedISO := filepath.Join(v.OvlDir(), "seed.iso")
 		a = append(a, "-drive", "file="+seedISO+",media=cdrom")
 	}

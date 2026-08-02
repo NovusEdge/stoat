@@ -31,8 +31,10 @@ type OS struct {
 	SeedPackages []string
 
 	// Backend names how this OS is provisioned: "apkovl" | "cloudinit" |
-	// "ssh". A string in phase 1 — see docs/design/guest-subsystem.md §3.2
-	// for the Backend interface a later phase turns this into.
+	// "ssh". This stays a string here, not the Backend interface itself:
+	// package guest owns OS data only and must stay a zero-import leaf, so
+	// the interface lives in internal/backend, one level up. See
+	// docs/design/guest-subsystem.md §3.2.
 	Backend string
 
 	// Installer is the interactive install command named in UI hints.
