@@ -23,6 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 const (
@@ -304,25 +305,35 @@ func Catalog() []Entry {
 // filename alone. It is a suggestion for the form to pre-fill, never a
 // verdict: the user can always override it, and an unrecognised name
 // resolves to "ssh" with no OS guess rather than a wrong guess.
+//
+// Hint matching decides the OS; the extension decides only the backend. That
+// split matters for Alpine specifically: an empty OS on an Alpine image is
+// what sends guestShell("") to /bin/bash, a shell Alpine doesn't have, so the
+// OS guess must fire on a hint match regardless of extension.
 func Infer(filename string) (backend, os string) {
 	lower := strings.ToLower(filename)
-	isAlpine := strings.Contains(lower, "alpine")
+
+	var matchedOS string
+	for _, o := range guest.All() {
+		for _, hint := range o.FilenameHints {
+			if strings.Contains(lower, hint) {
+				matchedOS = o.Name
+				break
+			}
+		}
+		if matchedOS != "" {
+			break
+		}
+	}
+
 	switch {
-	case isAlpine && strings.HasSuffix(lower, ".iso"):
+	case matchedOS == "alpine" && strings.HasSuffix(lower, ".iso"):
 		return "apkovl", "alpine"
 	case strings.Contains(lower, "cloudimg"), strings.Contains(lower, "genericcloud"),
 		strings.HasSuffix(lower, ".qcow2"), strings.HasSuffix(lower, ".img"):
-		// An alpine name here is the cloud image (a4befa9): claim the OS
-		// even though the extension alone doesn't say "alpine", so a BYO
-		// alpine cloud image never resolves to an empty OS. An empty OS on
-		// an alpine image is what sends guestShell("") to /bin/bash, which
-		// Alpine doesn't have — see the alpine cloud qcow2 case above.
-		if isAlpine {
-			return "cloudinit", "alpine"
-		}
-		return "cloudinit", ""
+		return "cloudinit", matchedOS
 	default:
-		return "ssh", ""
+		return "ssh", matchedOS
 	}
 }
 

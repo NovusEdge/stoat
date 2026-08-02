@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // TestDownload_RenameFailureCleansUpPart drives Download down the success
@@ -177,9 +179,10 @@ func TestByOSGroupsWithoutLosingEntries(t *testing.T) {
 	}
 }
 
-// TestInfer covers the BYO filename heuristic's three outcome classes:
-// a recognisable cloud qcow2/img, a recognisable Alpine live ISO, and an
-// unrecognised name that must fall back to ssh rather than guess wrong.
+// TestInfer covers the BYO filename heuristic's outcome classes: a
+// recognisable cloud qcow2/img (any registered OS), a recognisable Alpine
+// live ISO, a bare cloud image with no OS hint at all, and an unrecognised
+// name that must fall back to ssh rather than guess wrong.
 func TestInfer(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -187,8 +190,14 @@ func TestInfer(t *testing.T) {
 		wantBackend string
 		wantOS      string
 	}{
-		{"ubuntu cloudimg qcow2", "ubuntu-24.04-server-cloudimg-amd64.qcow2", "cloudinit", ""},
-		{"debian genericcloud qcow2", "debian-12-genericcloud-amd64.qcow2", "cloudinit", ""},
+		// Infer now recognises every registered OS by its FilenameHints, not
+		// just Alpine, so these two resolve an OS where they used to return
+		// "" — see TestInferRecognisesEveryRegisteredOS. That's the intended
+		// effect of the registry migration: a BYO ubuntu/debian cloud image
+		// used to get zero recipes offered (recipes.List("", backend)), and
+		// now gets whatever its OS supports.
+		{"ubuntu cloudimg qcow2", "ubuntu-24.04-server-cloudimg-amd64.qcow2", "cloudinit", "ubuntu"},
+		{"debian genericcloud qcow2", "debian-12-genericcloud-amd64.qcow2", "cloudinit", "debian"},
 		{"bare .img", "some-cloud-image.img", "cloudinit", ""},
 		{"alpine iso", "alpine-standard-3.20.0-x86_64.iso", "apkovl", "alpine"},
 		// The alpine-cloud catalog entry (a4befa9) downloads exactly this
@@ -205,6 +214,21 @@ func TestInfer(t *testing.T) {
 				t.Errorf("Infer(%q) = (%q, %q), want (%q, %q)", c.file, backend, os, c.wantBackend, c.wantOS)
 			}
 		})
+	}
+}
+
+// Every OS in the registry must be recognisable from a filename, for both an
+// iso and a qcow2. An OS that cannot be inferred produces an EMPTY OS on a BYO
+// image, which is how the seed ends up asking for a shell the guest lacks.
+func TestInferRecognisesEveryRegisteredOS(t *testing.T) {
+	for _, o := range guest.All() {
+		for _, ext := range []string{".iso", ".qcow2", ".img"} {
+			name := o.Name + "-test-image" + ext
+			_, gotOS := Infer(name)
+			if gotOS != o.Name {
+				t.Errorf("Infer(%q) os = %q, want %q", name, gotOS, o.Name)
+			}
+		}
 	}
 }
 
