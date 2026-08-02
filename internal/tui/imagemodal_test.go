@@ -802,7 +802,7 @@ func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
 // The actual user-visible point of a growing modal: a wide terminal gives
 // the directory column enough room that a real path renders whole, with no
 // "…" cutting it off. At the modal's old fixed width this directory (62
-// cells) would have been cut to foundDirWidth's old 15.
+// cells) would have been cut to 15.
 func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	byoVariants(t, mo)
@@ -825,6 +825,62 @@ func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
 			t.Errorf("the result row is still truncated on a 200-column terminal: %q", line)
 		}
 	}
+}
+
+// The user's actual requirement, verbatim: "the BYO filepicker doesn't show
+// full filenames which is a shame, we need full file names for it to be
+// useful." A realistic filename must render whole -- no ellipsis inside it
+// -- at the smallest supported terminal, an intermediate one, and a large
+// one alike. Growing the modal, eliding the directory and dropping the size
+// column all exist only in service of this; if the name itself ever gets
+// cut, everything else was pointless.
+func TestByoScreenNeverTruncatesTheFileName(t *testing.T) {
+	const name = "alpine-standard-3.24.1-x86_64.iso" // 33 cells, a real catalog filename
+	path := "/home/novusedge/downloads/isos/nested/rather/deep/path/" + name
+
+	for _, sz := range []struct{ w, h int }{
+		{smallWidth, smallHeight}, // 60x20, the floor
+		{100, 30},                 // intermediate
+		{200, 60},                 // large
+	} {
+		mo := newImageModal(testImages(), 0)
+		byoVariants(t, mo)
+		mo.openByo()
+		mo.setFound([]foundImage{{path: path, size: 1}})
+
+		m := model{width: sz.w, height: sz.h, modal: mo}
+		screen := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, "")
+		out := ansi.Strip(m.renderModal(screen))
+		t.Logf("%dx%d result row:\n%s", sz.w, sz.h, grepLine(out, name))
+
+		// The exact full name as a substring is the whole test: any
+		// truncated form (e.g. "alpine-standard-3.24…") is a different
+		// string and would not match.
+		if !strings.Contains(out, name) {
+			t.Errorf("%dx%d: the file name is not present in full:\n%s", sz.w, sz.h, out)
+		}
+
+		// Rows never wrap or overflow the box at any of these sizes.
+		box := m.modal.view()
+		if w := lipgloss.Width(box); w > sz.w {
+			t.Errorf("%dx%d: modal is %d cells wide, terminal is %d", sz.w, sz.h, w, sz.w)
+		}
+		if h := lipgloss.Height(box); h > sz.h {
+			t.Errorf("%dx%d: modal is %d lines tall, terminal is %d", sz.w, sz.h, h, sz.h)
+		}
+	}
+}
+
+// grepLine returns the first line of out containing needle, for test
+// output -- so a failure shows the one row that matters instead of the
+// whole box.
+func grepLine(out, needle string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return "(not found)"
 }
 
 // The box must also grow sanely at an ordinary "bigger than the floor but

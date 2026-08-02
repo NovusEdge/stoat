@@ -166,27 +166,7 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, it.opt.sizeLabel()))
 		fmt.Fprint(w, cursor+label+size+"  "+it.opt.statusLabel())
 	case foundItem:
-		// Base name, then the parent directory dimmed, then the size --
-		// matching the columns the tree browser shows (ShowSize = true). The
-		// directory is what tells apart two files that share a name. Widths
-		// sum to the list's own width (read off m, not a constant, so the
-		// row grows with the modal) so the row never wraps.
-		//
-		// The directory gets whatever's left over: it's the column that
-		// truncates on a narrow terminal, and the one a wide one has room to
-		// show in full — the base name stays a fixed width because ordinary
-		// filenames already fit it, and growing it would just leave the
-		// directory the same cramped size it is today.
-		dirWidth := m.Width() - 2 - foundNameWidth - modalSizeWidth
-		name := ansi.Truncate(filepath.Base(it.img.path), foundNameWidth, "…")
-		label := fmt.Sprintf("%-*s", foundNameWidth, name)
-		if index == m.Index() {
-			label = selStyle.Render(label)
-		}
-		dirText := ansi.Truncate(filepath.Dir(it.img.path), dirWidth, "…")
-		dir := dimStyle.Render(fmt.Sprintf("%-*s", dirWidth, dirText))
-		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, humanBytes(it.img.size)))
-		fmt.Fprint(w, cursor+label+dir+size)
+		fmt.Fprint(w, cursor+foundRow(it.img, m.Width()-lipgloss.Width(cursor), index == m.Index()))
 	}
 }
 
@@ -201,37 +181,44 @@ const (
 	modalRows         = 6
 )
 
-// modalMaxContentWidth and modalMaxRows cap how far resize grows the box on
-// a very large terminal.
-//
-// 100 for the width: past roughly a hundred columns a monospace line gets
-// hard to track by eye -- the guidance behind typographic "measure" limits
-// tops out around there for the same reason -- and this is a picker dialog,
-// not a pane meant to fill the screen, so it stays comfortably short of the
-// terminal's own width rather than chasing it. 16 for the rows is the same
-// idea applied vertically: enough for a scan with real results to feel like
-// a list rather than a slit, without turning the modal into most of a tall
-// terminal.
+// modalMaxContentWidth and modalMaxRows are a backstop, not a design target:
+// the box is meant to use the terminal, not stop at some conservative
+// width, so these are sized to never realistically bind on real hardware
+// and exist only so a pathological terminal size can't produce something
+// absurd.
 const (
-	modalMaxContentWidth = 100
-	modalMaxRows         = 16
+	modalMaxContentWidth = 1000
+	modalMaxRows         = 500
 )
 
-// modalWidthMargin is breathing room left OUTSIDE the box, beyond its own
-// frame, so a maximally wide modal never touches the terminal's edges.
+// modalWidthFraction and modalHeightFraction are how much of the terminal
+// resize lets the box claim, BEFORE its own frame is subtracted -- a
+// fraction rather than a fixed margin, because a fixed margin is a couple
+// of cells' breathing room on a small terminal and next to nothing on a
+// huge one (a 200-column terminal minus 4 cells is still a 190-column box,
+// which reads as filling the screen, not floating over it). A fraction
+// scales with the terminal instead: room left around the box stays roughly
+// proportionate whether the terminal is 60 columns or 200.
 //
+// 0.85/0.8 rather than something looser: high enough that the box still
+// grows aggressively (this project's whole point here), low enough that a
+// large terminal keeps visible margin on every side -- centred and
+// floating, not the full-terminal takeover this project's own layout work
+// has already had rejected once.
+const (
+	modalWidthFraction  = 0.85
+	modalHeightFraction = 0.8
+)
+
 // modalHeightChrome is the vertical space the box spends on everything that
 // ISN'T list rows -- pane border, padding, title, and (on the byo screen,
-// the tallest case) the text field and a two-line hint/error. Sized to that
-// worst case so growing rows never overflows it. Chosen, together with
-// modalWidthMargin, so that at exactly smallWidth x smallHeight (60x20)
-// both dimensions clamp to their floor -- the size this modal has always
-// drawn at -- rather than shifting the smallest-terminal geometry tests'
-// ground truth.
-const (
-	modalWidthMargin  = 8
-	modalHeightChrome = 14
-)
+// the tallest case) the text field and a two-line hint/error. resize
+// subtracts this from the terminal's allotted share before turning what's
+// left into rows, so growing rows never overflows the box's own fixed
+// chrome. Sized to the byo screen's tallest state (an inline error, which
+// can wrap to two lines) -- the worst case a single shared row count has to
+// fit.
+const modalHeightChrome = 11
 
 // modalSizeWidth is the size column, right-aligned so the digits line up down
 // the list — the whole point of showing sizes is comparing them, and a ragged
@@ -244,11 +231,82 @@ const (
 // whole feature exists to make comparable.
 const modalSizeWidth = 9
 
-// foundNameWidth is the fixed half of the byo screen's two text columns; the
-// directory gets whatever's left of the list's own width (see imageDelegate
-// Render's foundItem case) so the two always sum to it exactly and a found
-// row never wraps.
-const foundNameWidth = 20
+// foundRow lays out one byo result row: the base file name, the directory,
+// and the size, in that priority order. The NAME NEVER TRUNCATES -- that was
+// the whole complaint the byo screen existed to fix ("we need full file
+// names for it to be useful") -- so unlike every other row in this modal,
+// this one's columns are not fixed widths that happen to sum to the list's
+// width. They are computed backwards from the name outward: whatever's left
+// after it goes to the directory (elided from the LEFT, keeping the tail --
+// the deepest directories are what actually tells two same-named files
+// apart), and the size is the first thing dropped if there still isn't room.
+//
+// This does mean the size column can drift out of alignment row to row when
+// names vary in length and space is tight -- accepted deliberately, because
+// the alternative is truncating the name to keep a column lined up, and the
+// name is the one thing here that must not give.
+func foundRow(img foundImage, width int, selected bool) string {
+	name := filepath.Base(img.path)
+	label := name
+	if selected {
+		label = selStyle.Render(label)
+	}
+
+	rest := width - lipgloss.Width(name)
+	if rest <= 0 {
+		// The name alone reaches or exceeds the available width. It still
+		// renders whole rather than being cut -- an overlong row on a
+		// pathologically narrow terminal beats a truncated file name.
+		return label
+	}
+	rest -= foundGap
+	if rest <= 0 {
+		// Room for the name and nothing else, not even the gap after it.
+		return label + strings.Repeat(" ", width-lipgloss.Width(name))
+	}
+	gap := strings.Repeat(" ", foundGap)
+
+	switch {
+	case rest >= modalSizeWidth+foundMinDirWidth:
+		// Room for both: the directory takes everything left after the size
+		// column is reserved.
+		dirWidth := rest - modalSizeWidth
+		dir := dimStyle.Render(fmt.Sprintf("%-*s", dirWidth, dirTail(filepath.Dir(img.path), dirWidth)))
+		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, humanBytes(img.size)))
+		return label + gap + dir + size
+	case rest >= modalSizeWidth:
+		// No room for a directory at all; keep the size, since it costs
+		// less width and still tells the images apart by weight.
+		return label + gap + strings.Repeat(" ", rest-modalSizeWidth) + dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, humanBytes(img.size)))
+	default:
+		// Not even the size fits next to a name this long; pad and stop.
+		return label + gap + strings.Repeat(" ", rest)
+	}
+}
+
+// foundGap is the blank run between the name and whatever follows it --
+// without it, a directory or size butts straight up against the name the
+// moment the name isn't padded to a fixed column anymore.
+const foundGap = 2
+
+// foundMinDirWidth is the least a directory column is worth showing at --
+// below it, "…/x" says almost nothing, so the row drops the directory
+// entirely rather than draw a sliver of one.
+const foundMinDirWidth = 6
+
+// dirTail elides dir to width cells, keeping the RIGHTMOST part. The deepest
+// directories are what actually distinguishes two files sharing a name, so
+// that's what stays; the head is cut and marked with a leading "…".
+func dirTail(dir string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	w := lipgloss.Width(dir)
+	if w <= width {
+		return dir
+	}
+	return ansi.TruncateLeft(dir, w-(width-1), "…")
+}
 
 // imageModal is the two-level picker. One list, re-populated on drill-down,
 // rather than two lists: two would mean two cursors to keep consistent and
@@ -797,8 +855,10 @@ func (mo *imageModal) viewByo() string {
 // unchanged value is a no-op on the components underneath, so there's no
 // need to guard against calling this when nothing actually changed.
 func (mo *imageModal) resize(termWidth, termHeight int) {
-	mo.contentWidth = max(modalContentWidth, min(modalMaxContentWidth, termWidth-paneFrame()-modalWidthMargin))
-	mo.rows = max(modalRows, min(modalMaxRows, termHeight-modalHeightChrome))
+	widthBudget := int(float64(termWidth)*modalWidthFraction) - paneFrame()
+	mo.contentWidth = max(modalContentWidth, min(modalMaxContentWidth, widthBudget))
+	heightBudget := int(float64(termHeight)*modalHeightFraction) - modalHeightChrome
+	mo.rows = max(modalRows, min(modalMaxRows, heightBudget))
 
 	mo.list.SetWidth(mo.contentWidth)
 	mo.syncHeight(len(mo.list.Items()))
