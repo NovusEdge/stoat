@@ -551,7 +551,17 @@ func (mo *imageModal) setFound(found []foundImage) {
 	// A live filter must keep matching the grown item set, or a batch that
 	// lands after the user has already typed a query would silently show
 	// unfiltered results until the next keystroke.
-	mo.byoList.SetFilterText(mo.byoInput.Value())
+	mo.byoList.SetFilterText(mo.filterQuery())
+}
+
+// filterQuery is what byoInput's value actually filters against. Expanded
+// the same way a typed path is on enter: scanned paths are absolute, so a
+// bare "~" or "~/..." matches nothing in them character-for-character (fuzzy
+// matching still requires every rune to appear in order) and made the most
+// natural way to type a home-relative location -- ~/Downloads -- look like
+// the screen had found nothing at all.
+func (mo *imageModal) filterQuery() string {
+	return expandHome(mo.byoInput.Value())
 }
 
 // updateByo owns the keyboard while the byo screen is open. Up/down (and
@@ -634,7 +644,7 @@ func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
 	var cmd tea.Cmd
 	mo.byoInput, cmd = mo.byoInput.Update(msg)
 	mo.byoErr = ""
-	mo.byoList.SetFilterText(mo.byoInput.Value())
+	mo.byoList.SetFilterText(mo.filterQuery())
 	return cmd, -1, false
 }
 

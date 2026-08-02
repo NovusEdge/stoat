@@ -514,6 +514,36 @@ func TestFinderMatchesFuzzilyNotJustSubstrings(t *testing.T) {
 	}
 }
 
+// A typed ~ must expand before it filters. Scanned paths are absolute, so a
+// raw "~/Downloads" matches nothing in "/home/u/Downloads/alpine.iso"
+// character-for-character (fuzzy matching still requires every rune to
+// appear, in order) -- the most natural way to type a home-relative
+// location made the screen look like it had found nothing at all.
+func TestByoFilterExpandsATildeQuery(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	found := filepath.Join(home, "Downloads", "alpine.iso")
+
+	mo := newImageModal(testImages(), 0)
+	mo.openByo()
+	mo.setFound([]foundImage{
+		{path: found, size: 1},
+		{path: filepath.Join(home, "vms", "alpine.iso"), size: 1},
+	})
+
+	// Type it one key at a time through the real update path, exactly as a
+	// user would -- not by poking SetFilterText directly, since the bug is
+	// in what updateByo hands the list, not in the list's own filtering.
+	for _, r := range "~/Downloads" {
+		mo.update(keyMsg(string(r)))
+	}
+
+	out := ansi.Strip(mo.view())
+	if !strings.Contains(out, "alpine.iso") {
+		t.Errorf("typing ~/Downloads hid every result, including the one actually under it:\n%s", out)
+	}
+}
+
 // Results stream in while the walk is still running, so the pane must say so
 // -- an empty box with no explanation reads as "there are no images".
 func TestFinderSaysItIsStillLooking(t *testing.T) {
