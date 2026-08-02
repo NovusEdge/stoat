@@ -65,20 +65,23 @@ func Install() error {
 // really cloud-init's packages: list having no per-distro syntax: one
 // fragment only works across OSes whose package names happen to match, so an
 // OS can be safe for one shared fragment and not another (see
-// guest.OS.CloudRecipes and devtools.cloud.yaml vs xfce.cloud.yaml). Fedora
-// is kept out of the shared set entirely rather than being added to it, for
-// two reasons that matter if this ever grows past a single bool:
+// guest.OS.CloudRecipes and devtools.cloud.yaml vs xfce.cloud.yaml). Alpine
+// is CloudRecipes-eligible (devtools.cloud.yaml installs fine on apk) but
+// still needs its own xfce.alpine.cloud.yaml, because xfce.cloud.yaml's
+// systemctl runcmd does not run under Alpine's OpenRC — so, unlike Fedora
+// (kept out of the shared set entirely), a per-OS override and CloudRecipes
+// being true for the same OS both happen at once here. The first loop below
+// records which base names have a per-OS override for osName so the second
+// loop can suppress the shared fragment for exactly those names: without
+// it, an OS with both would be offered two entries for the same recipe —
+// the shared one (wrongly in scope) and the per-OS one.
 //
-//  1. The switch below resolves a shared fragment and a per-OS fragment
-//     separately: a name with BOTH (xfce does) would offer Fedora two
-//     entries for the same recipe the instant CloudRecipes were true for it
-//     — the shared one (now wrongly in scope) and the per-OS one. Nothing
-//     here makes the per-OS file suppress the shared one; that only holds
-//     today because Fedora's CloudRecipes is false.
-//  2. It would also silently break any shared-only fragment (no per-OS
-//     override) whose package names happen not to hold on dnf —
-//     devtools.cloud.yaml is one: git/curl/ca-certificates/tmux/less match,
-//     but Fedora's vim package is "vim-enhanced", not "vim".
+// Fedora is kept out of the shared set entirely for a second, independent
+// reason that still matters even with per-OS suppression: it would silently
+// break any shared-only fragment (no per-OS override) whose package names
+// happen not to hold on dnf — devtools.cloud.yaml is one:
+// git/curl/ca-certificates/tmux/less match, but Fedora's vim package is
+// "vim-enhanced", not "vim".
 func List(osName, backend string) ([]string, error) {
 	entries, err := os.ReadDir(dir())
 	if err != nil {
@@ -87,6 +90,26 @@ func List(osName, backend string) ([]string, error) {
 		}
 		return nil, err
 	}
+
+	// overridden collects the base name of every per-OS fragment that
+	// matches osName ("xfce.alpine.cloud.yaml" -> "xfce"), so the shared
+	// fragment of the same name is suppressed below rather than offered
+	// alongside it.
+	overridden := map[string]bool{}
+	if backend == "cloudinit" {
+		for _, e := range entries {
+			name := e.Name()
+			if !strings.HasSuffix(name, ".cloud.yaml") {
+				continue
+			}
+			base := strings.TrimSuffix(name, ".cloud.yaml")
+			i := strings.LastIndex(base, ".")
+			if i >= 0 && base[i+1:] == osName {
+				overridden[base[:i]] = true
+			}
+		}
+	}
+
 	var out []string
 	for _, e := range entries {
 		name := e.Name()
@@ -94,15 +117,13 @@ func List(osName, backend string) ([]string, error) {
 		case backend == "cloudinit" && strings.HasSuffix(name, ".cloud.yaml"):
 			// "xfce.fedora.cloud.yaml" -> per-OS, offered only to fedora.
 			// "xfce.cloud.yaml"        -> shared, offered to CloudRecipes
-			// OSes.
-			// A per-OS fragment and the shared one therefore never both
-			// appear for the same OS, so the picker shows one xfce entry.
+			// OSes that don't have their own override for "xfce".
 			base := strings.TrimSuffix(name, ".cloud.yaml")
 			if i := strings.LastIndex(base, "."); i >= 0 {
 				if base[i+1:] == osName {
 					out = append(out, name)
 				}
-			} else if g, ok := guest.Lookup(osName); ok && g.CloudRecipes {
+			} else if g, ok := guest.Lookup(osName); ok && g.CloudRecipes && !overridden[base] {
 				out = append(out, name)
 			}
 		case backend != "cloudinit" && strings.HasSuffix(name, ".sh"):

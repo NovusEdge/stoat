@@ -56,12 +56,15 @@ type OS struct {
 	// default, which is how an Alpine image gets asked for /bin/bash.
 	FilenameHints []string
 
-	// CloudRecipes reports whether the shared "*.cloud.yaml" fragment
-	// applies to this OS, as opposed to needing its own
-	// "<name>.<os>.cloud.yaml". Declared here exactly as recipes.cloudOS
-	// has it today, Alpine included as false — see recipes/recipes.go's
-	// cloudOS doc comment for why, and docs/design/guest-subsystem.md for
-	// the follow-up that revisits it deliberately.
+	// CloudRecipes reports whether an OS is offered the shared
+	// "*.cloud.yaml" fragment set at all — true does not mean every shared
+	// fragment applies. cloud-init's packages: list has no per-distro
+	// syntax, so devtools.cloud.yaml's names happen to hold for Alpine's
+	// apk too, but xfce.cloud.yaml's systemd runcmd does not (Alpine is
+	// OpenRC): Alpine gets devtools.cloud.yaml from the shared set and its
+	// own xfce.alpine.cloud.yaml, exactly like Fedora gets its own
+	// xfce.fedora.cloud.yaml. See recipes/recipes.go's List doc comment for
+	// how a per-OS fragment and the shared set combine.
 	CloudRecipes bool
 }
 
@@ -80,7 +83,7 @@ var registry = []OS{
 			"# the indexes, so a separate `apk update` is redundant.\nsetup-apkrepos -c -1\n",
 		PkgInstall:    "apk add ",
 		FilenameHints: []string{"alpine"},
-		CloudRecipes:  false,
+		CloudRecipes:  true,
 	},
 	{
 		Name:           "ubuntu",

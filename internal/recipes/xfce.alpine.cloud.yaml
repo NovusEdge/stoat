@@ -1,0 +1,57 @@
+#cloud-config
+# XFCE desktop fragment for Alpine on the cloudinit backend.
+#
+# Alpine needs its own fragment, not the shared xfce.cloud.yaml, for two
+# independent reasons:
+#
+#   - Alpine boots OpenRC, not systemd. The shared fragment's runcmd is
+#     `systemctl enable/start lightdm`; there is no systemctl binary on
+#     Alpine to run it. The OpenRC equivalents are rc-update/rc-service.
+#   - cloud-init's packages: module installs before runcmd runs, but a
+#     stock Alpine cloud image ships with the community repo commented out
+#     in /etc/apk/repositories — and every package this fragment needs
+#     (xfce4, lightdm, elogind, ...) lives in community, not main. A
+#     packages: list would fail outright, before runcmd ever got a chance
+#     to enable the repo it needs. So this fragment does everything through
+#     runcmd instead, via Alpine's own setup-xorg-base/setup-desktop
+#     tooling (alpine-conf, part of every Alpine install — xfce.alpine.sh,
+#     the live-ISO sibling of this fragment, already depends on it) rather
+#     than reimplementing what that tooling does by hand.
+#
+# setup-xorg-base (verified against its actual source at
+# github.com/alpinelinux/alpine-conf, setup-xorg-base.in):
+#   - runs `setup-apkrepos -o` first, which enables the community repo for
+#     every already-configured main repo and refreshes indexes — so the
+#     packages named on its command line resolve without a separate
+#     repo-enable step here.
+#   - installs xorg-server, xf86-input-libinput, xinit, eudev and
+#     mesa-dri-gallium — the actual X server and its input/GPU/udev stack —
+#     before the packages named on its command line. Skipping this and
+#     naming only the desktop packages is exactly the failure mode that
+#     produced a black screen with a working serial console elsewhere in
+#     this codebase: a desktop installed with no X server under it.
+#   - switches /dev management from Alpine's default mdev to udev.
+#     xf86-input-libinput hard-requires udev's backend; it does not work
+#     against mdev. eudev is in its package list for this reason.
+#
+# The desktop package list below (elogind, gvfs, lightdm,
+# lightdm-gtk-greeter, polkit-elogind, xfce4-terminal, xfce4) matches
+# alpine-conf's own `setup-desktop xfce` case (setup-desktop.in) exactly,
+# minus firefox and xfce4-screensaver/font-dejavu — optional extras this
+# fragment leaves out for the same reason the shared xfce.cloud.yaml stays
+# minimal.
+#
+# elogind + polkit-elogind stand in for systemd-logind's session-management
+# role, which Alpine does not have; without them lightdm has no seat/session
+# backend to hand a graphical login to.
+#
+# Checked against alpine-conf's upstream source, not against real hardware —
+# unverified pending a boot test.
+runcmd:
+  - setup-xorg-base xfce4 elogind gvfs lightdm lightdm-gtk-greeter polkit-elogind xfce4-terminal
+  # A cloud image has a real user account (stoat), so this gets a login
+  # screen rather than the single-user autologin the live-ISO Alpine recipe
+  # uses — same reasoning as the shared xfce.cloud.yaml. Log in as stoat
+  # with the console password set at creation.
+  - rc-update add lightdm default
+  - rc-service lightdm start

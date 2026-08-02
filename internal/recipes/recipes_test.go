@@ -23,7 +23,7 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml", "devtools.cloud.yaml") {
+	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml", "xfce.alpine.cloud.yaml", "devtools.cloud.yaml") {
 		if _, err := os.Stat(Path(name)); err != nil {
 			t.Errorf("Install did not install %q: %v", name, err)
 		}
@@ -64,6 +64,7 @@ func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 		"tailscale.alpine.sh":    true,
 		"xfce.cloud.yaml":        true,
 		"xfce.fedora.cloud.yaml": true,
+		"xfce.alpine.cloud.yaml": true,
 		"devtools.cloud.yaml":    true,
 	}
 	got := map[string]bool{}
@@ -125,10 +126,23 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 		}
 	}
 
-	// alpine has no cloud-config fragment and no ssh recipe: cloudinit is
-	// never its backend, and its only shell recipe requires osName=="alpine".
-	if names, err := List("alpine", "cloudinit"); err != nil || len(names) != 0 {
-		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, %v, want empty", names, err)
+	// alpine is CloudRecipes-eligible for the shared set (devtools.cloud.yaml
+	// installs fine on apk) and has its own xfce fragment (xfce.cloud.yaml's
+	// systemctl runcmd does not work under Alpine's OpenRC) — same pattern
+	// as Fedora's xfce override, so it must get exactly these two entries,
+	// never the shared xfce.cloud.yaml.
+	alpineNames, err := List("alpine", "cloudinit")
+	if err != nil {
+		t.Fatalf("List(\"alpine\", \"cloudinit\"): %v", err)
+	}
+	if !contains(alpineNames, "devtools.cloud.yaml") {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, want it to contain devtools.cloud.yaml", alpineNames)
+	}
+	if !contains(alpineNames, "xfce.alpine.cloud.yaml") {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, want it to contain xfce.alpine.cloud.yaml", alpineNames)
+	}
+	if contains(alpineNames, "xfce.cloud.yaml") {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, must NOT contain xfce.cloud.yaml — its systemctl runcmd does not run under Alpine's OpenRC", alpineNames)
 	}
 	// fedora is served by a per-OS fragment rather than the shared one: it
 	// has no package literally named "xfce4", so it needs the comps group
@@ -347,6 +361,70 @@ func TestCloudFragmentsParse(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestAlpineCloudFragmentUsesOpenRCNotSystemd asserts xfce.alpine.cloud.yaml
+// against the two things that made xfce.cloud.yaml (systemd) unsafe to just
+// reuse for Alpine: it must not shell out to systemctl (Alpine is OpenRC,
+// there is no such binary), and — because cloud-init's packages: module
+// installs before runcmd runs, and a stock Alpine cloud image ships with the
+// community repo (where every desktop package here lives) commented out —
+// it must not rely on a packages: list at all; everything has to happen
+// through runcmd instead.
+func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce.alpine.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(s, "#cloud-config") {
+		t.Error("xfce.alpine.cloud.yaml does not start with #cloud-config")
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+		t.Fatalf("xfce.alpine.cloud.yaml is not valid YAML: %v", err)
+	}
+	// mergeCloudRecipes only splices packages: and runcmd:; anything else is
+	// silently dropped, so the bundled fragment must not declare it.
+	for k := range doc {
+		if k != "packages" && k != "runcmd" {
+			t.Errorf("xfce.alpine.cloud.yaml has top-level key %q, which mergeCloudRecipes silently drops", k)
+		}
+	}
+	if _, ok := doc["packages"]; ok {
+		t.Error("xfce.alpine.cloud.yaml declares packages:, but cloud-init installs packages: before runcmd runs — too early to have enabled the community repo the desktop packages live in")
+	}
+	runcmd, _ := doc["runcmd"].([]any)
+	if len(runcmd) == 0 {
+		t.Fatal("xfce.alpine.cloud.yaml has no runcmd: — the fragment does nothing")
+	}
+
+	// Checked against the parsed runcmd items, not the raw file text, so an
+	// explanatory mention of "systemctl" in a comment (as above) doesn't
+	// trip this.
+	var haveRCUpdate, haveXorgBase bool
+	for _, c := range runcmd {
+		cmd, _ := c.(string)
+		if strings.Contains(cmd, "systemctl") {
+			t.Errorf("xfce.alpine.cloud.yaml runs %q, which does not exist under Alpine's OpenRC", cmd)
+		}
+		if strings.Contains(cmd, "rc-update") {
+			haveRCUpdate = true
+		}
+		if strings.Contains(cmd, "setup-xorg-base") {
+			haveXorgBase = true
+		}
+	}
+	if !haveRCUpdate {
+		t.Error("xfce.alpine.cloud.yaml never calls rc-update to enable lightdm under OpenRC")
+	}
+	if !haveXorgBase {
+		t.Error("xfce.alpine.cloud.yaml does not install an X server (expected via setup-xorg-base) — a desktop with no X server is the black-screen failure this fragment must avoid")
 	}
 }
 
