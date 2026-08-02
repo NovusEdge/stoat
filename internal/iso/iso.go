@@ -306,11 +306,20 @@ func Catalog() []Entry {
 // resolves to "ssh" with no OS guess rather than a wrong guess.
 func Infer(filename string) (backend, os string) {
 	lower := strings.ToLower(filename)
+	isAlpine := strings.Contains(lower, "alpine")
 	switch {
-	case strings.Contains(lower, "alpine") && strings.HasSuffix(lower, ".iso"):
+	case isAlpine && strings.HasSuffix(lower, ".iso"):
 		return "apkovl", "alpine"
 	case strings.Contains(lower, "cloudimg"), strings.Contains(lower, "genericcloud"),
 		strings.HasSuffix(lower, ".qcow2"), strings.HasSuffix(lower, ".img"):
+		// An alpine name here is the cloud image (a4befa9): claim the OS
+		// even though the extension alone doesn't say "alpine", so a BYO
+		// alpine cloud image never resolves to an empty OS. An empty OS on
+		// an alpine image is what sends guestShell("") to /bin/bash, which
+		// Alpine doesn't have — see the alpine cloud qcow2 case above.
+		if isAlpine {
+			return "cloudinit", "alpine"
+		}
 		return "cloudinit", ""
 	default:
 		return "ssh", ""

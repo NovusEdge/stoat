@@ -191,6 +191,11 @@ func TestInfer(t *testing.T) {
 		{"debian genericcloud qcow2", "debian-12-genericcloud-amd64.qcow2", "cloudinit", ""},
 		{"bare .img", "some-cloud-image.img", "cloudinit", ""},
 		{"alpine iso", "alpine-standard-3.20.0-x86_64.iso", "apkovl", "alpine"},
+		// The alpine-cloud catalog entry (a4befa9) downloads exactly this
+		// filename. An empty OS here is what makes the BYO fallback in
+		// internal/tui/form.go dangerous: it flows to guestShell(""),
+		// which returns /bin/bash, and Alpine has no bash.
+		{"alpine cloud qcow2", "generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2", "cloudinit", "alpine"},
 		{"random unrecognised name", "my-random-install.raw", "ssh", ""},
 	}
 	for _, c := range cases {

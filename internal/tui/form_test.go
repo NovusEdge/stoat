@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -435,6 +437,39 @@ func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 // A browsed path must produce exactly the same shape of option as a file
 // found in isos/, or downstream code (backend/OS inference, ssh user
 // resolution) silently behaves differently for the two.
+// a4befa9 added alpine-cloud as an index-resolved... no, direct-URL entry
+// with Flavor == "" (see iso.Resolve's doc comment), so matchLocalImage must
+// find the downloaded file by the same exact-basename match every other
+// direct-URL entry uses. Before this fix, the gate was `e.OS != "alpine"`,
+// which skipped that basename match for EVERY alpine entry (including
+// alpine-cloud) and fell through to iso.Infer, which used to return an empty
+// OS for the .qcow2 filename — so the download could never be matched back
+// to its catalog entry and the form offered it as an unlabeled BYO file
+// forever. See CRITICAL 1 in the final review.
+func TestMatchLocalImageFindsDownloadedAlpineCloudFile(t *testing.T) {
+	var entry iso.Entry
+	for _, e := range iso.Catalog() {
+		if e.ID == "alpine-cloud" {
+			entry = e
+			break
+		}
+	}
+	if entry.ID == "" {
+		t.Fatal("iso.Catalog() has no alpine-cloud entry")
+	}
+
+	u, err := url.Parse(entry.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := path.Base(u.Path)
+
+	got := matchLocalImage(entry, []string{base})
+	if got != base {
+		t.Errorf("matchLocalImage(alpine-cloud, [%q]) = %q, want %q", base, got, base)
+	}
+}
+
 func TestByoOptionFromPathMatchesLocalDiscovery(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "alpine-virt-3.20.0-x86_64.iso")

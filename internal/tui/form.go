@@ -176,10 +176,19 @@ func byoOptionFromPath(path string) (imageOption, error) {
 
 // matchLocalImage reports which local file (if any) satisfies catalog entry
 // e: either the exact basename of e.URL (direct-URL entries), or, for
-// entries resolved through an index rather than a fixed filename (Alpine),
-// whatever local file iso.Infer agrees belongs to e's OS/backend pair.
+// entries resolved through an index rather than a fixed filename, whatever
+// local file iso.Infer agrees belongs to e's OS/backend pair.
+//
+// The discriminator is e.Flavor, not e.OS == "alpine": alpine-cloud (a4befa9)
+// is an alpine entry with a direct URL and Flavor == "", same as any other
+// direct-URL entry (see iso.Resolve's doc comment for why). Gating on OS
+// alone skipped the exact basename match for every alpine entry, including
+// this one, and fell through to the Infer-based loop below — which,
+// depending on the local directory's contents, can match the wrong file
+// among several with the same backend/OS pair. See CRITICAL 1 in the final
+// review.
 func matchLocalImage(e iso.Entry, files []string) string {
-	if e.OS != "alpine" && e.URL != "" {
+	if e.Flavor == "" && e.URL != "" {
 		if u, err := url.Parse(e.URL); err == nil {
 			base := path.Base(u.Path)
 			for _, f := range files {
