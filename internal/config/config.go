@@ -85,11 +85,12 @@ func expand(p string) string {
 	return p
 }
 
-func (v *VM) path() string        { return filepath.Join(v.Dir, "vm.toml") }
-func (v *VM) DiskPath() string    { return filepath.Join(v.Dir, "disk.qcow2") }
-func (v *VM) PidPath() string     { return filepath.Join(v.Dir, "qemu.pid") }
-func (v *VM) MonitorPath() string { return filepath.Join(v.Dir, "monitor.sock") }
-func (v *VM) OvlDir() string      { return filepath.Join(v.Dir, "ovl") }
+func (v *VM) path() string           { return filepath.Join(v.Dir, "vm.toml") }
+func (v *VM) DiskPath() string       { return filepath.Join(v.Dir, "disk.qcow2") }
+func (v *VM) PidPath() string        { return filepath.Join(v.Dir, "qemu.pid") }
+func (v *VM) MonitorPath() string    { return filepath.Join(v.Dir, "monitor.sock") }
+func (v *VM) OvlDir() string         { return filepath.Join(v.Dir, "ovl") }
+func (v *VM) ConsoleLogPath() string { return filepath.Join(v.Dir, "console.log") }
 
 // ISOPath resolves the configured ISO against the data root.
 func (v *VM) ISOPath() string {

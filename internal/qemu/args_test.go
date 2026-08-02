@@ -124,6 +124,19 @@ func TestArgsCloud(t *testing.T) {
 	}
 }
 
+// Every VM writes its guest console to a file, in every mode. When an
+// automated VM fails at 3am there is no window to look at and no operator
+// watching -- the log on disk is the whole postmortem.
+func TestArgsAlwaysLogTheConsole(t *testing.T) {
+	for _, mode := range []string{"live", "disk", "cloud"} {
+		v := &config.VM{Name: "vm", Dir: t.TempDir(), Mode: mode, RAM: 1024, CPUs: 2, SSHPort: 2222}
+		got := strings.Join(Args(v), " ")
+		if !strings.Contains(got, v.ConsoleLogPath()) {
+			t.Errorf("mode=%s does not log the console:\n%s", mode, got)
+		}
+	}
+}
+
 func TestArgsNoShare(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{

@@ -21,6 +21,19 @@ func Args(v *config.VM) []string {
 		"-daemonize",
 		"-pidfile", v.PidPath(),
 		"-monitor", "unix:" + v.MonitorPath() + ",server,nowait",
+		// The guest's serial console, captured unconditionally. An automated VM
+		// has no window and no operator watching it, so this file is the only
+		// postmortem when a boot fails. Cheap: QEMU writes it whether or not
+		// anything ever reads it.
+		//
+		// Note this is the SERIAL console, not the VGA one the display shows.
+		// What lands here depends entirely on the guest's console= setting:
+		// Alpine's generic cloud images point their console at tty0, so this
+		// file gets only early kernel messages, not the full boot. Still, it's
+		// the first place to look when a guest never comes up -- an empty log
+		// here is a real, non-buggy outcome for some guests, not a sign this
+		// broke.
+		"-serial", "file:" + v.ConsoleLogPath(),
 		"-vga", "virtio",
 		"-display", "gtk,gl=on",
 		// Bind loopback explicitly: the QEMU default is 0.0.0.0, which would
