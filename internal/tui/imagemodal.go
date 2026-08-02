@@ -169,27 +169,68 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		// Base name, then the parent directory dimmed, then the size --
 		// matching the columns the tree browser shows (ShowSize = true). The
 		// directory is what tells apart two files that share a name. Widths
-		// sum to modalContentWidth so the row never wraps.
+		// sum to the list's own width (read off m, not a constant, so the
+		// row grows with the modal) so the row never wraps.
+		//
+		// The directory gets whatever's left over: it's the column that
+		// truncates on a narrow terminal, and the one a wide one has room to
+		// show in full — the base name stays a fixed width because ordinary
+		// filenames already fit it, and growing it would just leave the
+		// directory the same cramped size it is today.
+		dirWidth := m.Width() - 2 - foundNameWidth - modalSizeWidth
 		name := ansi.Truncate(filepath.Base(it.img.path), foundNameWidth, "…")
 		label := fmt.Sprintf("%-*s", foundNameWidth, name)
 		if index == m.Index() {
 			label = selStyle.Render(label)
 		}
-		dirText := ansi.Truncate(filepath.Dir(it.img.path), foundDirWidth, "…")
-		dir := dimStyle.Render(fmt.Sprintf("%-*s", foundDirWidth, dirText))
+		dirText := ansi.Truncate(filepath.Dir(it.img.path), dirWidth, "…")
+		dir := dimStyle.Render(fmt.Sprintf("%-*s", dirWidth, dirText))
 		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, humanBytes(it.img.size)))
 		fmt.Fprint(w, cursor+label+dir+size)
 	}
 }
 
-// modalContentWidth is the box's inner width, and modalRows the most rows it
-// shows before paginating. Both are sized to fit the smallest terminal stoat
-// renders panes in at all (smallWidth x smallHeight, 60x20): the box comes to
+// modalContentWidth is the box's floor width, and modalRows its floor row
+// count -- what every list draws at until resize (see below) has room to
+// grow them. Both are sized to fit the smallest terminal stoat renders panes
+// in at all (smallWidth x smallHeight, 60x20): the box comes to
 // modalContentWidth+paneFrame() wide and modalRows+6 tall, which leaves room
 // at that size rather than assuming the developer's window.
 const (
 	modalContentWidth = 46
 	modalRows         = 6
+)
+
+// modalMaxContentWidth and modalMaxRows cap how far resize grows the box on
+// a very large terminal.
+//
+// 100 for the width: past roughly a hundred columns a monospace line gets
+// hard to track by eye -- the guidance behind typographic "measure" limits
+// tops out around there for the same reason -- and this is a picker dialog,
+// not a pane meant to fill the screen, so it stays comfortably short of the
+// terminal's own width rather than chasing it. 16 for the rows is the same
+// idea applied vertically: enough for a scan with real results to feel like
+// a list rather than a slit, without turning the modal into most of a tall
+// terminal.
+const (
+	modalMaxContentWidth = 100
+	modalMaxRows         = 16
+)
+
+// modalWidthMargin is breathing room left OUTSIDE the box, beyond its own
+// frame, so a maximally wide modal never touches the terminal's edges.
+//
+// modalHeightChrome is the vertical space the box spends on everything that
+// ISN'T list rows -- pane border, padding, title, and (on the byo screen,
+// the tallest case) the text field and a two-line hint/error. Sized to that
+// worst case so growing rows never overflows it. Chosen, together with
+// modalWidthMargin, so that at exactly smallWidth x smallHeight (60x20)
+// both dimensions clamp to their floor -- the size this modal has always
+// drawn at -- rather than shifting the smallest-terminal geometry tests'
+// ground truth.
+const (
+	modalWidthMargin  = 8
+	modalHeightChrome = 14
 )
 
 // modalSizeWidth is the size column, right-aligned so the digits line up down
@@ -203,13 +244,11 @@ const (
 // whole feature exists to make comparable.
 const modalSizeWidth = 9
 
-// foundNameWidth and foundDirWidth are the finder's two text columns. Their
-// sum plus the cursor and modalSizeWidth equals modalContentWidth exactly, so
-// a found row never wraps the way the other rows' fixed columns don't either.
-const (
-	foundNameWidth = 20
-	foundDirWidth  = modalContentWidth - 2 - foundNameWidth - modalSizeWidth
-)
+// foundNameWidth is the fixed half of the byo screen's two text columns; the
+// directory gets whatever's left of the list's own width (see imageDelegate
+// Render's foundItem case) so the two always sum to it exactly and a found
+// row never wraps.
+const foundNameWidth = 20
 
 // imageModal is the two-level picker. One list, re-populated on drill-down,
 // rather than two lists: two would mean two cursors to keep consistent and
@@ -220,6 +259,15 @@ type imageModal struct {
 	groups []osItem
 	images []imageOption
 	osName string // the group drilled into; meaningful at levelVariant
+
+	// contentWidth and rows are the box's actual content width and list row
+	// count for the CURRENT render, recomputed every frame by resize from
+	// the terminal size. Both start at their floor constants, so a modal
+	// drawn before its first resize call -- built directly, as most tests
+	// do, rather than through renderModal -- behaves exactly as it always
+	// has: the fixed size this modal drew at before it could grow.
+	contentWidth int
+	rows         int
 
 	// byo backs the byo group's one leaf: a focused text field over a
 	// fuzzy-filtered list of every disk image under $HOME, the single screen
@@ -256,8 +304,8 @@ type imageModal struct {
 // off: the whole catalog is five OSes, so a search box would earn nothing,
 // and it would make esc ambiguous — the key has to mean "go back a level"
 // here, and bubbles/list claims it for clearing a filter.
-func newImageList() list.Model {
-	l := list.New(nil, imageDelegate{}, modalContentWidth, modalRows)
+func newImageList(width, rows int) list.Model {
+	l := list.New(nil, imageDelegate{}, width, rows)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
@@ -326,7 +374,13 @@ func groupImages(images []imageOption) []osItem {
 // group owning the currently selected image, so opening it does not lose the
 // user's place.
 func newImageModal(images []imageOption, current int) *imageModal {
-	mo := &imageModal{list: newImageList(), images: images, groups: groupImages(images)}
+	mo := &imageModal{
+		contentWidth: modalContentWidth,
+		rows:         modalRows,
+		images:       images,
+		groups:       groupImages(images),
+	}
+	mo.list = newImageList(mo.contentWidth, mo.rows)
 	mo.showOSLevel()
 	for i, g := range mo.groups {
 		for _, idx := range g.idxs {
@@ -374,13 +428,13 @@ func (mo *imageModal) drill(g osItem) {
 // level does not draw a box with four blank lines in it — bubbles/list pads
 // its viewport to whatever height it is given.
 func (mo *imageModal) syncHeight(n int) {
-	if n > modalRows {
-		n = modalRows
+	if n > mo.rows {
+		n = mo.rows
 	}
 	if n < 1 {
 		n = 1
 	}
-	mo.list.SetShowPagination(len(mo.list.Items()) > modalRows)
+	mo.list.SetShowPagination(len(mo.list.Items()) > mo.rows)
 	mo.list.SetHeight(n)
 }
 
@@ -484,7 +538,7 @@ func (mo *imageModal) openByo() tea.Cmd {
 
 	ti := theme.TextInput()
 	ti.Placeholder = "type to search, or paste a path"
-	ti.SetWidth(modalContentWidth)
+	ti.SetWidth(mo.contentWidth)
 	mo.byoInput = ti
 	mo.byo = true
 	mo.byoErr = ""
@@ -522,7 +576,7 @@ func (mo *imageModal) ensureByoList() {
 	if mo.byoListReady {
 		return
 	}
-	l := list.New(nil, imageDelegate{}, modalContentWidth, modalRows)
+	l := list.New(nil, imageDelegate{}, mo.contentWidth, mo.rows)
 	l.SetShowStatusBar(false)
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
@@ -547,7 +601,7 @@ func (mo *imageModal) setFound(found []foundImage) {
 		return items[a].(foundItem).img.path < items[b].(foundItem).img.path
 	})
 	mo.byoList.SetItems(items)
-	mo.byoList.SetShowPagination(len(items) > modalRows)
+	mo.byoList.SetShowPagination(len(items) > mo.rows)
 	// A live filter must keep matching the grown item set, or a batch that
 	// lands after the user has already typed a query would silently show
 	// unfiltered results until the next keystroke.
@@ -661,6 +715,13 @@ func (m model) renderModal(screen string) string {
 	if m.modal == nil {
 		return screen
 	}
+	// The one place a modal learns the terminal's size: renderModal is
+	// called every frame with m.width/m.height already known, so resizing
+	// here keeps the box in step without the modal reaching for a global or
+	// every screen that can open one threading size through by hand. A
+	// modal built directly and viewed without ever going through here (most
+	// tests) simply never resizes, and draws at its original fixed size.
+	m.modal.resize(m.width, m.height)
 	box := m.modal.view()
 	x := (m.width - lipgloss.Width(box)) / 2
 	y := (m.height - lipgloss.Height(box)) / 2
@@ -695,9 +756,9 @@ func (mo *imageModal) view() string {
 	// pane() only ever forces a width DOWN, so without this the box was as
 	// wide as whatever happened to be in it — 31 cells at the OS level and 41
 	// at the variant level — and drilling in made the border visibly jump.
-	body := lipgloss.NewStyle().Width(modalContentWidth).
+	body := lipgloss.NewStyle().Width(mo.contentWidth).
 		Render(mo.list.View() + "\n\n" + dimStyle.Render(hint))
-	return pane(title, body, modalContentWidth+paneFrame())
+	return pane(title, body, mo.contentWidth+paneFrame())
 }
 
 // viewByo renders the text field and its fuzzy-filtered result list in place
@@ -722,7 +783,31 @@ func (mo *imageModal) viewByo() string {
 	case status != "":
 		hint = status + "\n" + hint
 	}
-	body := lipgloss.NewStyle().Width(modalContentWidth).
+	body := lipgloss.NewStyle().Width(mo.contentWidth).
 		Render(mo.byoInput.View() + "\n" + mo.byoList.View() + "\n\n" + hint)
-	return pane("image"+glyphSep+"byo", body, modalContentWidth+paneFrame())
+	return pane("image"+glyphSep+"byo", body, mo.contentWidth+paneFrame())
+}
+
+// resize recomputes the box's content width and row count from the
+// terminal's current size, clamped between the fixed floors above (the
+// original, pre-growth size) and modalMaxContentWidth/modalMaxRows, then
+// pushes the new size into whichever lists and input already exist.
+//
+// Idempotent and cheap enough to call every frame: SetWidth/SetHeight on an
+// unchanged value is a no-op on the components underneath, so there's no
+// need to guard against calling this when nothing actually changed.
+func (mo *imageModal) resize(termWidth, termHeight int) {
+	mo.contentWidth = max(modalContentWidth, min(modalMaxContentWidth, termWidth-paneFrame()-modalWidthMargin))
+	mo.rows = max(modalRows, min(modalMaxRows, termHeight-modalHeightChrome))
+
+	mo.list.SetWidth(mo.contentWidth)
+	mo.syncHeight(len(mo.list.Items()))
+	if mo.byoListReady {
+		mo.byoList.SetWidth(mo.contentWidth)
+		mo.byoList.SetHeight(mo.rows)
+		mo.byoList.SetShowPagination(len(mo.byoList.Items()) > mo.rows)
+	}
+	if mo.byo {
+		mo.byoInput.SetWidth(mo.contentWidth)
+	}
 }

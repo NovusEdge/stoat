@@ -799,6 +799,94 @@ func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
 	}
 }
 
+// The actual user-visible point of a growing modal: a wide terminal gives
+// the directory column enough room that a real path renders whole, with no
+// "…" cutting it off. At the modal's old fixed width this directory (62
+// cells) would have been cut to foundDirWidth's old 15.
+func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+	mo.openByo()
+	longPath := "/home/novusedge/projects/my-really-long-project-name/downloads/alpine.iso"
+	mo.setFound([]foundImage{{path: longPath, size: 1}})
+
+	m := model{width: 200, height: 50, modal: mo}
+	screen := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, "")
+	out := ansi.Strip(m.renderModal(screen))
+
+	dir := filepath.Dir(longPath)
+	if !strings.Contains(out, dir) {
+		t.Errorf("a 200-column terminal still truncated the directory %q:\n%s", dir, out)
+	}
+	// Check the row itself for a truncation mark, not the whole screen --
+	// "searching …" is a legitimate ellipsis on its own status line.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "alpine.iso") && strings.Contains(line, "…") {
+			t.Errorf("the result row is still truncated on a 200-column terminal: %q", line)
+		}
+	}
+}
+
+// The box must also grow sanely at an ordinary "bigger than the floor but
+// nowhere near huge" terminal -- centred, and never overflowing it, the
+// same invariant TestByoScreenFitsTheSmallestTerminal and
+// TestModalFitsTheSmallestTerminal check at the other end of the range.
+func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
+	mo := newImageModal(testImages(), 0)
+	byoVariants(t, mo)
+	mo.openByo()
+	mo.setFound([]foundImage{{path: "/home/u/vms/alpine.iso", size: 1}})
+
+	m := model{width: 100, height: 30, modal: mo}
+	// Resize explicitly, the same way renderModal does every real frame --
+	// this test wants to observe growth, unlike the smallest-terminal tests,
+	// which deliberately never resize so they keep exercising the box's
+	// original fixed size.
+	m.modal.resize(m.width, m.height)
+	box := m.modal.view()
+	if w := lipgloss.Width(box); w > m.width {
+		t.Errorf("modal is %d cells wide, terminal is %d", w, m.width)
+	}
+	if h := lipgloss.Height(box); h > m.height {
+		t.Errorf("modal is %d lines tall, terminal is %d", h, m.height)
+	}
+	// The box should actually have grown past the smallest-terminal floor --
+	// otherwise this test would pass even if resize did nothing at all.
+	if w := lipgloss.Width(box); w <= smallWidth {
+		t.Errorf("modal did not grow at 100 columns: still %d cells wide", w)
+	}
+
+	screen := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, "")
+	out := m.renderModal(screen)
+	if w := lipgloss.Width(out); w > m.width {
+		t.Errorf("composited frame is %d cells wide, terminal is %d", w, m.width)
+	}
+	if h := lipgloss.Height(out); h > m.height {
+		t.Errorf("composited frame is %d lines tall, terminal is %d", h, m.height)
+	}
+
+	// Centred: the box's left edge should sit roughly mid-terminal, not
+	// flush to a corner the way a too-narrow terminal forces it to.
+	stripped := ansi.Strip(out)
+	lines := strings.Split(stripped, "\n")
+	var leftmostBorder int = -1
+	for _, line := range lines {
+		if i := strings.Index(line, "╭"); i >= 0 {
+			leftmostBorder = i
+			break
+		}
+	}
+	if leftmostBorder < 0 {
+		t.Fatal("could not find the box's top-left corner in the composited frame")
+	}
+	boxWidth := lipgloss.Width(box)
+	wantLeft := (m.width - boxWidth) / 2
+	if leftmostBorder != wantLeft {
+		t.Errorf("box's left edge is at column %d, want %d (centred for a %d-wide box in a %d-wide terminal)",
+			leftmostBorder, wantLeft, boxWidth, m.width)
+	}
+}
+
 // Arrow keys must move the list's selection, not the text field -- and the
 // DRAWN highlight must follow, since a cursor that moves in state but not on
 // screen is invisible to the user.
