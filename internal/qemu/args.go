@@ -11,6 +11,16 @@ import (
 // Binary is the QEMU executable stoat drives.
 const Binary = "qemu-system-x86_64"
 
+// needsWindow reports whether a human has to look at this VM's screen. Only
+// one case does: a disk-mode VM that has not been installed yet, where the
+// user is driving an OS installer that draws to VGA and would be invisible
+// on a serial console. live and cloud reach ssh with no console interaction
+// at all, and an installed disk VM boots the same way -- for those the
+// window only opens, steals focus, and gets alt-tabbed away from.
+func needsWindow(v *config.VM) bool {
+	return v.Mode == "disk" && !v.Installed
+}
+
 // Args returns the argv (excluding argv[0]) for a VM. It is pure: the config
 // must already be resolved, and nothing here touches the filesystem.
 func Args(v *config.VM) []string {
@@ -34,12 +44,19 @@ func Args(v *config.VM) []string {
 		// here is a real, non-buggy outcome for some guests, not a sign this
 		// broke.
 		"-serial", "file:" + v.ConsoleLogPath(),
-		"-vga", "virtio",
-		"-display", "gtk,gl=on",
 		// Bind loopback explicitly: the QEMU default is 0.0.0.0, which would
 		// publish every guest's SSH to the LAN.
 		"-netdev", fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort),
 		"-device", "virtio-net,netdev=n0",
+	}
+
+	if needsWindow(v) {
+		a = append(a, "-vga", "virtio", "-display", "gtk,gl=on")
+	} else {
+		// -display none is irreversible on a running qemu, so bind VNC to a
+		// socket at launch. It costs nothing when unused and means the
+		// display is always recoverable for a guest that misbehaves.
+		a = append(a, "-display", "none", "-vnc", "unix:"+v.VNCPath())
 	}
 
 	if v.Share != "" {

@@ -137,6 +137,45 @@ func TestArgsAlwaysLogTheConsole(t *testing.T) {
 	}
 }
 
+// live and cloud are automated end to end: sshd comes up with the user's key
+// already installed, and nobody ever needs to touch the console. The window
+// only steals focus. An installed disk VM is the same. But an UNINSTALLED
+// disk VM is a human running a VGA-first OS installer -- take its window away
+// and the mode becomes unusable.
+func TestOnlyManualInstallsGetAWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		vm          config.VM
+		wantsWindow bool
+	}{
+		{"live is automated", config.VM{Mode: "live"}, false},
+		{"cloud is automated", config.VM{Mode: "cloud"}, false},
+		{"installed disk boots like the others", config.VM{Mode: "disk", Installed: true}, false},
+		{"uninstalled disk is a manual install", config.VM{Mode: "disk"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := tc.vm
+			v.Name, v.Dir, v.RAM, v.CPUs, v.SSHPort = "vm", t.TempDir(), 1024, 2, 2222
+			got := strings.Join(Args(&v), " ")
+			hasGTK := strings.Contains(got, "gtk")
+			if hasGTK != tc.wantsWindow {
+				t.Errorf("gtk window = %v, want %v:\n%s", hasGTK, tc.wantsWindow, got)
+			}
+			if tc.wantsWindow {
+				return
+			}
+			if !strings.Contains(got, "-display none") && !strings.Contains(got, "display none") {
+				t.Errorf("headless VM does not ask for -display none:\n%s", got)
+			}
+			// -display none cannot be undone on a running qemu, so the
+			// display has to stay reachable some other way.
+			if !strings.Contains(got, "vnc") {
+				t.Errorf("headless VM has no way to get a display back:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestArgsNoShare(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
