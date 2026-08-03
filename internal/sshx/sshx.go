@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -135,7 +134,7 @@ func Provision(v *config.VM) (err error) {
 		}
 	}()
 
-	log, err := os.Create(filepath.Join(v.Dir, "last-provision.log"))
+	log, err := os.Create(v.ProvisionLogPath())
 	if err != nil {
 		return err
 	}

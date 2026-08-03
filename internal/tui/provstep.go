@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -64,7 +63,7 @@ const recipeMarker = "=== recipe "
 // Returns the step (which recipe, or the phase before one starts) and the most
 // recent line of real output.
 func readProvStep(v *config.VM) (step, last string) {
-	b := tailBytes(filepath.Join(v.Dir, "last-provision.log"), provTailBytes)
+	b := tailBytes(v.ProvisionLogPath(), provTailBytes)
 	if len(b) == 0 {
 		return "starting", ""
 	}

@@ -95,6 +95,12 @@ func (v *VM) VNCPath() string        { return filepath.Join(v.Dir, "vnc.sock") }
 func (v *VM) OvlDir() string         { return filepath.Join(v.Dir, "ovl") }
 func (v *VM) ConsoleLogPath() string { return filepath.Join(v.Dir, "console.log") }
 
+// ProvisionLogPath is the transcript of the most recent recipe run, written
+// by sshx.Provision. Lives here rather than in sshx so every VM path has one
+// home, matching ConsoleLogPath/DiskPath/etc. — a second copy of this
+// literal is exactly the drift this package exists to prevent.
+func (v *VM) ProvisionLogPath() string { return filepath.Join(v.Dir, "last-provision.log") }
+
 // ISOPath resolves the configured ISO against the data root.
 func (v *VM) ISOPath() string {
 	if filepath.IsAbs(v.ISO) {

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -71,7 +70,7 @@ func wantsAutoProvisionPrompt(v *config.VM) bool {
 // finished cleanly. sshx.Provision writes "done" as the final line, and
 // truncates the file at the start of every run, so the tail is unambiguous.
 func lastProvisionSucceeded(v *config.VM) bool {
-	b := tailBytes(filepath.Join(v.Dir, "last-provision.log"), provTailBytes)
+	b := tailBytes(v.ProvisionLogPath(), provTailBytes)
 	if len(b) == 0 {
 		return false
 	}
@@ -103,5 +102,5 @@ func ensureNoStaleLog(v *config.VM) {
 	if v.Mode != "live" {
 		return
 	}
-	_ = os.Remove(filepath.Join(v.Dir, "last-provision.log"))
+	_ = os.Remove(v.ProvisionLogPath())
 }

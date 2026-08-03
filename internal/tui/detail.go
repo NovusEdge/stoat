@@ -39,7 +39,7 @@ func tick(gen int) tea.Cmd {
 
 // tailLog reads the last n lines of the most recent provision run.
 func tailLog(v *config.VM, n int) string {
-	b, err := os.ReadFile(filepath.Join(v.Dir, "last-provision.log"))
+	b, err := os.ReadFile(v.ProvisionLogPath())
 	if err != nil {
 		return ""
 	}
