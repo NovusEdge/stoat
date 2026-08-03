@@ -2,6 +2,7 @@ package core
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,6 +79,13 @@ func TestPruneProtectsImageReferencedViaBase(t *testing.T) {
 // that only lists isos/ contents) and must not confuse the reference check
 // into leaving a same-named isos/ file looking referenced when it isn't.
 func TestPruneBYOOutsideIsosDoesNotConfuseImages(t *testing.T) {
+	// A BYO .iso with no alpine hint infers the ssh backend, which means disk
+	// mode, which means Create shells out to qemu-img. CI has no qemu-img, and
+	// a missing host tool must never redden CI — the same rule the xorriso and
+	// qemu-img tests elsewhere in this repo already follow.
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed")
+	}
 	dir := root(t)
 	outside := filepath.Join(t.TempDir(), "custom-linux.iso")
 	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {

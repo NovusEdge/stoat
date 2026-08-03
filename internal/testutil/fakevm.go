@@ -3,11 +3,14 @@
 package testutil
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // FakeRunning makes the VM at dir look running to qemu.Running, without
@@ -47,10 +50,38 @@ func FakeRunning(t *testing.T, dir string) func() {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", "-c", "sleep 100; :", filepath.Join(dir, "marker"))
+	marker := filepath.Join(dir, "marker")
+	cmd := exec.Command("sh", "-c", "sleep 100; :", marker)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
+	// WAIT FOR THE EXEC TO LAND before publishing the pidfile.
+	//
+	// cmd.Start returns once the fork is under way, not once the child has
+	// exec'd. In that window /proc/<pid>/cmdline still reports the PARENT's
+	// argv — the go test binary — which does not contain dir. A check landing
+	// there sees a pid whose cmdline does not match and concludes the VM is
+	// not running, and qemu.Running does not merely return false: it DELETES
+	// the pidfile it just read, so the VM stays "not running" forever after.
+	//
+	// Locally the exec wins that race essentially always, which is why this
+	// passed here and failed on a loaded CI runner. Publishing the pidfile
+	// only once the cmdline actually matches removes the window entirely.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", cmd.Process.Pid))
+		if err == nil && bytes.Contains(b, []byte(dir+"/")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			cmd.Wait()
+			t.Fatalf("fake VM process never showed %q in its cmdline; qemu.Running would not match it", dir+"/")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
 	pidFile := filepath.Join(dir, "qemu.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
 		cmd.Process.Kill()
