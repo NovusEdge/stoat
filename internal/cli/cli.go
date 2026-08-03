@@ -14,6 +14,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -55,6 +56,12 @@ type Args struct {
 	Sub     string
 	OS      string
 	Backend string
+
+	// Command belongs to "exec": the guest command as an argv, never a shell
+	// string. core.Exec quotes each element for the guest's shell, so word
+	// boundaries survive; flattening it to a string here would throw away the
+	// very thing that makes that possible.
+	Command []string
 
 	// Spec belongs to "create". It is core's own type rather than a dozen
 	// more fields here, so adding an option to a VM means adding it in one
@@ -192,6 +199,24 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
 
+	case "exec":
+		// exec parses NO flags of its own, deliberately. Everything after the
+		// VM name is the guest's command, verbatim — running `stoat exec work
+		// ls -la` must send -la to ls, not have stoat try to interpret it.
+		// A leading "--" is accepted and dropped for anyone in the habit of
+		// writing it, but it is not required.
+		if len(rest) == 0 {
+			return nil, usageError("exec: missing vm name")
+		}
+		name, cmd := rest[0], rest[1:]
+		if len(cmd) > 0 && cmd[0] == "--" {
+			cmd = cmd[1:]
+		}
+		if len(cmd) == 0 {
+			return nil, usageError("exec: missing command")
+		}
+		return &Args{Cmd: "exec", VM: name, Command: cmd}, nil
+
 	case "recipe":
 		// Positionals are pulled off BEFORE flag parsing: Go's flag package
 		// stops at the first non-flag argument, so "recipe new x --os alpine"
@@ -258,6 +283,8 @@ commands:
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
+  exec <name> <cmd>... run a command in a VM; exits with the GUEST's status.
+                       Everything after <name> is the command, verbatim.
   provision <name>     run recipes, streaming output to stdout
   rm <name> [-y]       delete a VM; refuses while running, confirms unless -y
   logs [-n N]          tail the stoat log (default 50 lines)
@@ -324,6 +351,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runLS(a, stdout, stderr)
 	case "create":
 		return runCreate(a, stdout, stderr)
+	case "exec":
+		return runExec(a, stdout, stderr)
 	case "up":
 		return runUp(a, stdout, stderr)
 	case "down":
@@ -403,6 +432,35 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "start it with: stoat up %s\n", v.Name)
 	}
 	return ExitOK
+}
+
+// runExec runs a command in a guest and RETURNS THE GUEST'S EXIT CODE, the
+// same way ssh itself does. That is what makes it scriptable — `stoat exec vm
+// make test && deploy` has to mean what it looks like.
+//
+// The cost is that stoat's own exit codes and the guest's share one range: a
+// guest command exiting 2 is indistinguishable from a stoat usage error. That
+// is accepted rather than worked around, because every alternative is worse —
+// remapping the guest's status silently lies about what the command did, and a
+// dedicated flag for "really give me the real code" would just be a footgun
+// with extra steps. ssh made the same trade for the same reason.
+//
+// Note stoat's OWN failures here (no such VM, not running) still exit 1, and
+// print to stderr, so they are distinguishable from guest output.
+func runExec(a *Args, stdout, stderr io.Writer) int {
+	// No timeout: a guest command may legitimately run for hours, and ^C
+	// already kills the ssh process. Bounding it here would mean inventing a
+	// limit nobody asked for.
+	res, err := core.Exec(context.Background(), a.VM, a.Command)
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: exec:", err)
+		return ExitFail
+	}
+	// Streamed through verbatim, on the matching stream, so a caller can pipe
+	// stdout without stderr contaminating it.
+	fmt.Fprint(stdout, res.Stdout)
+	fmt.Fprint(stderr, res.Stderr)
+	return res.ExitCode
 }
 
 func runLS(a *Args, stdout, stderr io.Writer) int {

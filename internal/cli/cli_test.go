@@ -404,3 +404,40 @@ func TestParseRMAcceptsFlagsEitherSide(t *testing.T) {
 		}
 	}
 }
+
+// TestParseExecTakesTheCommandVerbatim pins that exec does no flag parsing of
+// its own. `stoat exec work ls -la` must send -la to ls; if stoat's flag
+// package ever gets hold of the command, every guest command with a flag in it
+// breaks, and it breaks by doing something OTHER than what was asked rather
+// than by failing.
+func TestParseExecTakesTheCommandVerbatim(t *testing.T) {
+	cases := []struct {
+		args []string
+		vm   string
+		cmd  []string
+	}{
+		{[]string{"exec", "work", "ls"}, "work", []string{"ls"}},
+		{[]string{"exec", "work", "ls", "-la", "/tmp"}, "work", []string{"ls", "-la", "/tmp"}},
+		// Flags that stoat itself defines must NOT be swallowed.
+		{[]string{"exec", "work", "sh", "-c", "echo hi"}, "work", []string{"sh", "-c", "echo hi"}},
+		{[]string{"exec", "work", "-q"}, "work", []string{"-q"}},
+		{[]string{"exec", "work", "grep", "-y", "pattern"}, "work", []string{"grep", "-y", "pattern"}},
+		// A leading -- is optional and dropped.
+		{[]string{"exec", "work", "--", "ls", "-la"}, "work", []string{"ls", "-la"}},
+	}
+	for _, c := range cases {
+		got, err := Parse(c.args)
+		if err != nil {
+			t.Fatalf("Parse(%v) errored: %v", c.args, err)
+		}
+		if got.VM != c.vm || !reflect.DeepEqual(got.Command, c.cmd) {
+			t.Errorf("Parse(%v) = VM %q cmd %q; want %q %q", c.args, got.VM, got.Command, c.vm, c.cmd)
+		}
+	}
+
+	for _, args := range [][]string{{"exec"}, {"exec", "work"}, {"exec", "work", "--"}} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("Parse(%v) was accepted; want a usage error", args)
+		}
+	}
+}
