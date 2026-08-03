@@ -441,3 +441,36 @@ func TestParseExecTakesTheCommandVerbatim(t *testing.T) {
 		}
 	}
 }
+
+// TestParseCPInfersDirection pins that `stoat cp` works out which way the file
+// is going from which side carries the "<vm>:" prefix, so there is no
+// --to/--from flag for a user to get backwards. Both-sides and neither-side
+// are usage errors rather than a guess.
+func TestParseCPInfersDirection(t *testing.T) {
+	got, err := Parse([]string{"cp", "/host/a.txt", "work:/tmp/a.txt"})
+	if err != nil {
+		t.Fatalf("cp to guest: %v", err)
+	}
+	if got.VM != "work" || got.Local != "/host/a.txt" || got.Remote != "/tmp/a.txt" || !got.ToRemote {
+		t.Errorf("cp to guest = %+v", got)
+	}
+
+	got, err = Parse([]string{"cp", "work:/tmp/a.txt", "/host/a.txt"})
+	if err != nil {
+		t.Fatalf("cp from guest: %v", err)
+	}
+	if got.VM != "work" || got.Local != "/host/a.txt" || got.Remote != "/tmp/a.txt" || got.ToRemote {
+		t.Errorf("cp from guest = %+v", got)
+	}
+
+	for _, args := range [][]string{
+		{"cp", "a:/x", "b:/y"}, // guest to guest
+		{"cp", "/x", "/y"},     // host to host: that is just cp
+		{"cp", "work:/x"},      // one argument
+		{"cp", "a", "b", "c"},  // three
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("Parse(%v) was accepted; want a usage error", args)
+		}
+	}
+}

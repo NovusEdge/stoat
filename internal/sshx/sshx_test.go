@@ -44,6 +44,82 @@ func TestArgsUsesConfiguredSSHUser(t *testing.T) {
 	}
 }
 
+// TestCopyArgsUsesScpsPortFlagNotSSHs pins the regression this package
+// exists to prevent: scp takes -P (capital) for the port, not ssh's -p —
+// copy-pasting Args' argv into an scp invocation would either fail outright
+// or (worse) silently hit -p's OTHER meaning for scp, "preserve file times".
+func TestCopyArgsUsesScpsPortFlagNotSSHs(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
+	got := CopyArgs(v, "/tmp/local", "/root/remote", true)
+
+	if !containsPair(got, "-P", "2201") {
+		t.Errorf("missing -P 2201 in: %v", got)
+	}
+	for i, a := range got {
+		if a == "-p" {
+			t.Errorf("argv has bare -p at %d (scp's -p means \"preserve\", not port): %v", i, got)
+		}
+	}
+}
+
+// TestCopyArgsSharesConnOptionsWithArgs guards against the shared options
+// drifting apart from ssh's: this is the whole point of factoring
+// connOptions out in the first place.
+func TestCopyArgsSharesConnOptionsWithArgs(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
+	got := strings.Join(CopyArgs(v, "/tmp/local", "/root/remote", true), " ")
+
+	for _, want := range []string{
+		"-o StrictHostKeyChecking=no",
+		"-o UserKnownHostsFile=/dev/null",
+		"-o BatchMode=yes",
+		"-i /data/id_stoat",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in: %s", want, got)
+		}
+	}
+}
+
+// TestCopyArgsDirection pins which side of scp's argv gets the remote spec:
+// scp reads its LAST argument as the destination, so getting toRemote's
+// branch backwards would silently swap upload and download.
+func TestCopyArgsDirection(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
+
+	up := CopyArgs(v, "/tmp/local", "/root/remote", true)
+	if up[len(up)-2] != "/tmp/local" || up[len(up)-1] != "root@127.0.0.1:/root/remote" {
+		t.Errorf("CopyTo argv = %v, want local then remote", up)
+	}
+
+	down := CopyArgs(v, "/tmp/local", "/root/remote", false)
+	if down[len(down)-2] != "root@127.0.0.1:/root/remote" || down[len(down)-1] != "/tmp/local" {
+		t.Errorf("CopyFrom argv = %v, want remote then local", down)
+	}
+}
+
+// TestCopyArgsRemotePathIsNotShellQuoted pins the decision documented in
+// core/copy.go: unlike Exec, which sends its command through the GUEST'S
+// shell and must quote for it, scp (SFTP protocol, the default since OpenSSH
+// 9.0 — see `man scp`'s CAVEATS section, which says quoting is a concern
+// only for the legacy -O protocol) never involves a remote shell at all. A
+// remote path is a literal string handed to the SFTP subsystem, so a space
+// in it must survive completely unescaped — wrapping it in quotes would
+// create a file literally named with quote characters in it.
+func TestCopyArgsRemotePathIsNotShellQuoted(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
+	got := CopyArgs(v, "/tmp/local", "/root/my file.txt", true)
+
+	want := "root@127.0.0.1:/root/my file.txt"
+	if got[len(got)-1] != want {
+		t.Errorf("remote spec = %q, want %q verbatim, unquoted", got[len(got)-1], want)
+	}
+}
+
 func TestArgsExtraGoesAfterTarget(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
@@ -51,6 +127,15 @@ func TestArgsExtraGoesAfterTarget(t *testing.T) {
 	if got[len(got)-2] != "sh" || got[len(got)-1] != "-s" {
 		t.Errorf("extra args must come last, got %v", got)
 	}
+}
+
+func containsPair(argv []string, flag, val string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag && argv[i+1] == val {
+			return true
+		}
+	}
+	return false
 }
 
 // acceptOnly starts a listener that accepts connections and, for each one,

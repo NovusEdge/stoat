@@ -58,6 +58,13 @@ type Args struct {
 	OS      string
 	Backend string
 
+	// Local, Remote and ToRemote belong to "cp". The direction is resolved at
+	// parse time from which argument carried the "<vm>:" prefix, so nothing
+	// downstream has to re-derive it and get it backwards.
+	Local    string
+	Remote   string
+	ToRemote bool
+
 	// Forwards and Clear belong to "forward". Clear is separate from an empty
 	// Forwards because they mean different things: no pairs means "show me",
 	// --clear means "remove them all".
@@ -206,6 +213,27 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
 
+	case "cp":
+		// `stoat cp <src> <dst>`, where exactly one side is `<vm>:<path>` —
+		// the scp/docker cp spelling. Direction is inferred from which side
+		// carries the colon, so there is no --to/--from flag to get backwards.
+		if len(rest) != 2 {
+			return nil, usageError("cp: need a source and a destination, one of them <vm>:<path>")
+		}
+		srcVM, srcPath, srcRemote := strings.Cut(rest[0], ":")
+		dstVM, dstPath, dstRemote := strings.Cut(rest[1], ":")
+		switch {
+		case srcRemote == dstRemote:
+			// Both or neither: guest-to-guest is not something one scp
+			// invocation can do across two forwarded ports, and host-to-host
+			// is just `cp`.
+			return nil, usageError("cp: exactly one side must be <vm>:<path>")
+		case srcRemote:
+			return &Args{Cmd: "cp", VM: srcVM, Remote: srcPath, Local: rest[1]}, nil
+		default:
+			return &Args{Cmd: "cp", VM: dstVM, Remote: dstPath, Local: rest[0], ToRemote: true}, nil
+		}
+
 	case "forward":
 		// `stoat forward <name> 8080:80 8443:443` — the docker/ssh spelling,
 		// host first. With no pairs it PRINTS the current forwards rather than
@@ -324,6 +352,7 @@ commands:
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
+  cp <src> <dst>       copy a file in or out; one side is <vm>:<path>
   forward <name> [8080:80 ...] [--clear]
                        show, set or clear host:guest port forwards
   exec <name> <cmd>... run a command in a VM; exits with the GUEST's status.
@@ -394,6 +423,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runLS(a, stdout, stderr)
 	case "create":
 		return runCreate(a, stdout, stderr)
+	case "cp":
+		return runCopy(a, stdout, stderr)
 	case "forward":
 		return runForward(a, stdout, stderr)
 	case "exec":
@@ -543,6 +574,29 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !active {
 		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
+	}
+	return ExitOK
+}
+
+// runCopy moves one file between host and guest. Direction was already
+// decided by Parse, from which side carried the "<vm>:" prefix.
+func runCopy(a *Args, stdout, stderr io.Writer) int {
+	var err error
+	if a.ToRemote {
+		err = core.CopyTo(context.Background(), a.VM, a.Local, a.Remote)
+	} else {
+		err = core.CopyFrom(context.Background(), a.VM, a.Remote, a.Local)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: cp:", err)
+		return ExitFail
+	}
+	if !a.Quiet {
+		if a.ToRemote {
+			fmt.Fprintf(stdout, "copied %s to %s:%s\n", a.Local, a.VM, a.Remote)
+		} else {
+			fmt.Fprintf(stdout, "copied %s:%s to %s\n", a.VM, a.Remote, a.Local)
+		}
 	}
 	return ExitOK
 }
