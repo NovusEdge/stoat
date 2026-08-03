@@ -8,6 +8,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -48,6 +50,12 @@ type Args struct {
 	Sub     string
 	OS      string
 	Backend string
+
+	// Spec belongs to "create". It is core's own type rather than a dozen
+	// more fields here, so adding an option to a VM means adding it in one
+	// place — the CLI is a flag parser over core, not a second definition of
+	// what a VM is.
+	Spec core.Spec
 }
 
 // usageError marks a Parse failure as an exit-2 condition. Every Parse
@@ -125,6 +133,43 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "rm", VM: fs.Arg(0), Quiet: quiet, Yes: yes}, nil
 
+	case "create":
+		// Same positional-before-flags rule as "recipe new" below.
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("create: missing vm name")
+		}
+		name, rem := rest[0], rest[1:]
+
+		fs := newFlagSet(cmd)
+		var quiet bool
+		s := core.Spec{Name: name}
+		fs.StringVar(&s.Image, "image", "", "catalog image id, or a path to your own image")
+		fs.StringVar(&s.OS, "os", "", "override the guest OS inferred from a byo image's filename")
+		fs.StringVar(&s.Backend, "backend", "", "override the backend inferred from a byo image's filename")
+		fs.StringVar(&s.Mode, "mode", "", "live or disk (alpine iso only; every other image has one mode)")
+		fs.IntVar(&s.RAM, "ram", 0, "memory in MB")
+		fs.IntVar(&s.CPUs, "cpus", 0, "vcpu count")
+		fs.StringVar(&s.Disk, "disk", "", "disk size, absolute only (8G, 512M)")
+		fs.StringVar(&s.Share, "share", "", "host directory to expose in the guest")
+		fs.StringVar(&s.ConsolePassword, "console-password", "", `console password; "random" generates one`)
+		recipeList := fs.String("recipes", "", "comma-separated recipe names to record on the VM")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("create: unexpected argument %q", fs.Arg(0)))
+		}
+		if s.Image == "" {
+			return nil, usageError("create: --image is required")
+		}
+		for _, r := range strings.Split(*recipeList, ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				s.Recipes = append(s.Recipes, r)
+			}
+		}
+		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
+
 	case "recipe":
 		// Positionals are pulled off BEFORE flag parsing: Go's flag package
 		// stops at the first non-flag argument, so "recipe new x --os alpine"
@@ -183,6 +228,11 @@ func usage() string {
 
 commands:
   ls                   list VMs, one line per VM
+  create <name> --image <id|path> [--ram MB] [--cpus N] [--disk 8G]
+                [--share DIR] [--recipes a,b] [--mode live|disk]
+                [--os NAME] [--backend NAME] [--console-password random]
+                       create a VM without starting it
+
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
@@ -250,6 +300,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	switch a.Cmd {
 	case "ls":
 		return runLS(a, stdout, stderr)
+	case "create":
+		return runCreate(a, stdout, stderr)
 	case "up":
 		return runUp(a, stdout, stderr)
 	case "down":
@@ -310,6 +362,25 @@ func colorize(padded, state string) string {
 
 func oneLine(err error) string {
 	return strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", " ")
+}
+
+// runCreate is the whole of `stoat create`: hand the flags to core and print
+// what came back. There was no create subcommand before core existed, because
+// everything it needed lived inside the TUI's form.
+func runCreate(a *Args, stdout, stderr io.Writer) int {
+	v, err := core.Create(a.Spec)
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: create:", err)
+		if errors.Is(err, core.ErrImageNotDownloaded) {
+			fmt.Fprintln(stderr, "stoat: download it from the TUI's image picker first")
+		}
+		return ExitFail
+	}
+	if !a.Quiet {
+		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
+		fmt.Fprintf(stdout, "start it with: stoat up %s\n", v.Name)
+	}
+	return ExitOK
 }
 
 func runLS(a *Args, stdout, stderr io.Writer) int {

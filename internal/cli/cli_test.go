@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -97,7 +98,8 @@ func TestParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse(%v) unexpected error: %v", c.args, err)
 			}
-			if *got != *c.want {
+			if !reflect.DeepEqual(got, c.want) { // reflect, not ==: Args embeds a core.Spec with a slice in it
+
 				t.Fatalf("Parse(%v) = %+v; want %+v", c.args, got, c.want)
 			}
 		})
@@ -177,7 +179,8 @@ func TestParseRecipe(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse(%v): %v", c.args, err)
 			}
-			if *got != *c.want {
+			if !reflect.DeepEqual(got, c.want) { // reflect, not ==: Args embeds a core.Spec with a slice in it
+
 				t.Errorf("Parse(%v) = %+v, want %+v", c.args, got, c.want)
 			}
 		})

@@ -133,13 +133,17 @@ func TestCloudVMGetsADiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	f := newForm()
 	f.inputs[fName].SetValue("ubuntu-1")
-	f.images = []imageOption{{
-		entry:   &iso.Entry{ID: "u", OS: "ubuntu", Backend: "cloudinit", SSHUser: "stoat"},
-		file:    "ubuntu-24.04-server-cloudimg-amd64.img",
-		osName:  "ubuntu",
-		backend: "cloudinit",
-		sshUser: "stoat",
-	}}
+	// A real catalog entry, with its image on disk: core resolves the entry by
+	// ID and reads the backend/OS/ssh user the CATALOG states rather than
+	// re-inferring them from the filename.
+	entry := iso.Catalog()[0]
+	if entry.ID != "ubuntu-24.04" {
+		t.Fatalf("catalog[0] = %q, want ubuntu-24.04", entry.ID)
+	}
+	opt := stubImage(t, "ubuntu-24.04-server-cloudimg-amd64.img")
+	opt.entry = &entry
+	opt.sshUser = entry.SSHUser
+	f.images = []imageOption{opt}
 	f.imgIdx = 0
 
 	vm, err := f.build()
