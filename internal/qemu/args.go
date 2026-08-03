@@ -27,6 +27,23 @@ func NeedsWindow(v *config.VM) bool {
 // Args returns the argv (excluding argv[0]) for a VM. It is pure: the config
 // must already be resolved, and nothing here touches the filesystem.
 func Args(v *config.VM) []string {
+	// hostfwd is repeatable within a single -netdev's option string: QEMU's
+	// user-mode networking accepts any number of comma-separated
+	// "hostfwd=[tcp|udp]:[hostaddr]:hostport-[guestaddr]:guestport" clauses
+	// on one netdev instance, each opening its own host listener into the
+	// guest. Verified directly, not just read off docs: launched real
+	// qemu-system-x86_64 11.0.2 with
+	// "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:19922-:22,hostfwd=tcp:127.0.0.1:19980-:80"
+	// and confirmed with `ss -ltn` that BOTH 127.0.0.1:19922 and
+	// 127.0.0.1:19980 came up as independent host listeners from that one
+	// netdev. This is why additional forwards are appended clauses on the
+	// SSH netdev rather than a second -netdev/-device pair -- one guest
+	// NIC, N forwarded ports, matching a router's port-forwarding table.
+	netdev := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort)
+	for _, f := range v.Forwards {
+		netdev += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:%d", f.HostPort, f.GuestPort)
+	}
+
 	a := []string{
 		"-enable-kvm",
 		"-m", fmt.Sprint(v.RAM),
@@ -55,8 +72,9 @@ func Args(v *config.VM) []string {
 		"-chardev", "file,id=con0,path=" + v.ConsoleLogPath() + ",append=on",
 		"-serial", "chardev:con0",
 		// Bind loopback explicitly: the QEMU default is 0.0.0.0, which would
-		// publish every guest's SSH to the LAN.
-		"-netdev", fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort),
+		// publish every guest's SSH (and every user-declared forward) to the
+		// LAN.
+		"-netdev", netdev,
 		"-device", "virtio-net,netdev=n0",
 	}
 

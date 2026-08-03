@@ -26,6 +26,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		Share:     "/home/someone/vms",
 		SSHPort:   2201,
 		Recipes:   []string{"xfce"},
+		Forwards:  []PortForward{{HostPort: 8080, GuestPort: 80}},
 		Dir:       filepath.Join(Root(), "alpine-live"),
 	}
 	if err := want.Save(); err != nil {
@@ -98,6 +99,9 @@ sshport = 2201
 	}
 	if v.SSHUser != "" {
 		t.Errorf("pre-phase VM should have empty SSHUser (defaults to root elsewhere), got %q", v.SSHUser)
+	}
+	if len(v.Forwards) != 0 {
+		t.Errorf("pre-phase VM should have no port forwards, got %v", v.Forwards)
 	}
 }
 

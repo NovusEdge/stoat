@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -56,6 +57,12 @@ type Args struct {
 	Sub     string
 	OS      string
 	Backend string
+
+	// Forwards and Clear belong to "forward". Clear is separate from an empty
+	// Forwards because they mean different things: no pairs means "show me",
+	// --clear means "remove them all".
+	Forwards []core.PortForward
+	Clear    bool
 
 	// Command belongs to "exec": the guest command as an argv, never a shell
 	// string. core.Exec quotes each element for the guest's shell, so word
@@ -199,6 +206,40 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
 
+	case "forward":
+		// `stoat forward <name> 8080:80 8443:443` — the docker/ssh spelling,
+		// host first. With no pairs it PRINTS the current forwards rather than
+		// clearing them: silently wiping a VM's forwards because an argument
+		// was forgotten is not a mistake worth allowing. Use --clear to mean it.
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("forward: missing vm name")
+		}
+		name, rem := rest[0], rest[1:]
+
+		fs := newFlagSet(cmd)
+		var quiet, clear bool
+		fs.BoolVar(&clear, "clear", false, "remove every forward from this VM")
+		addQuiet(fs, &quiet)
+		// Flags first so the pairs that follow are never eaten by flag parsing.
+		var pairs []string
+		for _, a := range rem {
+			if strings.HasPrefix(a, "-") {
+				if err := fs.Parse([]string{a}); err != nil {
+					return nil, usageError(err.Error())
+				}
+				continue
+			}
+			pairs = append(pairs, a)
+		}
+		if clear && len(pairs) > 0 {
+			return nil, usageError("forward: --clear takes no port pairs")
+		}
+		fwds, err := parseForwards(pairs)
+		if err != nil {
+			return nil, usageError("forward: " + err.Error())
+		}
+		return &Args{Cmd: "forward", VM: name, Forwards: fwds, Clear: clear, Quiet: quiet}, nil
+
 	case "exec":
 		// exec parses NO flags of its own, deliberately. Everything after the
 		// VM name is the guest's command, verbatim — running `stoat exec work
@@ -283,6 +324,8 @@ commands:
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
+  forward <name> [8080:80 ...] [--clear]
+                       show, set or clear host:guest port forwards
   exec <name> <cmd>... run a command in a VM; exits with the GUEST's status.
                        Everything after <name> is the command, verbatim.
   provision <name>     run recipes, streaming output to stdout
@@ -351,6 +394,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runLS(a, stdout, stderr)
 	case "create":
 		return runCreate(a, stdout, stderr)
+	case "forward":
+		return runForward(a, stdout, stderr)
 	case "exec":
 		return runExec(a, stdout, stderr)
 	case "up":
@@ -430,6 +475,74 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
 		fmt.Fprintf(stdout, "start it with: stoat up %s\n", v.Name)
+	}
+	return ExitOK
+}
+
+// parseForwards reads "8080:80" pairs, host port first — the spelling docker
+// and ssh -L both use, so the ordering is the one a user already has in their
+// fingers. Getting it backwards silently binds the wrong port, so the error
+// names the whole offending argument rather than just complaining about a
+// number.
+func parseForwards(pairs []string) ([]core.PortForward, error) {
+	var out []core.PortForward
+	for _, p := range pairs {
+		host, guest, ok := strings.Cut(p, ":")
+		if !ok {
+			return nil, fmt.Errorf("%q is not a HOST:GUEST port pair", p)
+		}
+		h, err := strconv.Atoi(strings.TrimSpace(host))
+		if err != nil {
+			return nil, fmt.Errorf("%q: host port %q is not a number", p, host)
+		}
+		g, err := strconv.Atoi(strings.TrimSpace(guest))
+		if err != nil {
+			return nil, fmt.Errorf("%q: guest port %q is not a number", p, guest)
+		}
+		out = append(out, core.PortForward{HostPort: h, GuestPort: g})
+	}
+	return out, nil
+}
+
+// runForward shows, sets, or clears a VM's port forwards. core.Forward reports
+// whether they are live NOW; when they are not, saying so is the whole point —
+// a user who declared a forward on a running VM and got silence would conclude
+// it was working and spend the next ten minutes debugging the guest.
+func runForward(a *Args, stdout, stderr io.Writer) int {
+	if len(a.Forwards) == 0 && !a.Clear {
+		v, err := core.Get(a.VM)
+		if err != nil {
+			fmt.Fprintln(stderr, "stoat: forward:", err)
+			return ExitFail
+		}
+		if len(v.Forwards) == 0 {
+			fmt.Fprintf(stdout, "%s has no port forwards\n", a.VM)
+			return ExitOK
+		}
+		for _, f := range v.Forwards {
+			fmt.Fprintf(stdout, "%d:%d\n", f.HostPort, f.GuestPort)
+		}
+		return ExitOK
+	}
+
+	active, err := core.Forward(a.VM, a.Forwards)
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: forward:", err)
+		return ExitFail
+	}
+	if a.Quiet {
+		return ExitOK
+	}
+	switch {
+	case a.Clear:
+		fmt.Fprintf(stdout, "cleared %s's port forwards\n", a.VM)
+	default:
+		for _, f := range a.Forwards {
+			fmt.Fprintf(stdout, "%d:%d\n", f.HostPort, f.GuestPort)
+		}
+	}
+	if !active {
+		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
 	}
 	return ExitOK
 }

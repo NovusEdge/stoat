@@ -109,6 +109,13 @@ type VM struct {
 	SSHPort int
 	SSHUser string
 
+	// Forwards are the user-declared host->guest port forwards. Carried here
+	// rather than behind a separate accessor so there is exactly one way to
+	// read a VM's state: a caller that has called Get has everything, and
+	// cannot end up reasoning about forwards that are a round trip out of date
+	// with the State next to them.
+	Forwards []PortForward
+
 	Installed bool
 
 	Paths Paths
@@ -175,6 +182,7 @@ func fromConfig(v *config.VM) VM {
 		Recipes:   v.Recipes,
 		SSHPort:   v.SSHPort,
 		SSHUser:   v.SSHUser,
+		Forwards:  v.Forwards,
 		Installed: v.Installed,
 		Paths: Paths{
 			Dir:           v.Dir,
