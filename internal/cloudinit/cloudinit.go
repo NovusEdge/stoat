@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // User is the account the seed creates, and therefore the account anything
@@ -55,14 +56,15 @@ users:
 // outright on a missing shell, leaving no account and no authorized_keys, so
 // the only symptom is "Permission denied (publickey)" forever. Boot-tested
 // against Alpine's 3.24.1 cloud image: /bin/bash refused every connection,
-// /bin/ash connected on the first try.
+// /bin/ash connected on the first try. That fact now lives in the guest
+// registry; this just reads it.
 func guestShell(osName string) string {
-	if osName == "alpine" {
-		// Alpine's base image is busybox ash and ships no bash.
-		return "/bin/ash"
+	if o, ok := guest.Lookup(osName); ok {
+		return o.Shell
 	}
-	// Ubuntu, Debian, Fedora and Arch cloud images all ship bash as the
-	// login shell, so this stays the default for anything unrecognised.
+	// Unknown or empty OS: an empty OS is reachable for a BYO image stoat
+	// couldn't recognise, and every image stoat supports except Alpine ships
+	// bash, so bash stays the default for anything not in the registry.
 	return "/bin/bash"
 }
 
@@ -76,10 +78,17 @@ func guestShell(osName string) string {
 // recipe bodies so a recipe's own packages: list still ends up as a single,
 // valid YAML packages: key instead of two competing ones.
 func extraPackages(osName string) string {
-	if osName == "alpine" {
-		return "packages:\n  - sudo\n"
+	o, ok := guest.Lookup(osName)
+	if !ok || len(o.SeedPackages) == 0 {
+		// Unknown, empty, or an OS that needs nothing extra: no fragment.
+		return ""
 	}
-	return ""
+	var b strings.Builder
+	b.WriteString("packages:\n")
+	for _, p := range o.SeedPackages {
+		b.WriteString("  - " + p + "\n")
+	}
+	return b.String()
 }
 
 // userData builds the #cloud-config body: the hardware-proven users: block

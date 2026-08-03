@@ -1,11 +1,9 @@
 package tui
 
 import (
+	"context"
 	"fmt"
-	"net/url"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/theme"
@@ -130,24 +129,9 @@ func (o imageOption) label() string {
 		size + "  " + dimStyle.Render("byo")
 }
 
-// localImageFiles lists every plain file under isos/, any extension, so BYO
-// qcow2/img cloud images are picked up alongside ISOs.
+// localImageFiles is core.LocalImages, sorted for a stable picker order.
 func localImageFiles() []string {
-	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		// .part files are half-finished downloads. iso.Infer happily matches
-		// one ("…cloudimg-amd64.img.part" contains "cloudimg"), so without
-		// this they show up as selectable BYO images and a VM can be built on
-		// a truncated file. Aborting a download is routine — it is minutes
-		// long with no cancel key — so these do accumulate.
-		if !e.IsDir() && !strings.HasSuffix(e.Name(), ".part") {
-			out = append(out, e.Name())
-		}
-	}
+	out := core.LocalImages()
 	sort.Strings(out)
 	return out
 }
@@ -174,38 +158,11 @@ func byoOptionFromPath(path string) (imageOption, error) {
 	}, nil
 }
 
-// matchLocalImage reports which local file (if any) satisfies catalog entry
-// e: either the exact basename of e.URL (direct-URL entries), or, for
-// entries resolved through an index rather than a fixed filename, whatever
-// local file iso.Infer agrees belongs to e's OS/backend pair.
-//
-// The discriminator is e.Flavor, not e.OS == "alpine": alpine-cloud (a4befa9)
-// is an alpine entry with a direct URL and Flavor == "", same as any other
-// direct-URL entry (see iso.Resolve's doc comment for why). Gating on OS
-// alone skipped the exact basename match for every alpine entry, including
-// this one, and fell through to the Infer-based loop below — which,
-// depending on the local directory's contents, can match the wrong file
-// among several with the same backend/OS pair. See CRITICAL 1 in the final
-// review.
-func matchLocalImage(e iso.Entry, files []string) string {
-	if e.Flavor == "" && e.URL != "" {
-		if u, err := url.Parse(e.URL); err == nil {
-			base := path.Base(u.Path)
-			for _, f := range files {
-				if f == base {
-					return f
-				}
-			}
-		}
-	}
-	for _, f := range files {
-		backend, osName := iso.Infer(f)
-		if backend == e.Backend && osName == e.OS {
-			return f
-		}
-	}
-	return ""
-}
+// matchLocalImage is core.MatchLocal. The picker and core.Create must agree on
+// which file a catalog entry means — the form now names the ENTRY and lets
+// core resolve it, so two copies of this would let the picker offer one file
+// and Create build on another.
+var matchLocalImage = core.MatchLocal
 
 // buildImages assembles the form's image picker: every catalog entry (in
 // Catalog order), each flagged with whether it's already downloaded, then
@@ -543,7 +500,7 @@ func fetchImage(e iso.Entry) tea.Cmd {
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
-		p, err := iso.Download(r, dlRecord)
+		p, err := iso.Download(context.Background(), r, dlRecord)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
@@ -715,12 +672,18 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(fetchImage(*opt.entry), dlTick())
 			}
 		case "enter":
-			vm, err := m.form.build()
+			s, err := m.form.spec()
+			if err == nil {
+				// Plan is the same validation Create runs, so the form can put
+				// the error next to the fields that caused it instead of
+				// letting it arrive later as a toast over the list.
+				_, err = core.Plan(s)
+			}
 			if err != nil {
 				m.form.err = err.Error()
 				return m, nil
 			}
-			return m, tea.Sequence(createVM(vm), loadVMs, backToList())
+			return m, tea.Sequence(createVM(s), loadVMs, backToList())
 		}
 	}
 
@@ -749,127 +712,74 @@ func (f *formModel) refocus() {
 	}
 }
 
-// build validates the form and returns the VM it describes.
-func (f formModel) build() (*config.VM, error) {
-	name := strings.TrimSpace(f.inputs[fName].Value())
-	if name == "" {
-		return nil, fmt.Errorf("name is required")
-	}
-	if strings.ContainsAny(name, "/ ") {
-		return nil, fmt.Errorf("name cannot contain spaces or slashes")
-	}
-	if _, err := os.Stat(filepath.Join(config.Root(), name)); err == nil {
-		return nil, fmt.Errorf("%s already exists", name)
-	}
+// spec turns the form into a core.Spec. Everything that decides what the VM
+// IS — image resolution, OS, backend, ssh user, mode, defaults, validation —
+// lives in core, so the CLI and an MCP server get the same VM the form does.
+// What stays here is the two checks only the form can make, about its own
+// picker rather than about the VM.
+func (f formModel) spec() (core.Spec, error) {
 	opt := f.selected()
 	if opt == nil {
-		return nil, fmt.Errorf("pick an image first")
+		return core.Spec{}, fmt.Errorf("pick an image first")
 	}
 	if opt.file == "" {
-		return nil, fmt.Errorf("press space to download %s first", opt.entry.OS)
+		return core.Spec{}, fmt.Errorf("press space to download %s first", opt.entry.OS)
 	}
-	ram, err := strconv.Atoi(strings.TrimSpace(f.inputs[fRAM].Value()))
-	if err != nil || ram < 256 {
-		return nil, fmt.Errorf("ram must be a number of MB, at least 256")
+	// A catalog image is named by its ID, not by the path the picker resolved
+	// it to: core re-runs the same MatchLocal to find the file, and keeping the
+	// ID is what lets it read the ENTRY's backend, OS and ssh user rather than
+	// re-inferring them from the filename. Inference is a good guess for a file
+	// nobody has described; it is strictly worse than an entry that states the
+	// answer. A BYO file has no entry, so it goes by path.
+	var image string
+	var err error
+	if opt.entry != nil {
+		image = opt.entry.ID
+	} else if image, err = opt.imagePath(); err != nil {
+		return core.Spec{}, err
 	}
-	cpus, err := strconv.Atoi(strings.TrimSpace(f.inputs[fCPUs].Value()))
-	if err != nil || cpus < 1 {
-		return nil, fmt.Errorf("cpus must be at least 1")
-	}
-	port, err := config.FreePort()
-	if err != nil {
-		return nil, err
-	}
+
 	selected := []string{}
 	for _, r := range f.recipeNames {
 		if f.recipeSel[r] {
 			selected = append(selected, r)
 		}
 	}
+	// The form's numeric fields are free text, so a non-number has to become
+	// something core will reject rather than silently reading as 0, which core
+	// treats as "use the default".
+	ram, err := strconv.Atoi(strings.TrimSpace(f.inputs[fRAM].Value()))
+	if err != nil {
+		return core.Spec{}, fmt.Errorf("ram must be a number of MB, at least 256")
+	}
+	cpus, err := strconv.Atoi(strings.TrimSpace(f.inputs[fCPUs].Value()))
+	if err != nil {
+		return core.Spec{}, fmt.Errorf("cpus must be at least 1")
+	}
 
-	vm := &config.VM{
-		Name:    name,
+	s := core.Spec{
+		Name:    strings.TrimSpace(f.inputs[fName].Value()),
+		Image:   image,
+		OS:      f.byoOS,
+		Backend: f.byoBackend,
 		Mode:    f.effectiveMode(),
-		OS:      f.resolvedOS(),
-		Backend: f.resolvedBackend(),
-		SSHUser: f.resolvedSSHUser(),
 		RAM:     ram,
 		CPUs:    cpus,
+		Disk:    strings.TrimSpace(f.inputs[fDisk].Value()),
 		Share:   strings.TrimSpace(f.inputs[fShare].Value()),
-		SSHPort: port,
 		Recipes: selected,
 	}
-
-	// Refused the same way parseSize refuses it on the edit path: a relative
-	// size ("+8G") reads to qemu-img as "grow by", not "resize to", so
-	// `qemu-img create -f qcow2 disk.qcow2 +8G` silently allocates 2x. Empty
-	// is left alone here — it means "use the default" and is handled by
-	// buildVM/qemu-img the same way it always has.
-	disk := strings.TrimSpace(f.inputs[fDisk].Value())
-	if disk != "" {
-		if _, err := parseSize(disk); err != nil {
-			return nil, fmt.Errorf("disk size: %v", err)
-		}
+	if f.randomPassword {
+		s.ConsolePassword = "random"
 	}
-
-	if vm.Backend == "cloudinit" {
-		abs, err := opt.imagePath()
-		if err != nil {
-			return nil, err
-		}
-		vm.Base = abs
-		vm.Disk = disk
-		// Only a cloud image needs this. cloud-init locks every account by
-		// default, so without a console password the VNC console (a cloud
-		// VM never gets a qemu window — qemu.NeedsWindow) shows a login
-		// prompt with no valid answer. A live Alpine VM already logs root in
-		// at the console with no password, and a disk VM's password is
-		// whatever the user sets during the guest's own installer.
-		pw := config.DefaultConsolePassword
-		if f.randomPassword {
-			var err error
-			if pw, err = config.RandomConsolePassword(); err != nil {
-				return nil, err
-			}
-		}
-		vm.ConsolePassword = pw
-	} else {
-		vm.ISO = "isos/" + opt.file
-		vm.Disk = disk
-	}
-
-	return vm, nil
+	return s, nil
 }
 
-// buildVM writes vm.toml and, for disk mode, allocates the qcow2. If
-// qemu-img fails, the VM directory (and the vm.toml just written) is removed
-// so a failed creation leaves no trace in the data root — otherwise the list
-// would show a VM with no disk.qcow2 that can never boot.
-//
-// Cloud mode's overlay (backed by Base) and cloud-init seed are deliberately
-// NOT created here: qemu.Start's ensureCloudOverlay creates them once, on
-// first start, since — unlike a live VM's apkovl, rebuilt every start — a
-// cloud overlay holds real guest state that must never be discarded, and
-// creating it here would also mean creating it again if the user never
-// actually starts the VM.
-func buildVM(v *config.VM) error {
-	if err := v.Save(); err != nil {
-		return err
-	}
-	if v.Mode == "disk" {
-		out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
-		if err != nil {
-			os.RemoveAll(v.Dir)
-			return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
-		}
-	}
-	return nil
-}
-
-// createVM is the tea.Cmd wrapper around buildVM.
-func createVM(v *config.VM) tea.Cmd {
+// createVM is the tea.Cmd wrapper around core.Create.
+func createVM(s core.Spec) tea.Cmd {
 	return func() tea.Msg {
-		if err := buildVM(v); err != nil {
+		v, err := core.Create(s)
+		if err != nil {
 			return errMsg(err.Error())
 		}
 		return statusMsg("created " + v.Name)

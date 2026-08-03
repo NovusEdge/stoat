@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
@@ -309,6 +310,28 @@ func TestSeedMergesAlpineSudoWithRecipePackages(t *testing.T) {
 	for _, want := range []string{"sudo", "git", "tmux"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("merged packages missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The registry is now the authority, and the seed must agree with it for
+// every known OS. A drift here is the original bug returning.
+func TestSeedShellMatchesTheRegistry(t *testing.T) {
+	for _, o := range guest.All() {
+		got := userData(&config.VM{Name: "vm", OS: o.Name}, "ssh-ed25519 AAAA k", nil)
+		if !strings.Contains(got, "shell: "+o.Shell) {
+			t.Errorf("%s: seed does not use the registry's shell %q:\n%s", o.Name, o.Shell, got)
+		}
+	}
+}
+
+// An unknown or empty OS keeps the previous fallback. A BYO image can have no
+// OS at all, and every image stoat supports except Alpine ships bash.
+func TestSeedFallsBackToBashForAnUnknownOS(t *testing.T) {
+	for _, osName := range []string{"", "plan9"} {
+		got := userData(&config.VM{Name: "vm", OS: osName}, "ssh-ed25519 AAAA k", nil)
+		if !strings.Contains(got, "shell: /bin/bash") {
+			t.Errorf("os=%q lost the bash fallback:\n%s", osName, got)
 		}
 	}
 }

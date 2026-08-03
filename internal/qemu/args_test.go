@@ -14,6 +14,7 @@ func TestArgsLive(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
 		Name: "live1", Mode: "live", ISO: "isos/alpine.iso",
+		OS: "alpine", Backend: "apkovl",
 		RAM: 4096, CPUs: 4, Share: "/home/u/vms", SSHPort: 2201,
 		Dir: filepath.Join("/data", "live1"),
 	}
@@ -99,6 +100,7 @@ func TestArgsCloud(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
 		Name: "cloudy", Mode: "cloud", Base: "/data/base/alpine.qcow2",
+		OS: "alpine", Backend: "cloudinit",
 		RAM: 2048, CPUs: 2, Share: "/home/u/vms", SSHPort: 2204,
 		Dir: filepath.Join("/data", "cloudy"),
 	}
@@ -204,6 +206,51 @@ func TestOnlyManualInstallsGetAWindow(t *testing.T) {
 				t.Errorf("a headless VM must not also open a gtk window:\n%s", got)
 			}
 		})
+	}
+}
+
+// TestArgsPortForwards pins the exact hostfwd syntax additional forwards
+// must produce: additional comma-separated hostfwd= clauses on the SAME
+// -netdev as the SSH forward, never a second -netdev/-device pair. Verified
+// live against real qemu-system-x86_64 (see the comment in Args) that two
+// hostfwd= clauses on one -netdev each become an independent host listener.
+func TestArgsPortForwards(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "web", Mode: "live", ISO: "isos/alpine.iso",
+		RAM: 1024, CPUs: 1, SSHPort: 2201,
+		Forwards: []config.PortForward{
+			{HostPort: 8080, GuestPort: 80},
+			{HostPort: 8443, GuestPort: 443},
+		},
+		Dir: "/data/web",
+	}
+	got := joined(Args(v))
+
+	want := "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2201-:22,hostfwd=tcp:127.0.0.1:8080-:80,hostfwd=tcp:127.0.0.1:8443-:443"
+	if !strings.Contains(got, want) {
+		t.Errorf("want exact netdev arg %q in:\n%s", want, got)
+	}
+	// Only one -netdev/-device pair total: forwards ride the existing NIC,
+	// they do not add a second one.
+	if strings.Count(got, "-netdev") != 1 || strings.Count(got, "-device virtio-net") != 1 {
+		t.Errorf("want exactly one netdev/device pair, got:\n%s", got)
+	}
+}
+
+// TestArgsNoForwardsUnchanged pins that a VM with no declared forwards
+// produces exactly the SSH-only hostfwd this codebase had before this
+// field existed -- a VM with Forwards == nil must not regress.
+func TestArgsNoForwardsUnchanged(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "bare", Mode: "live", ISO: "isos/alpine.iso",
+		RAM: 1024, CPUs: 1, SSHPort: 2201, Dir: "/data/bare",
+	}
+	got := joined(Args(v))
+	want := "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2201-:22 "
+	if !strings.Contains(got, want) {
+		t.Errorf("want exact netdev arg %q in:\n%s", want, got)
 	}
 }
 

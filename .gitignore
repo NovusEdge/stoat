@@ -9,8 +9,10 @@
 # kill mid-copy can orphan one. Only lands here if $PREFIX points into the repo.
 .stoat-*
 
-# agent / planning cruft — local only
+# agent / planning cruft — local only. Task plans are throwaway; durable
+# architecture decisions belong in docs/design/, which IS tracked.
 docs/superpowers/
+context/
 CLAUDE.md
 CLAUDE.local.md
 AGENTS.md

@@ -1,6 +1,8 @@
 package iso
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
@@ -10,8 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // TestDownload_RenameFailureCleansUpPart drives Download down the success
@@ -61,7 +67,7 @@ func TestDownload_RenameFailureCleansUpPart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Download(r, nil)
+	_, err := Download(context.Background(), r, nil)
 	if err == nil {
 		t.Fatal("expected Download to fail because final is a non-empty directory")
 	}
@@ -177,9 +183,10 @@ func TestByOSGroupsWithoutLosingEntries(t *testing.T) {
 	}
 }
 
-// TestInfer covers the BYO filename heuristic's three outcome classes:
-// a recognisable cloud qcow2/img, a recognisable Alpine live ISO, and an
-// unrecognised name that must fall back to ssh rather than guess wrong.
+// TestInfer covers the BYO filename heuristic's outcome classes: a
+// recognisable cloud qcow2/img (any registered OS), a recognisable Alpine
+// live ISO, a bare cloud image with no OS hint at all, and an unrecognised
+// name that must fall back to ssh rather than guess wrong.
 func TestInfer(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -187,8 +194,14 @@ func TestInfer(t *testing.T) {
 		wantBackend string
 		wantOS      string
 	}{
-		{"ubuntu cloudimg qcow2", "ubuntu-24.04-server-cloudimg-amd64.qcow2", "cloudinit", ""},
-		{"debian genericcloud qcow2", "debian-12-genericcloud-amd64.qcow2", "cloudinit", ""},
+		// Infer now recognises every registered OS by its FilenameHints, not
+		// just Alpine, so these two resolve an OS where they used to return
+		// "" — see TestInferRecognisesEveryRegisteredOS. That's the intended
+		// effect of the registry migration: a BYO ubuntu/debian cloud image
+		// used to get zero recipes offered (recipes.List("", backend)), and
+		// now gets whatever its OS supports.
+		{"ubuntu cloudimg qcow2", "ubuntu-24.04-server-cloudimg-amd64.qcow2", "cloudinit", "ubuntu"},
+		{"debian genericcloud qcow2", "debian-12-genericcloud-amd64.qcow2", "cloudinit", "debian"},
 		{"bare .img", "some-cloud-image.img", "cloudinit", ""},
 		{"alpine iso", "alpine-standard-3.20.0-x86_64.iso", "apkovl", "alpine"},
 		// The alpine-cloud catalog entry (a4befa9) downloads exactly this
@@ -205,6 +218,21 @@ func TestInfer(t *testing.T) {
 				t.Errorf("Infer(%q) = (%q, %q), want (%q, %q)", c.file, backend, os, c.wantBackend, c.wantOS)
 			}
 		})
+	}
+}
+
+// Every OS in the registry must be recognisable from a filename, for both an
+// iso and a qcow2. An OS that cannot be inferred produces an EMPTY OS on a BYO
+// image, which is how the seed ends up asking for a shell the guest lacks.
+func TestInferRecognisesEveryRegisteredOS(t *testing.T) {
+	for _, o := range guest.All() {
+		for _, ext := range []string{".iso", ".qcow2", ".img"} {
+			name := o.Name + "-test-image" + ext
+			_, gotOS := Infer(name)
+			if gotOS != o.Name {
+				t.Errorf("Infer(%q) os = %q, want %q", name, gotOS, o.Name)
+			}
+		}
 	}
 }
 
@@ -252,7 +280,7 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 		t.Fatalf("Resolve SHA256 = %q, want %q", r.SHA256, wantSum)
 	}
 
-	rel, err := Download(r, nil)
+	rel, err := Download(context.Background(), r, nil)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -273,7 +301,7 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 
 	// Now with a checksum that won't match: Download must refuse to rename.
 	bad := &Release{File: "mismatch.qcow2", URL: fileSrv.URL + "/" + filename, SHA256: "deadbeef"}
-	if _, err := Download(bad, nil); err == nil {
+	if _, err := Download(context.Background(), bad, nil); err == nil {
 		t.Fatal("expected Download to fail on checksum mismatch")
 	}
 	badFinal := filepath.Join(os.Getenv("STOAT_HOME"), "isos", "mismatch.qcow2")
@@ -307,7 +335,7 @@ func TestDownload_SHA512(t *testing.T) {
 		t.Fatalf("test setup: expected a 128-hex sha512 digest, got %d chars", len(r.SHA256))
 	}
 
-	rel, err := Download(r, nil)
+	rel, err := Download(context.Background(), r, nil)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -337,7 +365,7 @@ func TestDownload_UnverifiedWhenNoChecksum(t *testing.T) {
 
 	r := &Release{File: filename, URL: srv.URL + "/" + filename}
 
-	if _, err := Download(r, nil); err != nil {
+	if _, err := Download(context.Background(), r, nil); err != nil {
 		t.Fatalf("Download: %v", err)
 	}
 	if r.Verified {
@@ -493,7 +521,7 @@ func TestDownloadOutlastsMetadataTimeout(t *testing.T) {
 	r := &Release{File: "slow.iso", Version: "0.0.0", SHA256: hex.EncodeToString(sum[:])}
 
 	var lastDone, lastTotal int64
-	got, err := Download(r, func(done, total int64) { lastDone, lastTotal = done, total })
+	got, err := Download(context.Background(), r, func(done, total int64) { lastDone, lastTotal = done, total })
 	if err != nil {
 		t.Fatalf("slow download failed: %v", err)
 	}
@@ -574,5 +602,139 @@ func TestCatalogOffersAlpineCloud(t *testing.T) {
 	}
 	if got.SSHUser != "stoat" {
 		t.Errorf("SSHUser = %q, want stoat (the seed creates that account)", got.SSHUser)
+	}
+}
+
+// TestDownloadConcurrentSameTargetDoesNotCorrupt is the regression test for a
+// silent data-corruption bug.
+//
+// Download used to open final+".part" with os.Create, which truncates in place
+// and grants no exclusivity. Two downloads of the same image therefore held
+// two handles on the SAME inode: one truncated the file out from under the
+// other, both wrote at independent offsets, and — worst of all — a writer that
+// was still going when the other renamed its .part into place kept writing
+// straight into the finished image.
+//
+// The checksum could not catch it: the digest is fed from the bytes each
+// goroutine reads off the NETWORK, never re-read from disk, so whichever
+// writer finished computed a valid digest of its own complete stream, set
+// Verified, and renamed a mangled file into place as a verified image.
+//
+// The two downloads must serve DIFFERENT bytes for this to be detectable at
+// all — interleaving identical content is invisible. That is not a contrived
+// setup: iso.Catalog's own comments note that cloud images are rebuilt in
+// place, so cancelling a download and retrying can genuinely fetch different
+// content under one filename. Each download now gets its own temp file, so
+// whichever wins must land byte-for-byte as one server response, never a mix.
+func TestDownloadConcurrentSameTargetDoesNotCorrupt(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	const size = 512 * 1024
+	var nth atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every request gets a DIFFERENT filler byte, so any interleaving of
+		// two responses shows up as a file that is not uniformly one letter.
+		fill := byte('A') + byte(nth.Add(1)-1)
+		chunk := bytes.Repeat([]byte{fill}, 4096)
+		for off := 0; off < size; off += len(chunk) {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// No checksum, exactly like the three alpine catalog entries: those
+			// have no digest backstop at all, so the file itself is the only
+			// thing standing between the user and a corrupt image.
+			r := &Release{File: "same.qcow2", URL: srv.URL}
+			Download(context.Background(), r, nil) //nolint:errcheck // one may lose the rename race; the CONTENT is what is under test
+		}()
+	}
+	wg.Wait()
+
+	final := filepath.Join(os.Getenv("STOAT_HOME"), "isos", "same.qcow2")
+	got, err := os.ReadFile(final)
+	if err != nil {
+		t.Fatalf("no image landed: %v", err)
+	}
+	if len(got) != size {
+		t.Fatalf("final image is %d bytes, want %d: writers interleaved or truncated each other", len(got), size)
+	}
+	for i, b := range got {
+		if b != got[0] {
+			t.Fatalf("final image is a MIX of two downloads: byte 0 is %q but byte %d is %q", got[0], i, b)
+		}
+	}
+
+	entries, err := os.ReadDir(filepath.Join(os.Getenv("STOAT_HOME"), "isos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".part") {
+			t.Errorf("leftover partial file %q", e.Name())
+		}
+	}
+}
+
+// TestDownloadCancelStopsTheTransfer pins that cancelling ctx actually stops
+// the read rather than merely returning control to the caller. Before
+// Download took a ctx, abandoning a download (the TUI's esc) left the
+// goroutine reading the socket until the 60s stall timer fired — which is the
+// only reason that timer exists.
+func TestDownloadCancelStopsTheTransfer(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+
+	served := make(chan struct{})
+	var once sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never finishes: keeps dribbling until the client goes away.
+		for i := 0; i < 100000; i++ {
+			if _, err := w.Write(bytes.Repeat([]byte{'B'}, 4096)); err != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			once.Do(func() { close(served) })
+			time.Sleep(time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		r := &Release{File: "endless.qcow2", URL: srv.URL}
+		_, err := Download(ctx, r, nil)
+		done <- err
+	}()
+
+	<-served // the transfer is genuinely in flight
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Download returned success after cancellation")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Download did not return within 10s of cancel: ctx is not reaching resp.Body.Read")
+	}
+
+	// A cancelled transfer must leave nothing usable behind.
+	final := filepath.Join(os.Getenv("STOAT_HOME"), "isos", "endless.qcow2")
+	if _, err := os.Stat(final); !os.IsNotExist(err) {
+		t.Error("a cancelled download was renamed into place")
 	}
 }

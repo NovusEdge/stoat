@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/theme"
@@ -356,38 +357,11 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 	return out, nil
 }
 
-// parseSize reads qemu-img's size syntax ("8G", "512M") as bytes. Only the
-// suffixes stoat itself writes are supported; anything else is refused rather
-// than guessed at, since guessing wrong here means a wrong resize.
-func parseSize(s string) (int64, error) {
-	s = strings.TrimSpace(strings.ToUpper(s))
-	if s == "" {
-		return 0, fmt.Errorf("empty")
-	}
-	// qemu-img also accepts relative sizes ("+8G"), and strconv.ParseFloat
-	// happily reads "+8" as 8 — so "+8G" would pass the grow check as "8G"
-	// and then ADD 8G, leaving vm.toml recording "+8G" and disagreeing with
-	// the disk forever after. Refused rather than translated.
-	if strings.HasPrefix(s, "+") || strings.HasPrefix(s, "-") {
-		return 0, fmt.Errorf("use an absolute size like 16G, not a relative one")
-	}
-	mult := int64(1)
-	switch s[len(s)-1] {
-	case 'K':
-		mult, s = 1<<10, s[:len(s)-1]
-	case 'M':
-		mult, s = 1<<20, s[:len(s)-1]
-	case 'G':
-		mult, s = 1<<30, s[:len(s)-1]
-	case 'T':
-		mult, s = 1<<40, s[:len(s)-1]
-	}
-	n, err := strconv.ParseFloat(s, 64)
-	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("use a size like 8G or 512M")
-	}
-	return int64(n * float64(mult)), nil
-}
+// parseSize is core.ParseSize. The create path and the edit path must accept
+// and refuse exactly the same strings — they used to be two functions, and the
+// relative-size bug ("+8G" means GROW BY to qemu-img) was fixed on this one
+// only, so creating an 8G disk silently made a 16G one for a whole release.
+var parseSize = core.ParseSize
 
 type vmSavedMsg struct {
 	vm      *config.VM

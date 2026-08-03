@@ -14,6 +14,16 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// PortForward is one user-declared host->guest TCP forward, additional to
+// the SSHPort forward every VM already gets. Validation (range, collisions
+// with other VMs' ports, privileged ports) lives in core.Forward, not here --
+// this package is the on-disk shape only, matching how VM itself carries no
+// validation of its own fields.
+type PortForward struct {
+	HostPort  int `toml:"hostport"`
+	GuestPort int `toml:"guestport"`
+}
+
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
 type VM struct {
 	Name      string   `toml:"name"`
@@ -27,6 +37,16 @@ type VM struct {
 	Share     string   `toml:"share"`     // host dir exposed as /mnt/host
 	SSHPort   int      `toml:"sshport"`
 	Recipes   []string `toml:"recipes"`
+
+	// Forwards are user-declared TCP ports forwarded from the host into the
+	// guest, additional to the SSHPort forward that always exists. Rendered
+	// into qemu's -netdev hostfwd= clauses by internal/qemu.Args. Applied at
+	// NEXT START only -- qemu has no way to hot-add a hostfwd rule to a
+	// running user-mode netdev, so editing this field while the VM is
+	// running changes vm.toml immediately but has no effect on the live
+	// process. See core.Forward and core.ErrAppliesAtNextStart, which exist
+	// specifically so a caller can't mistake "saved" for "live".
+	Forwards []PortForward `toml:"forwards"`
 
 	// Backend is the provisioning backend: "apkovl" | "cloudinit" | "ssh".
 	// Written by the form at creation time; dispatch elsewhere in stoat
@@ -91,9 +111,16 @@ func (v *VM) path() string           { return filepath.Join(v.Dir, "vm.toml") }
 func (v *VM) DiskPath() string       { return filepath.Join(v.Dir, "disk.qcow2") }
 func (v *VM) PidPath() string        { return filepath.Join(v.Dir, "qemu.pid") }
 func (v *VM) MonitorPath() string    { return filepath.Join(v.Dir, "monitor.sock") }
+func (v *VM) QMPPath() string        { return filepath.Join(v.Dir, "qmp.sock") }
 func (v *VM) VNCPath() string        { return filepath.Join(v.Dir, "vnc.sock") }
 func (v *VM) OvlDir() string         { return filepath.Join(v.Dir, "ovl") }
 func (v *VM) ConsoleLogPath() string { return filepath.Join(v.Dir, "console.log") }
+
+// ProvisionLogPath is the transcript of the most recent recipe run, written
+// by sshx.Provision. Lives here rather than in sshx so every VM path has one
+// home, matching ConsoleLogPath/DiskPath/etc. — a second copy of this
+// literal is exactly the drift this package exists to prevent.
+func (v *VM) ProvisionLogPath() string { return filepath.Join(v.Dir, "last-provision.log") }
 
 // ISOPath resolves the configured ISO against the data root.
 func (v *VM) ISOPath() string {

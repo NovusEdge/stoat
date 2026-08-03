@@ -1,6 +1,6 @@
 //go:build linux
 
-package installer
+package hostcheck
 
 import (
 	"errors"

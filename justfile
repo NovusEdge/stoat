@@ -24,6 +24,11 @@ install: build
 setup:
     go run ./cmd/installer
 
+# build and install stoat without a TTY — for CI and scripts
+[group('build')]
+setup-headless:
+    go run ./cmd/installer --no-tty
+
 # remove the installed binary — never touches ~/.stoat
 [group('build')]
 uninstall:

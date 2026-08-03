@@ -13,6 +13,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 type detailModel struct {
@@ -38,7 +39,7 @@ func tick(gen int) tea.Cmd {
 
 // tailLog reads the last n lines of the most recent provision run.
 func tailLog(v *config.VM, n int) string {
-	b, err := os.ReadFile(filepath.Join(v.Dir, "last-provision.log"))
+	b, err := os.ReadFile(v.ProvisionLogPath())
 	if err != nil {
 		return ""
 	}
@@ -222,10 +223,7 @@ func (m model) viewDetail() string {
 		}
 		line("installed", installed)
 	}
-	sshUser := v.SSHUser
-	if sshUser == "" {
-		sshUser = "root"
-	}
+	sshUser := sshx.User(v)
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
 	// qemu.NeedsWindow is the one case that gets a real qemu window (a
 	// disk-mode VM mid-install); every other VM is headless, and the VNC

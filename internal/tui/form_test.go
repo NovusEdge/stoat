@@ -3,7 +3,6 @@ package tui
 import (
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
 )
 
@@ -103,40 +103,32 @@ func TestFormTabOrder(t *testing.T) {
 	}
 }
 
-// TestBuildVMFailedDiskCreationLeavesNoTrace drives buildVM down the disk-mode
-// path with an invalid qemu-img size and asserts the VM directory (and the
-// vm.toml written just before the qemu-img call) does not survive the
-// failure. Before the fix, v.Save() ran unconditionally before qemu-img, so
-// a bad size left a phantom, unbootable VM behind.
-func TestBuildVMFailedDiskCreationLeavesNoTrace(t *testing.T) {
-	// Without qemu-img this passes for the wrong reason: buildVM fails
-	// because the binary is missing, not because the size is invalid.
-	if _, err := exec.LookPath("qemu-img"); err != nil {
-		t.Skip("qemu-img not installed: skipping disk-creation failure test")
+// build is what formModel.build() used to be: the VM the form describes.
+// Deciding what that VM is now lives in core, so the form's own job ends at
+// spec() and these tests go through core.Plan exactly as the enter key does.
+// (core owns the disk-creation-failure test that used to live here.)
+func (f formModel) build() (*config.VM, error) {
+	s, err := f.spec()
+	if err != nil {
+		return nil, err
 	}
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if err := config.EnsureRoot(); err != nil {
+	return core.Plan(s)
+}
+
+// stubImage puts a real file under isos/ and returns the picker option for it.
+// core resolves an image against the filesystem — a made-up filename no longer
+// builds, which is the point: the form used to happily create a VM pointing at
+// an image that was not there.
+func stubImage(t *testing.T, name string) imageOption {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(config.Root(), "isos"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	v := &config.VM{
-		Name: "badsize",
-		Mode: "disk",
-		ISO:  "isos/alpine-standard-3.20.0-x86_64.iso",
-		RAM:  1024,
-		CPUs: 1,
-		Disk: "8Gigs", // invalid qemu-img size
+	if err := os.WriteFile(filepath.Join(config.Root(), "isos", name), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	err := buildVM(v)
-	if err == nil {
-		t.Fatal("expected buildVM to fail on an invalid disk size")
-	}
-
-	dir := filepath.Join(config.Root(), "badsize")
-	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
-		t.Fatalf("VM directory %q survived a failed disk creation: %v", dir, statErr)
-	}
+	backend, osName := iso.Infer(name)
+	return imageOption{file: name, backend: backend, osName: osName}
 }
 
 // TestBuildAssignsSelectedRecipes is the required regression test for C2:
@@ -150,7 +142,7 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		t.Setenv("STOAT_HOME", t.TempDir())
 		f := newForm()
 		f.inputs[fName].SetValue(name)
-		f.images = []imageOption{{file: "alpine-standard-3.20.0-x86_64.iso", backend: "apkovl", osName: "alpine"}}
+		f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
 		f.imgIdx = 0
 		f.recipeNames = []string{"alpha", "beta", "gamma"}
 		return f
@@ -194,7 +186,7 @@ func TestBuildRejectsRelativeDiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	f := newForm()
 	f.inputs[fName].SetValue("relsize")
-	f.images = []imageOption{{file: "alpine-standard-3.20.0-x86_64.iso", backend: "apkovl", osName: "alpine"}}
+	f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
 	f.imgIdx = 0
 	f.mode = "disk"
 	f.inputs[fDisk].SetValue("+8G")
@@ -221,7 +213,7 @@ func TestFormAndParseSizeAgreeOnDiskStrings(t *testing.T) {
 			t.Setenv("STOAT_HOME", t.TempDir())
 			f := newForm()
 			f.inputs[fName].SetValue("agree")
-			f.images = []imageOption{{file: "alpine-standard-3.20.0-x86_64.iso", backend: "apkovl", osName: "alpine"}}
+			f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
 			f.imgIdx = 0
 			f.mode = "disk"
 			f.inputs[fDisk].SetValue(s)

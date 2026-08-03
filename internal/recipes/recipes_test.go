@@ -23,7 +23,7 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml", "devtools.cloud.yaml") {
+	for _, name := range append(append([]string{}, allShellRecipes...), "xfce.cloud.yaml", "xfce.fedora.cloud.yaml", "xfce.alpine.cloud.yaml", "devtools.cloud.yaml") {
 		if _, err := os.Stat(Path(name)); err != nil {
 			t.Errorf("Install did not install %q: %v", name, err)
 		}
@@ -46,6 +46,142 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 	}
 }
 
+// A recipe stoat wrote and nobody touched must be refreshed when the bundled
+// copy changes. This is the whole point of the manifest: before it, a shipped
+// fix never reached anyone who already had the broken version — the
+// xfce.cloud.yaml that produced a black screen kept being served long after
+// the bundled copy was fixed.
+func TestInstallRefreshesItsOwnStaleCopy(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for "an older stoat shipped this": overwrite the file AND
+	// record its checksum, which is exactly the state an older release left
+	// behind.
+	stale := "#cloud-config\n# from an older stoat\n"
+	if err := os.WriteFile(Path("xfce.cloud.yaml"), []byte(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := readManifest()
+	m["xfce.cloud.yaml"] = sum([]byte(stale))
+	if err := writeManifest(m); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fresh {
+		t.Error("Install left its own stale copy in place; a shipped recipe fix will never reach a user who already has the old one")
+	}
+	if _, err := os.Stat(Path("xfce.cloud.yaml.bak")); err == nil {
+		t.Error("Install kept a .bak of a file it knew was its own — the backup is only for the one-time pre-manifest adoption")
+	}
+}
+
+// The upgrade path: recipes on disk from before the manifest existed. There is
+// no way to tell an edited one from an untouched one, so they are refreshed
+// but the old contents are kept alongside.
+func TestInstallAdoptsPreManifestRecipesAndKeepsABackup(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := "#cloud-config\n# predates the manifest\n"
+	if err := os.WriteFile(Path("xfce.cloud.yaml"), []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(Path(ManifestName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read("xfce.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fresh {
+		t.Error("Install did not refresh a pre-manifest recipe")
+	}
+	bak, err := os.ReadFile(Path("xfce.cloud.yaml.bak"))
+	if err != nil {
+		t.Fatalf("Install overwrote a pre-manifest recipe without keeping a backup: %v", err)
+	}
+	if string(bak) != old {
+		t.Errorf("backup holds %q, want the pre-manifest contents", bak)
+	}
+
+	// Adoption is once. With a manifest now on disk, a later edit is
+	// recognised as an edit and left alone.
+	edit := "#cloud-config\n# mine\n"
+	if err := os.WriteFile(Path("xfce.cloud.yaml"), []byte(edit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Read("xfce.cloud.yaml"); got != edit {
+		t.Error("Install reverted an edit made after adoption")
+	}
+	// And keeps leaving it alone: recording the bundled sum for a file it
+	// did not write would make the next Install think the edit was its own.
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Read("xfce.cloud.yaml"); got != edit {
+		t.Error("Install reverted an edit on the second run after adoption")
+	}
+}
+
+// A .bak left by adoption must not be offered as a recipe, and neither must
+// the manifest.
+func TestBookkeepingFilesAreNotRecipes(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path("xfce.cloud.yaml.bak"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, osName := range []string{"alpine", "ubuntu", "arch"} {
+		got, err := List(osName, "cloudinit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range got {
+			if strings.HasSuffix(n, ".bak") || n == ManifestName {
+				t.Errorf("List(%q) offered bookkeeping file %q", osName, n)
+			}
+		}
+	}
+	installed, err := Installed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range installed {
+		if n == ManifestName {
+			t.Errorf("Installed listed %q, which is stoat's own bookkeeping", n)
+		}
+	}
+}
+
 func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 	// go:embed must pick up exactly the per-OS shell recipes plus the cloud
 	// fragments — no strays (recipes.go/recipes_test.go must NOT be swept up
@@ -64,6 +200,7 @@ func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 		"tailscale.alpine.sh":    true,
 		"xfce.cloud.yaml":        true,
 		"xfce.fedora.cloud.yaml": true,
+		"xfce.alpine.cloud.yaml": true,
 		"devtools.cloud.yaml":    true,
 	}
 	got := map[string]bool{}
@@ -125,10 +262,23 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 		}
 	}
 
-	// alpine has no cloud-config fragment and no ssh recipe: cloudinit is
-	// never its backend, and its only shell recipe requires osName=="alpine".
-	if names, err := List("alpine", "cloudinit"); err != nil || len(names) != 0 {
-		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, %v, want empty", names, err)
+	// alpine is CloudRecipes-eligible for the shared set (devtools.cloud.yaml
+	// installs fine on apk) and has its own xfce fragment (xfce.cloud.yaml's
+	// systemctl runcmd does not work under Alpine's OpenRC) — same pattern
+	// as Fedora's xfce override, so it must get exactly these two entries,
+	// never the shared xfce.cloud.yaml.
+	alpineNames, err := List("alpine", "cloudinit")
+	if err != nil {
+		t.Fatalf("List(\"alpine\", \"cloudinit\"): %v", err)
+	}
+	if !contains(alpineNames, "devtools.cloud.yaml") {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, want it to contain devtools.cloud.yaml", alpineNames)
+	}
+	if !contains(alpineNames, "xfce.alpine.cloud.yaml") {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, want it to contain xfce.alpine.cloud.yaml", alpineNames)
+	}
+	if contains(alpineNames, "xfce.cloud.yaml") {
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, must NOT contain xfce.cloud.yaml — its systemctl runcmd does not run under Alpine's OpenRC", alpineNames)
 	}
 	// fedora is served by a per-OS fragment rather than the shared one: it
 	// has no package literally named "xfce4", so it needs the comps group
@@ -347,6 +497,102 @@ func TestCloudFragmentsParse(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestAlpineCloudFragmentUsesOpenRCNotSystemd asserts xfce.alpine.cloud.yaml
+// against the two things that made xfce.cloud.yaml (systemd) unsafe to just
+// reuse for Alpine: it must not shell out to systemctl (Alpine is OpenRC,
+// there is no such binary), and — because cloud-init's packages: module
+// installs before runcmd runs, and a stock Alpine cloud image ships with the
+// community repo (where every desktop package here lives) commented out —
+// it must not rely on a packages: list at all; everything has to happen
+// through runcmd instead. It also pins the dbus-before-lightdm ordering a
+// real boot test caught missing on the first version of this fragment (see
+// the dbus-openrc checks below) — that failure produced cloud-init exit
+// status "error" with no desktop and no diagnosis beyond a log file, exactly
+// the class of silent failure this whole file exists to catch before a boot
+// test has to.
+func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Read("xfce.alpine.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(s, "#cloud-config") {
+		t.Error("xfce.alpine.cloud.yaml does not start with #cloud-config")
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+		t.Fatalf("xfce.alpine.cloud.yaml is not valid YAML: %v", err)
+	}
+	// mergeCloudRecipes only splices packages: and runcmd:; anything else is
+	// silently dropped, so the bundled fragment must not declare it.
+	for k := range doc {
+		if k != "packages" && k != "runcmd" {
+			t.Errorf("xfce.alpine.cloud.yaml has top-level key %q, which mergeCloudRecipes silently drops", k)
+		}
+	}
+	if _, ok := doc["packages"]; ok {
+		t.Error("xfce.alpine.cloud.yaml declares packages:, but cloud-init installs packages: before runcmd runs — too early to have enabled the community repo the desktop packages live in")
+	}
+	runcmd, _ := doc["runcmd"].([]any)
+	if len(runcmd) == 0 {
+		t.Fatal("xfce.alpine.cloud.yaml has no runcmd: — the fragment does nothing")
+	}
+
+	// Checked against the parsed runcmd items, not the raw file text, so an
+	// explanatory mention of "systemctl" in a comment (as above) doesn't
+	// trip this.
+	var haveRCUpdate, haveXorgBase, haveDbusOpenrc bool
+	var dbusStartIdx, lightdmStartIdx = -1, -1
+	for i, c := range runcmd {
+		cmd, _ := c.(string)
+		if strings.Contains(cmd, "systemctl") {
+			t.Errorf("xfce.alpine.cloud.yaml runs %q, which does not exist under Alpine's OpenRC", cmd)
+		}
+		if strings.Contains(cmd, "rc-update") {
+			haveRCUpdate = true
+		}
+		if strings.Contains(cmd, "setup-xorg-base") {
+			haveXorgBase = true
+			if strings.Contains(cmd, "dbus-openrc") {
+				haveDbusOpenrc = true
+			}
+		}
+		if strings.Contains(cmd, "rc-service dbus start") {
+			dbusStartIdx = i
+		}
+		if strings.Contains(cmd, "rc-service lightdm start") {
+			lightdmStartIdx = i
+		}
+	}
+	if !haveRCUpdate {
+		t.Error("xfce.alpine.cloud.yaml never calls rc-update to enable lightdm under OpenRC")
+	}
+	// A real boot test caught this: apk's dbus package installs the daemon
+	// but not its OpenRC init script (that's the separate dbus-openrc
+	// subpackage), so lightdm's `need dbus` never resolved and it refused
+	// to start with "dbus would not start". Pinned here so a future edit
+	// can't silently drop the fix without a second boot-test round trip.
+	if !haveDbusOpenrc {
+		t.Error("xfce.alpine.cloud.yaml does not install dbus-openrc — lightdm's `need dbus` has no OpenRC service to resolve to, and it will refuse to start")
+	}
+	if dbusStartIdx == -1 {
+		t.Error("xfce.alpine.cloud.yaml never starts dbus — lightdm depends on it")
+	}
+	if lightdmStartIdx == -1 {
+		t.Error("xfce.alpine.cloud.yaml never starts lightdm")
+	}
+	if dbusStartIdx != -1 && lightdmStartIdx != -1 && dbusStartIdx > lightdmStartIdx {
+		t.Error("xfce.alpine.cloud.yaml starts lightdm before dbus — lightdm needs a running dbus to start")
+	}
+	if !haveXorgBase {
+		t.Error("xfce.alpine.cloud.yaml does not install an X server (expected via setup-xorg-base) — a desktop with no X server is the black-screen failure this fragment must avoid")
 	}
 }
 

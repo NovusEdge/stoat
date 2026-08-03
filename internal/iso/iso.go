@@ -23,6 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 const (
@@ -304,25 +305,35 @@ func Catalog() []Entry {
 // filename alone. It is a suggestion for the form to pre-fill, never a
 // verdict: the user can always override it, and an unrecognised name
 // resolves to "ssh" with no OS guess rather than a wrong guess.
+//
+// Hint matching decides the OS; the extension decides only the backend. That
+// split matters for Alpine specifically: an empty OS on an Alpine image is
+// what sends guestShell("") to /bin/bash, a shell Alpine doesn't have, so the
+// OS guess must fire on a hint match regardless of extension.
 func Infer(filename string) (backend, os string) {
 	lower := strings.ToLower(filename)
-	isAlpine := strings.Contains(lower, "alpine")
+
+	var matchedOS string
+	for _, o := range guest.All() {
+		for _, hint := range o.FilenameHints {
+			if strings.Contains(lower, hint) {
+				matchedOS = o.Name
+				break
+			}
+		}
+		if matchedOS != "" {
+			break
+		}
+	}
+
 	switch {
-	case isAlpine && strings.HasSuffix(lower, ".iso"):
+	case matchedOS == "alpine" && strings.HasSuffix(lower, ".iso"):
 		return "apkovl", "alpine"
 	case strings.Contains(lower, "cloudimg"), strings.Contains(lower, "genericcloud"),
 		strings.HasSuffix(lower, ".qcow2"), strings.HasSuffix(lower, ".img"):
-		// An alpine name here is the cloud image (a4befa9): claim the OS
-		// even though the extension alone doesn't say "alpine", so a BYO
-		// alpine cloud image never resolves to an empty OS. An empty OS on
-		// an alpine image is what sends guestShell("") to /bin/bash, which
-		// Alpine doesn't have — see the alpine cloud qcow2 case above.
-		if isAlpine {
-			return "cloudinit", "alpine"
-		}
-		return "cloudinit", ""
+		return "cloudinit", matchedOS
 	default:
-		return "ssh", ""
+		return "ssh", matchedOS
 	}
 }
 
@@ -512,7 +523,7 @@ func fileDigest(path string, h hash.Hash) (string, error) {
 // r.URL, when set, is fetched directly (a catalog Entry's direct-URL image);
 // otherwise r.File is resolved against downloadMirror, preserving the
 // original Alpine-only behavior.
-func Download(r *Release, progress func(done, total int64)) (string, error) {
+func Download(ctx context.Context, r *Release, progress func(done, total int64)) (string, error) {
 	dir := filepath.Join(config.Root(), "isos")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -532,7 +543,13 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 		src = downloadMirror + r.File
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Derived from the CALLER's ctx, not context.Background(): cancelling the
+	// request is what unblocks a Read that will never return, and until this
+	// was reachable from outside, abandoning a download (the TUI's esc) left
+	// the goroutine reading the socket until the stall timer fired minutes
+	// later. The stall timer below still cancels this same ctx; it is now one
+	// of two reasons rather than the only one.
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
 	if err != nil {
@@ -556,11 +573,33 @@ func Download(r *Release, progress func(done, total int64)) (string, error) {
 	stall := time.AfterFunc(stallTimeout, func() { stalled.Store(true); cancel() })
 	defer stall.Stop()
 
-	part := final + ".part"
-	f, err := os.Create(part)
+	// A UNIQUE .part per download, not the shared final+".part".
+	//
+	// os.Create truncates in place and grants no exclusivity, so two downloads
+	// of the same image — trivially reachable by cancelling and retrying,
+	// since a cancelled download's goroutine outlives the call — opened the
+	// SAME inode and wrote to it at independent offsets, interleaving into a
+	// corrupt file.
+	//
+	// The checksum did NOT catch this, which is what makes it worth fixing
+	// rather than documenting: h is fed from the bytes THIS goroutine read off
+	// the network (h.Write below), never re-read from disk. Whichever writer
+	// finished computed a perfectly good digest of its own complete stream,
+	// set Verified = true, and renamed an interleaved file into place as a
+	// verified image. The three catalog entries with no ChecksumURL had no
+	// backstop at all, and the ones with a checksum had one that could not see
+	// the problem.
+	//
+	// CreateTemp gives each download its own inode, so concurrent downloads
+	// can no longer touch each other's bytes; the last to finish renames its
+	// own complete, digest-matched file over the final name. The ".part"
+	// suffix is kept because LocalImages (internal/core) skips *.part, so a
+	// half-written file is never offered as a usable image.
+	f, err := os.CreateTemp(dir, r.File+".*.part")
 	if err != nil {
 		return "", err
 	}
+	part := f.Name()
 	h := newDigest(r.SHA256)
 	var done int64
 	buf := make([]byte, 256*1024)

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -17,8 +18,8 @@ var errNotRunning = errors.New("not running — start it first")
 // Alpine has setup-alpine; a BYO Fedora/Debian/unknown ISO has its own, so
 // naming the wrong one is worse than staying general.
 func installerName(v *config.VM) string {
-	if v.OS == "alpine" {
-		return "setup-alpine"
+	if os, ok := guest.Lookup(v.OS); ok && os.Installer != "" {
+		return os.Installer
 	}
 	return "the installer"
 }

@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,25 +20,77 @@ import (
 // live boot plus dhcp is slower than a warm one, so this is generous.
 const WaitTimeout = 90 * time.Second
 
-// Args returns the argv (excluding argv[0]) for ssh into v. Host key checks
-// are off on purpose: this is a loopback forward to a VM stoat just built,
-// and live VMs are recreated constantly.
-func Args(v *config.VM, extra ...string) []string {
-	user := v.SSHUser
-	if user == "" {
-		user = "root"
+// User returns the account to ssh into v as: v.SSHUser when it was recorded
+// at build time (the catalog entry's account, or cloudinit.User for a cloud
+// image), otherwise "root".
+//
+// This deliberately does NOT consult guest.DefaultSSHUser as a second
+// fallback. An empty v.SSHUser is not "unknown" — for the cloudinit backend
+// it seeds a real account, so it is only ever empty for the apkovl/ssh
+// backends, both of which are unlocked-root images (a live Alpine apkovl, or
+// a BYO disk image awaiting a manual install). Guessing an OS's registry
+// default there would be wrong: a BYO file can be labelled e.g. "ubuntu" via
+// iso.Infer or a form override while still going through the ssh backend
+// (no cloud-init, no seeded account), and that image has no "stoat" user —
+// only whatever the installer itself created. See form.go's
+// resolvedSSHUser for the one place that decides the recorded value.
+func User(v *config.VM) string {
+	if v.SSHUser != "" {
+		return v.SSHUser
 	}
-	a := []string{
-		"-p", fmt.Sprint(v.SSHPort),
+	return "root"
+}
+
+// connOptions returns the connection settings ssh(1) and scp(1) both accept
+// with IDENTICAL syntax: host key checking, connect behaviour, and the
+// identity file. This is the one place they live, so a caller building an
+// scp invocation (core.CopyTo/CopyFrom) never has to re-decide
+// StrictHostKeyChecking or find the private key path a second time — the
+// exact kind of drift this package exists to prevent (see Args' comment).
+//
+// The port flag is deliberately NOT here: ssh takes "-p" and scp takes "-P"
+// (capital — scp's lowercase -p means "preserve file times"), so it is the
+// one option each caller must supply itself. See CopyArgs.
+func connOptions() []string {
+	return []string{
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=5",
 		"-o", "BatchMode=yes",
 		"-i", keys.PrivatePath(),
-		user + "@127.0.0.1",
 	}
+}
+
+// Args returns the argv (excluding argv[0]) for ssh into v. Host key checks
+// are off on purpose: this is a loopback forward to a VM stoat just built,
+// and live VMs are recreated constantly.
+func Args(v *config.VM, extra ...string) []string {
+	a := append([]string{"-p", fmt.Sprint(v.SSHPort)}, connOptions()...)
+	a = append(a, User(v)+"@127.0.0.1")
 	return append(a, extra...)
+}
+
+// CopyArgs returns the argv (excluding argv[0]) for scp between the host and
+// v's guest, sharing every connection setting Args does (see connOptions) —
+// only the port flag differs, because scp's is capital -P.
+//
+// toRemote picks the direction: true puts the guest spec ("user@127.0.0.1:
+// remotePath") on the right, as scp's destination (core.CopyTo); false puts
+// it on the left, as scp's source (core.CopyFrom). localPath is always a
+// bare host path — never quoted or otherwise rewritten, since it is scp's
+// own argv element, not something re-parsed by a shell.
+//
+// -q suppresses scp's interactive progress meter: this argv is built for
+// exec.CommandContext, never a terminal, and an unused flag doing nothing is
+// better than stray meter output ending up captured as if it were an error.
+func CopyArgs(v *config.VM, localPath, remotePath string, toRemote bool) []string {
+	a := append([]string{"-P", fmt.Sprint(v.SSHPort), "-q"}, connOptions()...)
+	remoteSpec := User(v) + "@127.0.0.1:" + remotePath
+	if toRemote {
+		return append(a, localPath, remoteSpec)
+	}
+	return append(a, remoteSpec, localPath)
 }
 
 // Wait blocks until the forwarded port accepts a connection, or timeout.
@@ -118,7 +169,7 @@ func Provision(v *config.VM) (err error) {
 		}
 	}()
 
-	log, err := os.Create(filepath.Join(v.Dir, "last-provision.log"))
+	log, err := os.Create(v.ProvisionLogPath())
 	if err != nil {
 		return err
 	}

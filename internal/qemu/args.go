@@ -3,8 +3,8 @@ package qemu
 
 import (
 	"fmt"
-	"path/filepath"
 
+	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -27,6 +27,23 @@ func NeedsWindow(v *config.VM) bool {
 // Args returns the argv (excluding argv[0]) for a VM. It is pure: the config
 // must already be resolved, and nothing here touches the filesystem.
 func Args(v *config.VM) []string {
+	// hostfwd is repeatable within a single -netdev's option string: QEMU's
+	// user-mode networking accepts any number of comma-separated
+	// "hostfwd=[tcp|udp]:[hostaddr]:hostport-[guestaddr]:guestport" clauses
+	// on one netdev instance, each opening its own host listener into the
+	// guest. Verified directly, not just read off docs: launched real
+	// qemu-system-x86_64 11.0.2 with
+	// "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:19922-:22,hostfwd=tcp:127.0.0.1:19980-:80"
+	// and confirmed with `ss -ltn` that BOTH 127.0.0.1:19922 and
+	// 127.0.0.1:19980 came up as independent host listeners from that one
+	// netdev. This is why additional forwards are appended clauses on the
+	// SSH netdev rather than a second -netdev/-device pair -- one guest
+	// NIC, N forwarded ports, matching a router's port-forwarding table.
+	netdev := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort)
+	for _, f := range v.Forwards {
+		netdev += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:%d", f.HostPort, f.GuestPort)
+	}
+
 	a := []string{
 		"-enable-kvm",
 		"-m", fmt.Sprint(v.RAM),
@@ -34,6 +51,20 @@ func Args(v *config.VM) []string {
 		"-daemonize",
 		"-pidfile", v.PidPath(),
 		"-monitor", "unix:" + v.MonitorPath() + ",server,nowait",
+		// A QMP socket ALONGSIDE the human monitor above, not replacing it.
+		//
+		// The design doc expected snapshots to force a wholesale migration to
+		// QMP. They do not, and doing it that way would mean rewriting Stop
+		// and TypeConsolePassword — two features that work — to gain nothing
+		// they need. QEMU is happy to serve both protocols at once on separate
+		// sockets, so the new operation gets the protocol it needs (framed
+		// JSON, with errors that can be told apart from output) while the
+		// existing two keep the one they already use correctly.
+		//
+		// Both are ",server,nowait": QEMU creates the socket and does not
+		// block waiting for anyone to connect, so a VM nobody ever snapshots
+		// pays nothing for this.
+		"-qmp", "unix:" + v.QMPPath() + ",server,nowait",
 		// The guest's serial console, captured unconditionally. An automated VM
 		// has no window and no operator watching it, so this file is the only
 		// postmortem when a boot fails. Cheap: QEMU writes it whether or not
@@ -55,8 +86,9 @@ func Args(v *config.VM) []string {
 		"-chardev", "file,id=con0,path=" + v.ConsoleLogPath() + ",append=on",
 		"-serial", "chardev:con0",
 		// Bind loopback explicitly: the QEMU default is 0.0.0.0, which would
-		// publish every guest's SSH to the LAN.
-		"-netdev", fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort),
+		// publish every guest's SSH (and every user-declared forward) to the
+		// LAN.
+		"-netdev", netdev,
 		"-device", "virtio-net,netdev=n0",
 	}
 
@@ -76,44 +108,44 @@ func Args(v *config.VM) []string {
 			fmt.Sprintf("local,path=%s,mount_tag=host,security_model=none", v.Share))
 	}
 
+	// Mode owns the BOOT MEDIA -- the qcow2, the installer ISO, the boot
+	// order. It deliberately does not decide anything about how the guest is
+	// provisioned; that is the backend's, below.
 	switch v.Mode {
 	case "live":
 		a = append(a, "-cdrom", v.ISOPath())
-		// The initramfs looks for *.apkovl.tar.gz at the root of a mountable
-		// filesystem, so the tarball is served through vvfat as a fake FAT disk.
-		a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
 		// vvfat synthesizes a valid MBR signature but no boot code, so without
 		// an explicit boot order QEMU's disk-first default can select the
-		// empty overlay and hang instead of falling through to the ISO.
+		// empty overlay the apkovl backend attaches and hang instead of
+		// falling through to the ISO.
 		a = append(a, "-boot", "d")
 	case "disk":
 		// The qcow2 comes first so it is vda: the installer's disk picker
 		// lists devices in order, and the target must be the obvious answer.
+		// Everything appended after this point is a later device, which is
+		// why the backend's drive goes on the end rather than inline here.
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
 		if !v.Installed {
 			a = append(a, "-cdrom", v.ISOPath())
-			// The same overlay a live VM gets, for the duration of the
-			// install only. Alpine's setup-disk in sys mode copies the
-			// RUNNING system onto the target, so an installer environment
-			// that already has stoat's key in /root/.ssh ends up installing
-			// it — otherwise the guest is unreachable after the install and
-			// provisioning dies on "Permission denied (publickey)".
-			//
-			// Only Alpine's initramfs looks for an apkovl. Any other ISO
-			// would just see a second, useless disk in its target picker.
-			if v.OS == "alpine" {
-				a = append(a, "-drive", "file=fat:rw:"+v.OvlDir()+",format=raw,if=virtio")
-			}
 			a = append(a, "-boot", "d")
 		}
 	case "cloud":
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
-		// The xorriso seed has no El Torito boot record, so BIOS skips it and
-		// boots the qcow2 without needing an explicit -boot order. cloud-init's
-		// NoCloud datasource finds it by scanning cdrom devices for the CIDATA
-		// volume label.
-		seedISO := filepath.Join(v.OvlDir(), "seed.iso")
-		a = append(a, "-drive", "file="+seedISO+",media=cdrom")
 	}
-	return a
+
+	// The provisioning artifact's drive: the apkovl overlay, the cloud-init
+	// seed, or nothing. Appended last, and unconditionally -- each backend
+	// decides for itself which of v's modes it applies to, so this single
+	// call covers the vvfat overlay a live boot and an uninstalled disk VM
+	// both need, and the seed cdrom a cloud VM needs.
+	//
+	// Asking the backend rather than comparing v.OS == "alpine" is also what
+	// makes alpine-cloud resolve correctly: it is OS "alpine" but backend
+	// "cloudinit" (see internal/backend.For), so an OS comparison would hand
+	// it an apkovl it does not boot from.
+	//
+	// Order is safe to leave until the end: the seed is a cdrom, and the
+	// overlay is only ever a second virtio disk behind either the installer
+	// ISO or the qcow2 that must stay vda.
+	return append(a, backend.For(v).Args(v)...)
 }

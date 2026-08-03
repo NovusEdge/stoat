@@ -11,6 +11,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 // The access box sits beside the VM list and answers "how do I get into this
@@ -51,10 +52,7 @@ func accessBox(v *config.VM, cloudInit string, ciProg progress.Model, width int)
 		line(k, ansi.Truncate(val, accessValueWidth, "…"))
 	}
 
-	user := v.SSHUser
-	if user == "" {
-		user = "root"
-	}
+	user := sshx.User(v)
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", user, v.SSHPort))
 	truncated("key", shortenPath(keys.PrivatePath()))
 
