@@ -111,6 +111,7 @@ func (v *VM) path() string           { return filepath.Join(v.Dir, "vm.toml") }
 func (v *VM) DiskPath() string       { return filepath.Join(v.Dir, "disk.qcow2") }
 func (v *VM) PidPath() string        { return filepath.Join(v.Dir, "qemu.pid") }
 func (v *VM) MonitorPath() string    { return filepath.Join(v.Dir, "monitor.sock") }
+func (v *VM) QMPPath() string        { return filepath.Join(v.Dir, "qmp.sock") }
 func (v *VM) VNCPath() string        { return filepath.Join(v.Dir, "vnc.sock") }
 func (v *VM) OvlDir() string         { return filepath.Join(v.Dir, "ovl") }
 func (v *VM) ConsoleLogPath() string { return filepath.Join(v.Dir, "console.log") }

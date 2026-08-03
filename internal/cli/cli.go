@@ -58,6 +58,11 @@ type Args struct {
 	OS      string
 	Backend string
 
+	// Tag, Restore and Delete belong to "snapshot".
+	Tag     string
+	Restore bool
+	Delete  bool
+
 	// Local, Remote and ToRemote belong to "cp". The direction is resolved at
 	// parse time from which argument carried the "<vm>:" prefix, so nothing
 	// downstream has to re-derive it and get it backwards.
@@ -213,6 +218,40 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
 
+	case "snapshot":
+		// `stoat snapshot <vm>` lists; `snapshot <vm> <tag>` saves;
+		// `--restore` / `--delete` act on an existing tag. Listing is the
+		// no-argument default for the same reason `forward` prints rather than
+		// clears: the destructive readings of a half-typed command should not
+		// be the ones that happen.
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("snapshot: missing vm name")
+		}
+		name, rem := rest[0], rest[1:]
+		var tag string
+		if len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
+			tag, rem = rem[0], rem[1:]
+		}
+
+		fs := newFlagSet(cmd)
+		var quiet, restore, del bool
+		fs.BoolVar(&restore, "restore", false, "roll the VM back to <tag>, discarding everything since")
+		fs.BoolVar(&del, "delete", false, "remove <tag>")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("snapshot: unexpected argument %q", fs.Arg(0)))
+		}
+		if restore && del {
+			return nil, usageError("snapshot: --restore and --delete are mutually exclusive")
+		}
+		if (restore || del) && tag == "" {
+			return nil, usageError("snapshot: --restore and --delete need a tag")
+		}
+		return &Args{Cmd: "snapshot", VM: name, Tag: tag, Restore: restore, Delete: del, Quiet: quiet}, nil
+
 	case "cp":
 		// `stoat cp <src> <dst>`, where exactly one side is `<vm>:<path>` —
 		// the scp/docker cp spelling. Direction is inferred from which side
@@ -352,6 +391,8 @@ commands:
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
+  snapshot <vm> [tag] [--restore|--delete]
+                       list, save, restore or delete a snapshot
   cp <src> <dst>       copy a file in or out; one side is <vm>:<path>
   forward <name> [8080:80 ...] [--clear]
                        show, set or clear host:guest port forwards
@@ -423,6 +464,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runLS(a, stdout, stderr)
 	case "create":
 		return runCreate(a, stdout, stderr)
+	case "snapshot":
+		return runSnapshot(a, stdout, stderr)
 	case "cp":
 		return runCopy(a, stdout, stderr)
 	case "forward":
@@ -574,6 +617,61 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !active {
 		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
+	}
+	return ExitOK
+}
+
+// runSnapshot lists, saves, restores or deletes a snapshot. Restoring is the
+// one genuinely destructive path here — everything since the snapshot is
+// discarded with no second copy — so it says what it did rather than
+// succeeding silently.
+func runSnapshot(a *Args, stdout, stderr io.Writer) int {
+	switch {
+	case a.Restore:
+		if err := core.Restore(a.VM, a.Tag); err != nil {
+			fmt.Fprintln(stderr, "stoat: snapshot:", err)
+			return ExitFail
+		}
+		if !a.Quiet {
+			fmt.Fprintf(stdout, "%s restored to %s\n", a.VM, a.Tag)
+		}
+		return ExitOK
+	case a.Delete:
+		if err := core.DeleteSnapshot(a.VM, a.Tag); err != nil {
+			fmt.Fprintln(stderr, "stoat: snapshot:", err)
+			return ExitFail
+		}
+		if !a.Quiet {
+			fmt.Fprintf(stdout, "deleted %s\n", a.Tag)
+		}
+		return ExitOK
+	case a.Tag != "":
+		if err := core.TakeSnapshot(a.VM, a.Tag); err != nil {
+			fmt.Fprintln(stderr, "stoat: snapshot:", err)
+			return ExitFail
+		}
+		if !a.Quiet {
+			fmt.Fprintf(stdout, "saved %s\n", a.Tag)
+		}
+		return ExitOK
+	}
+
+	snaps, err := core.Snapshots(a.VM)
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: snapshot:", err)
+		return ExitFail
+	}
+	if len(snaps) == 0 {
+		fmt.Fprintf(stdout, "%s has no snapshots\n", a.VM)
+		return ExitOK
+	}
+	fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", "TAG", "SIZE", "CREATED", "RAM")
+	for _, s := range snaps {
+		ram := "no"
+		if s.VMState {
+			ram = "yes"
+		}
+		fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", s.Tag, s.Size, s.Created, ram)
 	}
 	return ExitOK
 }

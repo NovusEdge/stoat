@@ -51,6 +51,20 @@ func Args(v *config.VM) []string {
 		"-daemonize",
 		"-pidfile", v.PidPath(),
 		"-monitor", "unix:" + v.MonitorPath() + ",server,nowait",
+		// A QMP socket ALONGSIDE the human monitor above, not replacing it.
+		//
+		// The design doc expected snapshots to force a wholesale migration to
+		// QMP. They do not, and doing it that way would mean rewriting Stop
+		// and TypeConsolePassword — two features that work — to gain nothing
+		// they need. QEMU is happy to serve both protocols at once on separate
+		// sockets, so the new operation gets the protocol it needs (framed
+		// JSON, with errors that can be told apart from output) while the
+		// existing two keep the one they already use correctly.
+		//
+		// Both are ",server,nowait": QEMU creates the socket and does not
+		// block waiting for anyone to connect, so a VM nobody ever snapshots
+		// pays nothing for this.
+		"-qmp", "unix:" + v.QMPPath() + ",server,nowait",
 		// The guest's serial console, captured unconditionally. An automated VM
 		// has no window and no operator watching it, so this file is the only
 		// postmortem when a boot fails. Cheap: QEMU writes it whether or not
