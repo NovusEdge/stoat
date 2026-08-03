@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/testutil"
 )
 
 // TestColorStateWidth pins the pad-then-colour order. The escape sequences
@@ -233,36 +232,8 @@ func writeBrokenVMToml(t *testing.T, dir, name string) {
 // helper of the same name and same trick, reimplemented here since it isn't
 // exported.
 func fakeRunning(t *testing.T, v *config.VM) func() {
-	t.Helper()
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not installed")
-	}
-	// NOT `sleep 100 <dir>/marker`: sleep sums its arguments as durations and
-	// rejects a non-numeric one, so that spelling exited about a millisecond
-	// in and the "running" VM was already dead. The trailing "; :" keeps sh
-	// from exec'ing the simple command and replacing its own argv, which would
-	// drop the directory qemu.Running matches on. Same fix as
-	// internal/core/vm_test.go's fakeRunning.
-	cmd := exec.Command("sh", "-c", "sleep 100; :", v.Dir+"/marker")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(v.PidPath(), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		cmd.Process.Kill()
-		t.Fatal(err)
-	}
-	return func() {
-		cmd.Process.Kill()
-		cmd.Wait()
-	}
+	return testutil.FakeRunning(t, v.Dir)
 }
-
-// TestRunLSOutput pins runLS's format now that it goes through core.List
-// instead of config.List+config.ListBroken: same header, same column
-// widths, good VMs before broken ones (core.List sorts everything together
-// by name; runLS still has to split it back into two passes to keep this
-// grouping — see its comment), same dashes for the fields a broken vm.toml
-// can't supply.
 func TestRunLSOutput(t *testing.T) {
 	dir := cliRoot(t)
 	if err := (&config.VM{Name: "good", Mode: "live", RAM: 1024, CPUs: 2, SSHPort: 2200}).Save(); err != nil {

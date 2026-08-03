@@ -3,12 +3,11 @@ package core
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/testutil"
 )
 
 // writeRawVMToml writes vm.toml content directly, bypassing config.VM.Save
@@ -37,37 +36,7 @@ func writeRawVMToml(t *testing.T, name, content string) {
 // without qemu-system-x86_64 installed — exactly the CI constraint the
 // existing tests already work around for qemu-img.
 func fakeRunning(t *testing.T, v *config.VM) func() {
-	t.Helper()
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not installed")
-	}
-	// `sh -c '<loop>' <dir>/marker`, NOT `sleep 100 <dir>/marker`.
-	//
-	// The original spelling passed the marker as a SECOND ARGUMENT TO SLEEP,
-	// and sleep sums its arguments as durations — so it rejected the path with
-	// "invalid time interval" and exited within about a millisecond. The fake
-	// process was therefore already dead by the time most callers looked, and
-	// whether a test passed came down to how much work happened in between.
-	// That is what made these tests flaky under full-suite load while passing
-	// when run per-package, and it was previously misdiagnosed as this
-	// sandbox reaping detached children.
-	//
-	// The trailing "; :" matters: `sh -c 'sleep 100'` with a SIMPLE command
-	// execs it directly, replacing sh's argv — and the directory, which is the
-	// whole point, disappears from /proc/<pid>/cmdline. A compound command
-	// keeps sh alive as itself, argv intact.
-	cmd := exec.Command("sh", "-c", "sleep 100; :", v.Dir+"/marker")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(v.PidPath(), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		cmd.Process.Kill()
-		t.Fatal(err)
-	}
-	return func() {
-		cmd.Process.Kill()
-		cmd.Wait()
-	}
+	return testutil.FakeRunning(t, v.Dir)
 }
 
 func TestListIncludesBrokenRatherThanOmittingThem(t *testing.T) {

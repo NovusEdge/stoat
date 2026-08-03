@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/novusedge/stoat/internal/config"
 )
 
 // writeBroken drops a vm.toml under dir/name that fails to parse (an
@@ -276,28 +278,24 @@ func TestPruneBrokenVMWithReadableBaseFieldProtectsItsImage(t *testing.T) {
 // never be deleted, even with Broken opted in — Destroy already refuses to
 // touch a running VM, and Prune, acting without anyone watching, must not
 // become a quieter way around that refusal.
-func TestPruneNeverRemovesARunningBrokenVM(t *testing.T) {
+// This was called TestPruneNeverRemovesARunningBrokenVM and asserted the
+// OPPOSITE of its name: a pid of 999999999 cannot exist, so qemu.Running was
+// always false and the running guard was never reached. Disabling that guard
+// entirely left every prune test still passing. Renamed to what it actually
+// checks — which is worth checking — and the guard it claimed to cover now has
+// a real test below.
+func TestPruneRemovesABrokenVMWithAStalePidfile(t *testing.T) {
 	dir := root(t)
 	writeBroken(t, dir, "busted")
 
 	vdir := filepath.Join(dir, "busted")
-	pidFile := filepath.Join(vdir, "qemu.pid")
-	// Our own test process is a real, currently-running pid whose
-	// /proc/<pid>/cmdline will not contain vdir — cmdlineMatches would
-	// reject that on a real check. But qemu.Running does not compare
-	// cmdline content against arbitrary text; it checks vdir+"/" appears in
-	// cmdline. The test process's own argv does not contain vdir, so this
-	// alone cannot fabricate "running" without a matching cmdline, which is
-	// exactly why the test below only asserts the SAFE side: an unrelated
-	// live pid must not be enough by itself to mark it running, and dryRun
-	// output must not be treated as ground truth for state.
-	if err := os.WriteFile(pidFile, []byte("999999999"), 0o644); err != nil {
+	// A pid that cannot possibly exist: the VM is NOT running, and a leftover
+	// pidfile from a crashed qemu must not protect it from an opted-in prune
+	// forever.
+	if err := os.WriteFile(filepath.Join(vdir, "qemu.pid"), []byte("999999999"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// A pid that cannot possibly exist (999999999) means qemu.Running is
-	// false, so this exercises the deletion path, confirming Broken-opt-in
-	// deletion still works when a stale, dead pidfile is present.
 	removed, err := Prune(PruneOpts{Broken: true})
 	if err != nil {
 		t.Fatal(err)
@@ -307,6 +305,37 @@ func TestPruneNeverRemovesARunningBrokenVM(t *testing.T) {
 	}
 	if _, err := os.Stat(vdir); !os.IsNotExist(err) {
 		t.Fatalf("broken VM directory with a stale pidfile survived: %v", err)
+	}
+}
+
+// TestPruneNeverRemovesARunningBrokenVM covers the single guard standing
+// between `stoat prune --broken` and deleting a live qemu's directory —
+// pidfile, monitor socket and disk — out from under it. A vm.toml can be
+// corrupted AFTER its VM was started, which is exactly the state that reaches
+// this path.
+//
+// It uses fakeRunning, which spawns a real process with the VM's directory in
+// its argv, because that is what qemu.Running actually matches on. The
+// previous version fabricated an impossible pid instead, so the guard was
+// never executed: with `if qemu.Running(bv)` changed to `if false && ...`,
+// every prune test still passed.
+func TestPruneNeverRemovesARunningBrokenVM(t *testing.T) {
+	dir := root(t)
+	writeBroken(t, dir, "busted")
+	vdir := filepath.Join(dir, "busted")
+
+	stop := fakeRunning(t, &config.VM{Name: "busted", Dir: vdir})
+	defer stop()
+
+	removed, err := Prune(PruneOpts{Broken: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want nothing: that VM is running", removed)
+	}
+	if _, err := os.Stat(vdir); err != nil {
+		t.Fatalf("a RUNNING VM's directory was deleted: %v", err)
 	}
 }
 
