@@ -1,9 +1,15 @@
 // Package cli implements stoat's non-interactive, scriptable interface: a
-// switch on the first argument dispatching to the same packages the TUI
-// uses. No subcommand contains business logic of its own — each is a thin
-// wrapper over internal/config, internal/qemu, internal/sshx, internal/keys,
-// internal/recipes, and internal/logx, so the TUI and CLI can never drift
-// into bugs that reproduce in one and not the other.
+// switch on the first argument dispatching into internal/core. No subcommand
+// contains business logic of its own — parsing flags, printing, and the
+// confirmation prompt are the whole of it, so the TUI, the CLI and an MCP
+// server can never drift into bugs that reproduce in one and not the others.
+//
+// It no longer imports internal/qemu at all: deciding whether a VM is running,
+// what happens when you start one, and whether a delete is allowed are core's
+// answers now, not three front ends' separate ones. What remains outside core
+// here is deliberate — internal/sshx for `ssh`, which execs and replaces this
+// process, and internal/recipes/logx for the two commands that are genuinely
+// about files on the host rather than about a VM.
 package cli
 
 import (
@@ -23,7 +29,6 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -118,20 +123,37 @@ func Parse(args []string) (*Args, error) {
 		return &Args{Cmd: cmd, VM: fs.Arg(0), Quiet: quiet}, nil
 
 	case "rm":
+		// The name is pulled off BEFORE flag parsing when it comes first, the
+		// same trick "create" and "recipe new" use. Go's flag package stops at
+		// the first non-flag argument, so `stoat rm work -y` used to leave -y
+		// unparsed and then reject it as a stray argument — even though the
+		// usage text has always documented exactly that form. Both orders work
+		// now; only `rm -y work` did before.
+		rem := rest
+		var name string
+		if len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
+			name, rem = rem[0], rem[1:]
+		}
+
 		fs := newFlagSet(cmd)
 		var quiet, yes bool
 		addQuiet(fs, &quiet)
 		fs.BoolVar(&yes, "y", false, "skip the delete confirmation")
-		if err := fs.Parse(rest); err != nil {
+		if err := fs.Parse(rem); err != nil {
 			return nil, usageError(err.Error())
 		}
-		if fs.NArg() < 1 {
-			return nil, usageError("rm: missing vm name")
-		}
-		if fs.NArg() > 1 {
+		if name == "" {
+			if fs.NArg() < 1 {
+				return nil, usageError("rm: missing vm name")
+			}
+			name = fs.Arg(0)
+			if fs.NArg() > 1 {
+				return nil, usageError("rm: too many arguments")
+			}
+		} else if fs.NArg() != 0 {
 			return nil, usageError("rm: too many arguments")
 		}
-		return &Args{Cmd: "rm", VM: fs.Arg(0), Quiet: quiet, Yes: yes}, nil
+		return &Args{Cmd: "rm", VM: name, Quiet: quiet, Yes: yes}, nil
 
 	case "create":
 		// Same positional-before-flags rule as "recipe new" below.
@@ -360,8 +382,8 @@ func colorize(padded, state string) string {
 	}
 }
 
-func oneLine(err error) string {
-	return strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", " ")
+func oneLine(s string) string {
+	return strings.ReplaceAll(strings.TrimSpace(s), "\n", " ")
 }
 
 // runCreate is the whole of `stoat create`: hand the flags to core and print
@@ -384,21 +406,26 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 }
 
 func runLS(a *Args, stdout, stderr io.Writer) int {
-	vms, err := config.List()
-	if err != nil {
-		fmt.Fprintln(stderr, "stoat: ls:", err)
-		return ExitFail
-	}
-	broken, err := config.ListBroken()
+	vms, err := core.List()
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: ls:", err)
 		return ExitFail
 	}
 
 	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
+	// core.List() sorts every VM — broken ones included — together by name,
+	// so a broken VM can interleave alphabetically with good ones. The
+	// original two calls (config.List then config.ListBroken) printed every
+	// good VM first and every broken one after; two passes over core's
+	// single (already name-sorted) slice reproduce that same grouping
+	// without asking core to special-case an ordering only this one caller
+	// wants.
 	for _, v := range vms {
+		if v.State == core.StateBroken {
+			continue
+		}
 		state := "stopped"
-		if qemu.Running(v) {
+		if v.State == core.StateRunning {
 			state = "running"
 		}
 		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %d\n",
@@ -407,23 +434,38 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
 	// supply, plus a one-line reason.
-	for _, b := range broken {
+	for _, v := range vms {
+		if v.State != core.StateBroken {
+			continue
+		}
 		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %s\n",
-			b.Name, "-", colorState("broken", 8), "-", "-", "-", oneLine(b.Err))
+			v.Name, "-", colorState("broken", 8), "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
 }
 
 func runUp(a *Args, stdout, stderr io.Writer) int {
-	v, err := config.Load(a.VM)
+	// core.Get first, exactly where config.Load used to sit: a caller must
+	// learn "no such VM" (or "broken") before any progress line prints, not
+	// after — the same reason it existed here originally.
+	v, err := core.Get(a.VM)
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: up:", err)
+		return ExitFail
+	}
+	// core.Get reports a broken VM as StateBroken rather than an error, so it
+	// can be listed and deleted. Neither is true of starting one: refuse here,
+	// before any output, rather than printing "starting x..." and only then
+	// failing — a progress line that announces something the next line admits
+	// is impossible is worse than no line at all.
+	if v.State == core.StateBroken {
+		fmt.Fprintln(stderr, "stoat: up:", v.Error)
 		return ExitFail
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "starting %s...\n", a.VM)
 	}
-	if err := qemu.Start(v); err != nil {
+	if err := core.Start(a.VM); err != nil {
 		fmt.Fprintln(stderr, "stoat: up:", err)
 		return ExitFail
 	}
@@ -432,20 +474,35 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 }
 
 func runDown(a *Args, stdout, stderr io.Writer) int {
-	v, err := config.Load(a.VM)
+	v, err := core.Get(a.VM)
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: down:", err)
 		return ExitFail
 	}
-	if !qemu.Running(v) {
+	// Same reasoning as up: "not running" is true of a broken VM but says
+	// nothing useful, and the parse error is the only thing that helps.
+	if v.State == core.StateBroken {
+		fmt.Fprintln(stderr, "stoat: down:", v.Error)
+		return ExitFail
+	}
+	if v.State != core.StateRunning {
 		fmt.Fprintf(stderr, "stoat: down: %s is not running\n", a.VM)
 		return ExitFail
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "stopping %s...\n", a.VM)
 	}
-	if err := qemu.Stop(v); err != nil {
-		fmt.Fprintln(stderr, "stoat: down:", err)
+	if err := core.Stop(a.VM); err != nil {
+		// The State check above already catches the common case before any
+		// output prints; errors.Is here is the defensive/authoritative path
+		// (a VM stopped between the check and this call) rather than the
+		// primary one, and it's what actually produces today's exact message
+		// for that race.
+		if errors.Is(err, core.ErrNotRunning) {
+			fmt.Fprintf(stderr, "stoat: down: %s is not running\n", a.VM)
+		} else {
+			fmt.Fprintln(stderr, "stoat: down:", err)
+		}
 		return ExitFail
 	}
 	fmt.Fprintf(stdout, "%s stopped\n", a.VM)
@@ -545,12 +602,12 @@ func copyNew(path string, out io.Writer, offset int64) int64 {
 }
 
 func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
-	v, err := config.Load(a.VM)
+	v, err := core.Get(a.VM)
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: rm:", err)
 		return ExitFail
 	}
-	if qemu.Running(v) {
+	if v.State == core.StateRunning {
 		fmt.Fprintf(stderr, "stoat: rm: %s is running; stop it first\n", a.VM)
 		return ExitFail
 	}
@@ -566,8 +623,16 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 			return ExitFail
 		}
 	}
-	if err := v.Delete(); err != nil {
-		fmt.Fprintln(stderr, "stoat: rm:", err)
+	if err := core.Destroy(a.VM); err != nil {
+		// Same belt-and-braces as runDown: the State check above already
+		// refuses a running VM before the confirmation prompt even shows,
+		// so this only fires on the started-after-the-check race — but it's
+		// what reproduces today's exact "stop it first" message for it.
+		if errors.Is(err, core.ErrAlreadyRunning) {
+			fmt.Fprintf(stderr, "stoat: rm: %s is running; stop it first\n", a.VM)
+		} else {
+			fmt.Fprintln(stderr, "stoat: rm:", err)
+		}
 		return ExitFail
 	}
 	fmt.Fprintf(stdout, "%s deleted\n", a.VM)
@@ -605,20 +670,31 @@ func tailLines(path string, n int) ([]string, error) {
 	return lines, nil
 }
 
+// runDoctor prints core.Doctor's findings. It checks strictly more than it
+// used to: this was two ad-hoc probes (qemu.Preflight plus a bare ssh
+// LookPath), while core.Doctor runs the same set the installer's pre-install
+// checklist does — qemu-system-x86_64, qemu-img, ssh, xorriso and /dev/kvm —
+// so `stoat doctor` and `just setup` can no longer disagree about whether the
+// host is ready.
+//
+// It also prints the fix command when there is one. The installer has always
+// told the user how to repair a failed check; the CLI made them guess.
 func runDoctor(a *Args, stdout, stderr io.Writer) int {
-	var issues []string
-	if err := qemu.Preflight(); err != nil {
-		issues = append(issues, err.Error())
+	var failed []core.HostCheck
+	for _, c := range core.Doctor() {
+		if !c.OK {
+			failed = append(failed, c)
+		}
 	}
-	if _, err := exec.LookPath("ssh"); err != nil {
-		issues = append(issues, "ssh not found in PATH")
-	}
-	if len(issues) == 0 {
+	if len(failed) == 0 {
 		fmt.Fprintln(stdout, "ok")
 		return ExitOK
 	}
-	for _, i := range issues {
-		fmt.Fprintln(stdout, "FAIL:", i)
+	for _, c := range failed {
+		fmt.Fprintf(stdout, "FAIL: %s: %s\n", c.Name, c.Detail)
+		if len(c.Fix) > 0 {
+			fmt.Fprintf(stdout, "      try: %s\n", strings.Join(c.Fix, " "))
+		}
 	}
 	return ExitFail
 }
