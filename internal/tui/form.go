@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -499,7 +500,7 @@ func fetchImage(e iso.Entry) tea.Cmd {
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
-		p, err := iso.Download(r, dlRecord)
+		p, err := iso.Download(context.Background(), r, dlRecord)
 		if err != nil {
 			return imageFetchErrMsg(e.OS + ": " + err.Error())
 		}
