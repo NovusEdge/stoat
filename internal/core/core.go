@@ -81,6 +81,18 @@ type Spec struct {
 // creating it here would also mean creating it again for a VM that is never
 // started.
 func Create(s Spec) (*config.VM, error) {
+	// Held across plan AND Save. plan allocates an ssh port and checks the
+	// name is free; neither is committed until Save writes vm.toml, so two
+	// callers interleaved in that gap both pick the same port and both believe
+	// the name is theirs. Plan on its own is deliberately NOT locked — it is a
+	// dry run for callers that want to show an error early (the TUI form), and
+	// Create re-plans under the lock rather than trusting that result.
+	unlock, err := config.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	v, err := plan(s)
 	if err != nil {
 		return nil, err

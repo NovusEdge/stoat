@@ -2,10 +2,12 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/cloudinit"
@@ -258,5 +260,69 @@ func TestCreateWritesVMToml(t *testing.T) {
 	}
 	if got.SSHPort != v.SSHPort || got.OS != "alpine" || strings.Join(got.Recipes, ",") != "devtools" {
 		t.Errorf("reloaded %+v, want it to match %+v", got, v)
+	}
+}
+
+// TestConcurrentCreatesGetDistinctPorts is the regression test for the §11
+// concurrency gap: FreePort reads every VM's port, picks a free one and
+// returns it, but the caller only COMMITS that choice when it writes vm.toml
+// some time later. Two callers interleaved in that gap both saw the same free
+// port and both took it, producing two VMs that fight over one host socket —
+// which surfaces much later as a bind failure from qemu naming neither VM.
+//
+// The CLI could not hit this (one VM per invocation), but an MCP server
+// handling two tool calls, or simply two `stoat create` processes, can.
+func TestConcurrentCreatesGetDistinctPorts(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+
+	const n = 8
+	var wg sync.WaitGroup
+	ports := make([]int, n)
+	errs := make([]error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // release them all at once, to actually overlap
+			v, err := Create(Spec{
+				Name:  fmt.Sprintf("vm%d", i),
+				Image: "alpine-virt-3.24.1-x86_64.iso",
+			})
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			ports[i] = v.SSHPort
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	seen := map[int]string{}
+	for i, p := range ports {
+		if errs[i] != nil {
+			t.Fatalf("vm%d: %v", i, errs[i])
+		}
+		if prev, dup := seen[p]; dup {
+			t.Fatalf("vm%d and %s were both given ssh port %d", i, prev, p)
+		}
+		seen[p] = fmt.Sprintf("vm%d", i)
+	}
+
+	// And the ports on DISK must match: a port held only in the returned
+	// struct would still collide for anything that reads vm.toml later.
+	onDisk := map[int]string{}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("vm%d", i)
+		v, err := config.Load(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prev, dup := onDisk[v.SSHPort]; dup {
+			t.Fatalf("%s and %s both persisted ssh port %d", name, prev, v.SSHPort)
+		}
+		onDisk[v.SSHPort] = name
 	}
 }

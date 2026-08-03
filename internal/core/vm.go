@@ -302,6 +302,18 @@ func Stop(name string) error {
 // (it checks filepath.Dir(v.Dir) == config.Root()); that guard is untouched
 // here, so Destroy inherits it rather than re-implementing it.
 func Destroy(name string) error {
+	// The same data-root lock Create and Clone take. Clone's overlay
+	// references its source's disk BY PATH and is created some time after
+	// Clone checks that source exists; without Destroy participating, a
+	// delete landing in that window produces a clone that is created
+	// successfully and then cannot open its backing file on first start. A
+	// lock only one side takes closes nothing.
+	unlock, err := config.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	v, err := load(name)
 	if errors.Is(err, ErrBroken) {
 		// A broken VM's directory is still real and still deletable — that is

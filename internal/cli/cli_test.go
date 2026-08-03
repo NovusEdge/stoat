@@ -234,10 +234,16 @@ func writeBrokenVMToml(t *testing.T, dir, name string) {
 // exported.
 func fakeRunning(t *testing.T, v *config.VM) func() {
 	t.Helper()
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skip("sleep not installed")
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not installed")
 	}
-	cmd := exec.Command("sleep", "100", v.Dir+"/marker")
+	// NOT `sleep 100 <dir>/marker`: sleep sums its arguments as durations and
+	// rejects a non-numeric one, so that spelling exited about a millisecond
+	// in and the "running" VM was already dead. The trailing "; :" keeps sh
+	// from exec'ing the simple command and replacing its own argv, which would
+	// drop the directory qemu.Running matches on. Same fix as
+	// internal/core/vm_test.go's fakeRunning.
+	cmd := exec.Command("sh", "-c", "sleep 100; :", v.Dir+"/marker")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

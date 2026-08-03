@@ -85,6 +85,19 @@ type PruneOpts struct {
 // directory outside Root() (config.VM.Delete's own guard, reused by
 // pruneBroken, refuses that). See docs/design/core-api.md §7 and §7.1 item 8.
 func Prune(opts PruneOpts) ([]string, error) {
+	// The same data-root lock Create, Clone and Destroy take. Pruning decides
+	// what is unreferenced by reading every vm.toml, and a VM being created
+	// concurrently does not exist in one yet: without the lock, an image
+	// chosen by an in-flight Create can be judged orphaned and deleted between
+	// that Create picking it and writing the vm.toml that would have protected
+	// it. Held for the dry run too, so what it reports is what it would have
+	// removed rather than a snapshot that was already stale when printed.
+	unlock, err := config.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	var removed []string
 
 	if opts.Broken {

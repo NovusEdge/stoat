@@ -36,6 +36,25 @@ import (
 // matches Destroy's own precedent (ErrAlreadyRunning, "stop it first")
 // rather than inventing a second shape for the same rule.
 func Clone(name, newName string) (VM, error) {
+	// Held for the whole operation, for two reasons.
+	//
+	// The first is Create's: FreePort and the name-already-taken check are
+	// both allocate-now-commit-later, so concurrent callers collide.
+	//
+	// The second is specific to cloning and worse. The overlay below
+	// references the SOURCE's disk BY PATH, not by copy. Without a lock, a
+	// concurrent Destroy of the source — which passes its own running check,
+	// because the source is stopped, which is exactly what cloning requires —
+	// can remove that disk between the check here and the qemu-img call. The
+	// clone is then created successfully, appears in List, and fails only on
+	// first start with "Could not open backing file". Taking the lock closes
+	// the window in the one direction that matters; Destroy takes it too.
+	unlock, err := config.Lock()
+	if err != nil {
+		return VM{}, err
+	}
+	defer unlock()
+
 	src, err := load(name)
 	if err != nil {
 		return VM{}, err

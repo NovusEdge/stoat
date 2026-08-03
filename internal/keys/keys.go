@@ -41,6 +41,31 @@ func generate(path, comment string) error {
 	if pairExists(path) {
 		return nil
 	}
+	// Serialised across PROCESSES, not just goroutines. Note this is
+	// LockKeys, a DIFFERENT lock file from config.Lock: Clone holds the
+	// data-root lock and then calls Ensure, and flock does not nest — sharing
+	// one lock here deadlocked the whole suite against itself. See Lock's doc
+	// comment.
+	//
+	// Every stoat command calls Ensure at startup, so two invocations against
+	// a fresh data root
+	// both saw no key, both cleared the pair, and both ran ssh-keygen against
+	// the same path — at which point the loser found the file recreated under
+	// it and ssh-keygen sat on an interactive "Overwrite (y/n)?" prompt.
+	// Observed for real: six concurrent `stoat create` calls, one failed with
+	// exactly that, on a command that never asks the user anything.
+	unlock, err := config.LockKeys()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Re-checked under the lock. The winner has created the pair by the time
+	// the loser gets here, and regenerating would hand out a key the winner's
+	// already-seeded guest does not accept.
+	if pairExists(path) {
+		return nil
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -49,6 +74,11 @@ func generate(path, comment string) error {
 	os.Remove(path)
 	os.Remove(path + ".pub")
 	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", path)
+	// Belt and braces with the lock above: ssh-keygen prompts on stdin when it
+	// finds a file it did not expect, and a background or MCP-driven stoat has
+	// no one to answer. With no stdin it fails immediately and reports, rather
+	// than hanging forever waiting for a keystroke that cannot arrive.
+	cmd.Stdin = nil
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ssh-keygen: %v: %s", err, strings.TrimSpace(string(out)))
 	}
