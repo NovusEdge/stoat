@@ -38,10 +38,25 @@ func writeRawVMToml(t *testing.T, name, content string) {
 // existing tests already work around for qemu-img.
 func fakeRunning(t *testing.T, v *config.VM) func() {
 	t.Helper()
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skip("sleep not installed")
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not installed")
 	}
-	cmd := exec.Command("sleep", "100", v.Dir+"/marker")
+	// `sh -c '<loop>' <dir>/marker`, NOT `sleep 100 <dir>/marker`.
+	//
+	// The original spelling passed the marker as a SECOND ARGUMENT TO SLEEP,
+	// and sleep sums its arguments as durations — so it rejected the path with
+	// "invalid time interval" and exited within about a millisecond. The fake
+	// process was therefore already dead by the time most callers looked, and
+	// whether a test passed came down to how much work happened in between.
+	// That is what made these tests flaky under full-suite load while passing
+	// when run per-package, and it was previously misdiagnosed as this
+	// sandbox reaping detached children.
+	//
+	// The trailing "; :" matters: `sh -c 'sleep 100'` with a SIMPLE command
+	// execs it directly, replacing sh's argv — and the directory, which is the
+	// whole point, disappears from /proc/<pid>/cmdline. A compound command
+	// keeps sh alive as itself, argv intact.
+	cmd := exec.Command("sh", "-c", "sleep 100; :", v.Dir+"/marker")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -261,5 +276,26 @@ func TestIdentityFromListRoundTrips(t *testing.T) {
 	}
 	if _, err := SSHCommand(vms[0].Name); err != nil {
 		t.Fatalf("SSHCommand(List()[0].Name) = %v; same identifier, different answer", err)
+	}
+}
+
+// TestDestroyRefusesARunningBrokenVM pins a real bug: Destroy's broken-VM
+// branch skipped the running check, on the stated but false grounds that
+// qemu.Running needed a parsed config.VM. It needs only Dir — which that
+// branch reconstructs — so a vm.toml corrupted AFTER its VM was started turned
+// Destroy into a quiet way around the refusal that applies to every healthy
+// VM, deleting the pidfile, monitor socket and disk from under a live qemu.
+func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
+	root(t)
+	// A directory that is running but whose vm.toml no longer parses.
+	writeRawVMToml(t, "hosed", "name = \"hosed\"\nmode = \"disk\n")
+	stop := fakeRunning(t, &config.VM{Name: "hosed", Dir: filepath.Join(config.Root(), "hosed")})
+	defer stop()
+
+	if err := Destroy("hosed"); !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Destroy on a running broken VM = %v, want ErrAlreadyRunning", err)
+	}
+	if _, err := os.Stat(filepath.Join(config.Root(), "hosed")); err != nil {
+		t.Fatalf("the directory was deleted from under a running qemu: %v", err)
 	}
 }

@@ -304,13 +304,22 @@ func Stop(name string) error {
 func Destroy(name string) error {
 	v, err := load(name)
 	if errors.Is(err, ErrBroken) {
-		// A broken VM has no live qemu process to check — Running() would
-		// need a parsed config.VM it doesn't have — but its directory is
-		// still real and still deletable. This is precisely why Get/List
-		// surface broken VMs instead of hiding them: so they CAN be
-		// destroyed instead of sitting forever as an unparseable directory
-		// nobody can clear.
+		// A broken VM's directory is still real and still deletable — that is
+		// precisely why Get/List surface broken VMs rather than hiding them,
+		// so they CAN be cleared instead of sitting forever unparseable.
+		//
+		// It is still checked for a running process first. An earlier version
+		// of this claimed Running() "would need a parsed config.VM it doesn't
+		// have" and skipped the check; that was simply wrong — Running reads
+		// v.Dir/qemu.pid and matches v.Dir against /proc/<pid>/cmdline, and
+		// Dir is exactly what is reconstructed here. The bug it caused was
+		// real: a vm.toml corrupted AFTER its VM was started made Destroy a
+		// quiet backdoor around the refusal below, deleting the directory —
+		// pidfile, monitor socket and disk — out from under a live qemu.
 		bv := &config.VM{Name: name, Dir: filepath.Join(config.Root(), name)}
+		if qemu.Running(bv) {
+			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
+		}
 		return bv.Delete()
 	}
 	if err != nil {

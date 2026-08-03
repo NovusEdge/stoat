@@ -58,7 +58,12 @@ type Args struct {
 	OS      string
 	Backend string
 
-	// Tag, Restore and Delete belong to "snapshot".
+	// Prune belongs to "prune"; it is core's own options type for the same
+	// reason Spec is — one place to add an option.
+	Prune core.PruneOpts
+
+	// Tag belongs to "snapshot" (the snapshot name) and to "clone" (the new
+	// VM's name); Restore and Delete are snapshot's.
 	Tag     string
 	Restore bool
 	Delete  bool
@@ -217,6 +222,34 @@ func Parse(args []string) (*Args, error) {
 			}
 		}
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
+
+	case "clone":
+		if len(rest) != 2 {
+			return nil, usageError("clone: need a source and a new name")
+		}
+		return &Args{Cmd: "clone", VM: rest[0], Tag: rest[1]}, nil
+
+	case "prune":
+		fs := newFlagSet(cmd)
+		var quiet bool
+		var opts core.PruneOpts
+		// DryRun is the DEFAULT, inverted by --apply, because every other
+		// spelling makes the destructive reading the easy one to type by
+		// accident. Prune is the only command here that can remove several
+		// unrelated things at once.
+		var apply bool
+		fs.BoolVar(&apply, "apply", false, "actually delete; without this, prune only reports")
+		fs.BoolVar(&opts.Broken, "broken", false, "also remove VMs whose vm.toml will not parse")
+		fs.BoolVar(&opts.Images, "images", false, "also remove downloaded images no VM refers to")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rest); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("prune: unexpected argument %q", fs.Arg(0)))
+		}
+		opts.DryRun = !apply
+		return &Args{Cmd: "prune", Prune: opts, Quiet: quiet}, nil
 
 	case "snapshot":
 		// `stoat snapshot <vm>` lists; `snapshot <vm> <tag>` saves;
@@ -391,6 +424,10 @@ commands:
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
+  clone <vm> <newname>  copy a VM: overlay disk, fresh ssh port, no forwards
+  prune [--apply] [--broken] [--images]
+                       report (or with --apply, remove) stale partial
+                       downloads; opt in to broken VMs and unused images
   snapshot <vm> [tag] [--restore|--delete]
                        list, save, restore or delete a snapshot
   cp <src> <dst>       copy a file in or out; one side is <vm>:<path>
@@ -464,6 +501,10 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runLS(a, stdout, stderr)
 	case "create":
 		return runCreate(a, stdout, stderr)
+	case "clone":
+		return runClone(a, stdout, stderr)
+	case "prune":
+		return runPrune(a, stdout, stderr)
 	case "snapshot":
 		return runSnapshot(a, stdout, stderr)
 	case "cp":
@@ -617,6 +658,44 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !active {
 		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
+	}
+	return ExitOK
+}
+
+// runClone copies a VM. core.Clone refuses a running source, allocates a fresh
+// ssh port and drops the source's port forwards — say so, because a user who
+// expected the forwards to come along would otherwise find out by debugging.
+func runClone(a *Args, stdout, stderr io.Writer) int {
+	v, err := core.Clone(a.VM, a.Tag)
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: clone:", err)
+		return ExitFail
+	}
+	if !a.Quiet {
+		fmt.Fprintf(stdout, "cloned %s to %s (ssh :%d)\n", a.VM, v.Name, v.SSHPort)
+		fmt.Fprintf(stdout, "port forwards were not copied; set them with: stoat forward %s ...\n", v.Name)
+	}
+	return ExitOK
+}
+
+// runPrune reports by default and deletes only with --apply. It prints what it
+// would remove either way, so the dry run and the real run are readable as the
+// same list.
+func runPrune(a *Args, stdout, stderr io.Writer) int {
+	removed, err := core.Prune(a.Prune)
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: prune:", err)
+		return ExitFail
+	}
+	if len(removed) == 0 {
+		fmt.Fprintln(stdout, "nothing to prune")
+		return ExitOK
+	}
+	for _, r := range removed {
+		fmt.Fprintln(stdout, r)
+	}
+	if a.Prune.DryRun {
+		fmt.Fprintln(stdout, "\n(dry run — nothing was deleted; re-run with --apply)")
 	}
 	return ExitOK
 }
