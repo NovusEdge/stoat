@@ -50,7 +50,11 @@ sudo usermod -aG kvm "$USER"   # then log out and back in
 
 ### GPU/display
 
-stoat runs QEMU with `-display gtk,gl=on`, so your QEMU build needs GTK and OpenGL support (the `qemu-full`/`qemu-desktop` Arch packages and the Debian/Ubuntu packages above provide this). This is currently a fixed constant, not a setting. If a VM fails to start with a display/GL error, the only workaround today is to edit `internal/qemu/args.go`, drop `,gl=on` from the `-display` argument, and rebuild from source.
+One kind of VM opens a real QEMU window: a disk-mode VM that has not been installed yet, whose OS installer has to be driven by a human. That window is `-display gtk,gl=on`, so your QEMU build needs GTK and OpenGL support (the `qemu-full`/`qemu-desktop` Arch packages and the Debian/Ubuntu packages above provide this). Every other VM is headless with its screen on a VNC socket, and needs none of it.
+
+**On a host with no graphical session** (a server, an ssh session with no forwarding) stoat does not ask for that window at all: it puts the install console on the VNC socket too and prints how to attach, so a disk VM can be installed from another machine. It detects this from `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0`.
+
+If a VM still fails to start with a display or GL error, your host has a session QEMU cannot draw on. Set `STOAT_GRAPHICAL=0` to take the window out of play; see [troubleshooting](../troubleshooting.md). No source edit and no rebuild.
 
 ### xorriso (cloud VMs only)
 

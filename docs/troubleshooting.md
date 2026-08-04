@@ -9,8 +9,9 @@ desktop onto it, and now no window opens on start. There is no error because
 nothing failed.
 
 Exactly one kind of VM gets a real QEMU window: a disk-mode VM that is **not
-yet installed**. That window exists for the OS installer, which draws to VGA
-and has to be driven by a human. The moment stoat records `installed = true`,
+yet installed**, on a host with a graphical session. That window exists for the
+OS installer, which draws to VGA and has to be driven by a human. The moment
+stoat records `installed = true`,
 the next start uses `-display none` with a VNC server bound to a unix socket in
 the VM's directory (`internal/qemu/args.go`). `-display none` cannot be undone
 on a running QEMU, so binding VNC at launch is what keeps a guest that has
@@ -35,6 +36,71 @@ There is no way to ask for a QEMU window on an installed disk VM. `-display
 gtk` needs a graphical session on the host, so granting one by default would
 make `stoat up` fail outright over SSH or from a script instead of merely
 coming up headless.
+
+## `OpenGL is not supported by display backend 'gtk'`
+
+```
+stoat: up: qemu failed to start: qemu-system-x86_64: OpenGL is not supported by display backend 'gtk'
+```
+
+This one is not about OpenGL, and mesa and your GPU drivers are not the place
+to look. stoat starts an uninstalled disk VM with `-display gtk,gl=on`, and
+`gl=on` is simply the first option QEMU rejects when it cannot open a window at
+all. With the same window and no `gl=on`, the same host says `gtk
+initialization failed` instead.
+
+If stoat prints this, it found a graphical session on the host and QEMU still
+could not use it: usually a QEMU or GTK build without working GL. The message
+now says so, and names the way past it:
+
+```
+run with STOAT_GRAPHICAL=0 to put the screen on this VM's VNC socket instead
+```
+
+## Installing a disk VM on a machine with no screen
+
+An OS installer has to be driven by a human, and `setup-alpine` has no
+unattended mode stoat drives for you. On a host with no graphical session there
+is no window to drive it at, and QEMU does not fall back: `-display gtk` exits
+1.
+
+So stoat detects the host itself and puts the install console on the VM's VNC
+socket instead, exactly like every other headless VM, and prints how to reach
+it:
+
+```
+$ stoat up alpinedisk
+starting alpinedisk...
+alpinedisk started (ssh :2200)
+display: no usable graphical session on this host, so the OS installer's
+  console is on VNC instead; drive it from a machine with a screen
+display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
+  attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
+```
+
+That socket is a unix socket on the server, so reaching it from your laptop is
+three steps: run stoat's own `socat` bridge on the server to republish it on
+`127.0.0.1:5900`, forward that port over ssh (`ssh -L 5900:127.0.0.1:5900
+server`), and point any VNC client at `127.0.0.1:5900` on the laptop. Then run
+the installer as usual, stop and start the VM, and stoat notices the install
+the same way it does for a windowed one.
+
+### Overriding the detection
+
+stoat looks at `DISPLAY`, at `WAYLAND_DISPLAY`, and at
+`$XDG_RUNTIME_DIR/wayland-0`, which is where GTK finds a Wayland session when
+`WAYLAND_DISPLAY` is not set. Guessing about display servers goes wrong on
+setups nobody anticipated, so `STOAT_GRAPHICAL` overrides the answer in both
+directions, for every command and for the TUI:
+
+| value | effect |
+| --- | --- |
+| `STOAT_GRAPHICAL=0` | never open a window; the install console goes to VNC |
+| `STOAT_GRAPHICAL=1` | open the window; use this if stoat did not recognize your session |
+| unset | detect (the default) |
+
+`STOAT_GRAPHICAL=0` is also the answer to the OpenGL error above, where a
+session exists but QEMU cannot draw on it.
 
 ## `ssh not reachable on port N after 1m30s`
 

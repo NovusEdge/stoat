@@ -220,12 +220,26 @@ absolute path. That is a guarantee, not an accident.
 will eventually re-derive wrong.
 
 `VM.display` is `"window"` or `"vnc"`, and `""` on a broken VM. It says which
-surface the VM's screen appears on: `"window"` for a real QEMU window, which
-only an uninstalled disk-mode VM gets, and `"vnc"` for every other VM, whose
-screen goes to a VNC server bound on a unix socket. It is emitted for the same
-reason as `Image.byo`: it is derivable from `mode` and `installed` today, and
-that is exactly the kind of rule a consumer re-derives and then keeps applying
-after stoat changes it.
+surface the VM's screen appears on: `"window"` for a real QEMU window, and
+`"vnc"` for every other VM, whose screen goes to a VNC server bound on a unix
+socket. It is emitted for the same reason as `Image.byo`: it is exactly the
+kind of rule a consumer re-derives and then keeps applying after stoat changes
+it.
+
+That has now happened once. `display` is **not** derivable from `mode` and
+`installed`: it also depends on the host stoat is running on. A window needs a
+graphical session, QEMU exits 1 rather than degrading when there is none, so on
+a host with no session an uninstalled disk VM gets `"vnc"` too, and its OS
+installer is driven over the socket. A consumer that computed `display` from
+`mode` and `installed` would tell its human to look at a window that will never
+open, on a machine with no screen to open it on.
+
+The host answer comes from `DISPLAY`, `WAYLAND_DISPLAY` and
+`$XDG_RUNTIME_DIR/wayland-0`, and `STOAT_GRAPHICAL=0`/`=1` in stoat's
+environment overrides it. It is a property of the machine running the CLI, not
+of the VM, so it is not carried as a field of its own: a consumer that wants to
+know why a VM is on VNC is asking about the host it is talking to, and every VM
+in one response answers the same way.
 
 `display` names the surface and never its location. The socket path is not on
 the wire and neither is a rendered command for opening it; a command would

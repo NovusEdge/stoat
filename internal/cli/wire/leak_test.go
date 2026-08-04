@@ -18,7 +18,7 @@ func TestLeadIndependentLeakCheck(t *testing.T) {
 			ConsoleLog: "/home/u/.stoat/w/console.log",
 		},
 	}
-	b, err := json.Marshal(FromVM(v))
+	b, err := json.Marshal(FromVM(v, true))
 	if err != nil {
 		t.Fatal(err)
 	}

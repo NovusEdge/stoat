@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -204,7 +205,10 @@ func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
 // The one case that DOES get a real qemu window is an uninstalled disk VM
 // (qemu.NeedsWindow). It should not additionally advertise a VNC row that
 // implies the display lives at a socket instead.
+// It gets that window only where there is a graphical session to open it on,
+// so the override is pinned rather than left to whatever host runs the test.
 func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
+	t.Setenv(qemu.GraphicalEnv, "1")
 	v := &config.VM{Name: "installing", Mode: "disk", Installed: false, Dir: t.TempDir()}
 	m := model{screen: screenDetail, width: 100, height: 40}
 	m.detail = newDetail(v)
@@ -212,6 +216,25 @@ func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
 
 	if strings.Contains(out, "vnc") {
 		t.Errorf("a windowed VM (qemu window shows) must not also claim a vnc row:\n%s", out)
+	}
+}
+
+// The same VM on a host with no graphical session: there is no window to be
+// had, so the detail screen shows the socket AND says why, since "no window"
+// is exactly what the user came here confused about.
+func TestDetailExplainsTheVNCFallbackOnAHeadlessHost(t *testing.T) {
+	t.Setenv(qemu.GraphicalEnv, "0")
+	fakeViewerPath(t, "gvncviewer")
+	v := &config.VM{Name: "installing", Mode: "disk", Installed: false, Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 120, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if !strings.Contains(out, v.VNCPath()) {
+		t.Errorf("the install console is on the socket now; the detail screen must show it:\n%s", out)
+	}
+	if !strings.Contains(out, "no usable graphical session on this host") {
+		t.Errorf("detail screen does not say why there is no window:\n%s", out)
 	}
 }
 

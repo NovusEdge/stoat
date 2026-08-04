@@ -19,40 +19,60 @@ const (
 	DisplayVNC    = "vnc"
 )
 
-// DisplayKind is the rule, stated over the two facts it actually depends on
-// rather than over a *config.VM: core.VM is a different type that carries
-// both, and it must ask this question rather than restate it.
+// DisplayKind is the rule, stated over the three facts it actually depends on
+// rather than over a *config.VM: core.VM is a different type that carries the
+// first two, and it must ask this question rather than restate it.
 //
-// Only an uninstalled disk-mode VM gets a real window, because its OS
+// Only an uninstalled disk-mode VM wants a real window, because its OS
 // installer draws to VGA rather than the serial console and a human has to
 // drive it. live, cloud and installed disk VMs reach ssh with no console
 // interaction, so their screen goes to the VNC socket instead.
 //
+// graphical is the host's veto, and it is a veto rather than a preference:
+// -display gtk needs a display server on the HOST, and qemu does not degrade
+// when there is none, it exits 1 (measured: "gtk initialization failed", and
+// with gl=on it fails one option earlier still, on "OpenGL is not supported by
+// display backend 'gtk'"). Before this argument existed, a fresh disk VM on a
+// headless host could not be started at all, and the install could not be
+// completed by any route. It falls back to VNC instead, which serves the exact
+// same VGA framebuffer over a socket the user can reach from a machine that
+// does have a screen. Whoever answers this must answer it for the host, not
+// for the VM: see GraphicalSession.
+//
 // This is deliberately blind to whether the guest has a desktop on it. An
-// installed disk VM running XFCE would like a window and does not get one;
-// see docs/troubleshooting.md. Widening the rule is not free: -display gtk
-// needs a graphical session on the HOST, so a VM started over ssh or from a
-// script would fail to launch rather than merely come up headless. Changing
-// this needs an explicit per-VM preference and a host-display check, not a
-// looser predicate.
-func DisplayKind(mode string, installed bool) string {
-	if mode == "disk" && !installed {
+// installed disk VM running XFCE would like a window and does not get one; see
+// docs/troubleshooting.md. Widening that needs an explicit per-VM preference,
+// not a looser predicate.
+func DisplayKind(mode string, installed, graphical bool) string {
+	if mode == "disk" && !installed && graphical {
 		return DisplayWindow
 	}
 	return DisplayVNC
 }
 
-// NeedsWindow reports whether a human has to look at this VM's screen.
+// NeedsWindow reports whether this VM gets a real qemu window on a host whose
+// graphical session is as given.
 //
 // Exported so the TUI can describe the right escape hatch (a GTK window vs.
 // the VNC socket) without duplicating this rule.
-func NeedsWindow(v *config.VM) bool {
-	return DisplayKind(v.Mode, v.Installed) == DisplayWindow
+func NeedsWindow(v *config.VM, graphical bool) bool {
+	return DisplayKind(v.Mode, v.Installed, graphical) == DisplayWindow
+}
+
+// WantsWindow reports whether this VM would use a window if the host could
+// give it one. It is the same rule with the host's veto removed, and it is
+// what separates "no window because this VM never gets one" from "no window
+// because this host has no session", which is the difference the user has to
+// be told about.
+func WantsWindow(v *config.VM) bool {
+	return NeedsWindow(v, true)
 }
 
 // Args returns the argv (excluding argv[0]) for a VM. It is pure: the config
-// must already be resolved, and nothing here touches the filesystem.
-func Args(v *config.VM) []string {
+// must already be resolved, graphical is the caller's already-made decision
+// about the host (GraphicalSession), and nothing here touches the filesystem
+// or the environment.
+func Args(v *config.VM, graphical bool) []string {
 	// hostfwd is repeatable within a single -netdev's option string, so
 	// additional forwards are appended clauses on the SSH netdev rather than
 	// a second -netdev/-device pair.
@@ -85,11 +105,15 @@ func Args(v *config.VM) []string {
 		"-device", "virtio-net,netdev=n0",
 	}
 
-	if NeedsWindow(v) {
+	if NeedsWindow(v, graphical) {
 		a = append(a, "-vga", "virtio", "-display", "gtk,gl=on")
 	} else {
 		// -display none is irreversible on a running qemu, so bind VNC to a
 		// socket at launch instead, recoverable for a misbehaving guest.
+		// No -vga here, including for an install console that fell back to
+		// this path: qemu's default adapter is what every VNC VM in stoat has
+		// always used, and swapping in virtio for the fallback would put an
+		// untested adapter under the one screen a human has to read.
 		a = append(a, "-display", "none", "-vnc", "unix:"+v.VNCPath())
 	}
 

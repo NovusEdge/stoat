@@ -22,7 +22,7 @@ func runUpdate(a *Args, stdout, stderr io.Writer) int {
 	}
 	if a.JSON {
 		return a.ok(stdout, map[string]any{
-			"vm":         wire.FromVM(v),
+			"vm":         wire.FromVM(v, core.GraphicalSession()),
 			"changed":    a.Changed,
 			"applies_at": appliesAt(v),
 		})

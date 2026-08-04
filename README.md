@@ -50,7 +50,7 @@ old-vm          -     broken   -     -      -    toml: line 1: expected '.' or, 
 ## Requirements
 
 - Linux with KVM: `/dev/kvm` readable and writable by your user (member of the `kvm` group).
-- `qemu-system-x86_64` and `qemu-img`, built with GTK+OpenGL support: stoat starts QEMU with `-display gtk,gl=on`.
+- `qemu-system-x86_64` and `qemu-img`. GTK+OpenGL support is needed only for the one VM that opens a window (`-display gtk,gl=on`, a disk VM mid-install); with no graphical session on the host, that console falls back to VNC and the VM still installs.
 - `ssh`.
 - `xorriso` (package `libisoburn`), only if you use a cloud-init image (Ubuntu/Debian/Fedora/Arch). Not needed for Alpine live or disk VMs.
 - Go 1.26 to build from source (the version pinned in `go.mod`).
