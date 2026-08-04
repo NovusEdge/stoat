@@ -269,6 +269,54 @@ func TestCreateWritesVMToml(t *testing.T) {
 	}
 }
 
+// TestCreateAllowExecDefaultsTrue pins that a Spec built by a caller that
+// never mentions AllowExec (the TUI's form today) still creates a VM an
+// agent can run commands in, not one silently locked down by Go's bool zero
+// value. See Spec.AllowExec's doc comment for the pointer-vs-bool reasoning.
+func TestCreateAllowExecDefaultsTrue(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+
+	v, err := Create(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.AllowExec {
+		t.Errorf("Create with AllowExec unset should default to true, got false")
+	}
+	got, err := config.Load("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AllowExec {
+		t.Errorf("reloaded vm.toml should have allow_exec = true, got false")
+	}
+}
+
+// TestCreateAllowExecFalseIsHonoured is TestCreateAllowExecDefaultsTrue's
+// mirror: an explicit opt-out must survive Create and the roundtrip through
+// vm.toml.
+func TestCreateAllowExecFalseIsHonoured(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+
+	no := false
+	v, err := Create(Spec{Name: "locked-down", Image: "alpine-virt-3.24.1-x86_64.iso", AllowExec: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.AllowExec {
+		t.Errorf("Create with AllowExec: &false should produce AllowExec false, got true")
+	}
+	got, err := config.Load("locked-down")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AllowExec {
+		t.Errorf("reloaded vm.toml should have allow_exec = false, got true")
+	}
+}
+
 // TestConcurrentCreatesGetDistinctPorts is the regression test for the §11
 // concurrency gap: FreePort reads every VM's port, picks a free one and
 // returns it, but the caller only COMMITS that choice when it writes vm.toml

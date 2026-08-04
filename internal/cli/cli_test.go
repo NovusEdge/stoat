@@ -128,6 +128,36 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestParseCreateAllowExecDefaultsTrue pins that an omitted --allow-exec
+// still produces Spec.AllowExec pointing at true, not a nil pointer (which
+// plan() would also read as true, but a nil pointer here would hide a kong
+// misconfiguration that made the flag look unset) and not false (Go's bool
+// zero value, which is exactly the regression AllowExec's default guards
+// against). Verified with `stoat create --help` that the flag itself is
+// `default:"true"`.
+func TestParseCreateAllowExecDefaultsTrue(t *testing.T) {
+	got, err := Parse([]string{"create", "work", "--image", "alpine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.AllowExec == nil || !*got.Spec.AllowExec {
+		t.Errorf("create with no --allow-exec: Spec.AllowExec = %v, want a pointer to true", got.Spec.AllowExec)
+	}
+}
+
+// TestParseCreateAllowExecFalse pins that --allow-exec=false is how a
+// caller turns it off; kong's bool default:"true" makes a bare --allow-exec
+// (no value) mean true, matching every other bool flag.
+func TestParseCreateAllowExecFalse(t *testing.T) {
+	got, err := Parse([]string{"create", "work", "--image", "alpine", "--allow-exec=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.AllowExec == nil || *got.Spec.AllowExec {
+		t.Errorf("create --allow-exec=false: Spec.AllowExec = %v, want a pointer to false", got.Spec.AllowExec)
+	}
+}
+
 // TestParsePure guards against Parse doing anything beyond interpreting
 // argv: it must never touch the filesystem, so calling it with a bogus
 // STOAT_HOME must not error or panic.
@@ -483,5 +513,97 @@ func TestParseCPInfersDirection(t *testing.T) {
 		if _, err := Parse(args); err == nil {
 			t.Errorf("Parse(%v) was accepted; want a usage error", args)
 		}
+	}
+}
+
+// TestParseCPFlagForm pins the explicit-flag spelling docs/design/mcp-server.md
+// §1.1 adds alongside the positional one: --direction picks the way, --local
+// and --remote are unambiguous regardless of what characters either path
+// contains, unlike the positional form's "<vm>:<path>" compound.
+func TestParseCPFlagForm(t *testing.T) {
+	got, err := Parse([]string{"cp", "--vm", "work", "--direction", "to", "--local", "/host/a.txt", "--remote", "/tmp/a.txt"})
+	if err != nil {
+		t.Fatalf("cp --direction to: %v", err)
+	}
+	if got.VM != "work" || got.Local != "/host/a.txt" || got.Remote != "/tmp/a.txt" || !got.ToRemote {
+		t.Errorf("cp --direction to = %+v", got)
+	}
+
+	got, err = Parse([]string{"cp", "--vm", "work", "--direction", "from", "--remote", "/tmp/a.txt", "--local", "/host/a.txt"})
+	if err != nil {
+		t.Fatalf("cp --direction from: %v", err)
+	}
+	if got.VM != "work" || got.Local != "/host/a.txt" || got.Remote != "/tmp/a.txt" || got.ToRemote {
+		t.Errorf("cp --direction from = %+v", got)
+	}
+}
+
+// TestParseCPFormsAreMutuallyExclusive pins that giving both the positional
+// arguments and the flags is rejected rather than one silently winning.
+func TestParseCPFormsAreMutuallyExclusive(t *testing.T) {
+	_, err := Parse([]string{"cp", "/host/a.txt", "work:/tmp/a.txt", "--vm", "work", "--direction", "to", "--local", "/host/a.txt", "--remote", "/tmp/a.txt"})
+	if err == nil {
+		t.Fatal("expected a usage error mixing positionals and flags")
+	}
+}
+
+// TestParseCPFlagFormRejectsPartialFlags pins that --vm alone (or any subset
+// short of all four) is a usage error, not a request that silently falls
+// back to defaults for the rest.
+func TestParseCPFlagFormRejectsPartialFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"cp", "--vm", "work"},
+		{"cp", "--vm", "work", "--direction", "to"},
+		{"cp", "--vm", "work", "--direction", "to", "--local", "/host/a.txt"},
+		{"cp", "--direction", "to", "--local", "/host/a.txt", "--remote", "/tmp/a.txt"}, // no --vm
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("Parse(%v) was accepted; want a usage error for an incomplete flag set", args)
+		}
+	}
+}
+
+// TestParseCPDirectionEnumRejectsGarbage pins that --direction is a real
+// enum, not a bare string smuggled through: kong's enum tag must reject
+// anything besides "to"/"from" before toArgs ever sees it.
+func TestParseCPDirectionEnumRejectsGarbage(t *testing.T) {
+	_, err := Parse([]string{"cp", "--vm", "work", "--direction", "sideways", "--local", "/host/a.txt", "--remote", "/tmp/a.txt"})
+	if err == nil {
+		t.Fatal("expected a usage error for an invalid --direction")
+	}
+}
+
+// TestParseCPResolvesLocalToAbsolutePath pins the reason this task exists
+// (docs/design/mcp-server.md §1.1): a caller passing a relative path, or one
+// with a leading ~, must see the RESOLVED absolute path in a.Local, since
+// that is what runCopy echoes back on the wire for the server to
+// post-verify. Both the positional and flag forms go through the same
+// resolution.
+func TestParseCPResolvesLocalToAbsolutePath(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Parse([]string{"cp", "relative/a.txt", "work:/tmp/a.txt"})
+	if err != nil {
+		t.Fatalf("positional relative path: %v", err)
+	}
+	want := filepath.Join(cwd, "relative/a.txt")
+	if got.Local != want {
+		t.Errorf("positional form: Local = %q, want %q", got.Local, want)
+	}
+
+	got, err = Parse([]string{"cp", "--vm", "work", "--direction", "to", "--local", "~/a.txt", "--remote", "/tmp/a.txt"})
+	if err != nil {
+		t.Fatalf("flag form tilde path: %v", err)
+	}
+	want = filepath.Join(home, "a.txt")
+	if got.Local != want {
+		t.Errorf("flag form: Local = %q, want %q", got.Local, want)
 	}
 }

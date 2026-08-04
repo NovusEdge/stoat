@@ -2,6 +2,40 @@
 
 Symptom-first. Find the error text you're seeing and jump to it.
 
+## No QEMU window appears any more
+
+You installed a disk VM, ran `setup-alpine` at its console, maybe provisioned a
+desktop onto it, and now no window opens on start. There is no error because
+nothing failed.
+
+Exactly one kind of VM gets a real QEMU window: a disk-mode VM that is **not
+yet installed**. That window exists for the OS installer, which draws to VGA
+and has to be driven by a human. The moment stoat records `installed = true`,
+the next start uses `-display none` with a VNC server bound to a unix socket in
+the VM's directory (`internal/qemu/args.go`). `-display none` cannot be undone
+on a running QEMU, so binding VNC at launch is what keeps a guest that has
+locked up or lost its network still reachable.
+
+**Fix:** ask stoat where the screen went. Both `stoat up` and `stoat get` print
+it, with a command for a VNC viewer that is actually installed on your machine:
+
+```
+$ stoat get alpinedisk
+...
+display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
+  attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
+```
+
+The TUI's detail screen shows the same socket and command. If no viewer is
+installed, stoat names what to install rather than printing a command that
+would fail. With only `socat`, the command bridges the socket to loopback and
+any VNC client connects to `127.0.0.1:5900`.
+
+There is no way to ask for a QEMU window on an installed disk VM. `-display
+gtk` needs a graphical session on the host, so granting one by default would
+make `stoat up` fail outright over SSH or from a script instead of merely
+coming up headless.
+
 ## `ssh not reachable on port N after 1m30s`
 
 ```

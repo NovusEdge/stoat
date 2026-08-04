@@ -11,15 +11,43 @@ import (
 // Binary is the QEMU executable stoat drives.
 const Binary = "qemu-system-x86_64"
 
-// NeedsWindow reports whether a human has to look at this VM's screen: only
-// an uninstalled disk-mode VM, whose OS installer draws to VGA rather than
-// the serial console. live, cloud, and installed disk VMs reach ssh with no
-// console interaction.
+// The two surfaces a VM's screen can appear on. Also the wire values for the
+// JSON DTO's "display" field, so the name a consumer reads is the same name
+// this package decides.
+const (
+	DisplayWindow = "window"
+	DisplayVNC    = "vnc"
+)
+
+// DisplayKind is the rule, stated over the two facts it actually depends on
+// rather than over a *config.VM: core.VM is a different type that carries
+// both, and it must ask this question rather than restate it.
+//
+// Only an uninstalled disk-mode VM gets a real window, because its OS
+// installer draws to VGA rather than the serial console and a human has to
+// drive it. live, cloud and installed disk VMs reach ssh with no console
+// interaction, so their screen goes to the VNC socket instead.
+//
+// This is deliberately blind to whether the guest has a desktop on it. An
+// installed disk VM running XFCE would like a window and does not get one;
+// see docs/troubleshooting.md. Widening the rule is not free: -display gtk
+// needs a graphical session on the HOST, so a VM started over ssh or from a
+// script would fail to launch rather than merely come up headless. Changing
+// this needs an explicit per-VM preference and a host-display check, not a
+// looser predicate.
+func DisplayKind(mode string, installed bool) string {
+	if mode == "disk" && !installed {
+		return DisplayWindow
+	}
+	return DisplayVNC
+}
+
+// NeedsWindow reports whether a human has to look at this VM's screen.
 //
 // Exported so the TUI can describe the right escape hatch (a GTK window vs.
 // the VNC socket) without duplicating this rule.
 func NeedsWindow(v *config.VM) bool {
-	return v.Mode == "disk" && !v.Installed
+	return DisplayKind(v.Mode, v.Installed) == DisplayWindow
 }
 
 // Args returns the argv (excluding argv[0]) for a VM. It is pure: the config

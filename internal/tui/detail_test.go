@@ -215,6 +215,49 @@ func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
 	}
 }
 
+// A socket path alone was not enough. The reported failure is a disk VM whose
+// window disappears the moment setup-alpine marks it installed, by a user left
+// holding a path and no idea what opens it, so the detail pane names a viewer
+// that is actually on this host.
+func TestDetailShowsHowToAttachToTheVNCSocket(t *testing.T) {
+	fakeViewerPath(t, "gvncviewer")
+	v := &config.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 120, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if !strings.Contains(out, "gvncviewer") {
+		t.Errorf("detail pane does not say what opens the socket:\n%s", out)
+	}
+}
+
+// Naming a viewer the user does not have is worse than naming none: it reads
+// as an instruction and fails as one.
+func TestDetailSaysWhatToInstallWhenNoViewerExists(t *testing.T) {
+	fakeViewerPath(t)
+	v := &config.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 120, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if !strings.Contains(out, "no VNC viewer found") {
+		t.Errorf("detail pane must admit nothing is installed:\n%s", out)
+	}
+}
+
+// fakeViewerPath makes PATH hold exactly the named binaries, so what the
+// detail pane offers does not depend on what this host has installed.
+func fakeViewerPath(t *testing.T, names ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+}
+
 // TestCopyConsolePasswordKeyOnlyOfferedWhenAvailable mirrors the "t" case:
 // the footer must not advertise "c" (copy to clipboard) for a VM that has no
 // console password to copy.

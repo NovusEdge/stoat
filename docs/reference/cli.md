@@ -68,7 +68,7 @@ The `STATE` column is colored (green `running`, red `broken`) when [color is ena
 
 ## `stoat get <name>`
 
-Prints one VM's fields as `key: value` lines: name, os, mode, backend, state, cpus, ram, disk, share, ssh port, ssh user, recipes, forwards, plus an `error:` line when the VM is broken.
+Prints one VM's fields as `key: value` lines: name, os, mode, backend, state, cpus, ram, disk, share, ssh port, ssh user, recipes, forwards, display, plus an `error:` line when the VM is broken.
 
 ```
 $ stoat get work
@@ -85,7 +85,11 @@ ssh port: 2222
 ssh user: root
 recipes: xfce.alpine.sh
 forwards: 8080:80
+display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
+  attach with: gvncviewer /home/user/.stoat/work/vnc.sock
 ```
+
+`display` is the only line here that is not a `vm.toml` field. See [`stoat up`](#stoat-up-name) for what it means and why the answer changes. It is omitted entirely for a broken VM, whose `vm.toml` supplies neither of the facts the answer depends on.
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded.
 
@@ -99,7 +103,7 @@ created work (alpine, live, ssh port 2222)
 start it with: stoat up work
 ```
 
-Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated).
+Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--allow-exec` (default true; `--allow-exec=false` opts this VM out of `exec`/`copy_to`/`copy_from`, enforced by the MCP server rather than stoat itself).
 
 **Exit codes:** 0 on success; 1 if creation fails (e.g. the image isn't downloaded yet: run `stoat pull` or download it from the TUI's image picker first); 2 if `--image` is missing.
 
@@ -141,9 +145,31 @@ Starts a VM.
 $ stoat up work
 starting work...
 work started (ssh :2222)
+display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
+  attach with: gvncviewer /home/user/.stoat/work/vnc.sock
 ```
 
 `-q`/`--quiet`/`--no-interactive` suppresses the `starting <name>...` line; the final result line always prints.
+
+### Where the screen is
+
+Exactly one kind of VM gets a real QEMU window: a **disk-mode VM that is not yet installed**. Its OS installer draws to VGA and a human has to drive it, so `up` says so:
+
+```
+display: a qemu window, for the OS installer's console
+```
+
+Every other VM is headless. QEMU is started with `-display none` and a VNC server bound to a unix socket in the VM's directory, because `-display none` cannot be undone on a running QEMU and binding VNC at launch keeps a misbehaving guest recoverable.
+
+**This includes a disk VM the moment its install finishes.** `setup-alpine` completes, stoat records `installed = true`, and the next start has no window. That is not a failure; the screen moved to the socket. It surprises people who provisioned a desktop onto a disk VM and expected the window to keep coming back.
+
+The attach command names a viewer that is actually installed on your machine:
+
+- `gvncviewer <socket>` opens the socket directly, when `gvncviewer` is present.
+- Otherwise `socat TCP-LISTEN:5900,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:<socket>` republishes it on loopback, and any VNC client connects to `127.0.0.1:5900`.
+- If neither is installed, `up` says so and names them rather than printing a command that would fail.
+
+There is currently no way to ask for a QEMU window on an installed disk VM. `-display gtk` needs a graphical session on the host, so granting one by default would make `stoat up` fail outright over SSH or from a script rather than merely come up headless.
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded or fails to start (including a broken VM, which is refused before the `starting...` line is even printed).
 
@@ -255,7 +281,15 @@ $ stoat cp work:/var/log/app.log ./app.log
 copied work:/var/log/app.log to ./app.log
 ```
 
-**Exit codes:** 0 on success; 1 if the copy fails; 2 if neither side or both sides carry a `<vm>:` prefix.
+There is also an explicit-flag form, `--vm`, `--direction` (`to` or `from`), `--local` and `--remote`, alongside the positional one rather than replacing it: a host path that legitimately contains a colon is ambiguous in the `<vm>:<path>` spelling, and a machine caller (the MCP server) needs an unambiguous one. The two forms are mutually exclusive; giving both, or giving some but not all of the flag form's four flags, is a usage error.
+
+```
+$ stoat cp --vm work --direction to --local ./build.sh --remote /root/build.sh
+```
+
+Under `--json`, the result's `local` field is always the **resolved absolute path**, even when a relative or `~`-prefixed path was given, so a caller can verify what actually ran (see [json.md](json.md)).
+
+**Exit codes:** 0 on success; 1 if the copy fails; 2 for a malformed invocation (neither or both sides carry a `<vm>:` prefix, both forms given, or an incomplete flag set).
 
 ## `stoat forward <name> [pairs...]`
 

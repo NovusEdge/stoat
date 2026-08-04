@@ -1,0 +1,148 @@
+package qemu
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/novusedge/stoat/internal/config"
+)
+
+// fakeBins puts an executable file per name into a fresh directory and makes
+// it the whole of PATH, so LookPath finds exactly these and nothing the host
+// happens to have installed.
+func fakeBins(t *testing.T, names ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+}
+
+func TestDisplayKind(t *testing.T) {
+	for _, c := range []struct {
+		mode      string
+		installed bool
+		want      string
+	}{
+		// The install console: the one case a human MUST be able to look at,
+		// because setup-alpine cannot be driven any other way.
+		{"disk", false, DisplayWindow},
+		{"disk", true, DisplayVNC},
+		{"live", false, DisplayVNC},
+		{"live", true, DisplayVNC},
+		{"cloud", false, DisplayVNC},
+		{"cloud", true, DisplayVNC},
+	} {
+		if got := DisplayKind(c.mode, c.installed); got != c.want {
+			t.Errorf("DisplayKind(%q, %v) = %q, want %q", c.mode, c.installed, got, c.want)
+		}
+	}
+}
+
+// NeedsWindow is now a wrapper over DisplayKind. It must still answer exactly
+// what it answered before, since qemu.Args and the TUI both branch on it.
+func TestNeedsWindowMatchesDisplayKind(t *testing.T) {
+	for _, mode := range []string{"live", "disk", "cloud"} {
+		for _, installed := range []bool{false, true} {
+			v := &config.VM{Mode: mode, Installed: installed}
+			want := mode == "disk" && !installed
+			if got := NeedsWindow(v); got != want {
+				t.Errorf("NeedsWindow(mode=%q installed=%v) = %v, want %v", mode, installed, got, want)
+			}
+		}
+	}
+}
+
+// The install flow, pinned end to end at the argv: a fresh disk VM gets a real
+// GTK window and no VNC socket, because setup-alpine is driven at that window
+// or not at all. Nothing in the display messaging work may change this.
+func TestFreshDiskVMStillGetsARealWindow(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "alpinedisk", Mode: "disk", OS: "alpine", ISO: "isos/alpine.iso",
+		RAM: 4096, CPUs: 2, Disk: "8G", Installed: false, SSHPort: 2200,
+		Dir: filepath.Join("/data", "alpinedisk"),
+	}
+	got := joined(Args(v))
+	if !strings.Contains(got, "-display gtk,gl=on") {
+		t.Errorf("an uninstalled disk VM must open a real qemu window:\n%s", got)
+	}
+	if !strings.Contains(got, "-vga virtio") {
+		t.Errorf("the installer draws to VGA and needs an adapter:\n%s", got)
+	}
+	if strings.Contains(got, "-display none") || strings.Contains(got, "-vnc") {
+		t.Errorf("the install console must not be headless:\n%s", got)
+	}
+
+	// ...and the moment it is installed, the same VM goes to the socket.
+	v.Installed = true
+	got = joined(Args(v))
+	if !strings.Contains(got, "-display none -vnc unix:/data/alpinedisk/vnc.sock") {
+		t.Errorf("an installed disk VM must bind VNC at launch:\n%s", got)
+	}
+}
+
+func TestAttachVNCPrefersDirectViewer(t *testing.T) {
+	fakeBins(t, "gvncviewer", "socat")
+	a := AttachVNC("/data/work/vnc.sock")
+	if a.Command != "gvncviewer /data/work/vnc.sock" {
+		t.Errorf("Command = %q", a.Command)
+	}
+	if a.Then != "" {
+		t.Errorf("a direct viewer needs no second step, got %q", a.Then)
+	}
+	if a.Missing != nil {
+		t.Errorf("Missing must be empty when a viewer was found: %v", a.Missing)
+	}
+}
+
+func TestAttachVNCFallsBackToTheSocatBridge(t *testing.T) {
+	fakeBins(t, "socat")
+	a := AttachVNC("/data/work/vnc.sock")
+	if !strings.HasPrefix(a.Command, "socat ") || !strings.Contains(a.Command, "UNIX-CONNECT:/data/work/vnc.sock") {
+		t.Errorf("Command = %q", a.Command)
+	}
+	// The bridge alone shows nobody anything; the follow-up step is the half
+	// that makes it usable, so it must never be silently absent.
+	if !strings.Contains(a.Then, "127.0.0.1:5900") {
+		t.Errorf("Then = %q, want the address a client connects to", a.Then)
+	}
+	if !strings.Contains(a.Command, "bind=127.0.0.1") {
+		t.Errorf("the bridge must not publish the VM's screen to the LAN: %q", a.Command)
+	}
+}
+
+// A command naming a binary the user does not have reads as an instruction
+// and fails as one. Nothing installed must produce no command at all.
+func TestAttachVNCWithNothingInstalledNamesWhatToInstall(t *testing.T) {
+	fakeBins(t)
+	a := AttachVNC("/data/work/vnc.sock")
+	if a.Command != "" || a.Then != "" {
+		t.Errorf("no viewer installed, yet got Command=%q Then=%q", a.Command, a.Then)
+	}
+	if len(a.Missing) == 0 {
+		t.Error("Missing must name what to install")
+	}
+	for _, want := range []string{"gvncviewer", "socat"} {
+		if !strings.Contains(strings.Join(a.Missing, " "), want) {
+			t.Errorf("Missing = %v, want it to mention %q", a.Missing, want)
+		}
+	}
+}
+
+// A data root with a space in it must still yield a command that runs, and
+// the ordinary path must stay copy-pasteable without quotes around it.
+func TestAttachVNCQuotesOnlyWhenItHasTo(t *testing.T) {
+	fakeBins(t, "gvncviewer")
+	if a := AttachVNC("/home/u/my vms/w/vnc.sock"); a.Command != "gvncviewer '/home/u/my vms/w/vnc.sock'" {
+		t.Errorf("Command = %q", a.Command)
+	}
+	if a := AttachVNC("/home/u/.stoat/w/vnc.sock"); strings.Contains(a.Command, "'") {
+		t.Errorf("an ordinary path must not be quoted: %q", a.Command)
+	}
+}
