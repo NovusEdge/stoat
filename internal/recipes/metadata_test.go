@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,13 +36,13 @@ func TestParseMetadataFullBlock(t *testing.T) {
 	if m.Description != "XFCE desktop with a graphical login" {
 		t.Errorf("Description = %q", m.Description)
 	}
-	if want := []string{"alpine", "ubuntu", "debian", "arch"}; !equalStrs(m.OS, want) {
+	if want := []string{"alpine", "ubuntu", "debian", "arch"}; !slices.Equal(m.OS, want) {
 		t.Errorf("OS = %v, want %v", m.OS, want)
 	}
-	if want := []string{"systemd"}; !equalStrs(m.Requires, want) {
+	if want := []string{"systemd"}; !slices.Equal(m.Requires, want) {
 		t.Errorf("Requires = %v, want %v", m.Requires, want)
 	}
-	if want := []string{"install", "configure", "enable"}; !equalStrs(m.Stages, want) {
+	if want := []string{"install", "configure", "enable"}; !slices.Equal(m.Stages, want) {
 		t.Errorf("Stages = %v, want %v", m.Stages, want)
 	}
 }
@@ -183,75 +184,5 @@ func TestUnsupportedReasonNone(t *testing.T) {
 	}
 }
 
-// TestBundledShellRecipeMetadataParses covers every bundled .sh recipe: each
-// one now carries front matter, and it must parse clean and be applicable to
-// the OS its filename already pins it to.
-func TestBundledShellRecipeMetadataParses(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if err := Install(); err != nil {
-		t.Fatal(err)
-	}
-	cases := []struct {
-		name, os string
-		requires []string
-	}{
-		{"xfce.alpine.sh", "alpine", nil},
-		{"xfce.ubuntu.sh", "ubuntu", []string{"systemd"}},
-		{"xfce.debian.sh", "debian", []string{"systemd"}},
-		{"xfce.arch.sh", "arch", []string{"systemd"}},
-		{"docker.alpine.sh", "alpine", nil},
-		{"devtools.alpine.sh", "alpine", nil},
-		{"tailscale.alpine.sh", "alpine", nil},
-	}
-	for _, c := range cases {
-		m, err := ReadMetadata(c.name)
-		if err != nil {
-			t.Errorf("ReadMetadata(%q): %v", c.name, err)
-			continue
-		}
-		if m.Name == "" {
-			t.Errorf("%s: no stoat:name declared", c.name)
-		}
-		if !equalStrs(m.OS, []string{c.os}) {
-			t.Errorf("%s: os = %v, want [%s]", c.name, m.OS, c.os)
-		}
-		if !equalStrs(m.Requires, c.requires) {
-			t.Errorf("%s: requires = %v, want %v", c.name, m.Requires, c.requires)
-		}
-		if len(m.Stages) == 0 {
-			t.Errorf("%s: no stoat:stages declared", c.name)
-		}
-		if r := UnsupportedReason(c.os, m); r != "" {
-			t.Errorf("%s: UnsupportedReason(%s) = %q, want applicable to its own OS", c.name, c.os, r)
-		}
-	}
-}
-
-// TestBundledXfceRecipesRejectTheWrongOS pins the concrete case the design
-// doc gives as its motivating example: xfce.alpine.sh does not require
-// systemd, but xfce.ubuntu.sh does, and alpine cannot satisfy it.
-func TestBundledXfceRecipesRejectTheWrongOS(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if err := Install(); err != nil {
-		t.Fatal(err)
-	}
-	m, err := ReadMetadata("xfce.ubuntu.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r := UnsupportedReason("alpine", m); r == "" {
-		t.Error("xfce.ubuntu.sh's metadata should reject alpine, either by os or by requires")
-	}
-}
-
-func equalStrs(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+// v2 recipes use recipe.toml for metadata, not in-file front-matter.
+// See manifest_test.go for v2 capability/OS filtering tests.

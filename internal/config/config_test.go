@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestSaveLoadRoundtrip(t *testing.T) {
@@ -65,6 +66,37 @@ func TestSaveLoadRoundtripCloudVM(t *testing.T) {
 	}
 
 	got, err := Load("ubuntu-cloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("roundtrip mismatch:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// TestSaveLoadRoundtripApplied verifies Applied entries survive a save/load
+// cycle, keyed by recipe name.
+func TestSaveLoadRoundtripApplied(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+
+	at := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	want := &VM{
+		Name:    "alpine-live",
+		Mode:    "live",
+		SSHPort: 2201,
+		Applied: map[string]AppliedRecipe{
+			"xfce": {Version: "1.2.3", At: at},
+		},
+		Dir: filepath.Join(Root(), "alpine-live"),
+	}
+	if err := want.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load("alpine-live")
 	if err != nil {
 		t.Fatal(err)
 	}

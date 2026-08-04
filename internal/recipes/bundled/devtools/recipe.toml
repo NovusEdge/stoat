@@ -1,0 +1,6 @@
+name = "devtools"
+description = "git, a compiler, an editor and basic fetch tools"
+os = ["alpine"]
+requires = ["apk"]
+stage = "provision"
+script = "install.sh"

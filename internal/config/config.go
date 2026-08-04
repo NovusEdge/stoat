@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -22,6 +23,12 @@ import (
 type PortForward struct {
 	HostPort  int `toml:"hostport"`
 	GuestPort int `toml:"guestport"`
+}
+
+// AppliedRecipe records when a recipe was applied and which version.
+type AppliedRecipe struct {
+	Version string    `toml:"version"`
+	At      time.Time `toml:"at"`
 }
 
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
@@ -75,6 +82,9 @@ type VM struct {
 	// that hold, since toml.Decode alone cannot distinguish "false" from
 	// "not written".
 	AllowExec bool `toml:"allow_exec"`
+
+	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
+	Applied map[string]AppliedRecipe `toml:"applied"`
 
 	Dir string `toml:"-"` // absolute path to the VM directory
 }

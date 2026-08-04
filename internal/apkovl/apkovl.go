@@ -14,6 +14,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 const repositories = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main\n" +
@@ -33,6 +34,37 @@ const tmpName = ".stoat-ovl.tmp"
 // crash or power loss during an old build could still be picked up by the
 // initramfs and unpacked as a truncated overlay.
 const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
+
+// installScript is the local.d script that drives an unattended disk
+// install: run setup-alpine against the baked answerfile, mark success on
+// the 9p work share (docs/recipe-spec-v2.md's "Install stage signaling"
+// decision), then reboot into the newly installed disk.
+const installScript = `#!/bin/sh
+setup-alpine -f /etc/stoat/answerfile
+echo "$(date -Iseconds)" > /mnt/work/.installed
+reboot
+`
+
+// installRecipe returns the manifest of v's install-stage recipe, if it has
+// one. Install-stage recipes only make sense for Alpine disk-mode installs
+// (docs/recipe-spec-v2.md's Stages section); a live VM has no disk to
+// install onto. Recipe creation is responsible for rejecting more than one
+// install-stage recipe per VM, so the first match here is authoritative.
+func installRecipe(v *config.VM) (recipes.Manifest, bool) {
+	if v.Mode != "disk" {
+		return recipes.Manifest{}, false
+	}
+	for _, name := range v.Recipes {
+		m, ok, err := recipes.ManifestFor(name)
+		if !ok || err != nil {
+			continue // v1 flat-file recipe, or no manifest at all: not install-stage
+		}
+		if m.Stage == "install" {
+			return m, true
+		}
+	}
+	return recipes.Manifest{}, false
+}
 
 type builder struct {
 	tw  *tar.Writer
@@ -151,6 +183,20 @@ func Build(v *config.VM) error {
 	// of a recipe running `mount -a`.
 	b.symlink("etc/runlevels/boot/localmount", "/etc/init.d/localmount")
 	b.file("etc/fstab", 0o644, fstab)
+
+	if _, ok := installRecipe(v); ok {
+		// setup-alpine runs from an unattended answerfile, then the local.d
+		// script marks success on the work share and reboots into the
+		// installed disk (docs/recipe-spec-v2.md's "For install stage"
+		// execution model). etc/runlevels/default/local is what makes the
+		// initramfs actually run local.d scripts at all; without it
+		// stoat-install.start would just sit there unexecuted.
+		b.dir("etc/stoat", 0o755)
+		b.file("etc/stoat/answerfile", 0o644, GenerateAnswerfile(v))
+		b.dir("etc/local.d", 0o755)
+		b.file("etc/local.d/stoat-install.start", 0o755, installScript)
+		b.symlink("etc/runlevels/default/local", "/etc/init.d/local")
+	}
 
 	if b.err != nil {
 		return b.err

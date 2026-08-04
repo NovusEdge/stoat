@@ -1,8 +1,4 @@
 #!/bin/sh
-# stoat:name        xfce
-# stoat:description XFCE desktop with autologin startx on tty1
-# stoat:os          alpine
-# stoat:stages      install, configure, enable
 # Installs XFCE and starts it. Runs as root over ssh, on a booted Alpine live VM.
 set -e
 

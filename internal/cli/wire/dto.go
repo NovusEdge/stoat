@@ -262,14 +262,12 @@ func FromPruneItems(ps []core.PruneItem) []PruneItem {
 
 // Recipe is core.Recipe for the wire.
 type Recipe struct {
-	Name     string `json:"name"`
-	Label    string `json:"label"`
-	TargetOS string `json:"target_os"`
-	Shared   bool   `json:"shared"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func FromRecipe(r core.Recipe) Recipe {
-	return Recipe{Name: r.Name, Label: r.Label, TargetOS: r.TargetOS, Shared: r.Shared}
+	return Recipe{Name: r.Name, Description: r.Description}
 }
 
 func FromRecipes(rs []core.Recipe) []Recipe {

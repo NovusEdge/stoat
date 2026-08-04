@@ -154,19 +154,19 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		if err := recipes.Install(); err != nil {
 			t.Fatal(err)
 		}
-		f.recipeNames = []string{"devtools.alpine.sh", "docker.alpine.sh", "xfce.alpine.sh"}
+		f.recipeNames = []string{"devtools", "docker", "xfce"}
 		return f
 	}
 
 	t.Run("selected recipes carried through", func(t *testing.T) {
 		f := newBuildableForm(t, "withrecipes")
-		f.recipeSel = map[string]bool{"xfce.alpine.sh": true, "devtools.alpine.sh": true}
+		f.recipeSel = map[string]bool{"xfce": true, "devtools": true}
 
 		vm, err := f.build()
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
-		want := []string{"devtools.alpine.sh", "xfce.alpine.sh"} // recipeNames order, not selection order
+		want := []string{"devtools", "xfce"} // recipeNames order, not selection order
 		if !reflect.DeepEqual(vm.Recipes, want) {
 			t.Fatalf("Recipes = %v, want %v", vm.Recipes, want)
 		}

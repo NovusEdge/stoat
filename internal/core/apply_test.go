@@ -38,7 +38,7 @@ func TestApplyRefusesCloudinitBackend(t *testing.T) {
 	dir := root(t)
 	v := &config.VM{
 		Name: "cl", Mode: "cloud", OS: "debian", Backend: "cloudinit",
-		RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"xfce.cloud.yaml"},
+		RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"xfce"},
 	}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 	dir := root(t)
 	v := &config.VM{
 		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
-		RAM: 512, CPUs: 1, SSHPort: 2200, Recipes: []string{"a.alpine.sh"},
+		RAM: 512, CPUs: 1, SSHPort: 2200, Recipes: []string{"a"},
 	}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 	stop := fakeRunning(t, v)
 	defer stop()
 
-	err := Apply(context.Background(), "work", ApplyOpts{Only: []string{"b.alpine.sh"}})
+	err := Apply(context.Background(), "work", ApplyOpts{Only: []string{"b"}})
 	if !errors.Is(err, ErrRecipeNotApplicable) {
 		t.Fatalf("err = %v, want ErrRecipeNotApplicable", err)
 	}
@@ -98,8 +98,8 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 // reachability check (bannerReady) almost instantly, getting Provision past
 // "waiting for ssh" and into its per-recipe ctx.Err() check, where an
 // ALREADY-CANCELLED ctx returns context.Canceled immediately. That proves
-// two things at once: Only accepted "a.alpine.sh" (no ErrRecipeNotApplicable,
-// a rejection would have returned before ctx was ever consulted), and the
+// two things at once: Only accepted "a" (no ErrRecipeNotApplicable, a
+// rejection would have returned before ctx was ever consulted), and the
 // call reached sshx.Provision's own ctx-aware cancellation, not a second,
 // separate one.
 func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
@@ -125,7 +125,7 @@ func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 	v := &config.VM{
 		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
 		RAM: 512, CPUs: 1, SSHPort: port,
-		Recipes: []string{"a.alpine.sh", "b.alpine.sh"},
+		Recipes: []string{"a", "b"},
 	}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
@@ -136,163 +136,47 @@ func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = Apply(ctx, "work", ApplyOpts{Only: []string{"a.alpine.sh"}})
+	err = Apply(ctx, "work", ApplyOpts{Only: []string{"a"}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled (proves Only validated and the run reached sshx.Provision)", err)
 	}
 }
 
-func TestRecipesRequiresBothOSAndBackend(t *testing.T) {
+// Recipes' filter requires OS: without it there is nothing to match a
+// recipe.toml's declared "os" list against. Backend is accepted for API
+// compatibility only and is not required (v2 recipes are all shell scripts;
+// the backend decides how a recipe runs, not whether it applies).
+func TestRecipesRequiresOS(t *testing.T) {
 	root(t)
-	if _, err := Recipes(RecipeFilter{OS: "alpine"}); !errors.Is(err, ErrInvalidSpec) {
-		t.Errorf("Recipes with no Backend: err = %v, want ErrInvalidSpec", err)
-	}
 	if _, err := Recipes(RecipeFilter{Backend: "apkovl"}); !errors.Is(err, ErrInvalidSpec) {
 		t.Errorf("Recipes with no OS: err = %v, want ErrInvalidSpec", err)
 	}
 }
 
 // The whole point of Recipes over recipes.List: a caller gets more than a
-// bare filename back. Label, TargetOS and Shared are all derived; see
-// apply.go's Recipe doc comment for what is deliberately NOT here yet
-// (Description/Requires/Stages) and why.
+// bare name back. In v2, Recipe is {Name, Description}, both read straight
+// from the recipe's recipe.toml.
 func TestRecipesReturnsMetadataNotJustNames(t *testing.T) {
 	root(t)
 	if err := recipes.Install(); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := Recipes(RecipeFilter{OS: "alpine", Backend: "apkovl"})
+	got, err := Recipes(RecipeFilter{OS: "alpine"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var xfce *Recipe
 	for i := range got {
-		if got[i].Name == "xfce.alpine.sh" {
+		if got[i].Name == "xfce" {
 			xfce = &got[i]
 		}
 	}
 	if xfce == nil {
-		t.Fatalf("xfce.alpine.sh not in %+v", got)
+		t.Fatalf("xfce not in %+v", got)
 	}
-	if xfce.Label != "xfce" {
-		t.Errorf("Label = %q, want %q", xfce.Label, "xfce")
-	}
-	if xfce.TargetOS != "alpine" {
-		t.Errorf("TargetOS = %q, want %q", xfce.TargetOS, "alpine")
-	}
-	if xfce.Shared {
-		t.Errorf("Shared = true for an OS-pinned shell recipe")
-	}
-}
-
-// A shared cloud-config fragment (no OS segment in its filename) must come
-// back with Shared true and no TargetOS: the metadata that tells a caller
-// apart a fragment meant for one specific OS from one meant for every
-// CloudRecipes-eligible OS.
-func TestRecipesMarksSharedCloudFragments(t *testing.T) {
-	root(t)
-	if err := recipes.Install(); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := Recipes(RecipeFilter{OS: "arch", Backend: "cloudinit"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var devtools *Recipe
-	for i := range got {
-		if got[i].Name == "devtools.cloud.yaml" {
-			devtools = &got[i]
-		}
-	}
-	if devtools == nil {
-		t.Fatalf("devtools.cloud.yaml not offered to arch/cloudinit: %+v", got)
-	}
-	if !devtools.Shared || devtools.TargetOS != "" {
-		t.Errorf("devtools.cloud.yaml = %+v, want Shared=true, TargetOS=\"\"", devtools)
-	}
-}
-
-// A per-OS override must NOT be reported as shared, and must carry its own
-// TargetOS; proven against debian's real override, xfce.debian.cloud.yaml.
-func TestRecipesPerOSOverrideIsNotShared(t *testing.T) {
-	root(t)
-	if err := recipes.Install(); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := Recipes(RecipeFilter{OS: "debian", Backend: "cloudinit"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var xfce *Recipe
-	for i := range got {
-		if got[i].Name == "xfce.debian.cloud.yaml" {
-			xfce = &got[i]
-		}
-	}
-	if xfce == nil {
-		t.Fatalf("xfce.debian.cloud.yaml not offered to debian/cloudinit: %+v", got)
-	}
-	if xfce.Shared {
-		t.Errorf("xfce.debian.cloud.yaml reported Shared=true, want false (it's a per-OS override)")
-	}
-	if xfce.TargetOS != "debian" {
-		t.Errorf("TargetOS = %q, want %q", xfce.TargetOS, "debian")
-	}
-	// And the shared fragment it overrides must not ALSO be offered:
-	// recipes.List already suppresses it; Recipes must not add it back.
-	for _, r := range got {
-		if r.Name == "xfce.cloud.yaml" {
-			t.Errorf("xfce.cloud.yaml offered to debian alongside its own override: %+v", got)
-		}
-	}
-}
-
-// The genuinely inapplicable pairing the brief calls out: xfce.cloud.yaml
-// (the SHARED fragment) explicitly requested for alpine, which has its own
-// xfce.alpine.cloud.yaml and so never gets the shared one from List. The
-// reason must say WHY, not just that it's unavailable.
-func TestCheckRecipesExplainsAlpineOverride(t *testing.T) {
-	root(t)
-	if err := recipes.Install(); err != nil {
-		t.Fatal(err)
-	}
-
-	issues, err := CheckRecipes("alpine", "cloudinit", []string{"xfce.cloud.yaml"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %+v, want exactly 1", issues)
-	}
-	if issues[0].Name != "xfce.cloud.yaml" {
-		t.Errorf("Name = %q, want xfce.cloud.yaml", issues[0].Name)
-	}
-	if !strings.Contains(issues[0].Reason, "xfce.alpine.cloud.yaml") {
-		t.Errorf("Reason = %q, does not name the override that supersedes it", issues[0].Reason)
-	}
-}
-
-// The same shape of failure, on debian's own override: a second, distinct
-// OS hitting the identical code path, not a coincidence special-cased for
-// alpine alone.
-func TestCheckRecipesExplainsDebianOverride(t *testing.T) {
-	root(t)
-	if err := recipes.Install(); err != nil {
-		t.Fatal(err)
-	}
-
-	issues, err := CheckRecipes("debian", "cloudinit", []string{"xfce.cloud.yaml"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %+v, want exactly 1", issues)
-	}
-	if !strings.Contains(issues[0].Reason, "xfce.debian.cloud.yaml") {
-		t.Errorf("Reason = %q, does not name the override that supersedes it", issues[0].Reason)
+	if xfce.Description == "" {
+		t.Errorf("Description is empty, want the recipe.toml description")
 	}
 }
 
@@ -302,7 +186,7 @@ func TestCheckRecipesNoSuchRecipe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := CheckRecipes("alpine", "apkovl", []string{"not-a-real-recipe.sh"})
+	issues, err := CheckRecipes("alpine", "apkovl", []string{"not-a-real-recipe"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +204,7 @@ func TestCheckRecipesOKRecipeReportsNoIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := CheckRecipes("alpine", "apkovl", []string{"xfce.alpine.sh"})
+	issues, err := CheckRecipes("alpine", "apkovl", []string{"xfce"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,23 +213,27 @@ func TestCheckRecipesOKRecipeReportsNoIssue(t *testing.T) {
 	}
 }
 
-// A shell recipe named for the cloudinit backend is a real, distinct
-// mistake from an OS mismatch, worth its own reason.
-func TestCheckRecipesShellRecipeOnCloudinitBackend(t *testing.T) {
+// A recipe requested for an OS its recipe.toml doesn't declare (docker is
+// alpine-only) falls back to the structural reason: ReadMetadata cannot
+// read a v2 recipe directory as a flat file, so it has nothing to say, and
+// CheckRecipes must still produce a real, useful reason rather than an
+// empty one.
+func TestCheckRecipesFallsBackToStructuralReason(t *testing.T) {
 	root(t)
 	if err := recipes.Install(); err != nil {
 		t.Fatal(err)
 	}
 
-	issues, err := CheckRecipes("debian", "cloudinit", []string{"xfce.debian.sh"})
+	issues, err := CheckRecipes("debian", "apkovl", []string{"docker"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(issues) != 1 {
 		t.Fatalf("issues = %+v, want exactly 1", issues)
 	}
-	if !strings.Contains(issues[0].Reason, "cloudinit") {
-		t.Errorf("Reason = %q, does not explain the backend mismatch", issues[0].Reason)
+	want := "docker is not offered to debian/apkovl"
+	if !strings.Contains(issues[0].Reason, want) {
+		t.Errorf("Reason = %q, want it to contain %q (the structural fallback)", issues[0].Reason, want)
 	}
 }
 
@@ -389,31 +277,5 @@ func TestCheckRecipesUsesDeclaredCapabilityReason(t *testing.T) {
 	want := "requires systemd, alpine uses openrc"
 	if !strings.Contains(issues[0].Reason, want) {
 		t.Errorf("Reason = %q, want it to contain %q", issues[0].Reason, want)
-	}
-}
-
-// TestCheckRecipesFallsBackWithNoDeclaredMetadata covers a recipe with no
-// front-matter block at all (every *.cloud.yaml fragment today, by design):
-// ReadMetadata returns the zero Metadata, UnsupportedReason has nothing to
-// say, and CheckRecipes must fall back to the structural reason rather than
-// reporting no issue or an empty one. xfce.cloud.yaml requested for fedora
-// hits recipes.List's real "Fedora is kept out of the shared set entirely"
-// rule (recipes.go), a reason only the structural path can give.
-func TestCheckRecipesFallsBackWithNoDeclaredMetadata(t *testing.T) {
-	root(t)
-	if err := recipes.Install(); err != nil {
-		t.Fatal(err)
-	}
-
-	issues, err := CheckRecipes("fedora", "cloudinit", []string{"xfce.cloud.yaml"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %+v, want exactly 1", issues)
-	}
-	want := "not in the shared cloud-recipe set"
-	if !strings.Contains(issues[0].Reason, want) {
-		t.Errorf("Reason = %q, want it to contain %q (the structural fallback)", issues[0].Reason, want)
 	}
 }

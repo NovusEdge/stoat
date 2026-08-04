@@ -1,8 +1,4 @@
 #!/bin/sh
-# stoat:name        tailscale
-# stoat:description Tailscale daemon, installed and started (join manually)
-# stoat:os          alpine
-# stoat:stages      install, enable
 # Installs Tailscale and starts the daemon. Runs as root over ssh on a booted
 # Alpine VM.
 #

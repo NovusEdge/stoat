@@ -1,0 +1,6 @@
+name = "tailscale"
+description = "Tailscale daemon, installed and started (join manually)"
+os = ["alpine"]
+requires = ["apk", "openrc"]
+stage = "provision"
+script = "install.sh"

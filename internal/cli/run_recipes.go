@@ -82,13 +82,9 @@ func runRecipes(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "no recipes")
 		return ExitOK
 	}
-	fmt.Fprintf(stdout, "%-30s %-14s %-10s %s\n", "NAME", "LABEL", "TARGET OS", "SHARED")
+	fmt.Fprintf(stdout, "%-30s %s\n", "NAME", "DESCRIPTION")
 	for _, r := range rs {
-		shared := "no"
-		if r.Shared {
-			shared = "yes"
-		}
-		fmt.Fprintf(stdout, "%-30s %-14s %-10s %s\n", r.Name, r.Label, r.TargetOS, shared)
+		fmt.Fprintf(stdout, "%-30s %s\n", r.Name, r.Description)
 	}
 	return ExitOK
 }

@@ -256,7 +256,7 @@ func TestCreateWritesVMToml(t *testing.T) {
 	}
 	// A real recipe name, as recipes.List returns it; plan now refuses names
 	// that are not actually available for the VM's OS and backend.
-	v, err := Create(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso", Recipes: []string{"devtools.alpine.sh"}})
+	v, err := Create(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso", Recipes: []string{"devtools"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestCreateWritesVMToml(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SSHPort != v.SSHPort || got.OS != "alpine" || strings.Join(got.Recipes, ",") != "devtools.alpine.sh" {
+	if got.SSHPort != v.SSHPort || got.OS != "alpine" || strings.Join(got.Recipes, ",") != "devtools" {
 		t.Errorf("reloaded %+v, want it to match %+v", got, v)
 	}
 }
@@ -419,13 +419,10 @@ func TestCloudVMGetsADiskSize(t *testing.T) {
 // TestCreateRejectsAnUnavailableRecipe pins that a recipe this VM cannot run
 // is refused at CREATE time.
 //
-// recipes.List returns full filenames ("xfce.cloud.yaml") and recipes.Read
-// expects the same, because the suffix separates ssh-pushed shell recipes from
-// cloud-init fragments. Nothing checked a Spec's names against that list, so
-// `--recipes xfce` was accepted, written to vm.toml, and failed only on
-// `stoat up` with "open .../recipes/xfce: no such file or directory", a
-// create that succeeded and produced a VM that could not start. Hit for real
-// while boot-testing.
+// recipes.List returns v2 recipe names ("xfce"), and nothing checked a
+// Spec's names against that list, so `--recipes nonexistent-recipe` would be
+// accepted, written to vm.toml, and fail only on `stoat up`, a create that
+// succeeded and produced a VM that could not start.
 func TestCreateRejectsAnUnavailableRecipe(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "nocloud_alpine-3.24.1-x86_64-bios-tiny-r0.qcow2")
@@ -435,19 +432,19 @@ func TestCreateRejectsAnUnavailableRecipe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := plan(Spec{Name: "cl", Image: "alpine-cloud", Recipes: []string{"xfce"}})
+	_, err := plan(Spec{Name: "cl", Image: "alpine-cloud", Recipes: []string{"nonexistent-recipe"}})
 	if !errors.Is(err, ErrRecipeNotApplicable) {
-		t.Fatalf("err = %v, want ErrRecipeNotApplicable for a bare name", err)
+		t.Fatalf("err = %v, want ErrRecipeNotApplicable for an unknown name", err)
 	}
 	// The message must name what IS available: the failure is nearly always a
 	// close-but-wrong name, and a caller who cannot list a directory (an
 	// agent) otherwise has nothing to correct against.
-	if !strings.Contains(err.Error(), ".cloud.yaml") {
+	if !strings.Contains(err.Error(), "xfce") {
 		t.Errorf("error does not say what is available: %v", err)
 	}
 
-	// The full filename, as List returns it, is accepted.
-	if _, err := plan(Spec{Name: "cl", Image: "alpine-cloud", Recipes: []string{"xfce.alpine.cloud.yaml"}}); err != nil {
+	// A real recipe name, as List returns it, is accepted.
+	if _, err := plan(Spec{Name: "cl", Image: "alpine-cloud", Recipes: []string{"xfce"}}); err != nil {
 		t.Fatalf("a recipe straight from recipes.List was rejected: %v", err)
 	}
 	// And no recipes at all stays valid.

@@ -171,21 +171,22 @@ func TestRecipesListsAndFilters(t *testing.T) {
 		t.Fatal("recipes returned nothing with no filter")
 	}
 
-	_, only := runJSON(t, "recipes", "--os", "alpine", "--backend", "apkovl")
-	alpine, _ := dataOf(t, only)["recipes"].([]any)
-	if len(alpine) == 0 {
-		t.Fatal("recipes --os alpine --backend apkovl returned nothing")
+	// debian only satisfies xfce's OS list (the other bundled recipes all
+	// require alpine-only capabilities like apk/openrc), so filtering to it
+	// is strictly narrower than the full catalog.
+	_, only := runJSON(t, "recipes", "--os", "debian", "--backend", "cloudinit")
+	debian, _ := dataOf(t, only)["recipes"].([]any)
+	if len(debian) == 0 {
+		t.Fatal("recipes --os debian --backend cloudinit returned nothing")
 	}
-	if len(alpine) >= len(every) {
-		t.Errorf("filtered %d is not narrower than unfiltered %d", len(alpine), len(every))
+	if len(debian) >= len(every) {
+		t.Errorf("filtered %d is not narrower than unfiltered %d", len(debian), len(every))
 	}
-	// alpine/apkovl gets shell recipes only; a cloud fragment here would mean
-	// the filter is not reaching recipes.List.
-	for _, r := range alpine {
+	for _, r := range debian {
 		m, _ := r.(map[string]any)
 		name, _ := m["name"].(string)
-		if !strings.HasSuffix(name, ".sh") {
-			t.Errorf("alpine/apkovl offered %q, want only .sh recipes", name)
+		if name != "xfce" {
+			t.Errorf("debian/cloudinit offered %q, want only xfce", name)
 		}
 	}
 }
@@ -210,7 +211,7 @@ func TestRecipesUnknownOSIsAnEmptyArray(t *testing.T) {
 func TestCheckRecipesApplicableAndNot(t *testing.T) {
 	cliRoot(t)
 
-	code, objs := runJSON(t, "check-recipes", "xfce.alpine.sh", "--os", "alpine", "--backend", "apkovl")
+	code, objs := runJSON(t, "check-recipes", "xfce", "--os", "alpine", "--backend", "apkovl")
 	if code != ExitOK {
 		t.Fatalf("applicable: exit = %d: %v", code, objs)
 	}
@@ -222,8 +223,8 @@ func TestCheckRecipesApplicableAndNot(t *testing.T) {
 		t.Errorf("issues = %v, want empty", issues)
 	}
 
-	// A debian shell recipe cannot run on alpine.
-	code, objs = runJSON(t, "check-recipes", "xfce.debian.sh", "--os", "alpine", "--backend", "apkovl")
+	// docker requires alpine's apk/openrc; debian cannot run it.
+	code, objs = runJSON(t, "check-recipes", "docker", "--os", "debian", "--backend", "cloudinit")
 	if code != ExitOK {
 		t.Fatalf("inapplicable: exit = %d, want 0: checking SUCCEEDED", code)
 	}
@@ -248,7 +249,7 @@ func TestCheckRecipesApplicableAndNot(t *testing.T) {
 func TestParseCheckRecipesUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"check-recipes", "--os", "alpine"}, // no names
-		{"check-recipes", "xfce.alpine.sh"}, // no --os
+		{"check-recipes", "xfce"},           // no --os
 		{"check-recipes"},                   // neither
 	} {
 		if _, err := Parse(args); err == nil {
@@ -292,7 +293,7 @@ func TestApplyOnACloudVMIsAppliedAtBoot(t *testing.T) {
 	dir := cliRoot(t)
 	v := saveVM(t, &config.VM{
 		Name: "cloudy", OS: "ubuntu", Mode: "cloud", Backend: "cloudinit",
-		RAM: 2048, CPUs: 2, SSHPort: 2201, Recipes: []string{"xfce.cloud.yaml"},
+		RAM: 2048, CPUs: 2, SSHPort: 2201, Recipes: []string{"xfce"},
 	})
 	v.Dir = filepath.Join(dir, "cloudy")
 	stop := fakeRunning(t, v)
@@ -348,11 +349,11 @@ func TestJSONLogWriterSplitsOnLinesNotWrites(t *testing.T) {
 func TestJSONLogWriterEmitsAStageAtEachRecipeMarker(t *testing.T) {
 	var buf strings.Builder
 	w := &jsonLogWriter{em: wire.NewEmitter(&buf), cmd: "apply"}
-	if _, err := w.Write([]byte("=== recipe xfce.alpine.sh ===\ninstalling\n")); err != nil {
+	if _, err := w.Write([]byte("=== recipe xfce ===\ninstalling\n")); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `"type":"stage"`) || !strings.Contains(out, `"recipe":"xfce.alpine.sh"`) {
+	if !strings.Contains(out, `"type":"stage"`) || !strings.Contains(out, `"recipe":"xfce"`) {
 		t.Errorf("no stage event for the marker: %q", out)
 	}
 	if strings.Count(out, `"type":"log"`) != 2 {

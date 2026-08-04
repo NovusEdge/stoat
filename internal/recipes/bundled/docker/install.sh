@@ -1,8 +1,4 @@
 #!/bin/sh
-# stoat:name        docker
-# stoat:description Docker engine and the compose plugin
-# stoat:os          alpine
-# stoat:stages      install, enable
 # Installs Docker and the compose plugin. Runs as root over ssh on a booted
 # Alpine VM.
 set -e

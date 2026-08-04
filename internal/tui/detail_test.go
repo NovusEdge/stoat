@@ -329,6 +329,37 @@ func TestDetailOmitsForwardsRowWhenNone(t *testing.T) {
 	}
 }
 
+// TestDetailShowsRecipeStatus proves the recipes row reports each recipe's
+// applied state individually: pending for one never run, applied (with the
+// date) for one recorded in v.Applied, and stale for an entry left in
+// v.Applied whose recipe was since removed from v.Recipes.
+func TestDetailShowsRecipeStatus(t *testing.T) {
+	appliedAt := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	v := &config.VM{
+		Name:    "recipe-vm",
+		Mode:    "live",
+		Dir:     t.TempDir(),
+		Recipes: []string{"xfce.alpine.sh", "docker.alpine.sh"},
+		Applied: map[string]config.AppliedRecipe{
+			"xfce.alpine.sh":    {Version: "1", At: appliedAt},
+			"removed.alpine.sh": {Version: "1", At: appliedAt},
+		},
+	}
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if !strings.Contains(out, "xfce (applied 2026-01-02)") {
+		t.Errorf("applied recipe must show its applied date:\n%s", out)
+	}
+	if !strings.Contains(out, "docker (pending)") {
+		t.Errorf("recipe never applied must show pending:\n%s", out)
+	}
+	if !strings.Contains(out, "removed (stale - removed from config)") {
+		t.Errorf("applied recipe no longer in v.Recipes must show stale:\n%s", out)
+	}
+}
+
 // TestDetailForwardsDistinguishRunningFromStopped proves the rendering never
 // collapses "in effect" and "applies at next start" into the same text: a
 // running VM's forwards must read differently from a stopped VM's, because

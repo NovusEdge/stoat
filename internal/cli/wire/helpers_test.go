@@ -16,7 +16,7 @@ func sampleVM() core.VM {
 		CPUs:            4,
 		Disk:            "8G",
 		Share:           "/home/u/src",
-		Recipes:         []string{"xfce.alpine.sh"},
+		Recipes:         []string{"xfce"},
 		SSHPort:         2222,
 		SSHUser:         "root",
 		ISO:             "isos/alpine-virt.iso",

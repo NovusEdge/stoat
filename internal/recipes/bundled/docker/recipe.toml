@@ -1,0 +1,6 @@
+name = "docker"
+description = "Docker engine and the compose plugin"
+os = ["alpine"]
+requires = ["apk", "openrc"]
+stage = "provision"
+script = "install.sh"

@@ -330,9 +330,10 @@ func TestDeclaringTheOSMakesRecipesAppear(t *testing.T) {
 	if len(f.recipeNames) == 0 {
 		t.Fatal("declaring the OS still offered no recipes")
 	}
+	// v2 recipes are directories, not files with extensions
 	for _, n := range f.recipeNames {
-		if !strings.HasSuffix(n, ".cloud.yaml") {
-			t.Errorf("cloudinit backend offered %q, which is not a cloud fragment", n)
+		if strings.Contains(n, ".") {
+			t.Errorf("recipe name %q looks like a v1 filename, want bare name", n)
 		}
 	}
 }

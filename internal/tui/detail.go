@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -314,12 +315,33 @@ func (m model) viewDetail() string {
 	if v.Share != "" {
 		line("share", v.Share+dimStyle.Render(" "+glyphTo+" /mnt/host"))
 	}
-	if len(v.Recipes) > 0 {
-		names := make([]string, len(v.Recipes))
-		for i, r := range v.Recipes {
-			names[i] = recipeLabel(r)
+	if len(v.Recipes) > 0 || len(v.Applied) > 0 {
+		label := "recipes"
+		inConfig := make(map[string]bool, len(v.Recipes))
+		for _, r := range v.Recipes {
+			inConfig[r] = true
+			status := dimStyle.Render("pending")
+			if a, ok := v.Applied[r]; ok {
+				status = upStyle.Render("applied " + a.At.Format("2006-01-02"))
+			}
+			line(label, recipeLabel(r)+" ("+status+")")
+			label = ""
 		}
-		line("recipes", strings.Join(names, ", "))
+		// Stale: a recipe that was applied but has since been removed from
+		// v.Recipes (the user edited it out of vm.toml after the fact). The
+		// applied record survives that edit, so it needs its own status
+		// rather than silently vanishing from this pane.
+		stale := make([]string, 0, len(v.Applied))
+		for name := range v.Applied {
+			if !inConfig[name] {
+				stale = append(stale, name)
+			}
+		}
+		sort.Strings(stale)
+		for _, name := range stale {
+			line(label, recipeLabel(name)+" ("+warnStyle.Render("stale - removed from config")+")")
+			label = ""
+		}
 	}
 
 	factsBox := pane(v.Name, facts.String(), m.width)

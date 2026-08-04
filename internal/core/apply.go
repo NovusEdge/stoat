@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/backend"
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -105,125 +107,146 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 		return nil
 	}
 
-	// run is v with Recipes narrowed to targets. config.VM is a plain value
-	// struct (see internal/config/config.go), no mutex, no owned resource,
-	// so copying it and pointing sshx.Provision at the copy is exactly as
-	// safe as calling it on v directly, and it is what lets Only reuse
-	// Provision as-is instead of it needing a subset parameter added to a
-	// file this change may not touch. Dir (and so ProvisionLogPath) is
-	// unchanged, which is what keeps this on the SAME log every other
-	// reader of this VM already tails.
+	// v2 recipes (docs/recipe-spec-v2.md) declare a run mode in their own
+	// recipe.toml; a v1 flat-file recipe has no manifest at all and keeps
+	// the old "always run it" behaviour untouched. explicit is which names
+	// the caller asked for BY NAME (a non-empty Only): that is what tells a
+	// "manual"-run recipe apart from one merely inherited via v.Recipes, the
+	// distinction docs/recipe-spec-v2.md's Decisions §4 draws between
+	// "stoat apply" and "stoat apply --recipe <name>".
+	explicit := make(map[string]bool, len(opts.Only))
+	for _, o := range opts.Only {
+		explicit[o] = true
+	}
+	runTargets, manifests, err := filterByRunMode(v, targets, explicit)
+	if err != nil {
+		return err
+	}
+	if len(runTargets) == 0 {
+		// Every target was skipped by its own run mode (an "once" recipe
+		// already applied at its current version, or a "manual" recipe
+		// nobody named explicitly). That is not a failure: it is the run
+		// mode doing exactly what it declared, so this stays a no-op like
+		// the "nothing to run at all" case above rather than erroring.
+		return nil
+	}
+
+	// run is v with Recipes narrowed to runTargets. config.VM is a plain
+	// value struct (see internal/config/config.go), no mutex, no owned
+	// resource, so copying it and pointing sshx.Provision at the copy is
+	// exactly as safe as calling it on v directly, and it is what lets Only
+	// (and now run-mode filtering) reuse Provision as-is instead of it
+	// needing a subset parameter added to a file this change may not touch.
+	// Dir (and so ProvisionLogPath) is unchanged, which is what keeps this
+	// on the SAME log every other reader of this VM already tails.
 	run := *v
-	run.Recipes = targets
+	run.Recipes = runTargets
 
-	return sshx.Provision(ctx, &run)
+	if err := sshx.Provision(ctx, &run); err != nil {
+		return err
+	}
+
+	// Provision runs runTargets in order and stops at the first failure, so
+	// reaching here means every one of them succeeded; each v2 recipe among
+	// them (the ones ManifestFor actually found a manifest for) gets its
+	// applied state recorded. A v1 recipe has no version to record and is
+	// left out of Applied exactly as it always has been.
+	var changed bool
+	for _, name := range runTargets {
+		m, ok := manifests[name]
+		if !ok {
+			continue
+		}
+		if v.Applied == nil {
+			v.Applied = make(map[string]config.AppliedRecipe, len(runTargets))
+		}
+		v.Applied[name] = config.AppliedRecipe{Version: m.Version, At: time.Now()}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return v.Save()
 }
 
-// Recipe is one recipe file resolved for a specific (OS, backend) pair, with
-// what can be honestly derived about it from its filename and its place on
-// disk.
+// filterByRunMode narrows targets to the recipes that should actually run,
+// given each recipe's declared run mode (recipes.Manifest.Run) and what v
+// has already recorded in Applied:
 //
-// docs/design/guest-subsystem.md §5 specifies an in-band front-matter
-// contract, "# stoat:name", "# stoat:description", "# stoat:os",
-// "# stoat:requires", "# stoat:stages" comments a recipe script would
-// declare, as the source for a recipe's real metadata. internal/recipes now
-// has that parser (ParseMetadata/ReadMetadata) and CheckRecipes uses it (see
-// recipeIssueReason), but every phase-1 shell recipe that carries the tags
-// today declares only name/description/os/requires/stages for ITSELF, not a
-// summary this type could surface for an arbitrary (OS, backend) pair
-// without re-parsing each file Recipes returns, which this function
-// deliberately does not do (see its own doc comment: no script content is
-// read here). So Recipe still cannot honestly report a declared
-// Description, Requires, or Stages without that extra read; what IS
-// populated below is derived purely from the filename and from what else
-// exists on disk.
-type Recipe struct {
-	// Name is the full filename ("xfce.alpine.cloud.yaml"), exactly what
-	// ApplyOpts.Only, Spec.Recipes and recipes.Read all expect.
-	Name string
-	// Label is the recipe's short display name: Name with its .sh/.yaml
-	// extension and its OS/backend-suffix segment stripped
-	// ("xfce.alpine.sh" -> "xfce"). Mirrors internal/tui/labels.go's
-	// recipeLabel exactly (that function is unexported in package tui,
-	// which this package must not import (tui sits above core in the
-	// layering, and reaching back down would be the cycle
-	// docs/design/guest-subsystem.md §3.2 explicitly avoids for a related
-	// reason), kept here as a small, independent copy rather than a shared
-	// export, since the two calls are one line each.
-	Label string
-	// TargetOS is the OS this specific file is pinned to, read off its own
-	// filename ("alpine" for "xfce.alpine.sh", "debian" for
-	// "xfce.debian.cloud.yaml"). Empty for a SHARED cloud-config fragment;
-	// see Shared.
-	TargetOS string
-	// Shared reports whether this is a cloud-config fragment offered to
-	// every guest.OS with CloudRecipes set (e.g. "devtools.cloud.yaml"),
-	// rather than one pinned to a single OS by its filename. Always false
-	// for a shell (.sh) recipe, which is always OS-pinned by convention
-	// (see recipes.List's doc comment).
-	Shared bool
+//   - "manual" never runs implicitly; it only runs when explicit[name] is
+//     true, i.e. the caller named it directly via ApplyOpts.Only.
+//   - "once" is skipped when v.Applied already has an entry for name AT THE
+//     SAME VERSION the manifest declares now; a version bump makes it run
+//     again, which is the whole point of recording Version alongside At.
+//   - "always" is never skipped.
+//
+// A target with no recipe.toml at all (ManifestFor's ok=false) is a v1
+// flat-file recipe: it has no run-mode concept, so it always stays in the
+// result, matching Apply's behaviour before v2 recipes existed. The returned
+// map holds the manifest for every v2 recipe kept, so the caller does not
+// have to re-resolve it after the run succeeds.
+func filterByRunMode(v *config.VM, targets []string, explicit map[string]bool) ([]string, map[string]recipes.Manifest, error) {
+	kept := make([]string, 0, len(targets))
+	manifests := make(map[string]recipes.Manifest, len(targets))
+	for _, name := range targets {
+		m, ok, err := recipes.ManifestFor(name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			kept = append(kept, name)
+			continue
+		}
+		manifests[name] = m
+
+		switch m.Run {
+		case "manual":
+			if !explicit[name] {
+				continue
+			}
+		case "once":
+			if applied, done := v.Applied[name]; done && applied.Version == m.Version {
+				continue
+			}
+		}
+		kept = append(kept, name)
+	}
+	return kept, manifests, nil
 }
 
-// RecipeFilter selects the recipes Recipes returns: the exact set
-// recipes.List(OS, Backend) would offer a VM with that OS and backend,
-// each with what Recipe above can honestly report about it. Both fields are
-// required: there is no "every OS" or "every backend" scope, matching
-// recipes.List itself, which cannot answer that question either.
+// Recipe is one recipe resolved for a specific OS. In v2, recipes are
+// directories with recipe.toml manifests; Name is the recipe name (e.g.,
+// "xfce"), not a filename.
+type Recipe struct {
+	Name        string // recipe name, matches the directory name
+	Description string // from recipe.toml
+}
+
+// RecipeFilter selects the recipes Recipes returns: the set
+// recipes.List(OS, Backend) would offer a VM with that OS and backend.
+// Backend is accepted for API compatibility but ignored in v2 (all recipes
+// are shell scripts, the backend determines how they run, not which apply).
 type RecipeFilter struct {
 	OS      string
 	Backend string
 }
 
-// Recipes returns what applies to a VM with the given OS and backend, with
-// the metadata described on Recipe.
+// Recipes returns what applies to a VM with the given OS.
 func Recipes(f RecipeFilter) ([]Recipe, error) {
-	if strings.TrimSpace(f.OS) == "" || strings.TrimSpace(f.Backend) == "" {
-		return nil, fmt.Errorf("%w: RecipeFilter needs both OS and Backend", ErrInvalidSpec)
+	if strings.TrimSpace(f.OS) == "" {
+		return nil, fmt.Errorf("%w: RecipeFilter needs OS", ErrInvalidSpec)
 	}
-	names, err := recipes.List(f.OS, f.Backend)
+	manifests, err := recipes.ListManifests()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Recipe, 0, len(names))
-	for _, n := range names {
-		out = append(out, recipeMetadata(n, f.Backend))
+	var out []Recipe
+	for _, m := range manifests {
+		if recipes.MatchesVM(&m, f.OS) {
+			out = append(out, Recipe{Name: m.Name, Description: m.Description})
+		}
 	}
 	return out, nil
-}
-
-// recipeLabel mirrors internal/tui/labels.go's function of the same name;
-// see Recipe.Label's comment for why this is a small independent copy
-// rather than a shared export.
-func recipeLabel(file string) string {
-	name := strings.TrimSuffix(file, ".yaml")
-	name = strings.TrimSuffix(name, ".sh")
-	if i := strings.IndexByte(name, '.'); i > 0 {
-		return name[:i]
-	}
-	return name
-}
-
-// recipeMetadata builds a Recipe for name, a filename recipes.List already
-// confirmed applies to backendName. The OS-suffix parsing here matches
-// recipes.List's own (internal/recipes/recipes.go) exactly, on purpose:
-// diverging would make Recipe's TargetOS disagree with why the file was
-// even in the list.
-func recipeMetadata(name, backendName string) Recipe {
-	r := Recipe{Name: name, Label: recipeLabel(name)}
-	if backendName == "cloudinit" && strings.HasSuffix(name, ".cloud.yaml") {
-		base := strings.TrimSuffix(name, ".cloud.yaml")
-		if i := strings.LastIndex(base, "."); i >= 0 {
-			r.TargetOS = base[i+1:]
-		} else {
-			r.Shared = true
-		}
-		return r
-	}
-	if strings.HasSuffix(name, ".sh") {
-		fields := strings.Split(strings.TrimSuffix(name, ".sh"), ".")
-		r.TargetOS = fields[len(fields)-1]
-	}
-	return r
 }
 
 // RecipeIssue names one recipe a Spec asked for that osName/backendName

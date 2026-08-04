@@ -1,0 +1,10 @@
+name = "xfce"
+description = "XFCE desktop with autologin startx on tty1"
+os = ["alpine", "ubuntu", "debian", "arch"]
+stage = "provision"
+script = "install.sh"
+
+[scripts]
+alpine = "install-alpine.sh"
+debian = "install-debian.sh"
+arch = "install-arch.sh"

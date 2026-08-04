@@ -7,56 +7,49 @@ import (
 	"testing"
 )
 
-// TestNewWritesAScaffoldThatMatchesTheNamingContract: the filename IS the
-// contract, since recipes.List filters on it, so a scaffold that names the file
-// wrongly produces a recipe the picker will never offer.
-func TestNewWritesAScaffoldThatMatchesTheNamingContract(t *testing.T) {
+func TestNewCreatesRecipeDirectory(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
-	cases := []struct {
-		name, osName, backend, wantFile string
-	}{
-		{"nodejs", "alpine", "", "nodejs.alpine.sh"},
-		{"nodejs", "ubuntu", "", "nodejs.ubuntu.sh"},
-		{"nodejs", "ubuntu", "cloudinit", "nodejs.cloud.yaml"},
-		// An OS the shared cloud fragment cannot serve needs its own file,
-		// for the same reason Fedora already has one.
-		{"nodejs", "fedora", "cloudinit", "nodejs.fedora.cloud.yaml"},
+	path, err := New("nodejs", "alpine", "")
+	if err != nil {
+		t.Fatalf("New(nodejs, alpine): %v", err)
 	}
-	for _, c := range cases {
-		t.Setenv("STOAT_HOME", t.TempDir())
-		path, err := New(c.name, c.osName, c.backend)
-		if err != nil {
-			t.Fatalf("New(%q,%q,%q): %v", c.name, c.osName, c.backend, err)
-		}
-		if got := filepath.Base(path); got != c.wantFile {
-			t.Errorf("New(%q,%q,%q) wrote %q, want %q", c.name, c.osName, c.backend, got, c.wantFile)
-		}
 
-		// And the picker must actually offer what was just written.
-		if c.backend == "" {
-			names, err := List(c.osName, "apkovl")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !contains(names, c.wantFile) {
-				t.Errorf("List(%q, apkovl) does not offer the scaffold %q: %v", c.osName, c.wantFile, names)
-			}
-		}
+	// Should create a directory, not a file
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Errorf("New returned %q which is not a directory", path)
+	}
+
+	// Should contain recipe.toml and install.sh
+	if _, err := os.Stat(filepath.Join(path, "recipe.toml")); err != nil {
+		t.Error("recipe.toml not created")
+	}
+	if _, err := os.Stat(filepath.Join(path, "install.sh")); err != nil {
+		t.Error("install.sh not created")
+	}
+
+	// The recipe should be listed
+	names, err := List("alpine", "apkovl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(names, "nodejs") {
+		t.Errorf("List(alpine) does not offer the new recipe: %v", names)
 	}
 }
 
-// TestNewShellScaffoldCarriesTheHonestyBlock: every bundled shell recipe is
-// required by this package's own tests to detect a live root and say that
-// nothing survives a reboot. A scaffold that omitted it would teach the
-// opposite of what the suite enforces.
 func TestNewShellScaffoldCarriesTheHonestyBlock(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	path, err := New("thing", "alpine", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(path)
+
+	b, err := os.ReadFile(filepath.Join(path, "install.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,16 +57,15 @@ func TestNewShellScaffoldCarriesTheHonestyBlock(t *testing.T) {
 
 	for _, want := range []string{"/proc/mounts", "tmpfs", "case ", "esac", "NOT", "set -e", "#!/bin/sh"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("scaffold is missing %q:\n%s", want, body)
+			t.Errorf("scaffold is missing %q", want)
 		}
 	}
-	// Alpine's community repo is off by default, which is where most of what
-	// anyone would install actually lives.
+	// Alpine's community repo is off by default
 	if !strings.Contains(body, "setup-apkrepos -c") {
 		t.Error("alpine scaffold does not enable the community repo")
 	}
 
-	fi, err := os.Stat(path)
+	fi, err := os.Stat(filepath.Join(path, "install.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,23 +74,25 @@ func TestNewShellScaffoldCarriesTheHonestyBlock(t *testing.T) {
 	}
 }
 
-// TestNewRefusesToClobber: Install() already promises never to overwrite a
-// user's edits. A scaffold command that could destroy the recipe you have
-// been working on would be a worse failure than not existing.
 func TestNewRefusesToClobber(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	path, err := New("thing", "alpine", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("#!/bin/sh\necho mine\n"), 0o755); err != nil {
+
+	// Edit the script
+	scriptPath := filepath.Join(path, "install.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho mine\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
+	// Try to create again
 	if _, err := New("thing", "alpine", ""); err == nil {
 		t.Fatal("New overwrote an existing recipe")
 	}
-	b, _ := os.ReadFile(path)
+
+	b, _ := os.ReadFile(scriptPath)
 	if !strings.Contains(string(b), "echo mine") {
 		t.Error("the user's recipe was destroyed")
 	}
@@ -108,16 +102,16 @@ func TestNewRejectsBadNames(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	for _, name := range []string{"", "has.dot", "has/slash", "has space"} {
 		if _, err := New(name, "alpine", ""); err == nil {
-			t.Errorf("New(%q) was accepted; dots and slashes are what separate name from os and extension", name)
+			t.Errorf("New(%q) was accepted; dots and slashes are not allowed", name)
 		}
 	}
-	// A shell recipe with no OS has no valid filename at all.
+	// A recipe with no OS is rejected
 	if _, err := New("thing", "", ""); err == nil {
-		t.Error("New accepted a shell recipe with no os")
+		t.Error("New accepted a recipe with no os")
 	}
 }
 
-func TestInstalledListsEverything(t *testing.T) {
+func TestInstalledListsRecipes(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if names, err := Installed(); err != nil || len(names) != 0 {
 		t.Errorf("Installed() on a fresh root = %v, %v; want empty", names, err)
@@ -129,8 +123,8 @@ func TestInstalledListsEverything(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Unlike List, this is not filtered by os or backend.
-	for _, want := range []string{"xfce.alpine.sh", "xfce.cloud.yaml", "docker.alpine.sh"} {
+	// Should list recipe names, not filenames
+	for _, want := range []string{"xfce", "docker", "devtools", "tailscale"} {
 		if !contains(names, want) {
 			t.Errorf("Installed() missing %q: %v", want, names)
 		}

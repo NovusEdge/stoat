@@ -7,16 +7,17 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/guest"
+	"github.com/novusedge/stoat/internal/logx"
 )
 
-//go:embed *.sh *.yaml
+//go:embed bundled
 var bundled embed.FS
 
 func dir() string { return filepath.Join(config.Root(), "recipes") }
@@ -93,88 +94,135 @@ func sum(b []byte) string {
 // first, so the one-time adoption cannot destroy anything. It happens once,
 // and afterwards the manifest is authoritative and edits are recognised.
 func Install() error {
+	sub, err := fs.Sub(bundled, "bundled")
+	if err != nil {
+		return err
+	}
+	return install(sub)
+}
+
+// install does the work behind Install, against src rather than the
+// package-level embed.FS, so the copy-and-refresh logic can be exercised
+// against a fake tree (fstest.MapFS) in tests without needing real bundled
+// recipes on disk.
+//
+// src's top level holds v2 recipe directories ("xfce/recipe.toml",
+// "xfce/install.sh"). Each is installed with the refresh-vs-preserve-edits
+// rule: a file whose checksum matches the manifest is stoat's own and gets
+// refreshed, while an edited file is left alone.
+func install(src fs.FS) error {
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return err
 	}
-	items, err := bundled.ReadDir(".")
+	items, err := fs.ReadDir(src, ".")
 	if err != nil {
 		return err
 	}
 	man := readManifest()
 	next := map[string]string{}
 	for _, it := range items {
-		name := it.Name()
-		want, err := bundled.ReadFile(name)
-		if err != nil {
+		if !it.IsDir() {
+			continue // v2 only has directories
+		}
+		if err := installDir(src, it.Name(), man, next); err != nil {
 			return err
 		}
-		wantSum := sum(want)
-		dst := filepath.Join(dir(), name)
-		have, err := os.ReadFile(dst)
-		switch {
-		case os.IsNotExist(err): // new recipe, or a fresh install
-		case err != nil:
-			return err
-		case sum(have) == wantSum: // already current
-			next[name] = wantSum
-			continue
-		case man == nil:
-			// Pre-manifest: unknowable whether this was edited, so keep a
-			// copy. ".bak" is deliberately not a suffix List matches.
-			if err := os.WriteFile(dst+".bak", have, 0o644); err != nil {
-				return err
-			}
-		case man[name] != sum(have):
-			// Edited by hand (or hand-created before stoat bundled a recipe
-			// of this name, which is the same thing as far as this goes).
-			// Leave it, and record nothing: writing the bundled sum here
-			// would make the next Install read the edit as stoat's own copy
-			// and overwrite it.
-			continue
-		}
-		if err := os.WriteFile(dst, want, 0o755); err != nil {
-			return err
-		}
-		next[name] = wantSum
 	}
 	return writeManifest(next)
 }
 
-// List returns installed recipe names offered for osName on backend.
+// installDir installs every file under a v2 recipe directory (name), keyed
+// by its path relative to the recipes root ("xfce/recipe.toml"), mirroring
+// that directory structure into dir().
+func installDir(src fs.FS, name string, man, next map[string]string) error {
+	return fs.WalkDir(src, name, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dir(), filepath.FromSlash(p)), 0o755)
+		}
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(p, ".sh") {
+			mode = 0o755
+		}
+		return installFile(src, p, mode, man, next)
+	})
+}
+
+// installFile installs a single bundled file, keyed by key (its path
+// relative to the recipes root: a bare filename for the old flat format, or
+// "<recipe>/<file>" for a v2 recipe directory). It is the shared body of
+// the refresh-vs-preserve-edits rule Install's doc comment describes:
+// refresh a copy that still matches what stoat last wrote (or predates the
+// manifest, backed up first), leave anything else alone.
+func installFile(src fs.FS, key string, mode os.FileMode, man, next map[string]string) error {
+	want, err := fs.ReadFile(src, key)
+	if err != nil {
+		return err
+	}
+	wantSum := sum(want)
+	dst := filepath.Join(dir(), filepath.FromSlash(key))
+	have, err := os.ReadFile(dst)
+	switch {
+	case os.IsNotExist(err): // new recipe, or a fresh install
+	case err != nil:
+		return err
+	case sum(have) == wantSum: // already current
+		next[key] = wantSum
+		return nil
+	case man == nil:
+		// Pre-manifest: unknowable whether this was edited, so keep a
+		// copy. ".bak" is deliberately not a suffix List matches.
+		if err := os.WriteFile(dst+".bak", have, 0o644); err != nil {
+			return err
+		}
+	case man[key] != sum(have):
+		// Edited by hand (or hand-created before stoat bundled a recipe
+		// of this name, which is the same thing as far as this goes).
+		// Leave it, and record nothing: writing the bundled sum here
+		// would make the next Install read the edit as stoat's own copy
+		// and overwrite it.
+		return nil
+	}
+	if err := os.WriteFile(dst, want, mode); err != nil {
+		return err
+	}
+	next[key] = wantSum
+	return nil
+}
+
+// List returns installed recipe names offered for osName. Backend is ignored
+// in v2: every recipe is a shell script, and the backend (apkovl, ssh,
+// cloudinit) determines HOW it runs, not WHETHER it applies.
 //
-// Shell recipes are named "xfce.<os>.sh" and only make sense pushed
-// interactively over a live shell, so they're offered on the apkovl/ssh
-// backends, filtered to the exact matching OS. The cloud-config fragment
-// ("xfce.cloud.yaml") only makes sense merged into a cloud-init seed, so
-// it's offered only on the cloudinit backend, filtered to
-// guest.Lookup(osName).CloudRecipes, unless a per-OS fragment
-// ("xfce.fedora.cloud.yaml") exists for that OS. A recipe with no file for
-// the (osName, backend) combination is not offered, e.g.
-// List("ubuntu", "cloudinit") never returns xfce.ubuntu.sh, and
-// List("alpine", "apkovl") never returns the cloud fragment.
+// Filtering is by the manifest's OS and Requires fields (see MatchesVM).
+func List(osName, _ string) ([]string, error) {
+	manifests, err := ListManifests()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, m := range manifests {
+		if MatchesVM(&m, osName) {
+			out = append(out, m.Name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// ListManifests scans dir() for v2 recipes: subdirectories holding a
+// recipe.toml (docs/recipe-spec-v2.md). Unlike List, it does not filter by
+// OS or backend; a caller that needs that does it against the parsed
+// Manifest's OS/Requires fields, the way UnsupportedReason already does for
+// v1's front-matter Metadata.
 //
-// CloudRecipes is a single bool per OS, but "the shared fragment set" is
-// really cloud-init's packages: list having no per-distro syntax: one
-// fragment only works across OSes whose package names happen to match, so an
-// OS can be safe for one shared fragment and not another (see
-// guest.OS.CloudRecipes and devtools.cloud.yaml vs xfce.cloud.yaml). Alpine
-// is CloudRecipes-eligible (devtools.cloud.yaml installs fine on apk) but
-// still needs its own xfce.alpine.cloud.yaml, because xfce.cloud.yaml's
-// systemctl runcmd does not run under Alpine's OpenRC. So, unlike Fedora
-// (kept out of the shared set entirely), a per-OS override and CloudRecipes
-// being true for the same OS both happen at once here. The first loop below
-// records which base names have a per-OS override for osName so the second
-// loop can suppress the shared fragment for exactly those names: without
-// it, an OS with both would be offered two entries for the same recipe,
-// the shared one (wrongly in scope) and the per-OS one.
-//
-// Fedora is kept out of the shared set entirely for a second, independent
-// reason that still matters even with per-OS suppression: it would silently
-// break any shared-only fragment (no per-OS override) whose package names
-// happen not to hold on dnf. devtools.cloud.yaml is one example:
-// git/curl/ca-certificates/tmux/less match, but Fedora's vim package is
-// "vim-enhanced", not "vim".
-func List(osName, backend string) ([]string, error) {
+// A subdirectory that isn't a v2 recipe (no recipe.toml: stray directory,
+// or leftover .bak territory) is silently skipped. One that IS a recipe
+// directory but fails to parse is also skipped, but logged: a single typo'd
+// manifest should not take every other recipe down with it.
+func ListManifests() ([]Manifest, error) {
 	entries, err := os.ReadDir(dir())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -183,51 +231,23 @@ func List(osName, backend string) ([]string, error) {
 		return nil, err
 	}
 
-	// overridden collects the base name of every per-OS fragment that
-	// matches osName ("xfce.alpine.cloud.yaml" -> "xfce"), so the shared
-	// fragment of the same name is suppressed below rather than offered
-	// alongside it.
-	overridden := map[string]bool{}
-	if backend == "cloudinit" {
-		for _, e := range entries {
-			name := e.Name()
-			if !strings.HasSuffix(name, ".cloud.yaml") {
-				continue
-			}
-			base := strings.TrimSuffix(name, ".cloud.yaml")
-			i := strings.LastIndex(base, ".")
-			if i >= 0 && base[i+1:] == osName {
-				overridden[base[:i]] = true
-			}
-		}
-	}
-
-	var out []string
+	var out []Manifest
 	for _, e := range entries {
-		name := e.Name()
-		switch {
-		case backend == "cloudinit" && strings.HasSuffix(name, ".cloud.yaml"):
-			// "xfce.fedora.cloud.yaml" -> per-OS, offered only to fedora.
-			// "xfce.cloud.yaml"        -> shared, offered to CloudRecipes
-			// OSes that don't have their own override for "xfce".
-			base := strings.TrimSuffix(name, ".cloud.yaml")
-			if i := strings.LastIndex(base, "."); i >= 0 {
-				if base[i+1:] == osName {
-					out = append(out, name)
-				}
-			} else if g, ok := guest.Lookup(osName); ok && g.CloudRecipes && !overridden[base] {
-				out = append(out, name)
-			}
-		case backend != "cloudinit" && strings.HasSuffix(name, ".sh"):
-			// "xfce.alpine.sh" -> "alpine"
-			fields := strings.Split(strings.TrimSuffix(name, ".sh"), ".")
-			fileOS := fields[len(fields)-1]
-			if fileOS == osName {
-				out = append(out, name)
-			}
+		if !e.IsDir() {
+			continue
 		}
+		path := filepath.Join(dir(), e.Name(), "recipe.toml")
+		if _, err := os.Stat(path); err != nil {
+			continue // not a v2 recipe directory
+		}
+		m, err := ParseManifest(path)
+		if err != nil {
+			logx.L().Warn("skipping recipe with an invalid manifest", "dir", e.Name(), "err", err)
+			continue
+		}
+		out = append(out, m)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 

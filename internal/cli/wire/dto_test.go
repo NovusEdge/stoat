@@ -12,7 +12,7 @@ import (
 
 func TestVMGolden(t *testing.T) {
 	got := marshal(t, FromVM(sampleVM()))
-	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce.alpine.sh"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"vnc"}`
+	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"vnc"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -116,18 +116,18 @@ func TestHostCheckGolden(t *testing.T) {
 }
 
 func TestRecipeGolden(t *testing.T) {
-	r := core.Recipe{Name: "xfce.alpine.sh", Label: "xfce", TargetOS: "alpine", Shared: false}
+	r := core.Recipe{Name: "xfce", Description: "XFCE desktop environment"}
 	got := marshal(t, FromRecipe(r))
-	want := `{"name":"xfce.alpine.sh","label":"xfce","target_os":"alpine","shared":false}`
+	want := `{"name":"xfce","description":"XFCE desktop environment"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
 
 func TestRecipeIssueGolden(t *testing.T) {
-	i := core.RecipeIssue{Name: "xfce.cloud.yaml", Reason: "xfce.cloud.yaml is not offered to alpine/cloudinit"}
+	i := core.RecipeIssue{Name: "xfce", Reason: "xfce is not offered to alpine/cloudinit"}
 	got := marshal(t, FromRecipeIssue(i))
-	want := `{"name":"xfce.cloud.yaml","reason":"xfce.cloud.yaml is not offered to alpine/cloudinit"}`
+	want := `{"name":"xfce","reason":"xfce is not offered to alpine/cloudinit"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

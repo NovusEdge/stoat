@@ -1,13 +1,9 @@
 #!/bin/sh
-# stoat:name        xfce
-# stoat:description XFCE desktop with autologin startx on tty1
-# stoat:os          arch
-# stoat:requires    systemd
-# stoat:stages      install, configure, enable
-# Installs XFCE and starts it. Runs as root over ssh on a booted Arch VM.
+# Installs XFCE and starts it. Runs as root over ssh on a booted Ubuntu VM.
 set -e
 
-pacman -Syu --noconfirm xfce4 xfce4-terminal dbus xorg-xinit
+apt-get update
+apt-get install -y xfce4 xfce4-terminal dbus-x11 xinit xserver-xorg
 
 systemctl enable dbus
 systemctl start dbus || true
@@ -21,9 +17,10 @@ echo 'exec startxfce4' > /root/.xinitrc
 # more machinery than a disposable single-user VM needs.
 # ponytail: no DM. If you ever want multi-user or a login screen, that is when to add one.
 #
-# Arch's tty1 is managed by systemd's getty@.service, so autologin is a
+# Ubuntu's tty1 is managed by systemd's getty@.service, so autologin is a
 # drop-in override rather than an /etc/inittab edit (that's the alpine/
-# busybox mechanism, not systemd's).
+# busybox mechanism, not systemd's). agetty's --autologin does the same job
+# busybox getty's `-n -l LOGIN` trick does on Alpine.
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
 [Service]
@@ -45,7 +42,7 @@ fi
 EOF
 fi
 
-# Live vs disk: an ssh-reachable Arch VM is not always a normal disk
+# Live vs disk: an ssh-reachable Ubuntu VM is not always a normal disk
 # install: a live/installer session also mounts its root as tmpfs/overlay,
 # and everything written above (the getty override, /root/.profile, the
 # installed packages) lives only in that RAM-backed root and is gone on

@@ -10,17 +10,25 @@ import (
 )
 
 // Dir is where recipes live. Exported so the TUI and CLI can point a user at
-// it: authoring a recipe has always been "put a correctly named file here",
-// and the only real problem with that was that nobody could tell.
+// it: authoring a recipe has always been "put a correctly named directory here
+// with a recipe.toml", and the only real problem was that nobody could tell.
 func Dir() string { return dir() }
 
-// shellTemplate is the skeleton `stoat recipe new` writes. It carries the two
-// things every bundled shell recipe has and a first-timer would not think of:
-// the repository enable (docker, tailscale and most of what you would want
-// live in Alpine's community repo, which is off by default), and the
-// live-vs-disk honesty block that the test suite REQUIRES of every bundled
-// recipe: on a live VM the root is a tmpfs overlay, so anything installed is
-// gone on reboot, and a recipe that implies otherwise is lying.
+// manifestTemplate is the recipe.toml skeleton `stoat recipe new` writes.
+const manifestTemplate = `name = "%s"
+description = "TODO: describe what this recipe does"
+os = ["%s"]
+stage = "provision"
+script = "install.sh"
+`
+
+// shellTemplate is the install.sh skeleton. It carries the two things every
+// bundled shell recipe has and a first-timer would not think of: the
+// repository enable (docker, tailscale and most of what you would want live
+// in Alpine's community repo, which is off by default), and the live-vs-disk
+// honesty block that the test suite REQUIRES of every bundled recipe: on a
+// live VM the root is a tmpfs overlay, so anything installed is gone on
+// reboot, and a recipe that implies otherwise is lying.
 const shellTemplate = `#!/bin/sh
 # %s: runs as root over ssh on a booted %s VM.
 set -e
@@ -44,21 +52,6 @@ tmpfs | overlay)
 esac
 `
 
-// cloudTemplate is the cloud-init equivalent. Cloud images are always a real
-// disk install, so there is no live-vs-disk branch to be honest about.
-const cloudTemplate = `#cloud-config
-# %s: carried verbatim into the cloud-init seed's cloud-config-archive and
-# applied at first boot; cloud-init merges it in, so any key it understands
-# survives, not just packages:/runcmd:. Package names must be spelled the
-# same on every distro this is offered to (apt and pacman for the shared
-# fragment), or it needs to be a per-OS file: <name>.<os>.cloud.yaml.
-packages:
-  # TODO: packages, by their exact name on the target distro.
-
-runcmd:
-  # TODO: commands to run once, at first boot.
-`
-
 // osSetup is the package-manager preamble per OS, or "" where none is needed.
 func osSetup(osName string) (setup, install string) {
 	if os, ok := guest.Lookup(osName); ok {
@@ -67,73 +60,60 @@ func osSetup(osName string) (setup, install string) {
 	return "", "# install: "
 }
 
-// New writes a skeleton recipe and returns its path. It refuses to overwrite:
-// Install() already promises never to clobber a user's edits, and a scaffold
-// command that could destroy the recipe you have been working on would be a
-// worse failure than not existing.
-func New(name, osName, backend string) (string, error) {
+// New writes a skeleton recipe directory and returns its path. It refuses to
+// overwrite: Install() already promises never to clobber a user's edits, and
+// a scaffold command that could destroy the recipe you have been working on
+// would be a worse failure than not existing.
+func New(name, osName, _ string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("a recipe needs a name")
 	}
 	if strings.ContainsAny(name, "./ ") {
-		return "", fmt.Errorf("recipe name %q cannot contain dots, slashes or spaces, since those separate the name from its os and extension", name)
+		return "", fmt.Errorf("recipe name %q cannot contain dots, slashes or spaces", name)
+	}
+	if osName == "" {
+		return "", fmt.Errorf("a recipe needs an os to target")
 	}
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return "", err
 	}
 
-	var file, body string
-	if backend == "cloudinit" {
-		file = name + ".cloud.yaml"
-		g, ok := guest.Lookup(osName)
-		if osName != "" && (!ok || !g.CloudRecipes) {
-			// An OS the shared fragment cannot serve needs its own file, for
-			// the same reason Fedora has one: its package names differ.
-			file = name + "." + osName + ".cloud.yaml"
-		}
-		body = fmt.Sprintf(cloudTemplate, name)
-	} else {
-		if osName == "" {
-			return "", fmt.Errorf("a shell recipe needs an os (its filename is <name>.<os>.sh, and that is how the picker knows which VMs to offer it to)")
-		}
-		file = name + "." + osName + ".sh"
-		setup, install := osSetup(osName)
-		body = fmt.Sprintf(shellTemplate, name, osName, setup, install)
+	recipeDir := filepath.Join(dir(), name)
+	if _, err := os.Stat(recipeDir); err == nil {
+		return "", fmt.Errorf("%s already exists: edit it instead", recipeDir)
 	}
 
-	path := filepath.Join(dir(), file)
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists: edit it instead", path)
-	}
-
-	mode := os.FileMode(0o644)
-	if strings.HasSuffix(file, ".sh") {
-		mode = 0o755
-	}
-	if err := os.WriteFile(path, []byte(body), mode); err != nil {
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
 		return "", err
 	}
-	return path, nil
+
+	// Write recipe.toml
+	manifest := fmt.Sprintf(manifestTemplate, name, osName)
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		return "", err
+	}
+
+	// Write install.sh
+	setup, install := osSetup(osName)
+	script := fmt.Sprintf(shellTemplate, name, osName, setup, install)
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte(script), 0o755); err != nil {
+		return "", err
+	}
+
+	return recipeDir, nil
 }
 
-// Installed lists every recipe file in the data root, whether bundled or
-// written by the user. Unlike List it does not filter by os or backend: this
-// is "what is on disk", for a human looking for something to edit.
+// Installed lists every recipe in the data root, whether bundled or written
+// by the user. Unlike List it does not filter by os: this is "what is on
+// disk", for a human looking for something to edit.
 func Installed() ([]string, error) {
-	entries, err := os.ReadDir(dir())
+	manifests, err := ListManifests()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	var out []string
-	for _, e := range entries {
-		// Dotfiles are stoat's own bookkeeping (ManifestName), not
-		// something anyone wants offered as a recipe to edit.
-		if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			out = append(out, e.Name())
-		}
+	out := make([]string, len(manifests))
+	for i, m := range manifests {
+		out[i] = m.Name
 	}
 	return out, nil
 }

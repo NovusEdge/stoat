@@ -96,7 +96,7 @@ func TestUpdateLeavesUnmentionedFieldsAlone(t *testing.T) {
 	cliRoot(t)
 	v := &config.VM{
 		Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200,
-		Share: "/home/someone/src", Recipes: []string{"xfce.alpine.sh"},
+		Share: "/home/someone/src", Recipes: []string{"xfce"},
 	}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestUpdateLeavesUnmentionedFieldsAlone(t *testing.T) {
 	if got.Share != "/home/someone/src" {
 		t.Errorf("Share = %q, want it untouched", got.Share)
 	}
-	if !reflect.DeepEqual(got.Recipes, []string{"xfce.alpine.sh"}) {
+	if !reflect.DeepEqual(got.Recipes, []string{"xfce"}) {
 		t.Errorf("Recipes = %v, want them untouched", got.Recipes)
 	}
 	if got.CPUs != 1 {
