@@ -8,7 +8,7 @@ import (
 
 // lockName is the lock file in the data root. A dotfile so it never appears in
 // a VM listing: List and ListBroken enumerate DIRECTORIES under the root, and
-// this is a plain file, so neither sees it either way — but the dot makes that
+// this is a plain file, so neither sees it either way, but the dot makes that
 // obvious to anyone reading the directory.
 const lockName = ".lock"
 
@@ -18,7 +18,7 @@ const lockName = ".lock"
 // This exists because allocating a resource and committing it are two steps
 // with a gap in between, and everything stoat allocates is claimed by writing
 // it into a vm.toml LATER: FreePort reads every VM's port, picks one that is
-// free, and returns it — the caller writes it to disk some time after that.
+// free, and returns it; the caller writes it to disk some time after that.
 // Two callers interleaved in that gap both see the same free port and both
 // take it, producing two VMs that fight over one host socket, which surfaces
 // much later as a bare bind failure from qemu naming neither VM. The same
@@ -26,7 +26,7 @@ const lockName = ".lock"
 //
 // IT IS A FILE LOCK, NOT A MUTEX, and that is the whole point: stoat is a CLI.
 // The realistic collision is two `stoat create` invocations, or an MCP server
-// and a human's terminal, which are separate PROCESSES — an in-process mutex
+// and a human's terminal, which are separate PROCESSES: an in-process mutex
 // would serialise goroutines that were never the problem while doing nothing
 // at all about the case that is. flock is also released automatically by the
 // kernel when the holder exits, so a process killed mid-create cannot leave
@@ -38,7 +38,7 @@ const lockName = ".lock"
 // # THESE LOCKS DO NOT NEST
 //
 // flock associates a lock with an OPEN FILE DESCRIPTION, not with a process,
-// so taking the same lock twice from one process — via two separate opens —
+// so taking the same lock twice from one process (via two separate opens)
 // BLOCKS FOREVER against itself. It is not a reentrant mutex.
 //
 // This is not hypothetical: Clone holds Lock and then calls keys.Ensure, and
@@ -52,7 +52,7 @@ func Lock() (func(), error) { return lockFile(lockName) }
 
 // keysLockName is a SEPARATE lock file, so key generation can serialise
 // against other processes without deadlocking against a data-root lock its
-// caller may already hold — see the nesting note on Lock. The two protect
+// caller may already hold; see the nesting note on Lock. The two protect
 // different things: this one covers the shared keypair, Lock covers VM
 // allocation, and no operation needs both to be one atomic unit.
 const keysLockName = ".keys.lock"

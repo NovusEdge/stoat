@@ -128,7 +128,7 @@ func TestArgsCloud(t *testing.T) {
 
 // Every VM writes its guest console to a file, in every mode. When an
 // automated VM fails at 3am there is no window to look at and no operator
-// watching -- the log on disk is the whole postmortem.
+// watching, so the log on disk is the whole postmortem.
 func TestArgsAlwaysLogTheConsole(t *testing.T) {
 	for _, mode := range []string{"live", "disk", "cloud"} {
 		v := &config.VM{Name: "vm", Dir: t.TempDir(), Mode: mode, RAM: 1024, CPUs: 2, SSHPort: 2222}
@@ -141,7 +141,7 @@ func TestArgsAlwaysLogTheConsole(t *testing.T) {
 
 // -serial file:<path> TRUNCATES on every QEMU start (verified against real
 // QEMU: a pre-filled console.log became 0 bytes on next launch). The
-// realistic failure sequence is exactly the one this log exists for -- a
+// realistic failure sequence is exactly the one this log exists for: a
 // headless VM fails to come up, the user restarts it, and the only evidence
 // is destroyed before anyone reads it. -chardev file,...,append=on is the
 // fix; plain "-serial file:" must never come back.
@@ -164,7 +164,7 @@ func TestConsoleLogAppendsRatherThanTruncates(t *testing.T) {
 // live and cloud are automated end to end: sshd comes up with the user's key
 // already installed, and nobody ever needs to touch the console. The window
 // only steals focus. An installed disk VM is the same. But an UNINSTALLED
-// disk VM is a human running a VGA-first OS installer -- take its window away
+// disk VM is a human running a VGA-first OS installer, so take its window away
 // and the mode becomes unusable.
 func TestOnlyManualInstallsGetAWindow(t *testing.T) {
 	for _, tc := range []struct {
@@ -240,7 +240,7 @@ func TestArgsPortForwards(t *testing.T) {
 
 // TestArgsNoForwardsUnchanged pins that a VM with no declared forwards
 // produces exactly the SSH-only hostfwd this codebase had before this
-// field existed -- a VM with Forwards == nil must not regress.
+// field existed: a VM with Forwards == nil must not regress.
 func TestArgsNoForwardsUnchanged(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{

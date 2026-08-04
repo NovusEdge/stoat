@@ -48,7 +48,7 @@ func TestInstallCopiesBundledRecipesAndPreservesEdits(t *testing.T) {
 
 // A recipe stoat wrote and nobody touched must be refreshed when the bundled
 // copy changes. This is the whole point of the manifest: before it, a shipped
-// fix never reached anyone who already had the broken version — the
+// fix never reached anyone who already had the broken version: the
 // xfce.cloud.yaml that produced a black screen kept being served long after
 // the bundled copy was fixed.
 func TestInstallRefreshesItsOwnStaleCopy(t *testing.T) {
@@ -85,7 +85,7 @@ func TestInstallRefreshesItsOwnStaleCopy(t *testing.T) {
 		t.Error("Install left its own stale copy in place; a shipped recipe fix will never reach a user who already has the old one")
 	}
 	if _, err := os.Stat(Path("xfce.cloud.yaml.bak")); err == nil {
-		t.Error("Install kept a .bak of a file it knew was its own — the backup is only for the one-time pre-manifest adoption")
+		t.Error("Install kept a .bak of a file it knew was its own; the backup is only for the one-time pre-manifest adoption")
 	}
 }
 
@@ -184,7 +184,7 @@ func TestBookkeepingFilesAreNotRecipes(t *testing.T) {
 
 func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 	// go:embed must pick up exactly the per-OS shell recipes plus the cloud
-	// fragments — no strays (recipes.go/recipes_test.go must NOT be swept up
+	// fragments, with no strays (recipes.go/recipes_test.go must NOT be swept up
 	// by a loose embed pattern).
 	entries, err := bundled.ReadDir(".")
 	if err != nil {
@@ -265,7 +265,7 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 
 	// alpine is CloudRecipes-eligible for the shared set (devtools.cloud.yaml
 	// installs fine on apk) and has its own xfce fragment (xfce.cloud.yaml's
-	// systemctl runcmd does not work under Alpine's OpenRC) — same pattern
+	// systemctl runcmd does not work under Alpine's OpenRC), same pattern
 	// as Fedora's xfce override, so it must get exactly these two entries,
 	// never the shared xfce.cloud.yaml.
 	alpineNames, err := List("alpine", "cloudinit")
@@ -279,11 +279,11 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, want it to contain xfce.alpine.cloud.yaml", alpineNames)
 	}
 	if contains(alpineNames, "xfce.cloud.yaml") {
-		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, must NOT contain xfce.cloud.yaml — its systemctl runcmd does not run under Alpine's OpenRC", alpineNames)
+		t.Errorf("List(\"alpine\", \"cloudinit\") = %v, must NOT contain xfce.cloud.yaml, since its systemctl runcmd does not run under Alpine's OpenRC", alpineNames)
 	}
 	// fedora is served by a per-OS fragment rather than the shared one: it
 	// has no package literally named "xfce4", so it needs the comps group
-	// @xfce-desktop. It must get exactly ONE xfce entry — the
+	// @xfce-desktop. It must get exactly ONE xfce entry: the
 	// Fedora fragment, never the shared file, which would fail on dnf.
 	names, err := List("fedora", "cloudinit")
 	if err != nil {
@@ -318,7 +318,7 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 
 func TestShellRecipesConfigureReposBeforeInstalling(t *testing.T) {
 	// Each recipe runs after boot over ssh, so it may install from the
-	// network — but it must set up/refresh repositories first. Assert
+	// network, but it must set up/refresh repositories first. Assert
 	// through the real path (Install then Read) so this proves what stoat
 	// actually installs for a user, not just what's in the source tree.
 	t.Setenv("STOAT_HOME", t.TempDir())
@@ -335,7 +335,7 @@ func TestShellRecipesConfigureReposBeforeInstalling(t *testing.T) {
 		{"xfce.ubuntu.sh", "apt-get update", "apt-get install"},
 		// arch uses a single pacman -Syu (avoids the partial-upgrade hazard
 		// of a separate -Sy + -S), so repo refresh and install are the same
-		// command — repoIdx == installIdx is expected and fine here.
+		// command, so repoIdx == installIdx is expected and fine here.
 		{"xfce.arch.sh", "pacman -Syu", "pacman -Syu"},
 	}
 	for _, c := range cases {
@@ -455,7 +455,7 @@ func TestShellRecipesAreHonestAboutLiveVsDiskPersistence(t *testing.T) {
 // because string-matching is what let a real bug ship: a collapsed comment
 // swallowed the `packages:` key in both fragments, leaving them invalid YAML
 // with no packages at all, and `strings.Contains(s, "packages:")` still passed
-// — it matched the word inside the comment. Every cloud VM's xfce recipe
+// because it matched the word inside the comment. Every cloud VM's xfce recipe
 // installed nothing for a full release.
 func TestCloudFragmentsParse(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
@@ -477,7 +477,7 @@ func TestCloudFragmentsParse(t *testing.T) {
 		}
 		pkgs, _ := doc["packages"].([]any)
 		if len(pkgs) == 0 {
-			t.Errorf("%s has no packages: list — the fragment installs nothing", name)
+			t.Errorf("%s has no packages: list; the fragment installs nothing", name)
 		}
 		// mergeCloudRecipes is gone: fragments are handed to cloud-init
 		// verbatim inside a cloud-config-archive, so a top-level key besides
@@ -504,13 +504,13 @@ func TestCloudFragmentsParse(t *testing.T) {
 // TestAlpineCloudFragmentUsesOpenRCNotSystemd asserts xfce.alpine.cloud.yaml
 // against the two things that made xfce.cloud.yaml (systemd) unsafe to just
 // reuse for Alpine: it must not shell out to systemctl (Alpine is OpenRC,
-// there is no such binary), and — because cloud-init's packages: module
+// there is no such binary), and, because cloud-init's packages: module
 // installs before runcmd runs, and a stock Alpine cloud image ships with the
-// community repo (where every desktop package here lives) commented out —
+// community repo (where every desktop package here lives) commented out,
 // it must not rely on a packages: list at all; everything has to happen
 // through runcmd instead. It also pins the dbus-before-lightdm ordering a
 // real boot test caught missing on the first version of this fragment (see
-// the dbus-openrc checks below) — that failure produced cloud-init exit
+// the dbus-openrc checks below): that failure produced cloud-init exit
 // status "error" with no desktop and no diagnosis beyond a log file, exactly
 // the class of silent failure this whole file exists to catch before a boot
 // test has to.
@@ -535,11 +535,11 @@ func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 	// cloud-config-archive, so a key besides packages/runcmd would survive
 	// rather than being silently dropped. Nothing here restricts the keys.
 	if _, ok := doc["packages"]; ok {
-		t.Error("xfce.alpine.cloud.yaml declares packages:, but cloud-init installs packages: before runcmd runs — too early to have enabled the community repo the desktop packages live in")
+		t.Error("xfce.alpine.cloud.yaml declares packages:, but cloud-init installs packages: before runcmd runs, too early to have enabled the community repo the desktop packages live in")
 	}
 	runcmd, _ := doc["runcmd"].([]any)
 	if len(runcmd) == 0 {
-		t.Fatal("xfce.alpine.cloud.yaml has no runcmd: — the fragment does nothing")
+		t.Fatal("xfce.alpine.cloud.yaml has no runcmd: the fragment does nothing")
 	}
 
 	// Checked against the parsed runcmd items, not the raw file text, so an
@@ -577,19 +577,19 @@ func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 	// to start with "dbus would not start". Pinned here so a future edit
 	// can't silently drop the fix without a second boot-test round trip.
 	if !haveDbusOpenrc {
-		t.Error("xfce.alpine.cloud.yaml does not install dbus-openrc — lightdm's `need dbus` has no OpenRC service to resolve to, and it will refuse to start")
+		t.Error("xfce.alpine.cloud.yaml does not install dbus-openrc, so lightdm's `need dbus` has no OpenRC service to resolve to, and it will refuse to start")
 	}
 	if dbusStartIdx == -1 {
-		t.Error("xfce.alpine.cloud.yaml never starts dbus — lightdm depends on it")
+		t.Error("xfce.alpine.cloud.yaml never starts dbus; lightdm depends on it")
 	}
 	if lightdmStartIdx == -1 {
 		t.Error("xfce.alpine.cloud.yaml never starts lightdm")
 	}
 	if dbusStartIdx != -1 && lightdmStartIdx != -1 && dbusStartIdx > lightdmStartIdx {
-		t.Error("xfce.alpine.cloud.yaml starts lightdm before dbus — lightdm needs a running dbus to start")
+		t.Error("xfce.alpine.cloud.yaml starts lightdm before dbus, but lightdm needs a running dbus to start")
 	}
 	if !haveXorgBase {
-		t.Error("xfce.alpine.cloud.yaml does not install an X server (expected via setup-xorg-base) — a desktop with no X server is the black-screen failure this fragment must avoid")
+		t.Error("xfce.alpine.cloud.yaml does not install an X server (expected via setup-xorg-base): a desktop with no X server is the black-screen failure this fragment must avoid")
 	}
 }
 
@@ -597,7 +597,7 @@ func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 // than string-matching it. A substring check like
 // strings.Contains(s, "packages:") would still pass even if a collapsed
 // comment swallowed the packages: key and orphaned the list items at the
-// top level — that shape is invalid YAML, and mergeCloudRecipes
+// top level: that shape is invalid YAML, and mergeCloudRecipes
 // (internal/cloudinit) would silently find no packages block, so the
 // fragment would install nothing with no error anywhere. Parsing catches
 // what string-matching can't.
@@ -621,7 +621,7 @@ func TestDevtoolsCloudFragment(t *testing.T) {
 
 	pkgs, _ := doc["packages"].([]any)
 	if len(pkgs) == 0 {
-		t.Fatal("devtools.cloud.yaml has no packages: list — the fragment installs nothing")
+		t.Fatal("devtools.cloud.yaml has no packages: list; the fragment installs nothing")
 	}
 
 	// mergeCloudRecipes is gone: fragments now ride verbatim in a
@@ -678,7 +678,7 @@ func TestListOffersDebianXfceOverSSH(t *testing.T) {
 // at all. With no DRM there is no /dev/dri, logind's seat0 has no graphics
 // device, and lightdm waits forever for a seat that can never display.
 //
-// The shared fragment fails SILENTLY there — verified on a real boot:
+// The shared fragment fails SILENTLY there, verified on a real boot:
 // cloud-init reports done with errors: [], 18 xfce4 packages install,
 // xserver-xorg is present, lightdm reports active, and /tmp/.X11-unix is
 // empty with no Xorg process. Offering both fragments, or the shared one
@@ -701,7 +701,7 @@ func TestDebianGetsItsOwnCloudXfceFragment(t *testing.T) {
 }
 
 // The debian fragment is worthless if it does not install the full kernel and
-// get rid of the cloud one — installing linux-image-amd64 alongside it is not
+// get rid of the cloud one: installing linux-image-amd64 alongside it is not
 // enough, because GRUB_DEFAULT=0 still boots the cloud flavour (observed: the
 // VM came back up on the cloud kernel with both installed).
 func TestDebianCloudFragmentReplacesTheCloudKernel(t *testing.T) {
@@ -713,7 +713,7 @@ func TestDebianCloudFragmentReplacesTheCloudKernel(t *testing.T) {
 		"linux-image-amd64", // the full flavour, with DRM
 		// BOTH names: linux-image-cloud-amd64 is only a META-package, and
 		// purging it alone frees 13.3 kB while leaving the real versioned
-		// kernel installed — which is how the first version of this fragment
+		// kernel installed, which is how the first version of this fragment
 		// failed, with update-grub still finding two kernels and entry 0 still
 		// the cloud one.
 		`purge -y linux-image-cloud-amd64 "linux-image-$(uname -r)"`,

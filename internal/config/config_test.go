@@ -277,7 +277,7 @@ func TestFreePortFreshInstallNoVMs(t *testing.T) {
 	}
 	// FreePort probes the host by binding, so a VM (or anything else) already
 	// listening on 2200 legitimately pushes the answer up. Asserting exactly
-	// 2200 made this test fail whenever the developer had a VM running —
+	// 2200 made this test fail whenever the developer had a VM running,
 	// which says nothing about FreePort and everything about the machine.
 	// What actually matters is that a fresh install gets a usable port in
 	// range, and that the port it names is genuinely bindable.

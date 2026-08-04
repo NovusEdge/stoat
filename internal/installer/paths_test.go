@@ -96,7 +96,7 @@ func TestAppendRCIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if added {
-		t.Error("second append reported added=true — the line would be duplicated")
+		t.Error("second append reported added=true: the line would be duplicated")
 	}
 
 	got, err := os.ReadFile(rc)
@@ -111,7 +111,7 @@ func TestAppendRCIsIdempotent(t *testing.T) {
 	}
 }
 
-// A missing rc file is normal -- a fresh account may have no .zshrc at all.
+// A missing rc file is normal: a fresh account may have no .zshrc at all.
 func TestAppendRCCreatesMissingFile(t *testing.T) {
 	rc := filepath.Join(t.TempDir(), "nested", ".zshrc")
 	line := `export PATH="/home/x/.local/bin:$PATH"`
@@ -162,7 +162,7 @@ func TestAppendRCHandlesMissingTrailingNewline(t *testing.T) {
 }
 
 // unquotePosixRun reverses a posix "word" made only of adjacent single-quoted
-// runs and backslash-escaped single characters outside of quotes -- exactly
+// runs and backslash-escaped single characters outside of quotes: exactly
 // the two constructs shellQuote ever produces, whether called once on the
 // whole dir or once per chunk. It is written from posix quoting rules
 // directly, not derived from shellQuote, so it is an independent check of
@@ -190,8 +190,8 @@ func unquotePosixRun(s string) (value, rest string) {
 	return b.String(), s
 }
 
-// unquoteFishRun reverses a fish word made of adjacent single-quoted runs --
-// what fishQuote produces per chunk -- unescaping fish's own `\\` and `\'`
+// unquoteFishRun reverses a fish word made of adjacent single-quoted runs,
+// what fishQuote produces per chunk, unescaping fish's own `\\` and `\'`
 // within each run. Independent of fishQuote for the same reason
 // unquotePosixRun is independent of shellQuote.
 func unquoteFishRun(s string) (value, rest string) {
@@ -256,7 +256,7 @@ func pasteValue(t *testing.T, shell string, wrapped []string) string {
 
 // However WrapRCLine chooses to break a line, pasting the result into a real
 // shell must always assign the exact same PATH value ShellRC's unbroken line
-// would have -- and whenever it actually did break the line (more than one
+// would have, and whenever it actually did break the line (more than one
 // physical line came back), every one of those lines must fit the width it
 // was asked for, or the whole point of wrapping (avoiding Bubble Tea's
 // per-line clip) is defeated.
@@ -298,7 +298,7 @@ func TestWrapRCLineReassembles(t *testing.T) {
 
 // A width too narrow to fit even a single quoted byte has no safe break:
 // WrapRCLine must hand back the line unbroken rather than corrupt it. A
-// terminal's own soft-wrap of that unbroken line is fine -- unlike Bubble
+// terminal's own soft-wrap of that unbroken line is fine: unlike Bubble
 // Tea's clip, it never inserts a real newline into what gets pasted.
 func TestWrapRCLineFallsBackWhenNoSafeBreakFits(t *testing.T) {
 	_, want := ShellRC("/usr/bin/zsh", "/home/x", "/home/x/.local/bin")

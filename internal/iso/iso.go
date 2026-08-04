@@ -58,7 +58,7 @@ type Release struct {
 	// Verified reports whether Download actually checked the downloaded
 	// bytes against a published digest. It starts false and Download sets
 	// it true only after a byte-for-byte digest match (including the
-	// existing-file reuse shortcut) — never on the strength of a
+	// existing-file reuse shortcut), never on the strength of a
 	// ChecksumURL merely being configured. When SHA256 is empty (no
 	// checksum was available at Resolve time), Download fetches the file
 	// anyway but Verified stays false, so callers can tell an unverified
@@ -76,11 +76,11 @@ type Entry struct {
 	URL     string
 	// Flavor selects which line of Alpine's latest-releases.yaml this
 	// entry resolves to (e.g. "alpine-standard", "alpine-virt"). It is
-	// only meaningful when OS == "alpine" — every other entry is a direct
+	// only meaningful when OS == "alpine"; every other entry is a direct
 	// URL and Resolve never looks at it.
 	Flavor string
 	// Variant is what distinguishes this entry from the others sharing its
-	// OS — a version ("24.04 LTS"), a release ("13 (trixie)") or a build
+	// OS: a version ("24.04 LTS"), a release ("13 (trixie)") or a build
 	// ("standard" vs "virt"). It exists because the catalog stopped having
 	// exactly one entry per OS: alpine has two that differ only in build,
 	// and a picker grouping by OS has to label the second level with
@@ -96,7 +96,7 @@ type Entry struct {
 	// opens would cost four round trips and break the picker offline.
 	//
 	// It is therefore approximate and drifts as images are rebuilt in place.
-	// Nothing may allocate, verify or preallocate against it — the real size
+	// Nothing may allocate, verify or preallocate against it: the real size
 	// comes from Content-Length at download time, and the real check is the
 	// checksum. It exists so the picker can say why alpine-virt is worth
 	// choosing over alpine-standard, which is 5x its size.
@@ -120,7 +120,7 @@ type OSGroup struct {
 
 // ByOS groups the catalog for a two-level picker: choose an OS, then a
 // variant within it. Both levels keep the catalog's own hand-written order
-// rather than sorting — the catalog is ordered deliberately (the most
+// rather than sorting, because the catalog is ordered deliberately (the most
 // generally useful image first), and sorting would replace that judgement
 // with alphabetical noise.
 //
@@ -146,7 +146,7 @@ func ByOS() []OSGroup {
 // network access.
 //
 // ChecksumURL points at a *published sums file* to be parsed at download
-// time (never a frozen hash — cloud images roll forward in place). Where a
+// time (never a frozen hash, since cloud images roll forward in place). Where a
 // distro has no stable, algorithm-matching sums URL to point at, ChecksumURL
 // is left empty and that is called out below; Download() then fetches
 // without verification rather than silently failing on a guessed URL.
@@ -203,7 +203,7 @@ func Catalog() []Entry {
 			// the GNU split) so this verifies too; the PGP armor lines
 			// around it are simply lines that don't match either format
 			// and are skipped. The compose suffix (here "1.7") is baked
-			// into both this URL and ChecksumURL and changes per respin —
+			// into both this URL and ChecksumURL and changes per respin;
 			// re-verify both together on the next bump.
 			ChecksumURL: "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-44-1.7-x86_64-CHECKSUM",
 			SSHUser:     "stoat",
@@ -234,7 +234,7 @@ func Catalog() []Entry {
 			// Alpine's checksum isn't a separate sums file: each release
 			// in latest-releases.yaml embeds its own sha256 inline, and
 			// Resolve() reads it via Latest(). ChecksumURL is left empty
-			// deliberately — it is not "unverified", verification just
+			// deliberately: it is not "unverified", verification just
 			// happens through the index instead.
 			ChecksumURL: "",
 			SSHUser:     "root",
@@ -249,7 +249,7 @@ func Catalog() []Entry {
 			Variant: "virt",
 			Size:    66 * mib,
 			// Same index, different flavor line (see alpine-standard
-			// above) — virt is built for VM guests specifically: virtio
+			// above); virt is built for VM guests specifically: virtio
 			// drivers only, no baremetal hardware support, meaningfully
 			// smaller. That's a better default for a tool whose only
 			// target is QEMU, so it's offered alongside standard rather
@@ -296,7 +296,7 @@ func Catalog() []Entry {
 			// verification rather than failing on a guessed URL.
 			ChecksumURL: "",
 			SSHUser:     "stoat",
-			Notes:       "Alpine 3.24 cloud image — persistent, no manual install",
+			Notes:       "Alpine 3.24 cloud image, persistent, no manual install",
 		},
 	}
 }
@@ -337,13 +337,13 @@ func Infer(filename string) (backend, os string) {
 	}
 }
 
-// client fetches small metadata — release indexes and checksum files — where
+// client fetches small metadata (release indexes and checksum files), where
 // a ceiling on the whole request is exactly right.
 var client = &http.Client{Timeout: 30 * time.Second}
 
 // downloadClient fetches images. http.Client.Timeout bounds the ENTIRE
 // request including reading the body, so the 30s that suits a checksum file
-// kills any image download that takes longer than 30 seconds — which is all
+// kills any image download that takes longer than 30 seconds, which is all
 // of them ("context deadline exceeded ... while reading body"). Bound only
 // the phases that can hang without producing bytes, and let a healthy
 // transfer run as long as it needs to.
@@ -369,7 +369,7 @@ var downloadMirror = mirror
 
 // Latest reads Alpine's published index so "latest" is never hardcoded, and
 // returns the release matching flavor (e.g. "alpine-standard",
-// "alpine-virt") — the index lists several flavors per release under the
+// "alpine-virt"): the index lists several flavors per release under the
 // same file.
 func Latest(flavor string) (*Release, error) {
 	resp, err := client.Get(indexURL)
@@ -432,7 +432,7 @@ func Resolve(e Entry) (*Release, error) {
 // mirrors: GNU coreutils ("<hex>  <filename>" or "<hex> *<filename>", as
 // used by SHA256SUMS/SHA512SUMS/.SHA256) and BSD-style ("SHA256 (filename)
 // = <hex>", as used by Fedora's CHECKSUM, which also arrives wrapped in a
-// clearsigned PGP block — the armor lines simply match neither format and
+// clearsigned PGP block, whose armor lines simply match neither format and
 // are skipped). The digest's own hex length (64 vs 128) tells Download which
 // algorithm to verify with; fetchChecksum does not need to know it.
 func fetchChecksum(checksumURL, filename string) (string, error) {
@@ -508,14 +508,14 @@ func fileDigest(path string, h hash.Hash) (string, error) {
 }
 
 // Download fetches r into isos/ and, when r.SHA256 is known, verifies it
-// (sha256 or sha512, picked by digest length — see newDigest), returning the
+// (sha256 or sha512, picked by digest length; see newDigest), returning the
 // path relative to the data root. An existing file with a matching digest is
 // reused. The partial download is renamed only after the digest matches (or,
 // for an entry with no published checksum, unconditionally on a full read),
 // so an interrupted fetch never leaves a plausible-looking image behind.
 //
 // r.Verified is set true only when Download itself confirmed the bytes
-// against a digest (fresh download or reused file) — never merely because a
+// against a digest (fresh download or reused file), never merely because a
 // checksum was configured. It stays false whenever r.SHA256 is empty, so a
 // caller can tell an unverified download apart from a verified one instead
 // of the two being indistinguishable.
@@ -576,8 +576,8 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 	// A UNIQUE .part per download, not the shared final+".part".
 	//
 	// os.Create truncates in place and grants no exclusivity, so two downloads
-	// of the same image — trivially reachable by cancelling and retrying,
-	// since a cancelled download's goroutine outlives the call — opened the
+	// of the same image (trivially reachable by cancelling and retrying,
+	// since a cancelled download's goroutine outlives the call) opened the
 	// SAME inode and wrote to it at independent offsets, interleaving into a
 	// corrupt file.
 	//
@@ -632,7 +632,7 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 	}
 	// Checked, not deferred: a Close error here would mean bytes never
 	// reached disk, and the digest is computed from the read stream in
-	// memory — so a short file would pass verification and get renamed into
+	// memory, so a short file would pass verification and get renamed into
 	// place as a "verified" image.
 	if err := f.Close(); err != nil {
 		os.Remove(part)

@@ -61,7 +61,7 @@ func ShellRC(shell, home, dir string) (rcPath, line string) {
 // relative dir would silently make PATH depend on whatever directory the
 // shell happens to be in. For the POSIX branch, the single-quoted segment
 // and the double-quoted ":$PATH" that follows it concatenate into one string
-// -- adjacent quoted strings do that in every POSIX shell -- so $PATH still
+// (adjacent quoted strings do that in every POSIX shell), so $PATH still
 // expands while dir does not.
 func rcLineParts(shell string) (prefix string, quote func(string) string, suffix string) {
 	if filepath.Base(shell) == "fish" {
@@ -91,31 +91,31 @@ func fishQuote(s string) string {
 // WrapRCLine breaks the rc line for shell/dir into physical lines no wider
 // than width, so a renderer that clips each physical line to a terminal
 // width (as Bubble Tea does) never truncates it. Pasting the result into a
-// live shell reproduces the same PATH value the unbroken line would have --
+// live shell reproduces the same PATH value the unbroken line would have,
 // not the identical bytes. A chunk boundary that lands inside what was one
 // quoted run becomes two back-to-back quoted runs instead of one longer
 // one, which a shell evaluates as the same concatenated word but is not
-// the same text; the value pasting it assigns is exactly dir regardless --
-// see paths_test.go's TestWrapRCLineReassembles.
+// the same text; the value pasting it assigns is exactly dir regardless.
+// See paths_test.go's TestWrapRCLineReassembles.
 //
 // The break itself only ever falls between two independently re-quoted
 // chunks of dir: quote(s1) followed by quote(s2), concatenated with nothing
 // between them, evaluates to the same word as quote(s1+s2) for both
 // shellQuote and fishQuote, because both escape one input byte ("'" or "\")
-// at a time -- splitting the input never splits an escape sequence, so
+// at a time, so splitting the input never splits an escape sequence, and
 // chunking dir and quoting the chunks separately can never change what the
 // shell assigns. Each line but the last ends with a bare "\" immediately
 // before the newline: that is a shell line-continuation outside of quotes
 // in every shell ShellRC targets (posix sh/bash/zsh and fish alike), so
 // pasting the wrapped output into a live shell reassembles the identical
-// command before it runs -- unlike a bare newline, which posix shells would
+// command before it runs, unlike a bare newline, which posix shells would
 // read as ending the statement, and unlike a newline *inside* the quotes,
 // which would paste a literal newline into PATH.
 //
 // If width is too narrow to fit even one byte of a quoted chunk (plus its
 // trailing "\" or the line's fixed prefix/suffix), no safe break exists and
 // the whole unbroken line is returned; the caller's terminal soft-wrapping
-// it is fine -- unlike Bubble Tea's clip, a terminal's own wrap never
+// it is fine, unlike Bubble Tea's clip: a terminal's own wrap never
 // inserts a real newline into what gets copied.
 func WrapRCLine(shell, dir string, width int) []string {
 	prefix, quote, suffix := rcLineParts(shell)
@@ -125,8 +125,8 @@ func WrapRCLine(shell, dir string, width int) []string {
 	}
 
 	// Every non-final line reserves as much room as the *wider* of its two
-	// possible trailing markers -- the continuation "\" or the real
-	// suffix -- not just the "\" it actually ends up using. Without that, a
+	// possible trailing markers (the continuation "\" or the real
+	// suffix), not just the "\" it actually ends up using. Without that, a
 	// greedy chunk sized only for "\" can swallow the entire remainder of
 	// dir (since posix's suffix, `:"$PATH"`, is wider than one backslash)
 	// while still failing the final-line check below, which reserves room
@@ -152,7 +152,7 @@ func WrapRCLine(shell, dir string, width int) []string {
 		budget := width - len(head) - reserve
 		n := largestQuotableChunk(rest, quote, budget)
 		if n == 0 {
-			// Not even one byte of dir fits on this line at this width --
+			// Not even one byte of dir fits on this line at this width:
 			// no safe break exists here. Bail out to the unbroken line.
 			return []string{full}
 		}

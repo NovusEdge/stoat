@@ -6,7 +6,7 @@ import "github.com/novusedge/stoat/internal/hostcheck"
 // They now live in internal/hostcheck, a package with no dependency on the
 // rest of stoat, so that internal/core (the headless layer an MCP server
 // sits on) can reuse the same host-dependency probes without pulling this
-// package's Bubbletea TUI (tui.go) into a process that must stay headless —
+// package's Bubbletea TUI (tui.go) into a process that must stay headless;
 // see internal/core/doctor.go's doc comment for the full reasoning.
 //
 // This file exists only so tui.go, build.go and cmd/installer/main_linux.go

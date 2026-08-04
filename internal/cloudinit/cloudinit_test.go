@@ -54,7 +54,7 @@ func unpackArchive(t *testing.T, ud string) []archiveDoc {
 const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
 
 func TestSeedWritesUserDataAndMetaData(t *testing.T) {
-	// Seed() hard-errors without xorriso, on purpose — a silent fallback used
+	// Seed() hard-errors without xorriso, on purpose: a silent fallback used
 	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
 	// start. That contract has its own test below; this one is about the
 	// seed's CONTENTS, so it skips rather than turning CI permanently red on
@@ -154,8 +154,8 @@ func TestHaveCloudInit(t *testing.T) {
 
 // TestValidateFragmentDegradesWithoutCloudInit is the guest-subsystem.md §10
 // requirement stated directly: cloud-init schema may be absent (Arch does
-// not install it by default), and that must show up as "not checked" --
-// annotated == "" and err == nil -- never as "assumed valid" (which would
+// not install it by default), and that must show up as "not checked":
+// annotated == "" and err == nil, never as "assumed valid" (which would
 // need a non-nil, affirmatively-passing result) and never as a hard error
 // that would block recipe selection just because the host lacks the tool.
 func TestValidateFragmentDegradesWithoutCloudInit(t *testing.T) {
@@ -172,11 +172,11 @@ func TestValidateFragmentDegradesWithoutCloudInit(t *testing.T) {
 // TestSeedNoRecipesByteIdentical guards the hardware-proven baseline: a VM
 // with no cloud recipes must get exactly the same users:/ssh_pwauth: body
 // that was hand-verified against a real Ubuntu 24.04 boot (see
-// .cloudinit-test/seed/user-data), with nothing appended -- now carried
+// .cloudinit-test/seed/user-data), with nothing appended, now carried
 // as the sole document's content inside the cloud-config-archive, plus the
 // merge_how directive every document gets (see withMergeHow).
 func TestSeedNoRecipesByteIdentical(t *testing.T) {
-	// Seed() hard-errors without xorriso, on purpose — a silent fallback used
+	// Seed() hard-errors without xorriso, on purpose: a silent fallback used
 	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
 	// start. That contract has its own test below; this one is about the
 	// seed's CONTENTS, so it skips rather than turning CI permanently red on
@@ -217,7 +217,7 @@ func TestSeedNoRecipesByteIdentical(t *testing.T) {
 // and whose second document is the recipe's fragment, byte-for-byte, plus
 // its own directive.
 func TestSeedMergesCloudRecipe(t *testing.T) {
-	// Seed() hard-errors without xorriso, on purpose — a silent fallback used
+	// Seed() hard-errors without xorriso, on purpose: a silent fallback used
 	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
 	// start. That contract has its own test below; this one is about the
 	// seed's CONTENTS, so it skips rather than turning CI permanently red on
@@ -267,7 +267,7 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 
 // TestSeedArchiveHeaderIsFirstLine pins the exact requirement NoCloud checks
 // to recognise a cloud-config-archive: "#cloud-config-archive" must be the
-// very first line of the file, verbatim (see nocloud format-detection --
+// very first line of the file, verbatim (see nocloud format-detection:
 // the same shape as the "#cloud-config" match this package already relied
 // on for the pre-archive format).
 func TestSeedArchiveHeaderIsFirstLine(t *testing.T) {
@@ -286,8 +286,8 @@ func TestSeedArchiveHeaderIsFirstLine(t *testing.T) {
 // distinct documents, each carrying the explicit merge_how directive that
 // makes cloud-init append rather than let the second one silently lose to
 // cloud-init's default no_replace=True (the "first wins" bug this change
-// fixes -- see guest-subsystem.md §6). This package no longer parses
-// packages: out of fragments at all -- proving survival here means proving
+// fixes, see guest-subsystem.md §6). This package no longer parses
+// packages: out of fragments at all: proving survival here means proving
 // the fragment bodies are carried through unparsed AND each is tagged with
 // the directive that makes cloud-init's own merge keep both, rather than
 // asserting anything about what cloud-init would do (that needs a real
@@ -315,7 +315,7 @@ func TestArchiveBothPackagesFragmentsSurvive(t *testing.T) {
 		}
 	}
 
-	// Every document except conceivably the last carries merge_how -- and
+	// Every document except conceivably the last carries merge_how, and
 	// since this package can't know which fragment a caller passes last,
 	// every one of them does (see withMergeHow). Pin that directly: this is
 	// what turns "first wins" into "both survive" on a real boot.
@@ -385,7 +385,7 @@ func TestSeedErrorsWithoutXorriso(t *testing.T) {
 // TestSeedUserMatchesUser pins the exported User constant to the account the
 // template actually creates. They are two literals that must agree: the TUI
 // records User on the VM as its SSH user, and sshx defaults an empty one to
-// root — which cloud images lock. If they drift, every cloud VM connects as
+// root, which cloud images lock. If they drift, every cloud VM connects as
 // an account that does not exist, and nothing else in the suite would notice.
 func TestSeedUserMatchesUser(t *testing.T) {
 	if !strings.Contains(userDataTemplate, "- name: "+User) {
@@ -394,7 +394,7 @@ func TestSeedUserMatchesUser(t *testing.T) {
 }
 
 // Alpine ships no bash. cloud-init's user module FAILS on a nonexistent
-// shell, so the account is never created and the key never lands -- the
+// shell, so the account is never created and the key never lands: the
 // symptom is "Permission denied (publickey)" forever, not a fallback shell.
 // Boot-tested against generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2:
 // /bin/bash refused every connection, /bin/ash connected first try.
@@ -449,7 +449,7 @@ func TestSeedInstallsSudoWhereItIsMissing(t *testing.T) {
 	}
 }
 
-// Recipe fragments must still merge after the base block, whatever the OS --
+// Recipe fragments must still merge after the base block, whatever the OS:
 // this is the existing contract and the reason the cloud-config-archive
 // exists (see buildArchive).
 func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
@@ -464,7 +464,7 @@ func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
 }
 
 // Alpine's own extra-packages fragment (sudo) and a recipe's fragment
-// (git, tmux) both declare packages: -- they now live in separate archive
+// (git, tmux) both declare packages: they now live in separate archive
 // documents rather than being spliced into one packages: list by hand, and
 // each carries merge_how so cloud-init appends rather than lets the later
 // one win. This is the same regression TestArchiveBothPackagesFragmentsSurvive

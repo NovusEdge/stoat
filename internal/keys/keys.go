@@ -43,14 +43,14 @@ func generate(path, comment string) error {
 	}
 	// Serialised across PROCESSES, not just goroutines. Note this is
 	// LockKeys, a DIFFERENT lock file from config.Lock: Clone holds the
-	// data-root lock and then calls Ensure, and flock does not nest — sharing
+	// data-root lock and then calls Ensure, and flock does not nest: sharing
 	// one lock here deadlocked the whole suite against itself. See Lock's doc
 	// comment.
 	//
 	// Every stoat command calls Ensure at startup, so two invocations against
 	// a fresh data root
 	// both saw no key, both cleared the pair, and both ran ssh-keygen against
-	// the same path — at which point the loser found the file recreated under
+	// the same path, at which point the loser found the file recreated under
 	// it and ssh-keygen sat on an interactive "Overwrite (y/n)?" prompt.
 	// Observed for real: six concurrent `stoat create` calls, one failed with
 	// exactly that, on a command that never asks the user anything.

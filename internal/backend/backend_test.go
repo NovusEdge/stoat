@@ -73,7 +73,7 @@ func TestUbuntuDiskGetsNoSeedCdrom(t *testing.T) {
 
 // The alpine-cloud catalog entry is OS "alpine" but Backend "cloudinit": it
 // is the one image whose backend contradicts its OS's registry default. It
-// is the entire reason For keys off v.Backend rather than v.OS, so pin it —
+// is the entire reason For keys off v.Backend rather than v.OS, so pin it:
 // dispatching on OS would hand this VM an apkovl overlay it does not boot
 // from, and no seed at all, which is a VM that comes up unprovisioned with
 // nothing saying why.
@@ -84,7 +84,7 @@ func TestAlpineCloudUsesItsEntrysBackendNotItsOSDefault(t *testing.T) {
 	}
 	b := For(v)
 	if b.Name() != "cloudinit" {
-		t.Fatalf("Name() = %q, want cloudinit — v.Backend must win over the registry's apkovl default for alpine", b.Name())
+		t.Fatalf("Name() = %q, want cloudinit; v.Backend must win over the registry's apkovl default for alpine", b.Name())
 	}
 	got := strings.Join(b.Args(v), " ")
 	if !strings.Contains(got, "seed.iso") {

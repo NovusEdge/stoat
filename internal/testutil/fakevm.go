@@ -14,7 +14,7 @@ import (
 )
 
 // FakeRunning makes the VM at dir look running to qemu.Running, without
-// qemu-system-x86_64 installed, and returns the func that stops it — which the
+// qemu-system-x86_64 installed, and returns the func that stops it, which the
 // caller must defer.
 //
 // qemu.Running reads dir/qemu.pid and then requires dir+"/" to appear in
@@ -24,19 +24,19 @@ import (
 //
 // THIS LIVES IN ONE PLACE ON PURPOSE. It previously existed as two
 // independently-maintained copies, in internal/core and internal/cli. Both
-// spawned `sleep 100 <dir>/marker` — which does not work, because sleep sums
+// spawned `sleep 100 <dir>/marker`, which does not work because sleep sums
 // its arguments as durations and rejects a non-numeric one, so the process
 // exited about a millisecond in and the "running" VM was dead before anything
 // looked. When that was found, only one copy was fixed. The other went on
 // backing a test asserting that `rm` REFUSES to delete a running VM, and
-// failed roughly 40% of the time under concurrency while passing in isolation
-// — a test that intermittently proved the opposite of its name, over a
+// failed roughly 40% of the time under concurrency while passing in isolation:
+// a test that intermittently proved the opposite of its name, over a
 // destructive operation.
 //
 // Two details are load-bearing:
 //
 //   - `sh -c "sleep 100; :"`, not `sh -c "sleep 100"`. A SIMPLE command makes
-//     sh exec it directly, replacing sh's own argv — and the directory, the
+//     sh exec it directly, replacing sh's own argv, and the directory, the
 //     entire point, vanishes from the cmdline. A compound command keeps sh
 //     alive as itself.
 //   - The returned stop func Waits after killing. Without it the child becomes
@@ -60,7 +60,7 @@ func FakeRunning(t *testing.T, dir string) func() {
 	//
 	// cmd.Start returns once the fork is under way, not once the child has
 	// exec'd. In that window /proc/<pid>/cmdline still reports the PARENT's
-	// argv — the go test binary — which does not contain dir. A check landing
+	// argv (the go test binary), which does not contain dir. A check landing
 	// there sees a pid whose cmdline does not match and concludes the VM is
 	// not running, and qemu.Running does not merely return false: it DELETES
 	// the pidfile it just read, so the VM stays "not running" forever after.

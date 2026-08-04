@@ -12,7 +12,7 @@ set -e
 # picks a mirror and refreshes indexes, so no separate `apk update`.
 setup-apkrepos -c -1
 
-# build-base is Alpine's meta-package for gcc/make/libc-dev — the equivalent of
+# build-base is Alpine's meta-package for gcc/make/libc-dev: the equivalent of
 # Debian's build-essential. Alpine has no package called "build-essential".
 apk add git curl ca-certificates build-base vim tmux less
 
@@ -31,9 +31,9 @@ root_fstype=$(awk '$2 == "/" { print $3 }' /proc/mounts)
 
 case "$root_fstype" in
 tmpfs | overlay)
-	echo "NOTE: this is a live VM (root is $root_fstype, in RAM). Everything installed above is gone after a reboot — rebooting will NOT bring it back. Use a disk VM to keep it."
+	echo "NOTE: this is a live VM (root is $root_fstype, in RAM). Everything installed above is gone after a reboot. Rebooting will NOT bring it back. Use a disk VM to keep it."
 	;;
 *)
-	echo "installed on a disk VM (root is $root_fstype) — this survives a reboot."
+	echo "installed on a disk VM (root is $root_fstype), so this survives a reboot."
 	;;
 esac

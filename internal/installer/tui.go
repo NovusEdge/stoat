@@ -95,7 +95,7 @@ type Model struct {
 	rcAdded bool
 	// rcErr is a failed rc write. It is kept apart from err deliberately: by
 	// the time AppendRC runs, the build and install already succeeded, so
-	// this is a recoverable failure the user can finish by hand — not a
+	// this is a recoverable failure the user can finish by hand, not a
 	// reason to report the whole run as failed. See Failed and done.
 	rcErr error
 	err   error
@@ -140,7 +140,7 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 //
 // Quitting before binPath is set is also a failure: nothing was installed, so
 // `just setup` reporting success would be a lie. Quitting after binPath is
-// set is not -- the install already succeeded, and walking away from the
+// set is not, since the install already succeeded, and walking away from the
 // optional PATH question is the same non-fatal outcome as answering it "n".
 func (m Model) Failed() bool { return m.err != nil || (m.cancelled && m.binPath == "") }
 
@@ -160,8 +160,8 @@ func buildCmd(repoDir, version string) tea.Cmd {
 		}
 		out := filepath.Join(tmp, "stoat")
 		if err := Build(repoDir, version, out); err != nil {
-			// Nothing will ever call installCmd to clean this up -- the build
-			// never produced a binary to hand it -- so this is the one path
+			// Nothing will ever call installCmd to clean this up: the build
+			// never produced a binary to hand it, so this is the one path
 			// that has to remove the temp dir itself.
 			os.RemoveAll(tmp)
 			return errMsg{err: err}
@@ -170,14 +170,17 @@ func buildCmd(repoDir, version string) tea.Cmd {
 	}
 }
 
-func installCmd(src, destDir string) tea.Cmd {
+func installCmd(src, destDir, repoDir, home string) tea.Cmd {
 	return func() tea.Msg {
 		// The temp dir buildCmd created is done its job the moment the binary
-		// is copied out of it -- whether that copy succeeds or fails -- so it
+		// is copied out of it, whether that copy succeeds or fails, so it
 		// goes away here unconditionally rather than leaking ~10MB per run.
 		defer os.RemoveAll(filepath.Dir(src))
 		path, err := Install(src, destDir)
 		if err != nil {
+			return errMsg{err: err}
+		}
+		if err := InstallData(repoDir, home); err != nil {
 			return errMsg{err: err}
 		}
 		return installedMsg{path: path}
@@ -197,7 +200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case builtMsg:
-		return m, installCmd(msg.tmpPath, m.dir)
+		return m, installCmd(msg.tmpPath, m.dir, m.repoDir, m.home)
 
 	case installedMsg:
 		m.binPath = msg.path
@@ -236,7 +239,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ctrl+c always quits. "q" only quits once there is nothing left to type
-	// into — at the dir prompt it is a character — so it is checked separately
+	// into (at the dir prompt it is a character), so it is checked separately
 	// and only outside phaseDir.
 	if key.Matches(msg, keys.Interrupt) {
 		return m.cancel()
@@ -282,7 +285,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.phase = phaseDone
 			return m, tea.Quit
 		case key.Matches(msg, keys.Accept):
-			// A failed write here is not fatal — see the rcErr field comment —
+			// A failed write here is not fatal (see the rcErr field comment),
 			// so it goes to rcErr, not err.
 			added, err := AppendRC(m.rcPath, m.rcLine)
 			m.rcAdded = added
@@ -351,7 +354,7 @@ func (m Model) View() tea.View {
 // checkTable renders the probe results as an aligned table.
 //
 // lipgloss/table does the column sizing, so no width is hardcoded and the
-// pre-colored status cells still line up -- it measures cells ANSI-aware, which
+// pre-colored status cells still line up, because it measures cells ANSI-aware, which
 // a hand-rolled pad using len() would get wrong the moment a detail string
 // contains anything non-ASCII.
 //
@@ -361,7 +364,7 @@ func (m Model) View() tea.View {
 // min(t.height, computeHeight()). It's silent here only because this table
 // never calls .Height(), so t.height stays 0 and the clamp is skipped
 // (lipgloss treats MaxHeight(0) as unset). The moment something calls
-// .Height() on this table, the last row — /dev/kvm, most often — disappears.
+// .Height() on this table, the last row (/dev/kvm, most often) disappears.
 // See fields.go's BorderBottom(true) comment for the full mechanism.
 func (m Model) checkTable() string {
 	t := table.New().
@@ -429,7 +432,7 @@ func (m Model) done() string {
 	// A hard failure still gets the host advice below: the checks already ran
 	// by the time anything can fail (build, install, or a bad dir), and a
 	// user whose install died on e.g. a permission error still needs to know
-	// what to fix before their first VM -- that guidance is meant to be given
+	// what to fix before their first VM, and that guidance is meant to be given
 	// once, not only on a clean run.
 	var lines []string
 	switch {
@@ -437,14 +440,14 @@ func (m Model) done() string {
 		// Left before the build/install ever finished: unlike every other
 		// branch here, nothing was actually installed, which is exactly what
 		// Failed() keys on too.
-		lines = []string{"", errStyle.Render("cancelled") + " — nothing was installed"}
+		lines = []string{"", errStyle.Render("cancelled") + ": nothing was installed"}
 	case m.err != nil:
-		lines = []string{"", errStyle.Render("failed") + " — " + m.err.Error()}
+		lines = []string{"", errStyle.Render("failed") + ": " + m.err.Error()}
 	default:
 		lines = []string{
 			"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
 			"",
-			"done — stoat " + m.version,
+			"done: stoat " + m.version,
 		}
 		switch {
 		case m.rcAdded:
@@ -464,11 +467,11 @@ func (m Model) done() string {
 			// Declined: rcLine is only ever set once the rc prompt has been
 			// shown (see the installedMsg case in Update), so this is
 			// reachable only after a real "n". Mirrors the failed-write
-			// branch above, which already got this right -- a user who
+			// branch above, which already got this right: a user who
 			// skipped it still needs the line to add by hand.
 			lines = append(lines,
 				"",
-				"  skipped — add this yourself:",
+				"  skipped, add this yourself:",
 			)
 			lines = append(lines, m.rcLineLines("        ")...)
 		}
@@ -478,7 +481,7 @@ func (m Model) done() string {
 		lines = append(lines, "", "before your first VM:")
 		seen := map[string]bool{}
 		for _, c := range problems {
-			lines = append(lines, "", "  "+warnStyle.Render(c.Name)+" — "+c.Detail)
+			lines = append(lines, "", "  "+warnStyle.Render(c.Name)+": "+c.Detail)
 			for _, f := range c.Fix {
 				// Fixes are deduplicated here rather than in Check: two checks
 				// (qemu-img, qemu-system-x86_64) can share one package, and the

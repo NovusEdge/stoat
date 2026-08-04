@@ -12,7 +12,7 @@ import (
 // which is the thing that fails, not whether the file exists.
 //
 // This file is the installer's one platform seam. Windows support means adding
-// kvm_windows.go with a WHPX probe -- and stoat itself does not compile for
+// kvm_windows.go with a WHPX probe, and stoat itself does not compile for
 // Windows yet, so that is not a near-term concern.
 func KVMCheck() Check { return kvmCheckAt("/dev/kvm") }
 
@@ -27,7 +27,7 @@ func kvmCheckAt(path string) Check {
 	case errors.Is(err, fs.ErrNotExist):
 		return Check{
 			Name:   "/dev/kvm",
-			Detail: "not present — no KVM support, or the kvm module is not loaded",
+			Detail: "not present: no KVM support, or the kvm module is not loaded",
 			Fix:    []string{"sudo modprobe kvm_intel   # or kvm_amd"},
 		}
 	case errors.Is(err, fs.ErrPermission):
@@ -36,7 +36,7 @@ func kvmCheckAt(path string) Check {
 			Detail: "permission denied",
 			Fix: []string{
 				`sudo usermod -aG kvm "$USER"`,
-				"# then log out and back in — group membership only applies to new sessions",
+				"# then log out and back in, since group membership only applies to new sessions",
 			},
 		}
 	}

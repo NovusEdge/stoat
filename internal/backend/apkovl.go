@@ -11,7 +11,7 @@ import (
 // to the guest by QEMU's vvfat, applied both to a genuine live boot and to
 // the installer environment of an uninstalled disk-mode VM (setup-disk in
 // sys mode copies the running system, including stoat's key, onto the
-// target -- without the overlay the installed guest is unreachable).
+// target; without the overlay the installed guest is unreachable).
 type apkovlBackend struct{}
 
 func (apkovlBackend) Name() string { return "apkovl" }

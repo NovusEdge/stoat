@@ -41,7 +41,7 @@ func TestChecksAdvanceToDirPrompt(t *testing.T) {
 
 // checkTable's own comment documents a real lipgloss v2.0.5 bug: a headerless
 // table that ever calls .Height() silently drops its last row. This is the
-// regression test that comment promises but does not enforce on its own --
+// regression test that comment promises but does not enforce on its own:
 // internal/tui/fields_test.go's TestFieldsKeepsEveryRow is the sibling for
 // the main TUI's equivalent landmine. It fails the moment someone adds a
 // width/height clamp to checkTable to fit a narrow terminal without
@@ -67,12 +67,12 @@ func TestCheckTableKeepsEveryRow(t *testing.T) {
 		t.Fatalf("got %d rows, want %d:\n%s", len(lines), len(m.checks), out)
 	}
 	if last := lines[len(lines)-1]; !strings.Contains(last, "/dev/kvm") {
-		t.Errorf("last row is not /dev/kvm -- the row v2.0.5 drops once .Height() is set: %q", last)
+		t.Errorf("last row is not /dev/kvm (the row v2.0.5 drops once .Height() is set): %q", last)
 	}
 }
 
 // Typing a relative path and pressing enter must resolve it to an absolute
-// path before it becomes m.dir -- a bare "bin" left relative would write a
+// path before it becomes m.dir: a bare "bin" left relative would write a
 // PATH entry any cwd can shadow. This is the test that would have caught it:
 // it drives the real key.Matches(keys.Install) dispatch in m.key, not a
 // phase set by hand.
@@ -152,7 +152,7 @@ func TestDirPromptExpandsHome(t *testing.T) {
 	}
 }
 
-// Ctrl+C at the dir prompt -- before anything is built or installed -- must
+// Ctrl+C at the dir prompt, before anything is built or installed, must
 // not let `just setup` report success. binPath is still empty at this point,
 // which is exactly what Failed() and done() key on to tell this apart from
 // quitting after a successful install.
@@ -181,7 +181,7 @@ func TestCtrlCAtDirPromptFailsTheRun(t *testing.T) {
 
 // Ctrl+C at the rc prompt is different: the binary is already on disk by
 // then, so walking away from the optional PATH question must stay as
-// non-fatal as answering "n" to it -- see the settled design in Failed's
+// non-fatal as answering "n" to it; see the settled design in Failed's
 // comment.
 func TestCtrlCAfterInstallStaysNonFatal(t *testing.T) {
 	m := newTestModel(t, "/usr/bin")
@@ -212,7 +212,7 @@ func TestInstalledSkipsRCPromptWhenOnPath(t *testing.T) {
 	m = next.(Model)
 
 	if m.phase != phaseDone {
-		t.Errorf("phase = %v, want phaseDone — the dir is already on PATH", m.phase)
+		t.Errorf("phase = %v, want phaseDone: the dir is already on PATH", m.phase)
 	}
 }
 
@@ -236,8 +236,8 @@ func TestInstalledAsksAboutRCWhenNotOnPath(t *testing.T) {
 	}
 }
 
-// Declining must write nothing, still finish cleanly, and -- since the user
-// said they will add it by hand -- still show them the line to add.
+// Declining must write nothing, still finish cleanly, and, since the user
+// said they will add it by hand, still show them the line to add.
 func TestDecliningRCGoesToDone(t *testing.T) {
 	m := newTestModel(t, "/usr/bin")
 	m.dir = "/home/x/.local/bin"
@@ -300,7 +300,7 @@ func TestDoneListsEveryProblemWithItsFix(t *testing.T) {
 
 // qemu-img and qemu-system-x86_64 share the qemu-full package on Arch, so two
 // checks can carry the identical Fix line. The done screen must print it once,
-// not once per check — that dedup belongs to the display layer, not Check.
+// not once per check: that dedup belongs to the display layer, not Check.
 func TestDoneDedupesIdenticalFixCommands(t *testing.T) {
 	m := newTestModel(t, "/home/x/.local/bin")
 	m.phase = phaseDone
@@ -317,8 +317,8 @@ func TestDoneDedupesIdenticalFixCommands(t *testing.T) {
 	}
 }
 
-// A failed rc write is recoverable — the build and install already succeeded
-// by the time AppendRC runs — so it must not be reported as a hard failure:
+// A failed rc write is recoverable: the build and install already succeeded
+// by the time AppendRC runs, so it must not be reported as a hard failure.
 // Failed() must stay false, and the done screen must still show the install
 // alongside the line the user needs to add themselves.
 func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
@@ -333,7 +333,7 @@ func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
 	m.phase = phaseRC
 	m.binPath = "/home/x/.local/bin/stoat"
 	// blocker is a regular file, so anything under it as a parent dir fails
-	// both the read and the MkdirAll inside AppendRC — without touching
+	// both the read and the MkdirAll inside AppendRC, without touching
 	// anything outside t.TempDir().
 	m.rcPath = filepath.Join(blocker, ".zshrc")
 	_, m.rcLine = ShellRC(m.shell, m.home, m.dir)
@@ -357,7 +357,7 @@ func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
 }
 
 // ansiRE strips SGR colour codes so pastedRCLine can read a rendered line's
-// real text -- it must not care which colours the theme picked, only what
+// real text: it must not care which colours the theme picked, only what
 // characters would land in the terminal, since those are what a paste
 // carries.
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -370,18 +370,18 @@ var longRCDir = "/home/exampleuser/" + strings.Repeat("wide-prefix-segment/", 6)
 // rcLineBlock finds the rc-line block in a rendered View: every ANSI-
 // stripped physical line indented by exactly indent, immediately following
 // the line containing anchor. Each returned line still carries its own
-// indent and, but for the last, its trailing `\` continuation marker --
+// indent and, but for the last, its trailing `\` continuation marker;
 // pasteValue (paths_test.go) is what interprets those.
 //
 // It also fails the test directly if any such physical line, once
 // lipgloss.JoinVertical's own trailing space padding is discounted (it
-// right-pads every line in a block to the block's widest line -- here,
+// right-pads every line in a block to the block's widest line: here,
 // that's the unrelated and unwrapped "<dir> is not on your PATH" status
 // line, since dir is deliberately huge in these tests; trailing spaces are
 // inert padding a terminal clips for free, never part of what a paste
 // carries), is wider than width: that's the payload Bubble Tea's real
 // per-line clip would truncate, which this in-process View() call does not
-// reproduce on its own -- so this check is what actually stands in for
+// reproduce on its own, so this check is what actually stands in for
 // "did not get silently clipped."
 func rcLineBlock(t *testing.T, view, anchor, indent string, width int) []string {
 	t.Helper()
@@ -405,7 +405,7 @@ func rcLineBlock(t *testing.T, view, anchor, indent string, width int) []string 
 		}
 		payload := strings.TrimPrefix(strings.TrimRight(l, " "), indent)
 		if len(indent)+len(payload) > width {
-			t.Errorf("drawn line's payload is %d chars, wider than the %d-column terminal -- Bubble Tea would clip this: %q", len(indent)+len(payload), width, indent+payload)
+			t.Errorf("drawn line's payload is %d chars, wider than the %d-column terminal, so Bubble Tea would clip this: %q", len(indent)+len(payload), width, indent+payload)
 		}
 		block = append(block, payload)
 	}
@@ -413,7 +413,7 @@ func rcLineBlock(t *testing.T, view, anchor, indent string, width int) []string 
 }
 
 // The active rc prompt (phaseRC) must show the complete, pasteable rc line
-// even on a narrow terminal -- not silently clipped by Bubble Tea's per-line
+// even on a narrow terminal, not silently clipped by Bubble Tea's per-line
 // width clamp, and not corrupted by a naive wrap that breaks the line
 // inside its quotes.
 func TestRCPromptLinePastesSafelyAtNarrowWidths(t *testing.T) {
@@ -438,7 +438,7 @@ func TestRCPromptLinePastesSafelyAtNarrowWidths(t *testing.T) {
 }
 
 // The done screen's "could not write the rc file" branch must show the same
-// complete, pasteable line -- this is the one case where the rc line is the
+// complete, pasteable line: this is the one case where the rc line is the
 // user's only way to finish the PATH change themselves.
 func TestDoneRCErrLinePastesSafelyAtNarrowWidths(t *testing.T) {
 	for _, width := range []int{60, 80} {
@@ -460,7 +460,7 @@ func TestDoneRCErrLinePastesSafelyAtNarrowWidths(t *testing.T) {
 }
 
 // The done screen's declined branch is the other place the line is the
-// user's only record of what to add -- same requirement, different indent.
+// user's only record of what to add: same requirement, different indent.
 func TestDoneDeclinedRCLinePastesSafelyAtNarrowWidths(t *testing.T) {
 	for _, width := range []int{60, 80} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
@@ -470,7 +470,7 @@ func TestDoneDeclinedRCLinePastesSafelyAtNarrowWidths(t *testing.T) {
 			m.binPath = longRCDir + "/stoat"
 			m.width = width
 			m.rcPath, m.rcLine = ShellRC(m.shell, m.home, m.dir)
-			// rcAdded stays false and rcErr stays nil -- this is the
+			// rcAdded stays false and rcErr stays nil: this is the
 			// declined branch, distinct from the rcErr branch above.
 
 			block := rcLineBlock(t, m.View().Content, "add this yourself:", "        ", width)
@@ -518,7 +518,7 @@ func TestFailedInstallStillShowsHostAdvice(t *testing.T) {
 }
 
 // tempBuildDirs finds this package's own leftovers, not just anything in
-// os.TempDir() -- the real temp dir is shared with everything else running
+// os.TempDir(): the real temp dir is shared with everything else running
 // on the machine, so a bare entry count would be flaky.
 func tempBuildDirs() []string {
 	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "stoat-build-*"))
@@ -552,7 +552,13 @@ func TestInstallCmdRemovesBuildTempDirOnSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg := installCmd(src, t.TempDir())()
+	// InstallData needs internal/recipes/ to exist in repoDir.
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoDir, "internal", "recipes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := installCmd(src, t.TempDir(), repoDir, t.TempDir())()
 	if _, ok := msg.(installedMsg); !ok {
 		t.Fatalf("expected installedMsg, got %T: %+v", msg, msg)
 	}
@@ -568,7 +574,7 @@ func TestInstallCmdRemovesBuildTempDirOnFailure(t *testing.T) {
 	}
 	src := filepath.Join(tmp, "stoat") // never created, so Install's Open fails
 
-	msg := installCmd(src, t.TempDir())()
+	msg := installCmd(src, t.TempDir(), t.TempDir(), t.TempDir())()
 	if _, ok := msg.(errMsg); !ok {
 		t.Fatalf("expected errMsg for a missing src binary, got %T: %+v", msg, msg)
 	}

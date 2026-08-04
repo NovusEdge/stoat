@@ -11,7 +11,7 @@ import (
 )
 
 // qmpTimeout bounds a whole QMP exchange. Snapshotting a running VM writes the
-// guest's entire RAM into the qcow2, so this is generous by design — a 4GB VM
+// guest's entire RAM into the qcow2, so this is generous by design: a 4GB VM
 // on a slow disk legitimately takes tens of seconds. It exists to stop a
 // wedged QEMU hanging the caller forever, not to police normal work.
 const qmpTimeout = 5 * time.Minute
@@ -71,7 +71,7 @@ func (q *qmp) Close() error { return q.c.Close() }
 // at any moment, including between a command and its reply. They are skipped
 // here rather than surfaced: nothing in stoat subscribes to events, and a
 // caller that treated the first message after a command as its reply would
-// intermittently read an event instead — a race that only shows up under
+// intermittently read an event instead, a race that only shows up under
 // exactly the conditions snapshots create.
 func (q *qmp) command(name string, args map[string]any) (json.RawMessage, error) {
 	req := map[string]any{"execute": name}
@@ -110,12 +110,12 @@ func (q *qmp) command(name string, args map[string]any) (json.RawMessage, error)
 // the command returns immediately and the caller must poll query-jobs for
 // completion, then interpret job states. human-monitor-command runs the
 // long-standing savevm/loadvm/delvm synchronously and hands back whatever the
-// monitor printed — far less machinery for an operation stoat performs one at
+// monitor printed, far less machinery for an operation stoat performs one at
 // a time and waits on anyway.
 //
 // The tradeoff, stated plainly: HMP reports failure as TEXT, so the caller has
 // to inspect the string. What QMP still buys over talking to the human monitor
-// socket directly is framing — the reply is exactly this command's output,
+// socket directly is framing: the reply is exactly this command's output,
 // delimited, with transport errors distinguishable from command output. That
 // is the part the human monitor's prompt-interleaved stream cannot give.
 func (q *qmp) hmp(cmd string) (string, error) {
@@ -132,7 +132,7 @@ func (q *qmp) hmp(cmd string) (string, error) {
 
 // hmpChecked runs an HMP command that is expected to print NOTHING on success.
 // savevm, loadvm and delvm all follow that convention, so any output at all is
-// the error message — which is the only way to detect failure over HMP, since
+// the error message, which is the only way to detect failure over HMP, since
 // the QMP layer itself succeeded in running the command.
 func (q *qmp) hmpChecked(cmd string) error {
 	out, err := q.hmp(cmd)

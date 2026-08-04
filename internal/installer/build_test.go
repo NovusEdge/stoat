@@ -10,7 +10,7 @@ import (
 )
 
 // Install must produce an executable file, creating the destination directory
-// if it is not there -- ~/.local/bin often does not exist yet.
+// if it is not there, since ~/.local/bin often does not exist yet.
 func TestInstallCopiesAndCreatesDir(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "stoat")
 	content := []byte("#!/bin/sh\necho hi\n")
@@ -43,7 +43,7 @@ func TestInstallCopiesAndCreatesDir(t *testing.T) {
 	}
 }
 
-// Reinstalling over an existing binary must work -- that is the common case,
+// Reinstalling over an existing binary must work: that is the common case,
 // and on Linux writing over a running executable needs the file replaced, not
 // opened for write.
 func TestInstallOverwrites(t *testing.T) {
@@ -110,7 +110,7 @@ func TestBuildProducesRunnableBinary(t *testing.T) {
 }
 
 // A build failure must surface the compiler's actual output, not just
-// "exit status 1" -- that is the only thing a user could act on.
+// "exit status 1", since that is the only thing a user could act on.
 func TestBuildFailureSurfacesCompilerOutput(t *testing.T) {
 	repo := t.TempDir()
 	cmdDir := filepath.Join(repo, "cmd", "stoat")

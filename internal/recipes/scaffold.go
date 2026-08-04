@@ -19,10 +19,10 @@ func Dir() string { return dir() }
 // the repository enable (docker, tailscale and most of what you would want
 // live in Alpine's community repo, which is off by default), and the
 // live-vs-disk honesty block that the test suite REQUIRES of every bundled
-// recipe — on a live VM the root is a tmpfs overlay, so anything installed is
+// recipe: on a live VM the root is a tmpfs overlay, so anything installed is
 // gone on reboot, and a recipe that implies otherwise is lying.
 const shellTemplate = `#!/bin/sh
-# %s — runs as root over ssh on a booted %s VM.
+# %s: runs as root over ssh on a booted %s VM.
 set -e
 
 %s
@@ -36,10 +36,10 @@ root_fstype=$(awk '$2 == "/" { print $3 }' /proc/mounts)
 
 case "$root_fstype" in
 tmpfs | overlay)
-	echo "NOTE: this is a live VM (root is $root_fstype, in RAM). Everything installed above is gone after a reboot — rebooting will NOT bring it back. Use a disk VM to keep it."
+	echo "NOTE: this is a live VM (root is $root_fstype, in RAM). Everything installed above is gone after a reboot; rebooting will NOT bring it back. Use a disk VM to keep it."
 	;;
 *)
-	echo "installed on a disk VM (root is $root_fstype) — this survives a reboot."
+	echo "installed on a disk VM (root is $root_fstype): this survives a reboot."
 	;;
 esac
 `
@@ -47,7 +47,7 @@ esac
 // cloudTemplate is the cloud-init equivalent. Cloud images are always a real
 // disk install, so there is no live-vs-disk branch to be honest about.
 const cloudTemplate = `#cloud-config
-# %s — carried verbatim into the cloud-init seed's cloud-config-archive and
+# %s: carried verbatim into the cloud-init seed's cloud-config-archive and
 # applied at first boot; cloud-init merges it in, so any key it understands
 # survives, not just packages:/runcmd:. Package names must be spelled the
 # same on every distro this is offered to (apt and pacman for the shared
@@ -76,7 +76,7 @@ func New(name, osName, backend string) (string, error) {
 		return "", fmt.Errorf("a recipe needs a name")
 	}
 	if strings.ContainsAny(name, "./ ") {
-		return "", fmt.Errorf("recipe name %q cannot contain dots, slashes or spaces — those separate the name from its os and extension", name)
+		return "", fmt.Errorf("recipe name %q cannot contain dots, slashes or spaces, since those separate the name from its os and extension", name)
 	}
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return "", err
@@ -103,7 +103,7 @@ func New(name, osName, backend string) (string, error) {
 
 	path := filepath.Join(dir(), file)
 	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists — edit it instead", path)
+		return "", fmt.Errorf("%s already exists: edit it instead", path)
 	}
 
 	mode := os.FileMode(0o644)
@@ -117,7 +117,7 @@ func New(name, osName, backend string) (string, error) {
 }
 
 // Installed lists every recipe file in the data root, whether bundled or
-// written by the user. Unlike List it does not filter by os or backend — this
+// written by the user. Unlike List it does not filter by os or backend: this
 // is "what is on disk", for a human looking for something to edit.
 func Installed() ([]string, error) {
 	entries, err := os.ReadDir(dir())

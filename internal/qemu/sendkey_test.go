@@ -4,7 +4,7 @@ import "testing"
 
 // TestPasswordKeysHexAlphabet pins the format sendkey expects: one key name
 // per character, in order, for the alphabet RandomConsolePassword actually
-// produces (0-9, a-f) — every character in it is a bare QEMU key name, so the
+// produces (0-9, a-f): every character in it is a bare QEMU key name, so the
 // sequence should just be the characters themselves.
 func TestPasswordKeysHexAlphabet(t *testing.T) {
 	got, err := passwordKeys("a1b2c3")
@@ -26,7 +26,7 @@ func TestPasswordKeysHexAlphabet(t *testing.T) {
 // with any character outside the bare-key-name allowlist (digits and
 // lowercase letters) must be refused outright, not sent partially or typed
 // wrong. An uppercase letter needs shift, and punctuation is not guaranteed
-// to be a bare key name — both are out of scope on purpose.
+// to be a bare key name, and both are out of scope on purpose.
 func TestPasswordKeysRefusesOutOfAlphabet(t *testing.T) {
 	cases := []string{"Secret1", "hunter2!", "pass word", "café"}
 	for _, pw := range cases {

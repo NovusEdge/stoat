@@ -166,7 +166,7 @@ func TestByOSGroupsWithoutLosingEntries(t *testing.T) {
 	}
 	for i, g := range groups {
 		if g.OS != wantOrder[i] {
-			t.Errorf("group %d is %q, want %q — ByOS must preserve catalog order", i, g.OS, wantOrder[i])
+			t.Errorf("group %d is %q, want %q: ByOS must preserve catalog order", i, g.OS, wantOrder[i])
 		}
 	}
 
@@ -196,7 +196,7 @@ func TestInfer(t *testing.T) {
 	}{
 		// Infer now recognises every registered OS by its FilenameHints, not
 		// just Alpine, so these two resolve an OS where they used to return
-		// "" — see TestInferRecognisesEveryRegisteredOS. That's the intended
+		// "": see TestInferRecognisesEveryRegisteredOS. That's the intended
 		// effect of the registry migration: a BYO ubuntu/debian cloud image
 		// used to get zero recipes offered (recipes.List("", backend)), and
 		// now gets whatever its OS supports.
@@ -433,7 +433,7 @@ func TestCatalog_ArchAndDebianHaveChecksumURL(t *testing.T) {
 // server, so this does a ranged GET against the real URL. Per this
 // package's convention of skipping rather than failing when a dependency
 // isn't there (see the xorriso/qemu-img skips elsewhere in this repo), a
-// network-level failure (DNS, connect, TLS) skips instead of failing —
+// network-level failure (DNS, connect, TLS) skips instead of failing:
 // only a reachable server telling us the pinned release is gone is a real
 // failure.
 func TestCatalog_FedoraURLNotArchived(t *testing.T) {
@@ -470,7 +470,7 @@ func TestCatalog_FedoraURLNotArchived(t *testing.T) {
 	case http.StatusNotFound, http.StatusGone:
 		// The one thing this test exists to catch: the pinned release has
 		// left releases/ for the archive, and every user's download 404s.
-		t.Errorf("fedora-cloud pinned release is gone from %s: %s (final URL %s) — bump the release and both compose suffixes",
+		t.Errorf("fedora-cloud pinned release is gone from %s: %s (final URL %s); bump the release and both compose suffixes",
 			e.URL, resp.Status, resp.Request.URL)
 	default:
 		// A mirror having a bad day (5xx, 429, a geo-redirect to a sick
@@ -484,7 +484,7 @@ func TestCatalog_FedoraURLNotArchived(t *testing.T) {
 // TestDownloadOutlastsMetadataTimeout is the regression test for a reported
 // failure: "ubuntu: context deadline exceeded (Client.Timeout or context
 // cancellation while reading body)". Download shared the metadata client,
-// whose Timeout bounds the WHOLE request including the body — so any image
+// whose Timeout bounds the WHOLE request including the body, so any image
 // taking longer than that ceiling died mid-transfer, which is every real
 // image. The server here dribbles the body out over noticeably longer than
 // the metadata client's own timeout; the download must still complete.
@@ -592,13 +592,13 @@ func TestCatalogOffersAlpineCloud(t *testing.T) {
 		t.Errorf("URL is not a qcow2: %s", got.URL)
 	}
 	// The tiny-cloud flavor has no sudo key, no cloud-init status and no
-	// plaintext password support -- everything stoat's seed and its polling
+	// plaintext password support: everything stoat's seed and its polling
 	// depend on. Only the cloudinit flavor works.
 	if !strings.Contains(got.URL, "cloudinit") {
 		t.Errorf("must be the cloudinit flavor, got %s", got.URL)
 	}
 	if strings.Contains(got.URL, "-uefi-") {
-		t.Errorf("bios flavor only -- stoat boots SeaBIOS, not OVMF: %s", got.URL)
+		t.Errorf("bios flavor only: stoat boots SeaBIOS, not OVMF: %s", got.URL)
 	}
 	if got.SSHUser != "stoat" {
 		t.Errorf("SSHUser = %q, want stoat (the seed creates that account)", got.SSHUser)
@@ -611,7 +611,7 @@ func TestCatalogOffersAlpineCloud(t *testing.T) {
 // Download used to open final+".part" with os.Create, which truncates in place
 // and grants no exclusivity. Two downloads of the same image therefore held
 // two handles on the SAME inode: one truncated the file out from under the
-// other, both wrote at independent offsets, and — worst of all — a writer that
+// other, both wrote at independent offsets, and (worst of all) a writer that
 // was still going when the other renamed its .part into place kept writing
 // straight into the finished image.
 //
@@ -621,7 +621,7 @@ func TestCatalogOffersAlpineCloud(t *testing.T) {
 // Verified, and renamed a mangled file into place as a verified image.
 //
 // The two downloads must serve DIFFERENT bytes for this to be detectable at
-// all — interleaving identical content is invisible. That is not a contrived
+// all: interleaving identical content is invisible. That is not a contrived
 // setup: iso.Catalog's own comments note that cloud images are rebuilt in
 // place, so cancelling a download and retrying can genuinely fetch different
 // content under one filename. Each download now gets its own temp file, so
@@ -690,7 +690,7 @@ func TestDownloadConcurrentSameTargetDoesNotCorrupt(t *testing.T) {
 // TestDownloadCancelStopsTheTransfer pins that cancelling ctx actually stops
 // the read rather than merely returning control to the caller. Before
 // Download took a ctx, abandoning a download (the TUI's esc) left the
-// goroutine reading the socket until the 60s stall timer fired — which is the
+// goroutine reading the socket until the 60s stall timer fired, which is the
 // only reason that timer exists.
 func TestDownloadCancelStopsTheTransfer(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())

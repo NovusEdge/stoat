@@ -8,7 +8,7 @@ import (
 // Distro is as much as we need to know about the host's package manager to
 // print a working install command. Anything we do not recognise stays
 // DistroUnknown, and the installer names the packages without inventing a
-// command for them — a wrong sudo line is worse than no line.
+// command for them: a wrong sudo line is worse than no line.
 //
 // Adding a distro touches three places: known() (the ID/ID_LIKE names it
 // answers to), PkgName (which Pkg field is its package name), and
@@ -80,7 +80,7 @@ func known(name string) Distro {
 }
 
 // DetectDistro reads the host's /etc/os-release. An unreadable or missing file
-// is not an error worth surfacing — it just means we print package names
+// is not an error worth surfacing: it just means we print package names
 // without a command.
 func DetectDistro() Distro {
 	b, err := os.ReadFile("/etc/os-release")
@@ -110,8 +110,8 @@ var installPrefix = map[Distro]string{
 	DistroFedora: "sudo dnf install ",
 }
 
-// InstallCmd is the shell command that installs p, or -- when the distro is
-// unknown -- the package's names with no command attached. It returns a slice
+// InstallCmd is the shell command that installs p, or (when the distro is
+// unknown) the package's names with no command attached. It returns a slice
 // because a Check's Fix is a command *list*, see checks.go for why that
 // matters: a wrong sudo line is worse than no line, but no line at all loses
 // information the user could have used.

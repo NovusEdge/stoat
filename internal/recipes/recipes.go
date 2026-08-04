@@ -74,7 +74,7 @@ func sum(b []byte) string {
 //
 // Never overwriting was the old rule, and it aged badly: a recipe shipped by
 // an earlier stoat stays on disk forever, so a fixed recipe never reaches
-// anyone who already ran the buggy one. That is not hypothetical — the
+// anyone who already ran the buggy one. That is not hypothetical: the
 // xfce.cloud.yaml that installed a desktop with no X server, autologged root
 // into a failing startx and left a black screen went on being served to
 // everyone who had it, long after the bundled copy was fixed.
@@ -83,15 +83,15 @@ func sum(b []byte) string {
 // what stoat recorded writing (ManifestName). A file whose contents still
 // match the manifest is stoat's own, untouched, and gets refreshed. A file
 // that differs from the manifest was edited by hand and is left exactly as it
-// is — authoring a recipe by editing one in place is a supported workflow (see
+// is; authoring a recipe by editing one in place is a supported workflow (see
 // tui/recipesdir.go), and silently reverting someone's work is worse than
 // shipping them a stale recipe.
 //
 // The upgrade case has no manifest to consult: every recipe on disk predates
 // it, and there is no way to tell an edited one from an untouched one. Those
 // get refreshed too, but the old contents are kept alongside as "<name>.bak"
-// first, so the one-time adoption cannot destroy anything. It happens once —
-// afterwards the manifest is authoritative and edits are recognised.
+// first, so the one-time adoption cannot destroy anything. It happens once,
+// and afterwards the manifest is authoritative and edits are recognised.
 func Install() error {
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return err
@@ -147,9 +147,9 @@ func Install() error {
 // backends, filtered to the exact matching OS. The cloud-config fragment
 // ("xfce.cloud.yaml") only makes sense merged into a cloud-init seed, so
 // it's offered only on the cloudinit backend, filtered to
-// guest.Lookup(osName).CloudRecipes — unless a per-OS fragment
+// guest.Lookup(osName).CloudRecipes, unless a per-OS fragment
 // ("xfce.fedora.cloud.yaml") exists for that OS. A recipe with no file for
-// the (osName, backend) combination is not offered — e.g.
+// the (osName, backend) combination is not offered, e.g.
 // List("ubuntu", "cloudinit") never returns xfce.ubuntu.sh, and
 // List("alpine", "apkovl") never returns the cloud fragment.
 //
@@ -160,18 +160,18 @@ func Install() error {
 // guest.OS.CloudRecipes and devtools.cloud.yaml vs xfce.cloud.yaml). Alpine
 // is CloudRecipes-eligible (devtools.cloud.yaml installs fine on apk) but
 // still needs its own xfce.alpine.cloud.yaml, because xfce.cloud.yaml's
-// systemctl runcmd does not run under Alpine's OpenRC — so, unlike Fedora
+// systemctl runcmd does not run under Alpine's OpenRC. So, unlike Fedora
 // (kept out of the shared set entirely), a per-OS override and CloudRecipes
 // being true for the same OS both happen at once here. The first loop below
 // records which base names have a per-OS override for osName so the second
 // loop can suppress the shared fragment for exactly those names: without
-// it, an OS with both would be offered two entries for the same recipe —
+// it, an OS with both would be offered two entries for the same recipe,
 // the shared one (wrongly in scope) and the per-OS one.
 //
 // Fedora is kept out of the shared set entirely for a second, independent
 // reason that still matters even with per-OS suppression: it would silently
 // break any shared-only fragment (no per-OS override) whose package names
-// happen not to hold on dnf — devtools.cloud.yaml is one:
+// happen not to hold on dnf. devtools.cloud.yaml is one example:
 // git/curl/ca-certificates/tmux/less match, but Fedora's vim package is
 // "vim-enhanced", not "vim".
 func List(osName, backend string) ([]string, error) {

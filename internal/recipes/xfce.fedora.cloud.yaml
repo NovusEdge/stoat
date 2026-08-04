@@ -2,14 +2,14 @@
 # XFCE desktop fragment for Fedora on the cloudinit backend.
 #
 # Fedora needs its own fragment because it has no package literally named
-# "xfce4" — the desktop ships as the comps group @xfce-desktop-environment.
+# "xfce4": the desktop ships as the comps group @xfce-desktop-environment.
 # The shared xfce.cloud.yaml lists plain "xfce4"/"xfce4-terminal", which are
 # real on apt and pacman, so mixing an "@group" token into that one file would
 # break Ubuntu/Debian/Arch.
 #
 # @xfce-desktop is the comps GROUP (58 packages). The similarly-named
-# @xfce-desktop-environment is an *environment* that pulls in 20 groups —
-# printing, 3d-printing, dial-up — which is a lot of disk against a cloud
+# @xfce-desktop-environment is an *environment* that pulls in 20 groups:
+# printing, 3d-printing, dial-up, which is a lot of disk against a cloud
 # image's small root.
 packages:
   - "@xfce-desktop"

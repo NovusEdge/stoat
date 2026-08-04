@@ -60,7 +60,7 @@ func TestRunChecksAllMissing(t *testing.T) {
 }
 
 // A binary that exists and is executable must be found, and a found check must
-// carry no Fix -- the Done screen prints every Fix it is given.
+// carry no Fix, since the Done screen prints every Fix it is given.
 func TestRunChecksFindsBinary(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "qemu-img")
@@ -88,7 +88,7 @@ func TestRunChecksFindsBinary(t *testing.T) {
 }
 
 // An unknown distro still reports the problem, and still names the packages
-// to install -- it just invents no command to run. Iterating binChecks
+// to install: it just invents no command to run. Iterating binChecks
 // directly (rather than trusting whatever RunChecks(DistroUnknown) returns)
 // is what makes this test able to fail: the previous version ranged over a
 // nil c.Fix and asserted nothing.

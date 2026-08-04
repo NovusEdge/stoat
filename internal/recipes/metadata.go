@@ -11,7 +11,7 @@ import (
 // Metadata is a phase-2 shell recipe's declared front matter
 // (docs/design/guest-subsystem.md §5): who it is, which OSes it applies to,
 // what guest capabilities it needs, and what stages it runs in. A recipe
-// with no front-matter block at all parses to the zero Metadata — that is
+// with no front-matter block at all parses to the zero Metadata: that is
 // not an error, it just declares nothing (see List, which already treats an
 // unmetadata'd recipe as always offered).
 type Metadata struct {
@@ -37,8 +37,8 @@ var metadataKeys = map[string]bool{
 // ParseMetadata reads the front-matter block from a recipe body: "# stoat:
 // key value" comment lines starting right after an optional shebang and
 // ending at the first line that is neither blank nor a comment. A
-// "# stoat:" tag past that point is not front matter — "front-matter means
-// front" is positional, not "anywhere in the file" — so it is left as an
+// "# stoat:" tag past that point is not front matter: "front-matter means
+// front" is positional, not "anywhere in the file", so it is left as an
 // ordinary comment rather than honoured or reported.
 //
 // Every other problem in the block is reported, not swallowed: an unknown
@@ -112,7 +112,7 @@ func ParseMetadata(body string) (Metadata, error) {
 
 // splitMetadataList parses a comma-separated front-matter value ("alpine,
 // ubuntu, debian"). Empty items from stray commas are dropped rather than
-// reported — a formatting slip here isn't the class of error §5 asks to be
+// reported: a formatting slip here isn't the class of error §5 asks to be
 // caught, unlike an unknown key or a missing value.
 func splitMetadataList(s string) []string {
 	var out []string
@@ -136,13 +136,13 @@ func ReadMetadata(name string) (Metadata, error) {
 
 // capabilities are the guest capabilities a recipe's "requires" tag can
 // name, and how each resolves against a guest.OS. Kept to exactly what a
-// bundled recipe declares (see the annotated .sh files) — add an entry here
+// bundled recipe declares (see the annotated .sh files); add an entry here
 // when a recipe actually needs a new one.
 //
 // "systemd" is derived from OS.Backend rather than a dedicated field: today
 // the apkovl backend is Alpine, and Alpine alone in the registry is OpenRC,
 // so "not apkovl" and "has systemd" happen to coincide exactly. That is a
-// real limitation, not a general init-system model — see the package
+// real limitation, not a general init-system model; see the package
 // report for what a future OS with a different combination would need.
 var capabilities = map[string]func(guest.OS) bool{
 	"systemd": func(g guest.OS) bool { return g.Backend != "apkovl" },
@@ -158,7 +158,7 @@ func initSystem(g guest.OS) string {
 
 // UnsupportedReason explains why osName cannot run a recipe declaring m, or
 // returns "" if it can. os is checked first (a named mismatch), then each
-// capability in Requires in order, stopping at the first failure — one
+// capability in Requires in order, stopping at the first failure: one
 // reason per recipe, matching core.RecipeIssue's shape.
 func UnsupportedReason(osName string, m Metadata) string {
 	if len(m.OS) > 0 {

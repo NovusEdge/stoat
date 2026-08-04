@@ -8,7 +8,7 @@ import (
 )
 
 // TestNewWritesAScaffoldThatMatchesTheNamingContract: the filename IS the
-// contract — recipes.List filters on it, so a scaffold that names the file
+// contract, since recipes.List filters on it, so a scaffold that names the file
 // wrongly produces a recipe the picker will never offer.
 func TestNewWritesAScaffoldThatMatchesTheNamingContract(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())

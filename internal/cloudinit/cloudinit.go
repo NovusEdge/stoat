@@ -4,8 +4,8 @@
 //
 // The seed is packed into an ISO9660 image labeled CIDATA via xorriso, which
 // NoCloud's datasource scans for at boot (matched case-insensitively). This
-// exact shape — including the quoted sudo string and the xorriso invocation
-// below — was hand-verified against a real Ubuntu 24.04 cloud image; do not
+// exact shape, including the quoted sudo string and the xorriso invocation
+// below, was hand-verified against a real Ubuntu 24.04 cloud image; do not
 // change it without re-verifying on hardware.
 package cloudinit
 
@@ -23,7 +23,7 @@ import (
 
 // User is the account the seed creates, and therefore the account anything
 // provisioned through this backend must connect as. Cloud images lock root,
-// so connecting as anything else fails — sshx defaults an empty VM.SSHUser to
+// so connecting as anything else fails: sshx defaults an empty VM.SSHUser to
 // root, which is exactly the wrong answer here.
 //
 // Exported so the TUI can record it on the VM instead of repeating the
@@ -38,8 +38,8 @@ const User = "stoat"
 // consolePasswordBlock below.
 //
 // ssh_pwauth stays false on purpose: the password exists so the VNC console
-// is usable -- a cloud VM never gets a qemu window (qemu.NeedsWindow), so
-// that socket is the only place a console login happens -- not so the
+// is usable, since a cloud VM never gets a qemu window (qemu.NeedsWindow), so
+// that socket is the only place a console login happens, not so the
 // forwarded port accepts one. Key-only over the network, password at the
 // console.
 const userDataTemplate = `#cloud-config
@@ -97,7 +97,7 @@ func extraPackages(osName string) string {
 // hardware-proven users: block (parameterized by the guest's shell), the
 // OS's own extra packages if it needs any, and every selected cloud
 // recipe's body verbatim, each as its own document. cloud-init merges the
-// documents itself (see buildArchive) -- this package no longer parses any
+// documents itself (see buildArchive), so this package no longer parses any
 // of them for packages:/runcmd:, so a fragment using write_files: or any
 // other key survives instead of being silently dropped.
 func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
@@ -135,7 +135,7 @@ func mountsDoc(v *config.VM) string {
 // or nothing when no password is set.
 //
 // It uses plain_text_passwd rather than a hash. cloud-init prefers a hash,
-// and for an internet-facing server that is right — but the hash would live
+// and for an internet-facing server that is right, but the hash would live
 // in the same seed file, in the same data root, next to the private key that
 // already grants full access to this VM. Protecting it from someone who can
 // read the seed but not the key guards a split that does not occur here, and
@@ -161,7 +161,7 @@ func haveXorriso() bool {
 // haveCloudInit reports whether the cloud-init binary is on PATH. Mirrors
 // haveXorriso above: Arch does not install cloud-init by default (see
 // guest-subsystem.md §10), so schema validation must degrade to "not
-// checked" rather than "assumed valid" -- callers of ValidateFragment must
+// checked" rather than "assumed valid"; callers of ValidateFragment must
 // treat a nil error with no annotated output as "not checked", not "passed".
 func haveCloudInit() bool {
 	_, err := exec.LookPath("cloud-init")
@@ -170,11 +170,11 @@ func haveCloudInit() bool {
 
 // ValidateFragment runs `cloud-init schema -c FILE --annotate` against a
 // single #cloud-config document, offline and before boot, and returns the
-// annotated output. It returns ("", nil) when cloud-init is not installed --
+// annotated output. It returns ("", nil) when cloud-init is not installed;
 // the caller must not treat that as "valid", only as "unchecked".
 //
 // `cloud-init schema` validates one cloud-config document, not a
-// cloud-config-archive, so this takes a single fragment body -- callers
+// cloud-config-archive, so this takes a single fragment body: callers
 // validate each recipe body before it is merged into buildArchive's output.
 func ValidateFragment(body string) (annotated string, err error) {
 	if !haveCloudInit() {
@@ -213,12 +213,12 @@ const mergeHow = "list(append)+dict(recurse_list)"
 // document body.
 //
 // Per cloud-init's merge model (merging.rst, "Specifying multiple types"), a
-// document's OWN merge_how does not govern how it merges in -- it governs
+// document's OWN merge_how does not govern how it merges in: it governs
 // how the NEXT document in the archive merges into the accumulated result.
 // The first document is always merged with the built-in default regardless
 // of what it declares. So to guarantee every later document appends rather
 // than silently losing to an earlier one, every document except the last
-// needs the directive -- and since callers may pass any number of recipe
+// needs the directive, and since callers may pass any number of recipe
 // bodies, the last one isn't known in advance, so every document gets it.
 // This matches cloud-init's own worked example in merging.rst, which puts
 // merge_how in both halves of a two-document merge rather than relying on
@@ -242,7 +242,7 @@ type archiveDoc struct {
 
 // buildArchive renders docs as a cloud-config-archive. The
 // "#cloud-config-archive" header is required verbatim on its own first
-// line -- it is what NoCloud's format-detection matches on to unpack the
+// line: it is what NoCloud's format-detection matches on to unpack the
 // payload as an archive rather than parse it (and fail) as one big
 // #cloud-config document. Each doc is carried through withMergeHow so the
 // archive as a whole merges by appending rather than by cloud-init's
@@ -264,7 +264,7 @@ func buildArchive(docs []string) (string, error) {
 // returning the iso path. recipeBodies are the bodies of v's selected cloud
 // recipes (already read by the caller); their packages:/runcmd: sections
 // are merged into user-data alongside the fixed, hardware-proven users:
-// block — cloud-init's packages: list only runs at first boot, so this is
+// block, because cloud-init's packages: list only runs at first boot, so this is
 // how a cloud VM's recipes get applied, unlike the ssh-provisioning path
 // used by other backends.
 func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {

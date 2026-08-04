@@ -78,7 +78,12 @@ func runHeadless(repoDir, home string) int {
 		return 1
 	}
 
-	fmt.Printf("done — stoat %s at %s\n", version, binPath)
+	if err := installer.InstallData(repoDir, home); err != nil {
+		fmt.Fprintln(os.Stderr, "error setting up ~/.stoat:", err)
+		return 1
+	}
+
+	fmt.Printf("done: stoat %s at %s\n", version, binPath)
 
 	if !installer.OnPath(dir, os.Getenv("PATH")) {
 		fmt.Printf("\nnote: %s is not on your PATH\n", dir)

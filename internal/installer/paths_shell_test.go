@@ -13,7 +13,7 @@ import (
 // our own understanding of shell quoting; this one is ground truth.
 //
 // The dirs below deliberately include a quote, a backslash, a multi-byte rune
-// and shell metacharacters, at widths that force breaks in different places --
+// and shell metacharacters, at widths that force breaks in different places:
 // a break that lands mid-escape, or that leaves dir's quoting open, shows up
 // here as a wrong PATH rather than as a plausible-looking string.
 func TestWrapRCLineAgainstRealShells(t *testing.T) {
@@ -39,7 +39,7 @@ func TestWrapRCLineAgainstRealShells(t *testing.T) {
 			for _, w := range widths {
 				lines := WrapRCLine("/bin/bash", dir, w)
 				// PATH=ORIG first, so the assertion also proves the ":$PATH"
-				// suffix survived -- that is the exact tail the original bug ate.
+				// suffix survived: that is the exact tail the original bug ate.
 				script := "PATH=ORIG\n" + strings.Join(lines, "\n") + "\nprintf '%s' \"$PATH\"\n"
 				out, err := exec.Command(sh, "-c", script).Output()
 				if err != nil {

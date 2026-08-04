@@ -48,7 +48,7 @@ EOF
 fi
 
 # Live vs disk: an ssh-reachable Debian VM is not always a normal disk
-# install — a live/installer session also mounts its root as tmpfs/overlay,
+# install: a live/installer session also mounts its root as tmpfs/overlay,
 # and everything written above (the getty override, /root/.profile, the
 # installed packages) lives only in that RAM-backed root and is gone on
 # reboot. Same detection as the alpine recipe: inspect the mounted root
@@ -60,9 +60,9 @@ tmpfs | overlay)
     # Live root: apply the getty change to the running session right now
     # instead of promising a reboot that would wipe it.
     systemctl restart getty@tty1.service || true
-    echo "xfce installed and starting NOW on the vm's console (this session only) — a live root keeps nothing across reboots (root is tmpfs/overlay, wiped on restart), so rebooting will NOT bring xfce back. For a desktop that survives reboots, provision a disk-installed VM instead."
+    echo "xfce installed and starting NOW on the vm's console (this session only). A live root keeps nothing across reboots (root is tmpfs/overlay, wiped on restart), so rebooting will NOT bring xfce back. For a desktop that survives reboots, provision a disk-installed VM instead."
     ;;
 *)
-    echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
+    echo "xfce installed. Reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
     ;;
 esac

@@ -6,8 +6,8 @@
 // the OS in a bring-your-own image.
 //
 // Adding an OS means adding one entry to registry below, and every field
-// must be filled: a missing field does not fail loudly, it fails silently —
-// an unselectable catalog entry, an empty OS that hands cloud-init a shell
+// must be filled: a missing field does not fail loudly, it fails silently,
+// as an unselectable catalog entry, an empty OS that hands cloud-init a shell
 // the image doesn't have, or a VM offered zero recipes. See
 // docs/design/guest-subsystem.md for the incident that made this the rule.
 package guest
@@ -59,7 +59,7 @@ type OS struct {
 	FilenameHints []string
 
 	// CloudRecipes reports whether an OS is offered the shared
-	// "*.cloud.yaml" fragment set at all — true does not mean every shared
+	// "*.cloud.yaml" fragment set at all: true does not mean every shared
 	// fragment applies. cloud-init's packages: list has no per-distro
 	// syntax, so devtools.cloud.yaml's names happen to hold for Alpine's
 	// apk too, but xfce.cloud.yaml's systemd runcmd does not (Alpine is

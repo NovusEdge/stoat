@@ -9,7 +9,7 @@ set -e
 # setup-apkrepos -c -1 already refreshes the indexes ("Updating repository
 # indexes... done"), so a separate `apk update` here is redundant work that
 # only widens the window for a transient ssh/network drop under `set -e` to
-# kill the whole provision. Don't add retries either — a real apk failure
+# kill the whole provision. Don't add retries either: a real apk failure
 # should still fail loudly.
 setup-apkrepos -c -1
 
@@ -28,13 +28,13 @@ echo 'exec startxfce4' > /root/.xinitrc
 # more machinery than a disposable single-user VM needs.
 # ponytail: no DM. If you ever want multi-user or a login screen, that is when to add one.
 #
-# busybox getty (this is Alpine, not util-linux) has NO -a/autologin flag —
-# verified against the actual busybox 1.37.0-r31 shipped on the Alpine 3.24.1
+# busybox getty (this is Alpine, not util-linux) has NO -a/autologin flag,
+# confirmed against the actual busybox 1.37.0-r31 shipped on the Alpine 3.24.1
 # ISO, whose `getty --help` lists only -h -L -m -n -w -i -f -l -t -I -H. The
 # busybox-native trick is `getty -n -l LOGIN`: -n skips the username prompt
 # and LOGIN is invoked directly in place of /bin/login. LOGIN then runs
 # `login -f root` (busybox login's "-f: don't authenticate, user already
-# authenticated" flag) so a real login session starts — MOTD, utmp entry,
+# authenticated" flag) so a real login session starts: MOTD, utmp entry,
 # and a proper login shell that sources /root/.profile.
 cat > /sbin/autologin <<'EOF'
 #!/bin/sh
@@ -62,12 +62,12 @@ fi
 
 # Live vs disk: a live VM boots Alpine's diskless mode, whose initramfs
 # mounts the root filesystem as tmpfs (and, on the -o overlaytmpfs boot
-# option, overlay-on-tmpfs) — verified against
+# option, overlay-on-tmpfs), confirmed against
 # /usr/share/mkinitfs/initramfs-init from mkinitfs-3.14.0-r0 (the package
 # apk installs from the Alpine 3.24 repos): the diskless path reads
 # `mount -t tmpfs -o "$rootflags" tmpfs "$sysroot"` and the overlaytmpfs
 # path reads `mount -t overlay -o ... overlayfs "$sysroot"`. Everything
-# written there — /etc/inittab, /root/.profile, the installed packages —
+# written there (/etc/inittab, /root/.profile, the installed packages)
 # lives in RAM and is gone on reboot; only the apkovl (which cannot carry
 # installed packages) survives. A disk install (setup-disk) instead mounts
 # a real block-device filesystem (ext4 by default) as root, which persists.
@@ -88,9 +88,9 @@ tmpfs | overlay)
     # comes up on the VM's console (the one qemu displays) without the user
     # touching the console at all.
     kill -HUP 1
-    echo "xfce installed and starting NOW on the vm's console (this session only) — a live VM keeps nothing across reboots (root is tmpfs/overlay, wiped on restart), so rebooting will NOT bring xfce back. For a desktop that survives reboots, provision a disk VM instead."
+    echo "xfce installed and starting NOW on the vm's console (this session only). A live VM keeps nothing across reboots (root is tmpfs/overlay, wiped on restart), so rebooting will NOT bring xfce back. For a desktop that survives reboots, provision a disk VM instead."
     ;;
 *)
-    echo "xfce installed — reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
+    echo "xfce installed. Reboot the vm to land in xfce automatically (tty1 now autologins root and starts X on next boot)"
     ;;
 esac

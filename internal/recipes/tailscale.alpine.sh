@@ -32,7 +32,7 @@ done
 
 echo "tailscale installed and tailscaled running."
 echo "To join your tailnet, ssh in and run:  tailscale up"
-echo "(stoat does not store auth keys — see this recipe's header for why.)"
+echo "(stoat does not store auth keys, see this recipe's header for why.)"
 
 # Live VMs are diskless: the root filesystem is a tmpfs/overlay in RAM, so
 # every package installed above is gone on reboot. A disk install mounts a
@@ -42,9 +42,9 @@ root_fstype=$(awk '$2 == "/" { print $3 }' /proc/mounts)
 
 case "$root_fstype" in
 tmpfs | overlay)
-	echo "NOTE: this is a live VM (root is $root_fstype, in RAM). Everything installed above is gone after a reboot — rebooting will NOT bring it back. Use a disk VM to keep it."
+	echo "NOTE: this is a live VM (root is $root_fstype, in RAM). Everything installed above is gone after a reboot. Rebooting will NOT bring it back. Use a disk VM to keep it."
 	;;
 *)
-	echo "installed on a disk VM (root is $root_fstype) — this survives a reboot."
+	echo "installed on a disk VM (root is $root_fstype), so this survives a reboot."
 	;;
 esac

@@ -62,9 +62,9 @@ func TestBuildProducesTheAlpineContract(t *testing.T) {
 	content, hdrs := entries(t, out)
 
 	// Without this file the initramfs skips every default service,
-	// including modloop — the guest boots with no kernel modules.
+	// including modloop, so the guest boots with no kernel modules.
 	if _, ok := content["etc/.default_boot_services"]; !ok {
-		t.Error("missing etc/.default_boot_services — guest would boot with no modules")
+		t.Error("missing etc/.default_boot_services: guest would boot with no modules")
 	}
 	if content["etc/.default_boot_services"] != "" {
 		t.Error("etc/.default_boot_services must be empty")
@@ -109,7 +109,7 @@ func TestBuildProducesTheAlpineContract(t *testing.T) {
 		t.Error("etc/apk/repositories does not point at a mirror")
 	}
 	if !strings.Contains(content["etc/ssh/ssh_host_ed25519_key"], "PRIVATE KEY") {
-		t.Error("guest host key not baked in — ssh would report a changed host key each boot")
+		t.Error("guest host key not baked in: ssh would report a changed host key each boot")
 	}
 }
 
@@ -173,7 +173,7 @@ func TestBuildSymlinksLocalmountWhenShareConfigured(t *testing.T) {
 	_, hdrs := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
 	h, ok := hdrs["etc/runlevels/boot/localmount"]
 	if !ok {
-		t.Fatal("missing etc/runlevels/boot/localmount symlink — share would never be mounted at boot")
+		t.Fatal("missing etc/runlevels/boot/localmount symlink: share would never be mounted at boot")
 	}
 	if h.Typeflag != tar.TypeSymlink || h.Linkname != "/etc/init.d/localmount" {
 		t.Errorf("etc/runlevels/boot/localmount = %+v, want symlink to /etc/init.d/localmount", h)
@@ -246,8 +246,8 @@ func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
 }
 
 // TestBuildRemovesLegacyTmpFile proves that a file orphaned by a crash
-// mid-Build from before tmpName was introduced — stoat.apkovl.tar.gz.tmp,
-// which DOES match nlplug-findfs's *.apkovl.tar.gz* glob — is cleaned up by
+// mid-Build from before tmpName was introduced (stoat.apkovl.tar.gz.tmp,
+// which DOES match nlplug-findfs's *.apkovl.tar.gz* glob) is cleaned up by
 // Build, so it can never be picked up by the initramfs as a truncated
 // overlay.
 func TestBuildRemovesLegacyTmpFile(t *testing.T) {

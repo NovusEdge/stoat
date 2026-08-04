@@ -27,7 +27,7 @@ const consoleKeyDelay = 50 * time.Millisecond
 // The monitor's sendkey command takes KEY NAMES, not characters: digits and
 // lowercase letters are their own bare name (sendkey a, sendkey 1, ...), but
 // anything needing shift (uppercase) or not guaranteed to be a plain key
-// (punctuation, whitespace, unicode) is not — and the console password is
+// (punctuation, whitespace, unicode) is not, and the console password is
 // user-settable, so it can contain any of those. Rather than guess at a
 // shift/dead-key mapping and risk typing the wrong thing into a login
 // prompt, this refuses outright the moment it sees a character outside the
@@ -38,7 +38,7 @@ func passwordKeys(password string) ([]string, error) {
 	for _, r := range password {
 		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'z')) {
 			return nil, fmt.Errorf(
-				"console password contains %q, which can't be typed reliably over the qemu monitor — enter it manually at the console",
+				"console password contains %q, which can't be typed reliably over the qemu monitor: enter it manually at the console",
 				string(r))
 		}
 		keys = append(keys, string(r))

@@ -22,7 +22,7 @@ packages:
 #
 # Log in as the `stoat` user with the console password stoat set at creation
 # (see the console row on the detail screen). Earlier versions of this
-# fragment configured /root/.xinitrc and autologged root in — copied from the
+# fragment configured /root/.xinitrc and autologged root in, copied from the
 # Alpine recipe, where root IS the user. On a cloud image root is locked and
 # you connect as stoat, so that configured a desktop for an account nobody
 # can reach.

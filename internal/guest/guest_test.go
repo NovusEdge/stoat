@@ -13,7 +13,7 @@ func TestRegistryFactsThatFailSilently(t *testing.T) {
 		pkgs      []string
 	}{
 		// Alpine ships no bash. cloud-init's user module fails outright on a
-		// missing shell, so no account is created and no key lands -- the only
+		// missing shell, so no account is created and no key lands: the only
 		// symptom is "Permission denied (publickey)" forever. Boot-verified.
 		{"alpine", "/bin/ash", []string{"sudo"}},
 		{"ubuntu", "/bin/bash", nil},
