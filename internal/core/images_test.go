@@ -106,7 +106,7 @@ func TestDownloadImageUnknownID(t *testing.T) {
 // cancellation DownloadImage can test without a network: ctx checked and
 // honoured BEFORE iso.Resolve/iso.Download are ever called. A context that
 // is already cancelled when DownloadImage is entered must return that error
-// immediately rather than dialing out — this is the only guarantee this
+// immediately rather than dialing out; this is the only guarantee this
 // function's doc comment makes about cancellation being complete; anything
 // mid-flight is honestly documented there as returning control, not
 // stopping the work, and is not testable here for exactly that reason (it
@@ -132,7 +132,7 @@ func TestDownloadImageHonoursAlreadyCancelledContext(t *testing.T) {
 // so the Infer fallback matched whichever alpine .iso was on disk for BOTH.
 // `stoat images` reported alpine-virt as downloaded with only the standard ISO
 // present, and `create --image alpine-virt` silently built on the standard
-// image — a 352 MiB general-purpose kernel where the user asked for the 66 MiB
+// image, a 352 MiB general-purpose kernel where the user asked for the 66 MiB
 // virtualised one, with no error to notice.
 func TestMatchLocalDistinguishesAlpineFlavours(t *testing.T) {
 	var std, virt iso.Entry

@@ -7,7 +7,7 @@ import (
 )
 
 // keyMsg builds the key message for a key named exactly as the Update
-// switches name it — the string tea.KeyPressMsg.String() returns.
+// switches name it: the string tea.KeyPressMsg.String() returns.
 //
 // Every test goes through this rather than constructing a tea.KeyPressMsg
 // itself. The literal form, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")},
@@ -24,7 +24,7 @@ func keyMsg(name string) tea.KeyPressMsg {
 }
 
 // namedKeys are the keys bubbletea reports by name rather than as printable
-// text — anything with no Text of its own, so String() falls through to
+// text: anything with no Text of its own, so String() falls through to
 // Keystroke() and depends on Code (and, for shift+tab, Mod).
 var namedKeys = map[string]tea.Key{
 	"enter":     {Code: tea.KeyEnter},
@@ -44,7 +44,7 @@ var namedKeys = map[string]tea.Key{
 
 // TestKeyMsgRoundTrips is what makes keyMsg trustworthy: a key it builds must
 // report the same name back, or a test would be pressing something other than
-// what it says. It is also the guard for the v2 migration — the space bar is
+// what it says. It is also the guard for the v2 migration, since the space bar is
 // reported as "space" there rather than " ", and this fails loudly if keySpace
 // and the message stop agreeing.
 func TestKeyMsgRoundTrips(t *testing.T) {

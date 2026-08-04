@@ -24,7 +24,7 @@ type Snapshot struct {
 
 // ErrNoDisk is returned for a VM that has no qcow2 to put a snapshot in.
 //
-// A live-mode VM is diskless by design — it boots an ISO into a tmpfs root, so
+// A live-mode VM is diskless by design: it boots an ISO into a tmpfs root, so
 // there is nowhere for a snapshot to live and nothing that would survive one.
 // This is a property of the mode, not a missing feature.
 var ErrNoDisk = fmt.Errorf("no disk to snapshot")
@@ -43,7 +43,7 @@ var ErrNoDisk = fmt.Errorf("no disk to snapshot")
 //     nothing has the image open, so this is the simple and safe path.
 //   - RUNNING: QMP savevm, which captures RAM as well as disk. Doing it with
 //     qemu-img instead would mean writing to an image QEMU has open and is
-//     actively writing — qemu-img warns about exactly that, and the result
+//     actively writing; qemu-img warns about exactly that, and the result
 //     would be a snapshot of a torn filesystem.
 //
 // The two produce different things (see Snapshot.VMState) and that difference
@@ -61,13 +61,13 @@ func TakeSnapshot(name, tag string) error {
 
 // Restore resets VM name to the snapshot named tag.
 //
-// On a RUNNING VM this resumes execution inside the snapshot — the guest does
+// On a RUNNING VM this resumes execution inside the snapshot: the guest does
 // not reboot, and anything it was doing since is gone. On a stopped VM it
 // rolls the disk back and the next start boots from there.
 //
 // This is the operation the design doc calls the core testing loop: set it up,
-// snapshot, break it, restore. It is also unambiguously destructive — whatever
-// happened since the snapshot is discarded with no second copy — so a caller
+// snapshot, break it, restore. It is also unambiguously destructive: whatever
+// happened since the snapshot is discarded with no second copy, so a caller
 // that wraps it should say so before calling.
 func Restore(name, tag string) error {
 	v, err := snapshotTarget(name, tag)
@@ -120,7 +120,7 @@ func Snapshots(name string) ([]Snapshot, error) {
 	}
 	if err != nil {
 		// A VM that has never been started has no qcow2 at all in cloud mode
-		// (the overlay is created on first start — see core.Create), which is
+		// (the overlay is created on first start; see core.Create), which is
 		// "no snapshots", not a failure.
 		if strings.Contains(out, "No such file") || strings.Contains(err.Error(), "no such file") {
 			return nil, nil
@@ -176,12 +176,12 @@ func qemuImgSnapshot(v *config.VM, flag, tag string) error {
 // real output: `qemu-img snapshot -l` numbers them 1, 2, 3, while the running
 // VM's `info snapshots` prints "--" for both ID and ICOUNT. An earlier version
 // of this required a numeric ID and therefore silently dropped EVERY snapshot
-// belonging to a running VM — `stoat snapshot <vm>` reported "no snapshots"
+// belonging to a running VM: `stoat snapshot <vm>` reported "no snapshots"
 // immediately after successfully taking one. Caught only by running it against
 // a real VM; the unit test could not, because its "running" sample was written
 // from memory with a numeric ID that QEMU never prints.
 //
-// A VM_SIZE of "0 B" is what marks a disk-only snapshot — one taken while the
+// A VM_SIZE of "0 B" is what marks a disk-only snapshot, one taken while the
 // VM was stopped captured no RAM. That is the distinction Snapshot.VMState
 // carries, and it is derived here rather than guessed from context.
 func parseSnapshots(out string) []Snapshot {

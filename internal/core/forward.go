@@ -11,8 +11,8 @@ import (
 // PortForward is an alias, not a copy, of config.PortForward. This package
 // otherwise gives every operation its own types (Spec vs config.VM) because
 // those carry request-shaped fields config.VM does not (Start, Apply, Wait).
-// A forward has no such extra shape -- host port and guest port are the
-// whole of it on both sides of the boundary -- so duplicating the struct
+// A forward has no such extra shape: host port and guest port are the
+// whole of it on both sides of the boundary, so duplicating the struct
 // would only add a conversion step with nothing to convert.
 type PortForward = config.PortForward
 
@@ -20,13 +20,13 @@ type PortForward = config.PortForward
 //
 // active reports whether they are in effect NOW. It is false when the VM is
 // running: QEMU's user-mode netdev has no mechanism to hot-add a hostfwd rule
-// to a live process — the argv is fixed at launch — so a forward declared
+// to a live process, since the argv is fixed at launch, so a forward declared
 // against a running VM is real (vm.toml has it, and it WILL apply) but inert
 // until the next start. err is non-nil only when the forwards were NOT saved.
 //
 // This is a return value rather than a sentinel error on purpose. The design
 // doc requires that "applied later" and "refused" never look the same to a
-// caller (docs/design/core-api.md §8, decision 5) — but encoding "saved, not
+// caller (docs/design/core-api.md §8, decision 5), but encoding "saved, not
 // yet live" as a non-nil error gets that exactly backwards in practice: every
 // caller that writes the ordinary `if err != nil { return err }` would report
 // a failure for an operation that succeeded. A contract needing an all-caps
@@ -34,7 +34,7 @@ type PortForward = config.PortForward
 // the common path cannot be got wrong: err means it did not happen, active
 // means when.
 //
-// Validation is deliberately strict — see validateForwards — because every
+// Validation is deliberately strict (see validateForwards) because every
 // failure mode here is a qemu process that either refuses to start with an
 // error naming no VM and no port, or two VMs silently fighting over one host
 // listener. Both are far worse to debug after the fact than a rejected Forward
@@ -75,12 +75,12 @@ func validateForwards(v *config.VM, fwds []PortForward) error {
 		// bind on Linux, which the user running stoat/qemu almost never
 		// has. Left unchecked, this fails at qemu start with a bare
 		// "Failed to bind socket: Permission denied" that names neither
-		// the VM nor the port -- the worst place to learn this, minutes
+		// the VM nor the port, the worst place to learn this, minutes
 		// after Forward already reported success. Refusing here, with the
 		// exact port named, beats "warn and let it fail invisibly later":
 		// this API returns only an error, with no channel for a
 		// non-fatal warning, so a warning would be silently dropped by
-		// any caller that doesn't specifically look for it -- indistinct
+		// any caller that doesn't specifically look for it, indistinct
 		// from not checking at all.
 		if f.HostPort < 1024 {
 			return fmt.Errorf("%w: host port %d needs root to bind; use 1024 or above", ErrInvalidSpec, f.HostPort)
@@ -108,7 +108,7 @@ func validateForwards(v *config.VM, fwds []PortForward) error {
 	// ssh ports: two qemu processes both trying to bind 127.0.0.1:<port>,
 	// one losing at start time with no indication why. A user-declared
 	// forward binds a host listener exactly like an ssh port does, so it
-	// gets the same collision check -- reusing FreePort's two data sources
+	// gets the same collision check, reusing FreePort's two data sources
 	// (List, for parseable VMs; ListBroken+BrokenSSHPort, for VMs whose
 	// vm.toml exists but a port is still committed to their disk) rather
 	// than re-deriving "every port any VM has claimed" a second time.
@@ -116,7 +116,7 @@ func validateForwards(v *config.VM, fwds []PortForward) error {
 	if vms, err := config.List(); err == nil {
 		for _, other := range vms {
 			// Identity is the directory, never the `name` field inside
-			// vm.toml -- see the identity note in vm.go. v.Dir is always
+			// vm.toml; see the identity note in vm.go. v.Dir is always
 			// set here because it came from load(), which always sets it
 			// via config.Load.
 			if filepath.Base(other.Dir) == filepath.Base(v.Dir) {

@@ -25,8 +25,8 @@ type ExecResult struct {
 
 // Exec runs a command inside a VM and returns its output and exit status.
 //
-// ON EXIT STATUS 255: that is what ssh reports for its OWN errors — refused
-// connection, failed handshake, unreachable host — and it is unavoidably
+// ON EXIT STATUS 255: that is what ssh reports for its OWN errors (refused
+// connection, failed handshake, unreachable host), and it is unavoidably
 // ambiguous, because a remote command that itself exits 255 arrives through
 // the same single channel. Exec does not pretend to resolve that. What it does
 // is remove the common causes first: it refuses a VM that is not running, and
@@ -39,7 +39,7 @@ type ExecResult struct {
 // guest's shell before being sent (see shellJoin). This matters more than it
 // looks: ssh concatenates its trailing arguments with spaces and hands the
 // result to the REMOTE shell to re-parse, so passing an argv through unquoted
-// silently loses every word boundary — Exec(…, []string{"touch", "my file"})
+// silently loses every word boundary. Exec(…, []string{"touch", "my file"})
 // would create two files. An agent constructing commands from data it read
 // somewhere is exactly the caller that would hit this and never notice.
 //
@@ -82,7 +82,7 @@ func Exec(ctx context.Context, name string, cmd []string) (ExecResult, error) {
 		return res, nil
 	case errors.As(err, &ee):
 		// The command ran and exited non-zero. That is a result, not a
-		// failure of Exec — see ExecResult.
+		// failure of Exec; see ExecResult.
 		res.ExitCode = ee.ExitCode()
 		// ctx expiring kills the process, which surfaces here as an
 		// ExitError rather than as ctx.Err(). Report the cancellation: a
@@ -103,14 +103,14 @@ func Exec(ctx context.Context, name string, cmd []string) (ExecResult, error) {
 // parse back into exactly those words.
 //
 // Every element is wrapped in single quotes, inside which POSIX shells treat
-// every byte literally — no expansion, no globbing, no word splitting. The one
+// every byte literally, no expansion, no globbing, no word splitting. The one
 // byte that cannot appear inside single quotes is a single quote itself, which
-// is closed, escaped and reopened as '\” — the standard idiom.
+// is closed, escaped and reopened as '\”, the standard idiom.
 //
 // This is deliberately NOT internal/installer's shellQuote: that one exists to
 // write a value into a shell rc file for a HOST shell that may be fish, and
 // this package must not import a front end anyway (see doctor.go). The rule
-// they share is the reason both exist — a value that is not quoted is a value
+// they share is the reason both exist: a value that is not quoted is a value
 // the shell rewrites.
 func shellJoin(argv []string) string {
 	quoted := make([]string, len(argv))

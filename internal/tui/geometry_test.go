@@ -31,7 +31,7 @@ func geoVMs(t *testing.T, n int) []*config.VM {
 }
 
 // TestListPaneFitsTheTerminal pins the pagination arithmetic. Budgeting two
-// lines for the pagination row (it costs one — bubbles only adds a top margin
+// lines for the pagination row (it costs one: bubbles only adds a top margin
 // when the delegate's spacing is 0, and ours is 1) made the block taller than
 // the terminal, which flips View() to top-align and lets the terminal eat the
 // bottom line: the help footer.
@@ -49,7 +49,7 @@ func TestListPaneFitsTheTerminal(t *testing.T) {
 		m = mm.(model)
 
 		if got := lipgloss.Height(m.View().Content); got > c.height {
-			t.Errorf("%d vms at height %d rendered %d lines — the footer is cut off",
+			t.Errorf("%d vms at height %d rendered %d lines, the footer is cut off",
 				c.vms, c.height, got)
 		}
 	}
@@ -57,7 +57,7 @@ func TestListPaneFitsTheTerminal(t *testing.T) {
 
 // TestListWidthFitsARunningRow is the test that would have caught the worst
 // finding. Every render in the suite showed STOPPED VMs, whose state column is
-// a single "—" (38 cells); a running one carries "up 1h30m0s  :2200" and needs
+// a single "-" (38 cells); a running one carries "up 1h30m0s  :2200" and needs
 // 54, so the pane wrapped the port onto its own line the moment anything was
 // actually up. Pure arithmetic on the row format, so it needs no live qemu.
 func TestListWidthFitsARunningRow(t *testing.T) {
@@ -77,7 +77,7 @@ func TestListWidthFitsARunningRow(t *testing.T) {
 // running total passes the width it can no longer fit an ellipsis, so it
 // appends every remaining binding and returns a line WIDER than the terminal,
 // which then wraps and pushes the whole screen up. 60 is the enforced floor
-// and 80 the classic default — both were broken.
+// and 80 the classic default, and both were broken.
 func TestFooterNeverOverflows(t *testing.T) {
 	for w := 60; w <= 120; w += 2 {
 		for _, km := range []help.KeyMap{

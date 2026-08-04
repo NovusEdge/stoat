@@ -50,7 +50,7 @@ func TestApplyRefusesCloudinitBackend(t *testing.T) {
 	}
 }
 
-// A VM with nothing to apply is a no-op, not an error — mirrors Create's own
+// A VM with nothing to apply is a no-op, not an error; mirrors Create's own
 // "no recipes at all stays valid" rule (core_test.go's
 // TestCreateRejectsAnUnavailableRecipe).
 func TestApplyNoRecipesIsANoop(t *testing.T) {
@@ -68,7 +68,7 @@ func TestApplyNoRecipesIsANoop(t *testing.T) {
 	}
 }
 
-// Only must refuse a name that is not one of the VM's OWN recipes — it
+// Only must refuse a name that is not one of the VM's OWN recipes: it
 // selects a subset, it does not smuggle in a new recipe nobody vetted
 // against this VM's OS/backend.
 func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
@@ -90,14 +90,14 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 	}
 }
 
-// A valid Only subset must pass validation and reach the actual run —
+// A valid Only subset must pass validation and reach the actual run,
 // proven without a real sshd or the full sshx.WaitTimeout (90s): a bare TCP
 // listener that answers with the "SSH-" banner satisfies sshx.Wait's
 // reachability check (bannerReady) almost instantly, getting Provision past
 // "waiting for ssh" and into its per-recipe ctx.Err() check, where an
 // ALREADY-CANCELLED ctx returns context.Canceled immediately. That proves
-// two things at once: Only accepted "a.alpine.sh" (no ErrRecipeNotApplicable
-// — a rejection would have returned before ctx was ever consulted), and the
+// two things at once: Only accepted "a.alpine.sh" (no ErrRecipeNotApplicable,
+// a rejection would have returned before ctx was ever consulted), and the
 // call reached sshx.Provision's own ctx-aware cancellation, not a second,
 // separate one.
 func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
@@ -151,7 +151,7 @@ func TestRecipesRequiresBothOSAndBackend(t *testing.T) {
 }
 
 // The whole point of Recipes over recipes.List: a caller gets more than a
-// bare filename back. Label, TargetOS and Shared are all derived — see
+// bare filename back. Label, TargetOS and Shared are all derived; see
 // apply.go's Recipe doc comment for what is deliberately NOT here yet
 // (Description/Requires/Stages) and why.
 func TestRecipesReturnsMetadataNotJustNames(t *testing.T) {
@@ -185,7 +185,7 @@ func TestRecipesReturnsMetadataNotJustNames(t *testing.T) {
 }
 
 // A shared cloud-config fragment (no OS segment in its filename) must come
-// back with Shared true and no TargetOS — the metadata that tells a caller
+// back with Shared true and no TargetOS: the metadata that tells a caller
 // apart a fragment meant for one specific OS from one meant for every
 // CloudRecipes-eligible OS.
 func TestRecipesMarksSharedCloudFragments(t *testing.T) {
@@ -213,7 +213,7 @@ func TestRecipesMarksSharedCloudFragments(t *testing.T) {
 }
 
 // A per-OS override must NOT be reported as shared, and must carry its own
-// TargetOS — proven against debian's real override, xfce.debian.cloud.yaml.
+// TargetOS; proven against debian's real override, xfce.debian.cloud.yaml.
 func TestRecipesPerOSOverrideIsNotShared(t *testing.T) {
 	root(t)
 	if err := recipes.Install(); err != nil {
@@ -239,7 +239,7 @@ func TestRecipesPerOSOverrideIsNotShared(t *testing.T) {
 	if xfce.TargetOS != "debian" {
 		t.Errorf("TargetOS = %q, want %q", xfce.TargetOS, "debian")
 	}
-	// And the shared fragment it overrides must not ALSO be offered —
+	// And the shared fragment it overrides must not ALSO be offered:
 	// recipes.List already suppresses it; Recipes must not add it back.
 	for _, r := range got {
 		if r.Name == "xfce.cloud.yaml" {
@@ -273,7 +273,7 @@ func TestCheckRecipesExplainsAlpineOverride(t *testing.T) {
 	}
 }
 
-// The same shape of failure, on debian's own override — a second, distinct
+// The same shape of failure, on debian's own override: a second, distinct
 // OS hitting the identical code path, not a coincidence special-cased for
 // alpine alone.
 func TestCheckRecipesExplainsDebianOverride(t *testing.T) {
@@ -309,7 +309,7 @@ func TestCheckRecipesNoSuchRecipe(t *testing.T) {
 	}
 }
 
-// An applicable recipe reports no issue at all — CheckRecipes only ever
+// An applicable recipe reports no issue at all: CheckRecipes only ever
 // names what's WRONG, so a clean answer is an empty slice, not a slice of
 // "OK" entries a caller has to filter.
 func TestCheckRecipesOKRecipeReportsNoIssue(t *testing.T) {
@@ -328,7 +328,7 @@ func TestCheckRecipesOKRecipeReportsNoIssue(t *testing.T) {
 }
 
 // A shell recipe named for the cloudinit backend is a real, distinct
-// mistake from an OS mismatch — worth its own reason.
+// mistake from an OS mismatch, worth its own reason.
 func TestCheckRecipesShellRecipeOnCloudinitBackend(t *testing.T) {
 	root(t)
 	if err := recipes.Install(); err != nil {

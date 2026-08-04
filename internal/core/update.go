@@ -12,7 +12,7 @@ import (
 )
 
 // ErrImmutableField is returned by Update when a Patch tries to change a
-// field that has no meaningful "after the fact" value — see Patch's own
+// field that has no meaningful "after the fact" value; see Patch's own
 // comment for which fields those are and why. Named, not silent: a caller
 // that thinks it renamed or re-OSed a VM must be told it didn't, not have
 // the request quietly partially applied.
@@ -20,7 +20,7 @@ var ErrImmutableField = errors.New("immutable field")
 
 // ErrDiskShrink is returned by Update when Patch.Disk names a size smaller
 // than the VM's current one. Shrinking a qcow2 truncates it and corrupts
-// whatever filesystem is inside — qemu-img will do it anyway if asked;
+// whatever filesystem is inside: qemu-img will do it anyway if asked;
 // Update won't. Matches the create path's ParseSize, which refuses a
 // relative size ("+8G") for the adjacent reason: both exist because
 // `qemu-img resize` reads a leading "+" as "grow by", which is how an 8G
@@ -28,13 +28,13 @@ var ErrImmutableField = errors.New("immutable field")
 var ErrDiskShrink = errors.New("disk can only grow")
 
 // Patch describes an edit to an existing VM. Every field is a pointer so
-// "not set" (nil — leave alone) is distinguishable from "set to the zero
+// "not set" (nil, leave alone) is distinguishable from "set to the zero
 // value" (e.g. an explicit Share: "" to clear a share), matching the design
 // doc's requirement (docs/design/core-api.md §2.1) that a Patch be able to
 // state that difference.
 //
 // Which fields are here, and what setting each one does, follows directly
-// from §2.1 and the mutability table in §8 (decision 5) — the same rules
+// from §2.1 and the mutability table in §8 (decision 5), the same rules
 // internal/tui/edit.go's validate already enforces for the TUI, which this
 // must not be looser than:
 //
@@ -44,16 +44,16 @@ var ErrDiskShrink = errors.New("disk can only grow")
 //     have touched, instead of a Go compile error for a caller building a
 //     Patch by hand, or a silently-dropped field for a caller building one
 //     from a generic map (an MCP tool's JSON args, notably). Mode is
-//     documented in the design doc as immutable only "after first boot" —
+//     documented in the design doc as immutable only "after first boot";
 //     see the note on checkImmutable for why this implementation treats it
 //     as unconditionally immutable instead, which is a real narrowing of
 //     the design doc reported to the brief's author rather than silently
 //     decided here.
 //   - RAM, CPUs, Share, SSHPort: safe, applies at the VM's next start.
 //   - Recipes: safe, applies immediately (it only affects the NEXT Apply
-//     call — nothing reads it while a VM is mid-boot).
-//   - Disk: constrained. Grow-only, absolute size only, and — per §8's
-//     mutability table, which classes a disk grow as Destructive — refused
+//     call; nothing reads it while a VM is mid-boot).
+//   - Disk: constrained. Grow-only, absolute size only, and, per §8's
+//     mutability table, which classes a disk grow as Destructive, refused
 //     outright while the VM is running rather than merely deferred.
 type Patch struct {
 	Name    *string
@@ -70,14 +70,14 @@ type Patch struct {
 	// Recipes replaces the recipe list wholesale when non-nil, including
 	// with an empty (but non-nil) slice to clear it. A nil Recipes leaves
 	// the list untouched, matching every other field's "nil means don't
-	// touch" rule — there is no other way to tell "clear the list" and
+	// touch" rule; there is no other way to tell "clear the list" and
 	// "didn't mention it" apart with a bare []string.
 	Recipes *[]string
 }
 
 // checkImmutable reports ErrImmutableField, naming the field, for any of
 // Name/OS/Backend/Mode the Patch sets to something other than the VM's
-// current value. Setting one to its CURRENT value is not an error — a
+// current value. Setting one to its CURRENT value is not an error: a
 // caller that read a VM and Patches it back with every field populated
 // (the natural shape for an MCP tool taking a full object) must not be
 // punished for fields it never meant to change.
@@ -86,18 +86,18 @@ type Patch struct {
 // §2.1 states. The reason is not a shortcut: nothing in the codebase can
 // answer "has this VM booted before" for all three modes today. Installed
 // (config.VM's own field) only means anything for disk mode, where it
-// tracks boot ORDER, not "ever booted" (internal/qemu/run.go's diskWritten
-// — a >10MB disk.qcow2 — sets it, and a disk-mode VM's qcow2 is created at
+// tracks boot ORDER, not "ever booted" (internal/qemu/run.go's diskWritten,
+// a >10MB disk.qcow2, sets it, and a disk-mode VM's qcow2 is created at
 // full size by Create, so the flag can go true from Create alone if
 // something merely fills the file, without qemu ever running). A cloud VM's
 // disk.qcow2 is lazily created on first start (Create's own comment
-// explains why), so its existence is a real first-boot signal for cloud —
+// explains why), so its existence is a real first-boot signal for cloud,
 // but only for cloud. A live VM persists nothing at all: its apkovl overlay
 // is rebuilt from scratch on every single start
 // (internal/backend/apkovl.go), so there is no on-disk artifact whose
 // presence means "this live VM has booted." Three incompatible,
 // mode-specific proxies (one of which doesn't exist) are not "a first-boot
-// signal" — inventing a fourth, new, persisted flag JUST for Update to key
+// signal": inventing a fourth, new, persisted flag JUST for Update to key
 // on was judged out of scope for a two-file change that must not touch
 // config.VM. This is a real narrowing of §2.1, reported rather than
 // silently done: Mode is immutable, full stop, until a genuine
@@ -198,9 +198,9 @@ func Update(name string, p Patch) (VM, error) {
 // re-deriving "every port any other VM has claimed" a second time.
 //
 // The trick: present the candidate as a synthetic PortForward (guest port
-// 22, matching Args's own hardcoded ssh hostfwd — internal/qemu/args.go)
+// 22, matching Args's own hardcoded ssh hostfwd; internal/qemu/args.go)
 // appended to v's EXISTING forwards, and validate that list against v AS IT
-// CURRENTLY STANDS — v.SSHPort not yet mutated to the candidate. That
+// CURRENTLY STANDS, v.SSHPort not yet mutated to the candidate. That
 // matters: validateForwards refuses a forward whose HostPort equals
 // v.SSHPort (a forward colliding with the VM's own ssh port), and if v were
 // already mutated to the candidate first, a caller asking to change the
@@ -215,9 +215,9 @@ func Update(name string, p Patch) (VM, error) {
 // validateForwards, for the message alone: validateForwards' own wording for
 // it ("host port %d requested twice") is written for Forward, where a caller
 // really did list the same port twice in one request. Reusing the LOGIC
-// here is right; inheriting THAT message for an SSHPort caller — who
+// here is right; inheriting THAT message for an SSHPort caller, who
 // supplied exactly one port and has no idea it was turned into a synthetic
-// forward under the hood — would be actively misleading. Every other
+// forward under the hood, would be actively misleading. Every other
 // message validateForwards can produce ("host port N out of range", "needs
 // root to bind", "already used by another VM") already reads correctly
 // as-is for a port that happens to be an ssh port, so those are passed
@@ -243,7 +243,7 @@ func validateSSHPort(v *config.VM, candidate int) error {
 // ("empty"), which is correct here: Patch.Disk being non-nil means the
 // caller asked for a change, and "" is not a valid disk size to change to.
 func validateDiskGrow(v *config.VM, size string) (string, error) {
-	// A live VM has no disk.qcow2 at all — internal/tui/edit.go's validate
+	// A live VM has no disk.qcow2 at all; internal/tui/edit.go's validate
 	// refuses the mirror case (an empty size in disk/cloud mode) for the
 	// same underlying reason: a field that names a size only means
 	// something where a qcow2 exists.
@@ -257,11 +257,11 @@ func validateDiskGrow(v *config.VM, size string) (string, error) {
 	}
 
 	// §8's mutability table classes a disk grow as Destructive: "allowed
-	// (stopped) / refused (running)" — not merely deferred to next start
+	// (stopped) / refused (running)": not merely deferred to next start
 	// like RAM/CPUs/SSHPort, because unlike those, this function actually
 	// runs qemu-img resize against the live file below. Reusing
 	// ErrAlreadyRunning (rather than the design doc's own ErrRequiresStopped,
-	// which — see the report accompanying this change — appears nowhere in
+	// which, see the report accompanying this change, appears nowhere in
 	// the doc's own §9 error taxonomy) matches how Destroy already signals
 	// "this needs the VM stopped, and it isn't" for the same shape of
 	// refusal.
@@ -271,7 +271,7 @@ func validateDiskGrow(v *config.VM, size string) (string, error) {
 
 	// v.Disk is empty for a cloud VM that has never named a size of its own
 	// (Create defaults it, so this is rare, but a hand-edited vm.toml or a
-	// pre-default VM could still have one) — ParseSize already rejected an
+	// pre-default VM could still have one); ParseSize already rejected an
 	// empty CANDIDATE above; an empty CURRENT size has nothing to compare
 	// against, so any valid candidate is accepted as the new size rather
 	// than compared.
@@ -292,7 +292,7 @@ func validateDiskGrow(v *config.VM, size string) (string, error) {
 		}
 	}
 
-	// disk.qcow2 does not exist yet for a cloud VM that has never started —
+	// disk.qcow2 does not exist yet for a cloud VM that has never started:
 	// Create deliberately does not create the overlay (see core.go's own
 	// comment on Create). qemu-img resize against a missing file fails with
 	// a generic "Could not open"; naming the real reason here beats letting

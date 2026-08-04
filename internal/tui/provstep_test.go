@@ -23,7 +23,7 @@ func provFixture(t *testing.T, log string) *config.VM {
 
 // TestReadProvStep covers what the spinner line actually reports, across the
 // stages a real run passes through. The step comes from the log the run
-// already writes, so there is no progress channel to keep in sync — and no
+// already writes, so there is no progress channel to keep in sync, and no
 // percentage, because nothing knows how many packages a recipe will install.
 func TestReadProvStep(t *testing.T) {
 	cases := []struct {
@@ -121,7 +121,7 @@ func TestProvisionRefusedUntilInstalled(t *testing.T) {
 		SSHPort: 2201, Dir: t.TempDir(), Recipes: []string{"xfce.alpine.sh"},
 	}
 
-	// A refusal still returns a Cmd — the one that shows its toast — so the
+	// A refusal still returns a Cmd (the one that shows its toast), so the
 	// invariant to check is that no run was registered, not that no Cmd came
 	// back.
 	m.startProvision(v)

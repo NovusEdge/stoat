@@ -138,7 +138,7 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 
 // TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable proves the footer only
 // advertises "t" (type console password into guest) when the VM actually has
-// one to send — a stopped VM or one with no console password set must not
+// one to send. A stopped VM or one with no console password set must not
 // show it, since pressing it then can never succeed.
 func TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
 	cases := []struct {
@@ -177,8 +177,8 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 }
 
 // A cloud VM never gets a qemu window (qemu.NeedsWindow), so the detail
-// screen must surface the VNC socket as the actual way to get a display --
-// before this fix nothing anywhere told the user that socket exists, and
+// screen must surface the VNC socket as the actual way to get a display.
+// Before this fix nothing anywhere told the user that socket exists, and
 // the console-password row claimed a "(qemu window only)" that never
 // appears for a VM this password is ever set on (it's only written for the
 // cloudinit backend, which is always cloud mode). See IMPORTANT 3 in the

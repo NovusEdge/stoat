@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseMetadataMissingBlock(t *testing.T) {
-	// No "# stoat:" tags at all — a recipe predating the contract, or one
+	// No "# stoat:" tags at all: a recipe predating the contract, or one
 	// that simply declares nothing. Zero Metadata, no error.
 	m, err := ParseMetadata("#!/bin/sh\n# just a plain comment\nset -e\necho hi\n")
 	if err != nil {
@@ -62,8 +62,8 @@ func TestParseMetadataDuplicateKey(t *testing.T) {
 }
 
 func TestParseMetadataMalformedLine(t *testing.T) {
-	// "# stoat:" with nothing after it at all — no key, not even an empty
-	// one — is malformed, distinct from a known key with an empty value.
+	// "# stoat:" with nothing after it at all, no key and not even an empty
+	// one, is malformed. Distinct from a known key with an empty value.
 	_, err := ParseMetadata("#!/bin/sh\n# stoat:\nset -e\n")
 	if err == nil || !strings.Contains(err.Error(), "no key") {
 		t.Errorf("err = %v, want a malformed-line error", err)
@@ -79,7 +79,7 @@ func TestParseMetadataEmptyValue(t *testing.T) {
 
 func TestParseMetadataTagsAfterFrontMatterAreNotHonoured(t *testing.T) {
 	// A tag appearing after the first non-comment, non-blank line is not
-	// front matter — it's left as an ordinary comment, not parsed and not
+	// front matter. It is left as an ordinary comment, not parsed and not
 	// reported as an error either.
 	body := "#!/bin/sh\nset -e\n# stoat:name too-late\n"
 	m, err := ParseMetadata(body)
@@ -87,7 +87,7 @@ func TestParseMetadataTagsAfterFrontMatterAreNotHonoured(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if m.Name != "" {
-		t.Errorf("Name = %q, want empty — the tag came after front matter", m.Name)
+		t.Errorf("Name = %q, want empty: the tag came after front matter", m.Name)
 	}
 }
 

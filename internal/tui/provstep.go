@@ -111,7 +111,7 @@ func provElapsed(d time.Duration) string {
 const provMaxLast = 34
 
 // provLine renders one in-flight run: spinner, VM, current step, last output,
-// elapsed. Everything in it is derived from real state — there is no progress
+// elapsed. Everything in it is derived from real state: there is no progress
 // bar here on purpose, because nothing knows how many steps remain.
 func provLine(spin spinner.Model, name string, st provState, now time.Time) string {
 	out := spin.View() + " " + accentStyle.Render(name) + dimStyle.Render(" · "+st.step)

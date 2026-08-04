@@ -33,7 +33,7 @@ func writeRawVMToml(t *testing.T, name, content string) {
 // must be deferred by the caller.
 //
 // This exists so Start/Stop/Destroy's "is it running" branches are testable
-// without qemu-system-x86_64 installed — exactly the CI constraint the
+// without qemu-system-x86_64 installed, exactly the CI constraint the
 // existing tests already work around for qemu-img.
 func fakeRunning(t *testing.T, v *config.VM) func() {
 	return testutil.FakeRunning(t, v.Dir)
@@ -89,7 +89,7 @@ func TestGetUnknownVM(t *testing.T) {
 }
 
 // A broken vm.toml must come back as a VM the caller can see (StateBroken),
-// not as a bare error indistinguishable from "no such VM" — otherwise there
+// not as a bare error indistinguishable from "no such VM", otherwise there
 // is no way to ever offer deleting it.
 func TestGetBrokenVMReturnsStateBrokenNotAnError(t *testing.T) {
 	root(t)
@@ -135,7 +135,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 }
 
 // down on a stopped VM is a failure, matching runDown's existing behaviour
-// (internal/cli/cli.go) — Stop must not silently succeed the way qemu.Stop
+// (internal/cli/cli.go): Stop must not silently succeed the way qemu.Stop
 // does on its own.
 func TestStopNotRunningIsAnError(t *testing.T) {
 	root(t)
@@ -154,7 +154,7 @@ func TestStopUnknownVM(t *testing.T) {
 	}
 }
 
-// Destroy refuses while running, matching runRM and the TUI's delete key —
+// Destroy refuses while running, matching runRM and the TUI's delete key;
 // see Destroy's doc comment for why stopping-first was rejected.
 func TestDestroyRefusesWhileRunning(t *testing.T) {
 	dir := root(t)
@@ -191,7 +191,7 @@ func TestDestroyUnknownVM(t *testing.T) {
 	}
 }
 
-// A broken VM's directory is still real and still deletable — this is the
+// A broken VM's directory is still real and still deletable; this is the
 // whole reason Get/List surface it instead of hiding it.
 func TestDestroyBrokenVMDeletesTheDirectory(t *testing.T) {
 	dir := root(t)
@@ -209,8 +209,8 @@ func TestDestroyBrokenVMDeletesTheDirectory(t *testing.T) {
 // this package is a DIRECTORY name, and that VM.Name reports that directory
 // rather than vm.toml's `name` field.
 //
-// The two diverge in practice — a VM's directory is fixed at creation and the
-// file's name field can be edited afterwards — and every operation here is
+// The two diverge in practice: a VM's directory is fixed at creation and the
+// file's name field can be edited afterwards, and every operation here is
 // directory-anchored (config.Load builds Root()/<name>/vm.toml, qemu's pidfile
 // comes off v.Dir, Delete removes v.Dir). Before this was fixed, a directory
 // "work" holding `name = "work2"` came back from List as "work2", and feeding
@@ -250,8 +250,8 @@ func TestIdentityFromListRoundTrips(t *testing.T) {
 
 // TestDestroyRefusesARunningBrokenVM pins a real bug: Destroy's broken-VM
 // branch skipped the running check, on the stated but false grounds that
-// qemu.Running needed a parsed config.VM. It needs only Dir — which that
-// branch reconstructs — so a vm.toml corrupted AFTER its VM was started turned
+// qemu.Running needed a parsed config.VM. It needs only Dir, which that
+// branch reconstructs, so a vm.toml corrupted AFTER its VM was started turned
 // Destroy into a quiet way around the refusal that applies to every healthy
 // VM, deleting the pidfile, monitor socket and disk from under a live qemu.
 func TestDestroyRefusesARunningBrokenVM(t *testing.T) {

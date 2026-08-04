@@ -18,8 +18,9 @@ import (
 // replacing it: `image` is what Create/resolveImage need to build a VM
 // (an absolute path, an *iso.Entry, a resolved SSH user) and is built by
 // resolving ONE spec string; CatalogImage is what a picker or `stoat images`
-// needs to list EVERY known image with its download state — different
-// callers, different lifetimes, no reason for one type to serve both. The
+// needs to list EVERY known image with its download state, and those are
+// different callers with different lifetimes, no reason for one type to
+// serve both. The
 // name is CatalogImage, not Image, specifically so it cannot collide with
 // the existing unexported `image`.
 type CatalogImage struct {
@@ -45,7 +46,7 @@ type CatalogImage struct {
 	//     downloaded file.
 	//   - Exact == false: Bytes is iso.Entry.Size, a DECLARED approximation
 	//     that drifts as images are rebuilt in place (see that field's doc
-	//     comment) — never measured, never verified.
+	//     comment); never measured, never verified.
 	//
 	// A caller that renders a size (or, worse, preallocates against one)
 	// must not treat the two the same way; the flag exists so it doesn't
@@ -55,11 +56,11 @@ type CatalogImage struct {
 }
 
 // fileSize is the exact on-disk size of a file under isos/, mirroring
-// internal/tui/form.go's imageBytes. Failure is not surfaced as an error —
-// the file was just listed by LocalImages and could have been removed since
-// (or, for the sub-second window in Images below, is mid-download and racing
-// with the reader) — a missing size just means the caller gets no exact
-// figure for that entry.
+// internal/tui/form.go's imageBytes. Failure is not surfaced as an error: the
+// file was just listed by LocalImages and could have been removed since (or,
+// for the sub-second window in Images below, is mid-download and racing with
+// the reader), so a missing size just means the caller gets no exact figure
+// for that entry.
 func fileSize(file string) (int64, bool) {
 	fi, err := os.Stat(filepath.Join(config.Root(), "isos", file))
 	if err != nil {
@@ -75,8 +76,8 @@ func fileSize(file string) (int64, bool) {
 // This is the headless equivalent of internal/tui/form.go's buildImages,
 // which assembles the exact same two-pass shape for the picker: reused here
 // are LocalImages (image.go) for the file listing and MatchLocal (image.go)
-// for entry<->file matching, so there is exactly one place — not a third
-// copy — that decides which file satisfies which catalog entry. Create
+// for entry<->file matching, so there is exactly one place (not a third
+// copy) that decides which file satisfies which catalog entry. Create
 // (via resolveImage) uses the same two functions, so Images can never
 // disagree with what a Spec naming a catalog ID actually resolves to.
 func Images() ([]CatalogImage, error) {
@@ -92,7 +93,7 @@ func Images() ([]CatalogImage, error) {
 			matched[f] = true
 			// A downloaded image knows its own size exactly, so the
 			// catalog's declared approximation stops being the best answer
-			// available — same reasoning as buildImages.
+			// available, same reasoning as buildImages.
 			if n, ok := fileSize(f); ok {
 				img.Bytes, img.Exact = n, true
 			}
@@ -131,12 +132,12 @@ func Images() ([]CatalogImage, error) {
 //
 // iso.Download now takes this ctx and builds its HTTP request from it, so
 // cancelling unblocks the in-flight resp.Body.Read exactly the way the stall
-// timer's own cancel() already did — the plumbing was always there, it just
+// timer's own cancel() already did: the plumbing was always there, it just
 // was not reachable from outside. The partial file is removed on the way out
 // (Download's read-error path does that), so nothing half-written survives.
 //
-// One honest limit: iso.Resolve — the index and checksum fetches that run
-// before the body download — still uses its own client with a 30s timeout and
+// One honest limit: iso.Resolve, the index and checksum fetches that run
+// before the body download, still uses its own client with a 30s timeout and
 // takes no ctx, so a cancellation arriving during that short window is noticed when
 // Resolve returns rather than interrupting it. That is a bounded 30s worst
 // case on a metadata request, not an unbounded multi-minute image transfer,

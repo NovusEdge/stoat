@@ -87,7 +87,7 @@ func TestWaitReachableAlreadyUpReturnsImmediately(t *testing.T) {
 func TestWaitReachablePollsUntilUp(t *testing.T) {
 	root(t)
 	// Reserve a port, save the VM against it, then only start the fake sshd
-	// after a delay — Wait must poll rather than answering on its first
+	// after a delay; Wait must poll rather than answering on its first
 	// check.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

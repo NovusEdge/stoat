@@ -11,7 +11,7 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// State is what List/Get answer at the moment they are called — never cached,
+// State is what List/Get answer at the moment they are called: never cached,
 // always re-derived from the process table and the filesystem, exactly like
 // runLS does today.
 //
@@ -21,7 +21,7 @@ import (
 //   - StateStopped and StateRunning come straight from qemu.Running, which
 //     already does the hard part (pid liveness plus a /proc/<pid>/cmdline
 //     check, so a reused pid never reads as "running").
-//   - StateBroken comes from a vm.toml that exists but fails to parse —
+//   - StateBroken comes from a vm.toml that exists but fails to parse,
 //     config.ListBroken's existing concept.
 //
 // StateStarting, StateApplying and StateFailed are NOT declared here. Each
@@ -30,7 +30,7 @@ import (
 // reachable", nothing records that recipes are mid-apply, and nothing
 // records that the last operation on a VM failed. Declaring those constants
 // now would give List/Get a return type that claims six states while only
-// ever producing three — a caller that switches on State exhaustively would
+// ever producing three: a caller that switches on State exhaustively would
 // have three cases that can never trigger, which is worse than an enum that
 // is honestly incomplete. Add them when Start/Apply gain the tracking to
 // back them, not before.
@@ -43,18 +43,18 @@ const (
 )
 
 // ErrNotRunning is returned by Stop (and by Destroy, transitively) for a VM
-// that is not currently running — the honest answer, distinct from silently
+// that is not currently running: the honest answer, distinct from silently
 // succeeding. qemu.Stop itself treats "already stopped" as a no-op; Stop
 // checks first so the caller gets a typed signal instead of a silent nothing.
 var ErrNotRunning = errors.New("not running")
 
 // ErrAlreadyRunning is returned by Start for a VM that is already running,
 // and reused by Destroy for a VM that is still running: both are the same
-// shape of refusal — "this operation needs the VM stopped, and it isn't".
+// shape of refusal: "this operation needs the VM stopped, and it isn't".
 var ErrAlreadyRunning = errors.New("already running")
 
 // ErrBroken is returned by Start/Stop/Destroy for a VM whose vm.toml exists
-// but fails to parse. Get and List do NOT return this — a broken VM must be
+// but fails to parse. Get and List do NOT return this: a broken VM must be
 // visible to those two (as StateBroken, so it can still be found and
 // destroyed) rather than looking deleted. Start/Stop/Destroy have no VM view
 // to attach a state to, so a typed error is the only way to say "broken" to
@@ -64,7 +64,7 @@ var ErrBroken = errors.New("broken vm.toml")
 // Paths are the on-disk locations for one VM, resolved once here so a caller
 // (an MCP server describing a VM, a TUI detail screen) does not have to
 // import config and call five separate methods to get them. Every field
-// comes straight from the matching config.VM path method — ApplyLog from
+// comes straight from the matching config.VM path method: ApplyLog from
 // v.ProvisionLogPath(), the same one access.go's Logs(WhichApply) opens.
 type Paths struct {
 	Dir           string
@@ -79,7 +79,7 @@ type Paths struct {
 // record. It is a deliberately separate type from config.VM rather than the
 // same struct with a State bolted on:
 //
-//   - config.VM is vm.toml — what was asked for, valid the instant it was
+//   - config.VM is vm.toml: what was asked for, valid the instant it was
 //     last saved, and meaningless to compare against "is it running" without
 //     also calling qemu.Running.
 //   - core.VM is a point-in-time answer: vm.toml plus qemu.Running, computed
@@ -87,11 +87,11 @@ type Paths struct {
 //     know that combining them is even a step.
 //
 // Fields present in the design doc's VM (§1) but not here: Progress (nothing
-// produces one yet — see State's comment) and Created (nothing records a
+// produces one yet, see State's comment) and Created (nothing records a
 // creation timestamp; vm.toml's mtime is not that, since Update or a
 // recipe-list edit would move it).
 type VM struct {
-	// Name is the VM's DIRECTORY under the data root, which is its identity —
+	// Name is the VM's DIRECTORY under the data root, which is its identity;
 	// see the note above load(). It is NOT necessarily the `name` field in
 	// vm.toml; when those diverge, this is the one that works.
 	Name    string
@@ -127,15 +127,15 @@ type VM struct {
 }
 
 // A VM's IDENTITY is its DIRECTORY under the data root, never the `name` field
-// inside its vm.toml. The two can diverge — editing a VM keeps its directory
-// and can leave a different name in the file — and everything that acts on a
+// inside its vm.toml. The two can diverge: editing a VM keeps its directory
+// and can leave a different name in the file, and everything that acts on a
 // VM is directory-anchored: config.Load builds Root()/<name>/vm.toml, qemu's
 // pidfile and monitor socket come off v.Dir, and config.VM.Delete removes
 // v.Dir. internal/tui's TestDeleteTargetsDirectoryNotName pins this for the
 // delete path specifically, after it was got wrong once.
 //
 // So every `name string` parameter in this package is a DIRECTORY name, and
-// VM.Name must report that same directory — otherwise List hands back an
+// VM.Name must report that same directory, otherwise List hands back an
 // identifier that Get and Destroy reject, or worse, one that resolves to a
 // different VM. That is not hypothetical: before this was fixed,
 // List()[0].Name on a directory "work" holding `name = "work2"` returned
@@ -145,7 +145,7 @@ type VM struct {
 // load resolves a VM DIRECTORY name to its config.VM, distinguishing the two
 // ways that can fail: no such VM at all (ErrNotFound) versus a VM directory
 // whose vm.toml exists but won't parse (ErrBroken). config.Load alone
-// conflates these — both come back as a bare decode/stat error — which is
+// conflates these: both come back as a bare decode/stat error, which is
 // exactly the distinction Start/Stop/Destroy need in order to give a broken VM
 // a sensible error instead of a raw TOML parse message.
 func load(name string) (*config.VM, error) {
@@ -167,7 +167,7 @@ func fromConfig(v *config.VM) VM {
 		state = StateRunning
 	}
 	return VM{
-		// The DIRECTORY, not v.Name — see the identity note above load(). This
+		// The DIRECTORY, not v.Name; see the identity note above load(). This
 		// is the identifier every other operation in this package accepts, so
 		// it is the only one List may hand out.
 		Name:      filepath.Base(v.Dir),
@@ -195,7 +195,7 @@ func fromConfig(v *config.VM) VM {
 	}
 }
 
-// List returns every VM in the data root, sorted by name — including broken
+// List returns every VM in the data root, sorted by name, including broken
 // ones as StateBroken rather than omitting them.
 //
 // This is the whole point of the operation, not an edge case bolted on:
@@ -220,8 +220,8 @@ func List() ([]VM, error) {
 		return nil, err
 	}
 	for _, b := range broken {
-		// A broken VM can supply none of config.VM's fields — there is no
-		// parsed struct to read them from — so it gets a name, StateBroken,
+		// A broken VM can supply none of config.VM's fields: there is no
+		// parsed struct to read them from, so it gets a name, StateBroken,
 		// and the parse error, and nothing else. Matches what runLS already
 		// renders as dashes.
 		out = append(out, VM{Name: b.Name, State: StateBroken, Error: b.Err.Error()})
@@ -234,7 +234,7 @@ func List() ([]VM, error) {
 // Get returns the current view of one VM by name.
 //
 // A VM whose vm.toml is unparseable comes back as (VM{State: StateBroken},
-// nil), not an error — the same reasoning as List: a caller (in particular
+// nil), not an error, the same reasoning as List: a caller (in particular
 // Destroy, or a TUI wanting to offer "delete" on a broken entry) needs to be
 // able to see and act on a broken VM, and returning a bare error here would
 // make it indistinguishable from "no such VM".
@@ -256,7 +256,7 @@ func Get(name string) (VM, error) {
 // qemu.Start already refuses to run twice, but with an untyped error
 // ("%s is already running") that a caller can only detect by string
 // matching. Checking qemu.Running first, before calling it, is what turns
-// that into ErrAlreadyRunning — not a second guard, just a typed one placed
+// that into ErrAlreadyRunning, not a second guard, just a typed one placed
 // ahead of the one qemu.Start already has (which then never fires, because
 // this function has already returned).
 func Start(name string) error {
@@ -271,7 +271,7 @@ func Start(name string) error {
 }
 
 // Stop powers down VM name. qemu.Stop treats "already stopped" as a
-// successful no-op; Stop does not — the CLI's `down` already refuses a
+// successful no-op; Stop does not: the CLI's `down` already refuses a
 // stopped VM as a failure (internal/cli/cli.go's runDown), and that is the
 // behaviour this preserves rather than regresses to a silent success.
 func Stop(name string) error {
@@ -287,7 +287,7 @@ func Stop(name string) error {
 
 // Destroy removes VM name's directory and vm.toml.
 //
-// Decision: REFUSE while running, matching both existing callers exactly —
+// Decision: REFUSE while running, matching both existing callers exactly:
 // runRM (internal/cli/cli.go) errors with "stop it first", and the TUI's
 // delete key (internal/tui/list.go) shows a toast telling the user to stop
 // it rather than offering to delete at all. Stopping-first was the other
@@ -296,7 +296,7 @@ func Stop(name string) error {
 // process was running inside it. Deleting is destructive enough already;
 // bundling an implicit kill into it is a second destructive action a caller
 // did not explicitly ask for. A caller that wants "stop it, then delete it"
-// can call Stop then Destroy — two words, and it cannot get the order wrong.
+// can call Stop then Destroy, two words, and it cannot get the order wrong.
 //
 // config.VM.Delete already refuses to remove anything outside the data root
 // (it checks filepath.Dir(v.Dir) == config.Root()); that guard is untouched
@@ -316,18 +316,18 @@ func Destroy(name string) error {
 
 	v, err := load(name)
 	if errors.Is(err, ErrBroken) {
-		// A broken VM's directory is still real and still deletable — that is
+		// A broken VM's directory is still real and still deletable; that is
 		// precisely why Get/List surface broken VMs rather than hiding them,
 		// so they CAN be cleared instead of sitting forever unparseable.
 		//
 		// It is still checked for a running process first. An earlier version
 		// of this claimed Running() "would need a parsed config.VM it doesn't
-		// have" and skipped the check; that was simply wrong — Running reads
+		// have" and skipped the check; that was simply wrong: Running reads
 		// v.Dir/qemu.pid and matches v.Dir against /proc/<pid>/cmdline, and
 		// Dir is exactly what is reconstructed here. The bug it caused was
 		// real: a vm.toml corrupted AFTER its VM was started made Destroy a
-		// quiet backdoor around the refusal below, deleting the directory —
-		// pidfile, monitor socket and disk — out from under a live qemu.
+		// quiet backdoor around the refusal below, deleting the directory,
+		// pidfile, monitor socket and disk, out from under a live qemu.
 		bv := &config.VM{Name: name, Dir: filepath.Join(config.Root(), name)}
 		if qemu.Running(bv) {
 			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)

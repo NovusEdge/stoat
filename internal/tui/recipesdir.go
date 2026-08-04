@@ -13,7 +13,7 @@ import (
 // hatch "E" uses for a vm.toml.
 //
 // Authoring a recipe has always been "put a correctly named file in this
-// directory" — recipes.Install leaves an edited recipe alone, so it survives
+// directory": recipes.Install leaves an edited recipe alone, so it survives
 // upgrades, and recipes.List picks up a new file with no code change at all.
 // The only real problem was that nothing in the UI ever said so. A key that
 // puts you in the directory says it better than any amount of documentation.

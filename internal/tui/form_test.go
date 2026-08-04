@@ -47,7 +47,7 @@ func TestFormTabOrder(t *testing.T) {
 			}
 
 			// Forward: tab len(order) times should visit every position in
-			// order and land back on the start (fName) — one full wrap.
+			// order and land back on the start (fName), one full wrap.
 			var forward []int
 			for i := 0; i < len(c.order); i++ {
 				mm, _ := m.updateForm(keyMsg("tab"))
@@ -63,7 +63,7 @@ func TestFormTabOrder(t *testing.T) {
 			}
 
 			// Backward: shift+tab len(order) times from fName should retrace
-			// the same order in reverse and land back on fName — one full
+			// the same order in reverse and land back on fName, one full
 			// wrap the other way.
 			var backward []int
 			for i := 0; i < len(c.order); i++ {
@@ -117,7 +117,7 @@ func (f formModel) build() (*config.VM, error) {
 }
 
 // stubImage puts a real file under isos/ and returns the picker option for it.
-// core resolves an image against the filesystem — a made-up filename no longer
+// core resolves an image against the filesystem, so a made-up filename no longer
 // builds, which is the point: the form used to happily create a VM pointing at
 // an image that was not there.
 func stubImage(t *testing.T, name string) imageOption {
@@ -148,7 +148,7 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		// Real recipe names, as recipes.List returns them: core.Plan refuses a
 		// name that is not actually available for the VM's OS and backend, so
 		// synthetic "alpha"/"beta"/"gamma" no longer build. The property under
-		// test is unchanged — that the CHECKED subset is carried through in
+		// test is unchanged: that the CHECKED subset is carried through in
 		// recipeNames order, not selection order.
 		if err := recipes.Install(); err != nil {
 			t.Fatal(err)
@@ -187,7 +187,7 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 // TestBuildRejectsRelativeDiskSize is a regression test: build() used to hand
 // the disk field straight to config.VM.Disk unchecked, so a relative size
 // like "+8G" reached qemu-img's resize, which reads a leading "+" as "grow
-// by" rather than "resize to" — silently doubling a fresh overlay. edit.go's
+// by" rather than "resize to", silently doubling a fresh overlay. edit.go's
 // parseSize already refuses this on the edit path; build() must refuse it
 // too, the same way it refuses other invalid input (returning an error from
 // build(), surfaced by the caller as m.form.err).
@@ -231,7 +231,7 @@ func TestFormAndParseSizeAgreeOnDiskStrings(t *testing.T) {
 			_, sizeErr := parseSize(s)
 
 			// Empty is a special case on the form: it means "use the default",
-			// not "invalid" — parseSize alone would refuse it, but build() must
+			// not "invalid": parseSize alone would refuse it, but build() must
 			// not, so the two are only compared when the string isn't empty.
 			if s == "" {
 				if buildErr != nil {
@@ -366,8 +366,8 @@ func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
 }
 
 // TestDownloadSurvivesLeavingTheForm is the regression test for the review's
-// C1. Leaving the form with "esc" does not cancel the fetch — there is no
-// cancel — so the goroutine keeps writing. If "n" then handed out a fresh
+// C1. Leaving the form with "esc" does not cancel the fetch. There is no
+// cancel, so the goroutine keeps writing. If "n" then handed out a fresh
 // form, "fetching" would reset to false and a second space would start a
 // SECOND download of the same file: two writers interleaving into one .part,
 // each verifying its own read stream, so both pass the checksum and the
@@ -444,7 +444,7 @@ func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 // direct-URL entry uses. Before this fix, the gate was `e.OS != "alpine"`,
 // which skipped that basename match for EVERY alpine entry (including
 // alpine-cloud) and fell through to iso.Infer, which used to return an empty
-// OS for the .qcow2 filename — so the download could never be matched back
+// OS for the .qcow2 filename, so the download could never be matched back
 // to its catalog entry and the form offered it as an unlabeled BYO file
 // forever. See CRITICAL 1 in the final review.
 func TestMatchLocalImageFindsDownloadedAlpineCloudFile(t *testing.T) {
@@ -547,7 +547,7 @@ func TestByoOptionFromPathRejectsMissingFile(t *testing.T) {
 }
 
 // b6593b3: a BYO image in cloudinit mode must resolve to cloudinit.User, not
-// root -- cloud images lock root. A browsed path takes a different route into
+// root. Cloud images lock root. A browsed path takes a different route into
 // imageOption than localImageFiles, so it needs its own guard.
 func TestBrowsedByoCloudinitResolvesSSHUser(t *testing.T) {
 	dir := t.TempDir()

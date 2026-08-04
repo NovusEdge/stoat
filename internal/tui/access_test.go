@@ -125,8 +125,8 @@ func TestCloudInitStates(t *testing.T) {
 		})
 	}
 
-	// An unknown status must not claim the run finished — that would stop the
-	// poll and leave the UI reporting a stage that never advances.
+	// An unknown status must not claim the run finished, since that would stop
+	// the poll and leave the UI reporting a stage that never advances.
 	if cloudInitDone("wat") {
 		t.Error("an unrecognised status was treated as terminal")
 	}

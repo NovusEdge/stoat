@@ -13,7 +13,7 @@ import (
 
 // writeBroken drops a vm.toml under dir/name that fails to parse (an
 // unterminated string), optionally with extra lines appended verbatim before
-// the break — used to test the best-effort iso/base regex extraction.
+// the break, used to test the best-effort iso/base regex extraction.
 func writeBroken(t *testing.T, dir, name string, extraLines ...string) {
 	t.Helper()
 	vdir := filepath.Join(dir, name)
@@ -26,7 +26,7 @@ func writeBroken(t *testing.T, dir, name string, extraLines ...string) {
 	}
 }
 
-// A healthy VM's image must never be removed even when Images is requested —
+// A healthy VM's image must never be removed even when Images is requested:
 // the whole point of the class being opt-in is that it still has to get the
 // "is this referenced" check right, not just the flag.
 func TestPruneNeverRemovesAHealthyVMsImage(t *testing.T) {
@@ -81,7 +81,7 @@ func TestPruneProtectsImageReferencedViaBase(t *testing.T) {
 func TestPruneBYOOutsideIsosDoesNotConfuseImages(t *testing.T) {
 	// A BYO .iso with no alpine hint infers the ssh backend, which means disk
 	// mode, which means Create shells out to qemu-img. CI has no qemu-img, and
-	// a missing host tool must never redden CI — the same rule the xorriso and
+	// a missing host tool must never redden CI, the same rule the xorriso and
 	// qemu-img tests elsewhere in this repo already follow.
 	if _, err := exec.LookPath("qemu-img"); err != nil {
 		t.Skip("qemu-img not installed")
@@ -156,7 +156,7 @@ func TestPruneDryRunRemovesNothingFromDisk(t *testing.T) {
 }
 
 // A .part file young enough to plausibly be an in-flight download must
-// survive even a non-dry-run Prune — this is the one class with no opt-in
+// survive even a non-dry-run Prune: this is the one class with no opt-in
 // flag guarding it, so the age gate has to do all the work by itself.
 func TestPruneLeavesFreshPartFileAlone(t *testing.T) {
 	dir := root(t)
@@ -257,7 +257,7 @@ func TestPruneLeavesOrphanedImageAloneWithoutOptIn(t *testing.T) {
 }
 
 // A broken VM whose vm.toml still has an intact `base` line, salvaged by the
-// best-effort regex, must still protect its image from Images pruning —
+// best-effort regex, must still protect its image from Images pruning,
 // exactly the case a naive "only look at parsed VMs" implementation misses.
 func TestPruneBrokenVMWithReadableBaseFieldProtectsItsImage(t *testing.T) {
 	dir := root(t)
@@ -283,14 +283,14 @@ func TestPruneBrokenVMWithReadableBaseFieldProtectsItsImage(t *testing.T) {
 }
 
 // A broken VM directory whose qemu process is still actually running must
-// never be deleted, even with Broken opted in — Destroy already refuses to
+// never be deleted, even with Broken opted in: Destroy already refuses to
 // touch a running VM, and Prune, acting without anyone watching, must not
 // become a quieter way around that refusal.
 // This was called TestPruneNeverRemovesARunningBrokenVM and asserted the
 // OPPOSITE of its name: a pid of 999999999 cannot exist, so qemu.Running was
 // always false and the running guard was never reached. Disabling that guard
 // entirely left every prune test still passing. Renamed to what it actually
-// checks — which is worth checking — and the guard it claimed to cover now has
+// checks (which is worth checking), and the guard it claimed to cover now has
 // a real test below.
 func TestPruneRemovesABrokenVMWithAStalePidfile(t *testing.T) {
 	dir := root(t)
@@ -317,8 +317,8 @@ func TestPruneRemovesABrokenVMWithAStalePidfile(t *testing.T) {
 }
 
 // TestPruneNeverRemovesARunningBrokenVM covers the single guard standing
-// between `stoat prune --broken` and deleting a live qemu's directory —
-// pidfile, monitor socket and disk — out from under it. A vm.toml can be
+// between `stoat prune --broken` and deleting a live qemu's directory:
+// pidfile, monitor socket and disk, out from under it. A vm.toml can be
 // corrupted AFTER its VM was started, which is exactly the state that reaches
 // this path.
 //
@@ -348,7 +348,7 @@ func TestPruneNeverRemovesARunningBrokenVM(t *testing.T) {
 }
 
 // config.List/ListBroken skip "isos" and "recipes" as VM directories, and
-// Prune's helpers only ever touch Root()/<broken-vm-dir> or Root()/isos/* —
+// Prune's helpers only ever touch Root()/<broken-vm-dir> or Root()/isos/*;
 // this pins that recipes/ is never enumerated as a prune candidate at all.
 func TestPruneNeverTouchesRecipesDir(t *testing.T) {
 	dir := root(t)

@@ -59,7 +59,7 @@ func TestParseSize(t *testing.T) {
 
 // TestEditRefusesDiskShrink covers the friendly half of the shrink guard.
 // qemu-img itself refuses a shrink without --shrink (verified: exit 1,
-// "Use the --shrink option"), and saveEdit never passes it — so this is not
+// "Use the --shrink option"), and saveEdit never passes it. So this is not
 // the last line of defence, it is the one that answers in stoat's own words
 // instead of a raw qemu-img error, and before anything is written.
 func TestEditRefusesDiskShrink(t *testing.T) {
@@ -228,7 +228,7 @@ func TestEditTabOrderSkipsDiskInLiveMode(t *testing.T) {
 
 // TestEditCloudVMSavesWithoutADiskSize is the regression test for a reported
 // bug: a cloud VM boots a CoW overlay of its base image and carries no disk
-// size in vm.toml at all, so the field opens empty — and validate demanded
+// size in vm.toml at all, so the field opens empty, and validate demanded
 // one, making every cloud VM impossible to save with "disk size is required".
 func TestEditCloudVMSavesWithoutADiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
@@ -330,7 +330,7 @@ func TestParseSizeRejectsRelative(t *testing.T) {
 // TestModeSwitchToDiskNeedsADiskFile is the regression test for the worst
 // finding in review: the create form records a disk size for every non-cloud
 // VM, but only creates disk.qcow2 in disk mode. So a live VM has "8G" in its
-// vm.toml and no file — and flipping it to disk mode left the size unchanged,
+// vm.toml and no file, and flipping it to disk mode left the size unchanged,
 // which meant no resize ran, the save succeeded, and the next start died on a
 // missing image with nothing pointing back at this form.
 func TestModeSwitchToDiskNeedsADiskFile(t *testing.T) {
@@ -371,7 +371,7 @@ func TestModeSwitchToDiskNeedsADiskFile(t *testing.T) {
 
 // TestModeSwitchOffCloudNeedsAnISO covers the mirror of the cloud-needs-a-base
 // guard. A cloud VM has no ISO, and ISOPath() on an empty ISO resolves to the
-// data root DIRECTORY — so qemu would be handed "-cdrom ~/.stoat" and refuse
+// data root DIRECTORY, so qemu would be handed "-cdrom ~/.stoat" and refuse
 // to start.
 func TestModeSwitchOffCloudNeedsAnISO(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())

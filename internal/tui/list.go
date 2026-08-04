@@ -17,7 +17,7 @@ import (
 // won't parse) as one sequence. current and currentBroken split the selected
 // row back apart: exactly one of them returns non-nil for any valid
 // selection. Both read through the list component, so they honour an active
-// search filter — indexing the raw slices would select the wrong VM whenever
+// search filter: indexing the raw slices would select the wrong VM whenever
 // a filter is applied.
 func (m model) current() *config.VM {
 	it, ok := m.selectedItem()
@@ -83,7 +83,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.String() == "y" {
 			return m, m.startProvision(v)
 		}
-		cmd := m.showToast("not provisioning "+v.Name+" — press p when you want to", false)
+		cmd := m.showToast("not provisioning "+v.Name+", press p when you want to", false)
 		return m, cmd
 	}
 
@@ -119,7 +119,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 	case "j", "down", "k", "up", "/", "pgup", "pgdown", "home", "end", "g", "G":
 		// Movement, paging and opening the search box all belong to the list
-		// component — it owns the cursor and the filter.
+		// component: it owns the cursor and the filter.
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
 		m.syncListHeight()
@@ -127,7 +127,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "esc":
 		// Clears an applied filter. Note a pending delete is handled earlier
 		// and consumes esc before this runs, so with both active the delete
-		// cancels and the filter stays — the safer of the two orderings.
+		// cancels and the filter stays, the safer of the two orderings.
 		if m.list.IsFiltered() {
 			var cmd tea.Cmd
 			m.list, cmd = m.list.Update(msg)
@@ -141,7 +141,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if v == nil {
 			if broken != nil {
-				cmd := m.showToast(broken.Name+": broken vm.toml — cannot start (d to delete)", true)
+				cmd := m.showToast(broken.Name+": broken vm.toml, cannot start (d to delete)", true)
 				return m, cmd
 			}
 			break
@@ -175,7 +175,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tick(m.detailGen)
 		}
 		if broken != nil {
-			cmd := m.showToast(broken.Name+": broken vm.toml — cannot start (d to delete)", true)
+			cmd := m.showToast(broken.Name+": broken vm.toml, cannot start (d to delete)", true)
 			return m, cmd
 		}
 	case "s":
@@ -217,8 +217,8 @@ func deleteVM(v *config.VM) tea.Cmd {
 }
 
 // deleteBrokenVM removes a broken VM's directory by name. There is no
-// *config.VM to call Delete on — the whole point is that its vm.toml
-// couldn't be parsed into one — so this reimplements Delete's data-root
+// *config.VM to call Delete on. The whole point is that its vm.toml
+// couldn't be parsed into one, so this reimplements Delete's data-root
 // containment check directly against the directory path.
 func deleteBrokenVM(name string) tea.Cmd {
 	return func() tea.Msg {
@@ -247,7 +247,7 @@ func brokenReason(err error) string {
 	return s
 }
 
-// viewList renders the list screen's body — everything below the banner,
+// viewList renders the list screen's body: everything below the banner,
 // which View composes separately so it can be centered over this block
 // instead of sharing its left edge (see View's doc comment). The VM rows
 // live inside a pane; the status line and footer sit outside it, left-
@@ -261,16 +261,16 @@ func (m model) viewList() string {
 	switch {
 	case len(m.list.Items()) == 0:
 		// The genuinely-empty first run. Left to the component this renders
-		// its own "No vms." — capitalised, full stop, no guidance — as the
+		// its own "No vms." (capitalised, full stop, no guidance) as the
 		// very first screen a new user ever sees.
-		rows.WriteString(dimStyle.Render("no vms yet — press n to create one"))
+		rows.WriteString(dimStyle.Render("no vms yet, press n to create one"))
 	// "there are VMs but none are visible" rather than IsFiltered(), which
-	// only reports an APPLIED filter — while the user is still typing, the
+	// only reports an APPLIED filter. While the user is still typing, the
 	// state is Filtering and the pane would otherwise render empty.
 	case len(m.list.VisibleItems()) == 0:
 		// bubbles/list renders an empty viewport here; without a message the
 		// pane just collapses and reads as "stoat lost my VMs".
-		rows.WriteString(dimStyle.Render("no vm matches this search — esc clears it"))
+		rows.WriteString(dimStyle.Render("no vm matches this search, esc clears it"))
 	default:
 		// The delegate puts a blank line after every row including the last;
 		// inside a padded pane that reads as a stray gap above the border.
@@ -299,12 +299,12 @@ func (m model) viewList() string {
 	// as a whole once it's centered in the terminal.
 	//
 	// Center, not Left: the footer is much wider than the box, so a left join
-	// pins the box to the footer's left edge — leaving it visibly off-center
+	// pins the box to the footer's left edge, leaving it visibly off-center
 	// under the centered banner.
 	parts := []string{box, ""}
 	// The search line sits between the pane and the status: while the input
 	// is open it IS the input, and once a filter is applied it reports what
-	// is being hidden — without it a filtered list just looks like VMs went
+	// is being hidden. Without it a filtered list just looks like VMs went
 	// missing.
 	if search := listStatusLine(m.list); search != "" {
 		parts = append(parts, search, "")

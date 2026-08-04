@@ -69,7 +69,7 @@ func TestSSHCommandUnknownVM(t *testing.T) {
 	}
 }
 
-// A broken vm.toml has no SSHPort and no SSHUser to build an argv from —
+// A broken vm.toml has no SSHPort and no SSHUser to build an argv from;
 // see SSHCommand's doc comment for why ErrBroken, not ErrNotFound, is the
 // right answer here, unlike Logs below.
 func TestSSHCommandBrokenVM(t *testing.T) {
@@ -119,7 +119,7 @@ func TestLogsReturnsWrittenBytes(t *testing.T) {
 }
 
 // A VM that was never started or provisioned has neither log file. That is
-// normal, not an error — see Logs' doc comment — so this must come back as
+// normal, not an error (see Logs' doc comment), so this must come back as
 // an empty, already-EOF reader rather than a failure.
 func TestLogsMissingFileIsEmptyNotError(t *testing.T) {
 	v := vm(t, "fresh", "")
@@ -154,7 +154,7 @@ func TestLogsUnknownVM(t *testing.T) {
 	}
 }
 
-// Logs on a broken VM must still serve the console log — see Logs' doc
+// Logs on a broken VM must still serve the console log; see Logs' doc
 // comment: the file lives in the VM directory and does not depend on
 // vm.toml parsing, and a broken VM is exactly the case where a user most
 // wants to read it.
@@ -217,8 +217,8 @@ func writeBrokenVMToml(t *testing.T, name string) string {
 	return dir
 }
 
-// -- small local helpers, kept out of the errors/strings packages' way of an
-// import cycle with nothing else in this file needing them --
+// Small local helpers, kept out of the errors/strings packages' way of an
+// import cycle, with nothing else in this file needing them.
 
 func containsPair(argv []string, flag, val string) bool {
 	for i := 0; i+1 < len(argv); i++ {

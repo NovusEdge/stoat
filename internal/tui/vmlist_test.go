@@ -13,7 +13,7 @@ import (
 )
 
 // drainCmds applies msg and then runs the commands it returns, because
-// bubbles/list resolves filtering asynchronously — without this the filter
+// bubbles/list resolves filtering asynchronously, so without this the filter
 // never actually applies and every assertion below would pass vacuously.
 //
 // The bound is 2, not "until nil": the component also returns a spinner tick
@@ -79,7 +79,7 @@ func TestFilteredSelectionActsOnTheVisibleRow(t *testing.T) {
 		t.Fatal("no VM selected under an applied filter")
 	}
 	if v.Name != "gamma" {
-		t.Errorf("selected %q, want gamma — an action would hit the wrong VM", v.Name)
+		t.Errorf("selected %q, want gamma; an action would hit the wrong VM", v.Name)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestRefreshKeepsFilterApplied(t *testing.T) {
 // not clamp the cursor, and the SetHeight that follows remaps an out-of-range
 // index to the TOP of the list rather than the bottom (it recomputes
 // page/cursor against a new, smaller PerPage). So deleting the last VM moved
-// the selection to the FIRST one — and the next "d" would arm a delete on the
+// the selection to the FIRST one, and the next "d" would arm a delete on the
 // wrong VM. This repo has shipped a delete-the-wrong-VM bug before.
 func TestCursorClampsWhenTheBottomVMDisappears(t *testing.T) {
 	m := listFixture(t) // alpha, beta, gamma
@@ -208,8 +208,8 @@ func TestCursorClampsWhenTheBottomVMDisappears(t *testing.T) {
 }
 
 // TestFirstRunSaysHowToStart guards the empty-state copy. Left to the
-// component this renders its own "No vms." — capitalised, full stop, no
-// guidance — as the very first screen a new user ever sees.
+// component this renders its own "No vms." (capitalised, full stop, no
+// guidance) as the very first screen a new user ever sees.
 func TestFirstRunSaysHowToStart(t *testing.T) {
 	m := model{screen: screenList, width: 100, height: 30, list: newVMList()}
 	m.syncListHeight()
@@ -228,8 +228,8 @@ func TestFirstRunSaysHowToStart(t *testing.T) {
 // brokenReason allows up to 60 characters of TOML error on top of a
 // "%-14s broken: " prefix, so a real parse error routinely needs a second
 // line. Left to paneAt's own word-wrap over the whole rendered list, the
-// continuation used to land flush against the pane's padding — under the
-// cursor rather than under the row's own text — and read as a second broken
+// continuation used to land flush against the pane's padding, under the
+// cursor rather than under the row's own text, and read as a second broken
 // entry instead of a continuation of the first.
 func TestBrokenRowContinuationAlignsUnderText(t *testing.T) {
 	m := model{screen: screenList, width: 80, height: 30, list: newVMList(), provisioning: map[string]provState{}}

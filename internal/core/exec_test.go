@@ -21,7 +21,7 @@ import (
 // shells that are not installed so a missing host tool never reddens CI.
 //
 // The guest shell is /bin/sh or /bin/ash (Alpine), so POSIX sh is the right
-// target — see guest.OS.Shell.
+// target; see guest.OS.Shell.
 func TestShellJoinAgainstARealShell(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
@@ -48,8 +48,8 @@ func TestShellJoinAgainstARealShell(t *testing.T) {
 	for _, argv := range cases {
 		// Arguments are separated by NUL, not newline, so the shell tells us
 		// exactly how many words it parsed and what each one was. A newline
-		// delimiter CANNOT express an argument that itself contains a newline
-		// — the first version of this test used one and reported a spurious
+		// delimiter CANNOT express an argument that itself contains a newline:
+		// the first version of this test used one and reported a spurious
 		// failure on {"echo", "new\nline"}, where the quoting was correct and
 		// the harness could not represent the answer. NUL is the only byte
 		// that cannot appear inside an argument, which is why xargs -0 and

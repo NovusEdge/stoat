@@ -18,12 +18,12 @@ import (
 // set distinct from State (§3 of the design doc): a caller waits for an
 // EVENT ("this VM has become reachable"), not for one of List/Get's six
 // point-in-time labels, and Applying/Failed are not events Wait resolves
-// against — see waitApplied's comment on why "applied" is answered from the
+// against; see waitApplied's comment on why "applied" is answered from the
 // apply log rather than from a State this package does not yet produce.
 type Until string
 
 const (
-	// UntilReachable is sshd answering on the VM's forwarded port — the same
+	// UntilReachable is sshd answering on the VM's forwarded port, the same
 	// signal sshx.Wait and Provision already treat as "up".
 	UntilReachable Until = "reachable"
 	// UntilApplied is the most recent recipe run having finished
@@ -34,12 +34,12 @@ const (
 )
 
 // ErrCannotReach is returned by Wait for a VM that cannot, by construction,
-// ever reach the requested state — a stopped VM asked to become Reachable, or
-// a VM with no recipes asked to become Applied. Blocking such a call until
+// ever reach the requested state (a stopped VM asked to become Reachable, or
+// a VM with no recipes asked to become Applied). Blocking such a call until
 // the caller's own deadline would turn a programming mistake (or a stale
 // assumption about the VM) into a multi-second hang with no useful message;
 // Wait catches the cases it can prove are impossible up front instead. It is
-// deliberately narrower than "will probably never happen" — a running VM
+// deliberately narrower than "will probably never happen": a running VM
 // that never brings up sshd, or a VM whose recipes are running but stall,
 // are NOT reported this way, because both remain genuinely possible right up
 // until ctx says otherwise. Only cases where nothing could conceivably move
@@ -82,7 +82,7 @@ func Wait(ctx context.Context, name string, until Until) error {
 //
 // A VM whose qemu process is not running is refused immediately rather than
 // polled: Wait never starts a VM itself (that is Start's job), so nothing
-// here would ever bring sshd up — the qemu process reaching StateRunning is
+// here would ever bring sshd up: the qemu process reaching StateRunning is
 // a precondition an already-not-running VM cannot satisfy on its own.
 func waitReachable(ctx context.Context, v *config.VM) error {
 	if !qemu.Running(v) {
@@ -92,7 +92,7 @@ func waitReachable(ctx context.Context, v *config.VM) error {
 }
 
 // sshBannerUp reports whether v's forwarded port is answering as a real
-// sshd, not merely accepting TCP — QEMU/libslirp's user-mode networking
+// sshd, not merely accepting TCP: QEMU/libslirp's user-mode networking
 // accepts the host-side socket before the guest is dialled, so a bare
 // accept() is not proof anything is listening on the other end. Requiring
 // the "SSH-" identification banner is the same check sshx.Wait's
@@ -118,15 +118,15 @@ func sshBannerUp(ctx context.Context, v *config.VM) bool {
 // The signal is the apply log, not a new mechanism: sshx.Provision truncates
 // last-provision.log at the START of every run (os.Create) and writes a
 // bare "done" as its final line only on success (see Provision's last
-// Fprintln) — internal/tui/autoprov.go's lastProvisionSucceeded already
+// Fprintln); internal/tui/autoprov.go's lastProvisionSucceeded already
 // treats exactly that as the trustworthy definition of "applied", so Wait
 // reuses it rather than inventing a second. There is no separate progress
-// record (design doc §1's Progress is not produced by anything yet — see
+// record (design doc §1's Progress is not produced by anything yet, see
 // State's doc comment in vm.go), so mid-run progress cannot be reported;
 // Wait only ever answers "not yet" or "done".
 //
-// A VM with no recipes at all can never produce a "done" line — nothing
-// will ever run — so that case is refused up front, the same reasoning as
+// A VM with no recipes at all can never produce a "done" line, since nothing
+// will ever run, so that case is refused up front, the same reasoning as
 // waitReachable's not-running check. A run that fails ("FAILED: ..." as the
 // final line) is deliberately NOT treated the same way: Provision truncates
 // the log again on retry, so "failed" is not permanent the way "no recipes
@@ -157,7 +157,7 @@ func lastProvisionLineIs(v *config.VM, want string) bool {
 }
 
 // waitStopped blocks until qemu.Running(v) turns false. Unlike Reachable and
-// Applied, there is no impossible-by-construction case to refuse up front —
+// Applied, there is no impossible-by-construction case to refuse up front:
 // a running VM can always, in principle, be stopped by something else before
 // ctx gives up.
 func waitStopped(ctx context.Context, v *config.VM) error {
@@ -169,8 +169,8 @@ func waitStopped(ctx context.Context, v *config.VM) error {
 // pollInterval until it reports true or ctx is done.
 //
 // ctx is checked with select on every iteration, including the very first
-// wait, so a cancelled or expired ctx is noticed within one select — not
-// after the next full pollInterval — which is what makes cancellation
+// wait, so a cancelled or expired ctx is noticed within one select, not
+// after the next full pollInterval, which is what makes cancellation
 // prompt rather than merely bounded.
 func pollUntil(ctx context.Context, check func() bool) error {
 	if check() {

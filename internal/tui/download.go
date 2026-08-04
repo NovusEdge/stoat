@@ -12,12 +12,12 @@ import (
 // dlProgress carries byte counts from the download goroutine (iso.Download's
 // callback runs there) to the UI goroutine. It is a shared cell polled on a
 // ticker rather than a channel because a tea.Cmd may only ever deliver one
-// message — the detail screen already tails last-provision.log the same way,
+// message. The detail screen already tails last-provision.log the same way,
 // so this is the idiom already in the codebase rather than a new one.
 //
 // ponytail: one global cell, not a per-download map. Exactly one download can
-// be in flight — the form refuses to start a second while fetching, and
-// list.go refuses to hand out a fresh form that would clear that flag — so
+// be in flight: the form refuses to start a second while fetching, and
+// list.go refuses to hand out a fresh form that would clear that flag, so
 // there is never more than one writer. If concurrent downloads ever land, key
 // this by entry ID.
 //
@@ -78,7 +78,7 @@ func dlSnapshot(now time.Time) dlStats {
 }
 
 // ratio is the fraction complete, or -1 when the total size is unknown (no
-// Content-Length) — the caller renders a byte count instead of a bar rather
+// Content-Length): the caller renders a byte count instead of a bar rather
 // than showing a fabricated percentage.
 func (s dlStats) ratio() float64 {
 	if s.total <= 0 {
@@ -177,8 +177,8 @@ func humanDuration(d time.Duration) string {
 const dlBarWidth = 32
 
 // dlBar is the component both progress bars are drawn with. ViewAs is fed a
-// ratio computed from real byte counts, so none of its spring animation runs
-// — it is used for its gradient and width handling, not its motion.
+// ratio computed from real byte counts, so none of its spring animation runs;
+// it is used for its gradient and width handling, not its motion.
 // fullBlockBar is the progress bar every bar in stoat is built from.
 //
 // bubbles v2 changed the default fill character from a full block to a HALF
@@ -207,10 +207,10 @@ func bar(ratio float64, width int) string {
 }
 
 // dlView renders the download block as form rows: a "download <os>" label
-// row, then the bar, then the stats — label-less rows land in the same value
+// row, then the bar, then the stats. Label-less rows land in the same value
 // column as the fields above, so the block reads as part of the form rather
 // than something bolted underneath it. When the server gave no
-// Content-Length there is no bar and no percentage — a fabricated one would
+// Content-Length there is no bar and no percentage: a fabricated one would
 // be worse than none.
 func dlView(osName string, s dlStats) string {
 	// The block renders inside the form pane, so it wraps to the form's width.

@@ -18,7 +18,7 @@ type HostCheck struct {
 }
 
 // Doctor probes every host dependency stoat needs and reports the result as
-// data. It takes no interactive input and prints nothing — the two doctors
+// data. It takes no interactive input and prints nothing: the two doctors
 // that existed before this one (installer's pre-install checklist and the
 // CLI's `stoat doctor`) both wrote straight to a Writer, which is exactly
 // what stops an MCP server or a TUI panel from reusing either.
@@ -30,10 +30,10 @@ type HostCheck struct {
 //
 // internal/hostcheck.RunChecks already covers the union of what both prior
 // doctors checked:
-//   - qemu-system-x86_64, qemu-img, ssh, xorriso (LookPath, binChecks) —
-//     matches the CLI's qemu.Preflight() binary probe and its own separate
+//   - qemu-system-x86_64, qemu-img, ssh, xorriso (LookPath, binChecks),
+//     matching the CLI's qemu.Preflight() binary probe and its own separate
 //     `ssh` LookPath.
-//   - /dev/kvm (KVMCheck) — matches qemu.Preflight()'s /dev/kvm open.
+//   - /dev/kvm (KVMCheck), matching qemu.Preflight()'s /dev/kvm open.
 //
 // ssh-keygen is deliberately not a separate check: ssh and ssh-keygen ship in
 // one package on every distro stoat supports, so a second probe would only
@@ -52,12 +52,12 @@ func Doctor() []HostCheck {
 //
 // The probes (LookPath on qemu-system-x86_64/qemu-img/ssh/xorriso, and
 // /dev/kvm) used to live in internal/installer/checks.go, distro.go and
-// kvm_linux.go. That looked leaf-ish at a glance — those three files import
-// nothing beyond errors/io/fs/os/exec/filepath/strings — but
+// kvm_linux.go. That looked leaf-ish at a glance (those three files import
+// nothing beyond errors/io/fs/os/exec/filepath/strings), but
 // internal/installer as a WHOLE is not a leaf: internal/installer/tui.go is
 // a full Bubbletea TUI. Importing internal/installer from here pulled
 // charm.land/bubbletea, lipgloss, bubbles and log into internal/core's
-// dependency graph — verifiable with `go list -deps ./internal/core | grep
+// dependency graph, verifiable with `go list -deps ./internal/core | grep
 // charm.land`. internal/core is the headless layer an MCP server sits on
 // (see the package doc in core.go); it must never depend on a terminal UI,
 // so that import inverted the exact layering this branch exists to fix.
@@ -70,11 +70,11 @@ func Doctor() []HostCheck {
 // internal/core already depends on internal/config (see core.go), so core
 // importing this small, genuinely dependency-free package adds nothing
 // architecturally new; internal/hostcheck importing core would, and would
-// also be backwards — a leaf importing the layer above it.
+// also be backwards: a leaf importing the layer above it.
 //
 // The follow-up this leaves: internal/installer's tui.go/build.go still call
 // hostcheck.RunChecks through the alias shim rather than through
-// core.Doctor. That is fine, not a defect — the installer builds and
+// core.Doctor. That is fine, not a defect: the installer builds and
 // installs stoat itself, so it running before core.Doctor's caller (the
 // built stoat binary) even exists is expected, not a layering violation to
 // fix later. Both sides now sit on the same leaf; neither needs to depend on

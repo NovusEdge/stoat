@@ -57,7 +57,7 @@ type model struct {
 	// cloudInit holds each cloud VM's last polled cloud-init status. A cloud
 	// VM does most of its setup minutes into the boot, so without this
 	// "installing", "finished" and "failed" are indistinguishable from the
-	// outside — a VM rejects a correct password and then silently starts
+	// outside: a VM rejects a correct password and then silently starts
 	// accepting it.
 	cloudInit map[string]string
 	ciProg    progress.Model // the stage bar beside a cloud VM's setup line
@@ -71,7 +71,7 @@ type model struct {
 }
 
 // vmsLoadedMsg carries a refreshed VM list, alongside any VM directories
-// whose vm.toml exists but failed to parse — config.List silently omits
+// whose vm.toml exists but failed to parse. config.List silently omits
 // those, so they're fetched separately and surfaced rather than made to
 // look deleted.
 type vmsLoadedMsg struct {
@@ -82,7 +82,7 @@ type vmsLoadedMsg struct {
 // statusMsg reports that an action finished, errMsg that one failed. They are
 // two types rather than one with a flag because every producer already knows
 // which it is at the point it returns, and a toast has to colour them
-// differently — an ssh failure and "vm deleted" cannot look alike.
+// differently: an ssh failure and "vm deleted" cannot look alike.
 type statusMsg string
 
 type errMsg string
@@ -108,7 +108,7 @@ func Run() error {
 	if err := keys.Ensure(); err != nil {
 		return err
 	}
-	// ponytail: a log we can't open is not worth refusing to start over —
+	// ponytail: a log we can't open is not worth refusing to start over.
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
 	defer logx.Close()
@@ -164,7 +164,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ctrl+c must quit from every screen and every sub-mode (delete
 	// confirmation, full help, the form, ...). It's handled centrally, once,
-	// here — rather than duplicated per-screen — because that duplication is
+	// here, rather than duplicated per-screen, because that duplication is
 	// exactly how it has regressed before: a new screen or sub-mode gets
 	// added, and whoever writes its key switch doesn't think to repeat the
 	// ctrl+c case.
@@ -182,8 +182,8 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, isKey := msg.(tea.KeyPressMsg); isKey {
 			cmd, chosen, closed := m.modal.update(msg)
 			if chosen >= 0 {
-				// A browsed file isn't in m.form.images — it can live
-				// anywhere on disk, that's the point — so the modal appends
+				// A browsed file isn't in m.form.images: it can live
+				// anywhere on disk, that's the point, so the modal appends
 				// it to its own copy and returns an index past the form's
 				// original bounds. Re-adopting mo.images first is a no-op
 				// whenever nothing was browsed, since it's otherwise the same
@@ -216,7 +216,7 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// SetItems does not clamp the cursor, and the SetHeight below remaps
 		// an out-of-range index to the TOP rather than the bottom. Without
 		// this, deleting the last VM in the list moves the cursor to the
-		// first one — and the next "d" arms a delete on the wrong VM.
+		// first one, and the next "d" arms a delete on the wrong VM.
 		// Guarded on n > 0 because SetItems nils the filtered set for a
 		// moment, and clamping then would reset a filtered cursor.
 		if n := len(m.list.VisibleItems()); n > 0 && m.list.Index() >= n {
@@ -280,7 +280,7 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(started, loadVMs)
 		}
 		// Watch for sshd in the background. The user keeps full use of the UI
-		// meanwhile — this is an offer that arrives when it is ready, not a
+		// meanwhile: this is an offer that arrives when it is ready, not a
 		// modal wait.
 		return m, tea.Batch(started, loadVMs, awaitSSH(msg.vm))
 	case sshReadyMsg:
@@ -328,7 +328,7 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dlTickMsg, imageFetchedMsg, imageFetchErrMsg:
 		// A download outlives the form: "esc" returns to the list while the
 		// fetch goroutine keeps running, and there is no way to cancel it.
-		// Routing its messages by screen would strand them — the tick chain
+		// Routing its messages by screen would strand them: the tick chain
 		// would die, and a checksum failure would be swallowed with the user
 		// never told. They go to the form's handler wherever we are, exactly
 		// as provisionDoneMsg is handled centrally above.
@@ -348,7 +348,7 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // smallWidth and smallHeight are the floor below which panes are refused
-// rather than rendered corrupted — narrower or shorter than this, a bordered
+// rather than rendered corrupted: narrower or shorter than this, a bordered
 // box has nowhere to wrap that doesn't come out as garbage.
 const (
 	smallWidth  = 60
@@ -363,7 +363,7 @@ func (m model) View() tea.View {
 	}
 	if m.width < smallWidth || m.height < smallHeight {
 		return m.newView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			warnStyle.Render("terminal too small — resize to at least 60x20")))
+			warnStyle.Render("terminal too small: resize to at least 60x20")))
 	}
 
 	var body string
@@ -379,7 +379,7 @@ func (m model) View() tea.View {
 	}
 
 	// JoinVertical(Center, ...) centers each block as a whole rather than
-	// padding every line to a shared width first — the fix for the
+	// padding every line to a shared width first. That's the fix for the
 	// justified-text look a hand-rolled version of this used to produce.
 	// The list screen's banner sits above the body as a heading; every
 	// other screen's body already carries its own pane title, so it has no
@@ -402,7 +402,7 @@ func (m model) View() tea.View {
 	return m.newView(m.renderToast(m.renderModal(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s))))
 }
 
-// newView wraps a rendered frame in a tea.View with the alt-screen flag set —
+// newView wraps a rendered frame in a tea.View with the alt-screen flag set,
 // the v1 equivalent of passing tea.WithAltScreen() to tea.NewProgram, which
 // v2 moved from a program-startup option to a per-frame View field.
 func (m model) newView(s string) tea.View {

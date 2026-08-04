@@ -15,7 +15,7 @@ import (
 // A cloud VM does most of its setup after the login prompt appears: the user
 // is created, the password set and the packages installed by cloud-init,
 // minutes into the boot. Until this was surfaced, "still installing",
-// "finished" and "failed" all looked identical from stoat — a VM would reject
+// "finished" and "failed" all looked identical from stoat. A VM would reject
 // a correct password for two minutes and then silently start accepting it,
 // which is indistinguishable from broken. A real report.
 
@@ -116,7 +116,7 @@ func cloudInitLabel(status string) string {
 	case "done":
 		return upStyle.Render("ready")
 	case "error":
-		return errStyle.Render("failed — see cloud-init status --long in the vm")
+		return errStyle.Render("failed: see cloud-init status --long in the vm")
 	case "disabled", "not-run":
 		return dimStyle.Render(status)
 	case "":

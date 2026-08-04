@@ -16,7 +16,7 @@ import (
 	"github.com/novusedge/stoat/internal/theme"
 )
 
-// The image picker is two levels — choose an OS, then a variant within it —
+// The image picker is two levels: choose an OS, then a variant within it,
 // because the catalog stopped having exactly one entry per OS. Alpine ships
 // both standard and virt, which differ only in build (66 MiB virtio-only vs
 // 352 MiB), and a flat row cycling with left/right gave the user no way to
@@ -49,7 +49,7 @@ type osItem struct {
 func (i osItem) FilterValue() string { return i.os }
 
 // variantItem is a level-two row: one concrete image. idx is its position in
-// the form's image slice — carried on the item rather than inferred from the
+// the form's image slice, carried on the item rather than inferred from the
 // cursor, because bubbles/list indexes into its FILTERED view and an index
 // taken from the cursor would point at the wrong image the moment a filter is
 // applied.
@@ -68,7 +68,7 @@ func (i variantItem) FilterValue() string {
 
 // foundItem is one row of the fuzzy finder. FilterValue is the FULL path, not
 // the base name, so a query can narrow by directory ("dl alp") as well as by
-// file name -- which is the main thing that makes a flat list of every image
+// file name, which is the main thing that makes a flat list of every image
 // on the machine usable.
 type foundItem struct{ img foundImage }
 
@@ -79,8 +79,8 @@ func (i foundItem) FilterValue() string { return i.img.path }
 // is the only thing there is to tell two of those apart by.
 //
 // BYO filenames are truncated because they are the one label here with no
-// bound — ubuntu-24.04-server-cloudimg-amd64.img is 38 cells against a
-// 40-cell box — and an overlong one would push the modal's border out of
+// bound. ubuntu-24.04-server-cloudimg-amd64.img is 38 cells against a
+// 40-cell box, and an overlong one would push the modal's border out of
 // square rather than simply reading long.
 func (o imageOption) variantLabel() string {
 	if o.entry != nil {
@@ -94,7 +94,7 @@ func (o imageOption) variantLabel() string {
 const modalVariantWidth = 20
 
 // statusLabel says whether the image is on disk yet. A BYO file is local by
-// definition — that is what makes it BYO — so it reports no download state.
+// definition, which is what makes it BYO, so it reports no download state.
 func (o imageOption) statusLabel() string {
 	if o.entry == nil {
 		return dimStyle.Render("local")
@@ -134,7 +134,7 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 			trailer = it.only.sizeLabel()
 		case it.os == byoGroup && len(it.idxs) == 0:
 			// No BYO file has been found under isos/ yet, but the group still
-			// has to be selectable — it's the only route to choose an image….
+			// has to be selectable, since it's the only route to choose an image….
 			trailer = "choose an image…"
 		}
 		label := fmt.Sprintf("%-*s", modalVariantWidth, it.os)
@@ -154,7 +154,7 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 			return
 		}
 		// Styled substrings end in \x1b[0m, which resets the ENCLOSING style
-		// too — so the status stays outside the selection wrap, or a
+		// too, so the status stays outside the selection wrap, or a
 		// highlighted row would render everything after it unhighlighted.
 		// Padded plain and styled afterwards, for the same reason.
 		label := fmt.Sprintf("%-*s", modalVariantWidth, it.opt.variantLabel())
@@ -171,7 +171,7 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 }
 
 // modalContentWidth is the box's floor width, and modalRows its floor row
-// count -- what every list draws at until resize (see below) has room to
+// count: what every list draws at until resize (see below) has room to
 // grow them. Both are sized to fit the smallest terminal stoat renders panes
 // in at all (smallWidth x smallHeight, 60x20): the box comes to
 // modalContentWidth+paneFrame() wide and modalRows+6 tall, which leaves room
@@ -192,7 +192,7 @@ const (
 )
 
 // modalWidthFraction and modalHeightFraction are how much of the terminal
-// resize lets the box claim, BEFORE its own frame is subtracted -- a
+// resize lets the box claim, BEFORE its own frame is subtracted. It is a
 // fraction rather than a fixed margin, because a fixed margin is a couple
 // of cells' breathing room on a small terminal and next to nothing on a
 // huge one (a 200-column terminal minus 4 cells is still a 190-column box,
@@ -202,7 +202,7 @@ const (
 //
 // 0.85/0.8 rather than something looser: high enough that the box still
 // grows aggressively (this project's whole point here), low enough that a
-// large terminal keeps visible margin on every side -- centred and
+// large terminal keeps visible margin on every side, centred and
 // floating, not the full-terminal takeover this project's own layout work
 // has already had rejected once.
 const (
@@ -211,38 +211,38 @@ const (
 )
 
 // modalHeightChrome is the vertical space the box spends on everything that
-// ISN'T list rows -- pane border, padding, title, and (on the byo screen,
+// ISN'T list rows: pane border, padding, title, and (on the byo screen,
 // the tallest case) the text field and a two-line hint/error. resize
 // subtracts this from the terminal's allotted share before turning what's
 // left into rows, so growing rows never overflows the box's own fixed
 // chrome. Sized to the byo screen's tallest state (an inline error, which
-// can wrap to two lines) -- the worst case a single shared row count has to
+// can wrap to two lines), the worst case a single shared row count has to
 // fit.
 const modalHeightChrome = 11
 
 // modalSizeWidth is the size column, right-aligned so the digits line up down
-// the list — the whole point of showing sizes is comparing them, and a ragged
+// the list, since the whole point of showing sizes is comparing them, and a ragged
 // left edge makes that harder than it needs to be.
 //
 // Nine, not eight: humanBytes keeps one decimal below 100 ("66.0 MiB"), so the
 // widest value is "~66.0 MiB" rather than the "~595 MiB" you would guess from
 // the biggest image. Sized to eight, the status column shifted a cell on
-// exactly the rows with a small image — which is alpine-virt, the row this
+// exactly the rows with a small image, which is alpine-virt, the row this
 // whole feature exists to make comparable.
 const modalSizeWidth = 9
 
 // foundRow lays out one byo result row: the base file name, the directory,
-// and the size, in that priority order. The NAME NEVER TRUNCATES -- that was
+// and the size, in that priority order. The NAME NEVER TRUNCATES. That was
 // the whole complaint the byo screen existed to fix ("we need full file
-// names for it to be useful") -- so unlike every other row in this modal,
+// names for it to be useful"), so unlike every other row in this modal,
 // this one's columns are not fixed widths that happen to sum to the list's
 // width. They are computed backwards from the name outward: whatever's left
-// after it goes to the directory (elided from the LEFT, keeping the tail --
-// the deepest directories are what actually tells two same-named files
+// after it goes to the directory (elided from the LEFT, keeping the tail,
+// since the deepest directories are what actually tells two same-named files
 // apart), and the size is the first thing dropped if there still isn't room.
 //
 // This does mean the size column can drift out of alignment row to row when
-// names vary in length and space is tight -- accepted deliberately, because
+// names vary in length and space is tight. Accepted deliberately, because
 // the alternative is truncating the name to keep a column lined up, and the
 // name is the one thing here that must not give.
 func foundRow(img foundImage, width int, selected bool) string {
@@ -252,7 +252,7 @@ func foundRow(img foundImage, width int, selected bool) string {
 		// The one situation the name is allowed to lose characters: it
 		// alone already reaches or exceeds the row's full width, so there
 		// is nowhere else to take space from. Middle-elided, not cut from
-		// the tail -- the version and extension near the end are what
+		// the tail, since the version and extension near the end are what
 		// actually identifies the file, so the head gives way first.
 		name = middleElide(name, width)
 	}
@@ -290,13 +290,13 @@ func foundRow(img foundImage, width int, selected bool) string {
 	}
 }
 
-// foundGap is the blank run between the name and whatever follows it --
-// without it, a directory or size butts straight up against the name the
+// foundGap is the blank run between the name and whatever follows it.
+// Without it, a directory or size butts straight up against the name the
 // moment the name isn't padded to a fixed column anymore.
 const foundGap = 2
 
-// foundMinDirWidth is the least a directory column is worth showing at --
-// below it, "…/x" says almost nothing, so the row drops the directory
+// foundMinDirWidth is the least a directory column is worth showing at.
+// Below it, "…/x" says almost nothing, so the row drops the directory
 // entirely rather than draw a sliver of one.
 const foundMinDirWidth = 6
 
@@ -315,14 +315,14 @@ func dirTail(dir string, width int) string {
 }
 
 // middleElide shortens s to width cells by cutting out of the MIDDLE and
-// marking the cut with "…", e.g. "alpine-stand…x86_64.iso" -- unlike dirTail
+// marking the cut with "…", e.g. "alpine-stand…x86_64.iso". Unlike dirTail
 // (which only ever needs to keep one end), a file name's identifying parts
 // sit at both ends: the base name up front, the version and extension at
 // the back. The tail gets the larger half of what's kept, since the
 // extension is what a user scans for first when several files share a
 // prefix.
 //
-// Only called when nothing else can be dropped to make the name fit --
+// Only called when nothing else can be dropped to make the name fit;
 // every other case in foundRow keeps the name whole.
 func middleElide(s string, width int) string {
 	r := []rune(s)
@@ -354,8 +354,8 @@ type imageModal struct {
 	// contentWidth and rows are the box's actual content width and list row
 	// count for the CURRENT render, recomputed every frame by resize from
 	// the terminal size. Both start at their floor constants, so a modal
-	// drawn before its first resize call -- built directly, as most tests
-	// do, rather than through renderModal -- behaves exactly as it always
+	// drawn before its first resize call, built directly as most tests
+	// do rather than through renderModal, behaves exactly as it always
 	// has: the fixed size this modal drew at before it could grow.
 	contentWidth int
 	rows         int
@@ -369,7 +369,7 @@ type imageModal struct {
 	byo      bool
 	byoInput textinput.Model
 	// byoList is the fuzzy-filtered result list. Its own filter prompt is
-	// hidden (SetShowFilter(false)) -- byoInput is the one visible text
+	// hidden (SetShowFilter(false)); byoInput is the one visible text
 	// field, and its value drives byoList.SetFilterText on every keystroke.
 	byoList      list.Model
 	byoListReady bool   // whether byoList has been built by ensureByoList
@@ -384,16 +384,16 @@ type imageModal struct {
 	scanCancel chan struct{}
 	// scanGen is the current scan's generation, stamped into every
 	// imagesFoundMsg openByo issues. updateByo drops any message whose
-	// generation doesn't match -- see imagesFoundMsg's doc.
+	// generation doesn't match; see imagesFoundMsg's doc.
 	scanGen int
-	// scanDone distinguishes "found nothing yet" from "found nothing" -- an
+	// scanDone distinguishes "found nothing yet" from "found nothing": an
 	// empty pane means opposite things before and after the walk ends.
 	scanDone bool
 }
 
 // newImageList builds the modal's list component. Filtering is deliberately
 // off: the whole catalog is five OSes, so a search box would earn nothing,
-// and it would make esc ambiguous — the key has to mean "go back a level"
+// and it would make esc ambiguous: the key has to mean "go back a level"
 // here, and bubbles/list claims it for clearing a filter.
 func newImageList(width, rows int) list.Model {
 	l := list.New(nil, imageDelegate{}, width, rows)
@@ -418,7 +418,7 @@ func listStyles(s list.Styles) list.Styles {
 }
 
 // groupImages buckets the form's images by OS, preserving the order they
-// arrive in — that order is the catalog's own, which is hand-written with the
+// arrive in, since that order is the catalog's own, which is hand-written with the
 // most generally useful image first, and sorting would replace that judgement
 // with alphabetical noise. BYO files land in one trailing group.
 func groupImages(images []imageOption) []osItem {
@@ -452,7 +452,7 @@ func groupImages(images []imageOption) []osItem {
 	// before there is one on disk to have grouped above.
 	group(byoGroup)
 	// A one-image group carries that image, so the first level can show its
-	// size — it is the only level a single-variant OS is ever seen at.
+	// size, since it is the only level a single-variant OS is ever seen at.
 	for i := range groups {
 		if len(groups[i].idxs) == 1 {
 			groups[i].only = images[groups[i].idxs[0]]
@@ -516,7 +516,7 @@ func (mo *imageModal) drill(g osItem) {
 }
 
 // syncHeight shrinks the list to the rows it actually has, so a two-item
-// level does not draw a box with four blank lines in it — bubbles/list pads
+// level does not draw a box with four blank lines in it. bubbles/list pads
 // its viewport to whatever height it is given.
 func (mo *imageModal) syncHeight(n int) {
 	if n > mo.rows {
@@ -645,8 +645,8 @@ func (mo *imageModal) openByo() tea.Cmd {
 
 // stopScan tells the running scan's goroutine to give up rather than block
 // forever on a batch nobody will read, and forgets the channel so a stray
-// repump can't be issued against it. Called whenever the byo screen is left
-// -- esc, choosing an image, or the modal closing outright.
+// repump can't be issued against it. Called whenever the byo screen is left,
+// namely esc, choosing an image, or the modal closing outright.
 func (mo *imageModal) stopScan() {
 	if mo.scanCancel != nil {
 		close(mo.scanCancel)
@@ -679,7 +679,7 @@ func (mo *imageModal) ensureByoList() {
 }
 
 // setFound appends a batch and re-sorts. Sorting on every batch rather than
-// once at the end keeps the visible order stable while results stream in --
+// once at the end keeps the visible order stable while results stream in:
 // rows that jump around under a cursor the user is already moving are worse
 // than a slightly late sort.
 func (mo *imageModal) setFound(found []foundImage) {
@@ -703,7 +703,7 @@ func (mo *imageModal) setFound(found []foundImage) {
 // the same way a typed path is on enter: scanned paths are absolute, so a
 // bare "~" or "~/..." matches nothing in them character-for-character (fuzzy
 // matching still requires every rune to appear in order) and made the most
-// natural way to type a home-relative location -- ~/Downloads -- look like
+// natural way to type a home-relative location, such as ~/Downloads, look like
 // the screen had found nothing at all.
 func (mo *imageModal) filterQuery() string {
 	return expandHome(mo.byoInput.Value())
@@ -712,7 +712,7 @@ func (mo *imageModal) filterQuery() string {
 // updateByo owns the keyboard while the byo screen is open. Up/down (and
 // ctrl+p/ctrl+n) move byoList's cursor directly rather than going through its
 // Update, because the field above it must stay focused for typing to keep
-// filtering -- routing arrow keys through the list's own Update would risk
+// filtering: routing arrow keys through the list's own Update would risk
 // its filter-input handling stealing them instead. Every other key press
 // goes to byoInput, and its value re-drives byoList's filter live.
 func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
@@ -740,7 +740,7 @@ func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "esc":
-			// Back to the variant list, not out of the modal -- esc means
+			// Back to the variant list, not out of the modal: esc means
 			// "back a level" everywhere else here, and closing outright on
 			// it would throw away the group the user already drilled into.
 			mo.stopScan()
@@ -763,7 +763,7 @@ func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
 				}
 				// Deleted or unmounted since the scan listed it, or the list
 				// is simply empty (no filter match). Either way fall through
-				// to resolving the typed text as a path directly -- that is
+				// to resolving the typed text as a path directly. That is
 				// how an image outside $HOME gets chosen.
 			}
 			path := strings.TrimSpace(mo.byoInput.Value())
@@ -774,7 +774,7 @@ func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
 			}
 			opt, err := byoOptionFromPath(expandHome(path))
 			if err != nil {
-				// Stay open and say why -- closing or going silent on a bad
+				// Stay open and say why: closing or going silent on a bad
 				// path would leave the user guessing what happened.
 				mo.byoErr = err.Error()
 				return nil, -1, false
@@ -800,7 +800,7 @@ func (mo *imageModal) updateByo(msg tea.Msg) (tea.Cmd, int, bool) {
 // which is the part a hand-rolled overlay gets wrong (a styled line cut by
 // byte offset slices an escape sequence in half).
 //
-// screen is already terminal-sized — Place padded it — so the modal's
+// screen is already terminal-sized (Place padded it), so the modal's
 // position is computed straight against m.width/m.height.
 func (m model) renderModal(screen string) string {
 	if m.modal == nil {
@@ -845,8 +845,8 @@ func (mo *imageModal) view() string {
 	}
 	// The body is held at a fixed width rather than left to hug its content.
 	// pane() only ever forces a width DOWN, so without this the box was as
-	// wide as whatever happened to be in it — 31 cells at the OS level and 41
-	// at the variant level — and drilling in made the border visibly jump.
+	// wide as whatever happened to be in it, 31 cells at the OS level and 41
+	// at the variant level, and drilling in made the border visibly jump.
 	body := lipgloss.NewStyle().Width(mo.contentWidth).
 		Render(mo.list.View() + "\n\n" + dimStyle.Render(hint))
 	return pane(title, body, mo.contentWidth+paneFrame())

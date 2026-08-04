@@ -1,13 +1,13 @@
 // Package cli implements stoat's non-interactive, scriptable interface: a
 // switch on the first argument dispatching into internal/core. No subcommand
-// contains business logic of its own — parsing flags, printing, and the
+// contains business logic of its own: parsing flags, printing, and the
 // confirmation prompt are the whole of it, so the TUI, the CLI and an MCP
 // server can never drift into bugs that reproduce in one and not the others.
 //
 // It no longer imports internal/qemu at all: deciding whether a VM is running,
 // what happens when you start one, and whether a delete is allowed are core's
 // answers now, not three front ends' separate ones. What remains outside core
-// here is deliberate — internal/sshx for `ssh`, which execs and replaces this
+// here is deliberate: internal/sshx for `ssh`, which execs and replaces this
 // process, and internal/recipes/logx for the two commands that are genuinely
 // about files on the host rather than about a VM.
 package cli
@@ -59,7 +59,7 @@ type Args struct {
 	Backend string
 
 	// Prune belongs to "prune"; it is core's own options type for the same
-	// reason Spec is — one place to add an option.
+	// reason Spec is: one place to add an option.
 	Prune core.PruneOpts
 
 	// Tag belongs to "snapshot" (the snapshot name) and to "clone" (the new
@@ -89,7 +89,7 @@ type Args struct {
 
 	// Spec belongs to "create". It is core's own type rather than a dozen
 	// more fields here, so adding an option to a VM means adding it in one
-	// place — the CLI is a flag parser over core, not a second definition of
+	// place: the CLI is a flag parser over core, not a second definition of
 	// what a VM is.
 	Spec core.Spec
 }
@@ -157,7 +157,7 @@ func Parse(args []string) (*Args, error) {
 		// The name is pulled off BEFORE flag parsing when it comes first, the
 		// same trick "create" and "recipe new" use. Go's flag package stops at
 		// the first non-flag argument, so `stoat rm work -y` used to leave -y
-		// unparsed and then reject it as a stray argument — even though the
+		// unparsed and then reject it as a stray argument, even though the
 		// usage text has always documented exactly that form. Both orders work
 		// now; only `rm -y work` did before.
 		rem := rest
@@ -314,7 +314,7 @@ func Parse(args []string) (*Args, error) {
 		return &Args{Cmd: "snapshot", VM: name, Tag: tag, Restore: restore, Delete: del, Quiet: quiet}, nil
 
 	case "cp":
-		// `stoat cp <src> <dst>`, where exactly one side is `<vm>:<path>` —
+		// `stoat cp <src> <dst>`, where exactly one side is `<vm>:<path>`,
 		// the scp/docker cp spelling. Direction is inferred from which side
 		// carries the colon, so there is no --to/--from flag to get backwards.
 		if len(rest) != 2 {
@@ -335,7 +335,7 @@ func Parse(args []string) (*Args, error) {
 		}
 
 	case "forward":
-		// `stoat forward <name> 8080:80 8443:443` — the docker/ssh spelling,
+		// `stoat forward <name> 8080:80 8443:443`, the docker/ssh spelling,
 		// host first. With no pairs it PRINTS the current forwards rather than
 		// clearing them: silently wiping a VM's forwards because an argument
 		// was forgotten is not a mistake worth allowing. Use --clear to mean it.
@@ -370,7 +370,7 @@ func Parse(args []string) (*Args, error) {
 
 	case "exec":
 		// exec parses NO flags of its own, deliberately. Everything after the
-		// VM name is the guest's command, verbatim — running `stoat exec work
+		// VM name is the guest's command, verbatim: running `stoat exec work
 		// ls -la` must send -la to ls, not have stoat try to interpret it.
 		// A leading "--" is accepted and dropped for anyone in the habit of
 		// writing it, but it is not required.
@@ -505,7 +505,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	}
 
 	// Every other subcommand touches the data root, so it must be
-	// initialised exactly as tui.Run() initialises it — otherwise a
+	// initialised exactly as tui.Run() initialises it, otherwise a
 	// first-run CLI user ends up with a half-initialised ~/.stoat.
 	if err := config.EnsureRoot(); err != nil {
 		fmt.Fprintln(stderr, "stoat:", err)
@@ -519,7 +519,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "stoat:", err)
 		return ExitFail
 	}
-	// ponytail: same as the TUI — an unopenable log degrades to io.Discard
+	// ponytail: same as the TUI, an unopenable log degrades to io.Discard
 	// rather than failing the command the user actually asked for. `logs`
 	// re-Inits and reports its own error, since there the log IS the command.
 	_ = logx.Init()
@@ -628,7 +628,7 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// parseForwards reads "8080:80" pairs, host port first — the spelling docker
+// parseForwards reads "8080:80" pairs, host port first: the spelling docker
 // and ssh -L both use, so the ordering is the one a user already has in their
 // fingers. Getting it backwards silently binds the wrong port, so the error
 // names the whole offending argument rather than just complaining about a
@@ -654,7 +654,7 @@ func parseForwards(pairs []string) ([]core.PortForward, error) {
 }
 
 // runForward shows, sets, or clears a VM's port forwards. core.Forward reports
-// whether they are live NOW; when they are not, saying so is the whole point —
+// whether they are live NOW; when they are not, saying so is the whole point:
 // a user who declared a forward on a running VM and got silence would conclude
 // it was working and spend the next ten minutes debugging the guest.
 func runForward(a *Args, stdout, stderr io.Writer) int {
@@ -698,7 +698,7 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 
 // runImages lists what stoat can build from: the catalog plus anything else
 // under isos/, with an exact size for what is downloaded and the catalog's
-// declared approximation for what is not — the distinction core.CatalogImage
+// declared approximation for what is not: the distinction core.CatalogImage
 // carries, surfaced rather than flattened.
 func runImages(a *Args, stdout, stderr io.Writer) int {
 	imgs, err := core.Images()
@@ -726,7 +726,7 @@ func runImages(a *Args, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// runPull downloads a catalog image. ^C cancels it for real now — the ctx
+// runPull downloads a catalog image. ^C cancels it for real now: the ctx
 // reaches the HTTP body read, which is why iso.Download needed a stall timeout
 // before and why an abandoned download used to keep running.
 func runPull(a *Args, stdout, stderr io.Writer) int {
@@ -767,7 +767,7 @@ func humanSize(n int64) string {
 }
 
 // runClone copies a VM. core.Clone refuses a running source, allocates a fresh
-// ssh port and drops the source's port forwards — say so, because a user who
+// ssh port and drops the source's port forwards. Say so, because a user who
 // expected the forwards to come along would otherwise find out by debugging.
 func runClone(a *Args, stdout, stderr io.Writer) int {
 	v, err := core.Clone(a.VM, a.Tag)
@@ -799,14 +799,14 @@ func runPrune(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, r)
 	}
 	if a.Prune.DryRun {
-		fmt.Fprintln(stdout, "\n(dry run — nothing was deleted; re-run with --apply)")
+		fmt.Fprintln(stdout, "\n(dry run: nothing was deleted; re-run with --apply)")
 	}
 	return ExitOK
 }
 
 // runSnapshot lists, saves, restores or deletes a snapshot. Restoring is the
-// one genuinely destructive path here — everything since the snapshot is
-// discarded with no second copy — so it says what it did rather than
+// one genuinely destructive path here: everything since the snapshot is
+// discarded with no second copy, so it says what it did rather than
 // succeeding silently.
 func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 	switch {
@@ -883,12 +883,12 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 }
 
 // runExec runs a command in a guest and RETURNS THE GUEST'S EXIT CODE, the
-// same way ssh itself does. That is what makes it scriptable — `stoat exec vm
+// same way ssh itself does. That is what makes it scriptable: `stoat exec vm
 // make test && deploy` has to mean what it looks like.
 //
 // The cost is that stoat's own exit codes and the guest's share one range: a
 // guest command exiting 2 is indistinguishable from a stoat usage error. That
-// is accepted rather than worked around, because every alternative is worse —
+// is accepted rather than worked around, because every alternative is worse:
 // remapping the guest's status silently lies about what the command did, and a
 // dedicated flag for "really give me the real code" would just be a footgun
 // with extra steps. ssh made the same trade for the same reason.
@@ -919,7 +919,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 	}
 
 	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
-	// core.List() sorts every VM — broken ones included — together by name,
+	// core.List() sorts every VM, broken ones included, together by name,
 	// so a broken VM can interleave alphabetically with good ones. The
 	// original two calls (config.List then config.ListBroken) printed every
 	// good VM first and every broken one after; two passes over core's
@@ -953,7 +953,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 func runUp(a *Args, stdout, stderr io.Writer) int {
 	// core.Get first, exactly where config.Load used to sit: a caller must
 	// learn "no such VM" (or "broken") before any progress line prints, not
-	// after — the same reason it existed here originally.
+	// after, the same reason it existed here originally.
 	v, err := core.Get(a.VM)
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: up:", err)
@@ -962,7 +962,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	// core.Get reports a broken VM as StateBroken rather than an error, so it
 	// can be listed and deleted. Neither is true of starting one: refuse here,
 	// before any output, rather than printing "starting x..." and only then
-	// failing — a progress line that announces something the next line admits
+	// failing: a progress line that announces something the next line admits
 	// is impossible is worse than no line at all.
 	if v.State == core.StateBroken {
 		fmt.Fprintln(stderr, "stoat: up:", v.Error)
@@ -1049,11 +1049,11 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 	}
 	if v.Mode == "cloud" {
 		// cloud-init's packages: list only runs at first boot, baked into
-		// the seed when the overlay was created — there is nothing left for
+		// the seed when the overlay was created, there is nothing left for
 		// ssh-based provisioning to do, and piping a recipe (which for cloud
 		// VMs is #cloud-config YAML, not a shell script) into `sh -s` would
 		// just fail.
-		fmt.Fprintf(stdout, "%s is a cloud VM — recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.\n", a.VM)
+		fmt.Fprintf(stdout, "%s is a cloud VM: recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.\n", a.VM)
 		return ExitOK
 	}
 	if !a.Quiet {
@@ -1136,7 +1136,7 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := core.Destroy(a.VM); err != nil {
 		// Same belt-and-braces as runDown: the State check above already
 		// refuses a running VM before the confirmation prompt even shows,
-		// so this only fires on the started-after-the-check race — but it's
+		// so this only fires on the started-after-the-check race, but it's
 		// what reproduces today's exact "stop it first" message for it.
 		if errors.Is(err, core.ErrAlreadyRunning) {
 			fmt.Fprintf(stderr, "stoat: rm: %s is running; stop it first\n", a.VM)
@@ -1183,7 +1183,7 @@ func tailLines(path string, n int) ([]string, error) {
 // runDoctor prints core.Doctor's findings. It checks strictly more than it
 // used to: this was two ad-hoc probes (qemu.Preflight plus a bare ssh
 // LookPath), while core.Doctor runs the same set the installer's pre-install
-// checklist does — qemu-system-x86_64, qemu-img, ssh, xorriso and /dev/kvm —
+// checklist does (qemu-system-x86_64, qemu-img, ssh, xorriso and /dev/kvm),
 // so `stoat doctor` and `just setup` can no longer disagree about whether the
 // host is ready.
 //
@@ -1210,7 +1210,7 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 }
 
 // runRecipe implements "recipe list" and "recipe new". Authoring a recipe has
-// always been "put a correctly named file in the recipes directory" — the
+// always been "put a correctly named file in the recipes directory": the
 // only real problem was that nothing told you so, or what the name had to be.
 func runRecipe(a *Args, stdout, stderr io.Writer) int {
 	switch a.Sub {

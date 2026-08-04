@@ -14,8 +14,8 @@ import (
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
-// Clone duplicates VM name under newName. It is NOT a file copy — see
-// docs/design/core-api.md §7/§7.1 item 9 and the per-field reasoning below —
+// Clone duplicates VM name under newName. It is NOT a file copy; see
+// docs/design/core-api.md §7/§7.1 item 9 and the per-field reasoning below,
 // and every shortcut it takes is deliberate, not an oversight:
 //
 //   - The disk (when there is one) becomes a qcow2 OVERLAY backed by the
@@ -24,11 +24,11 @@ import (
 //     records blocks that diverge from the backing file.
 //   - The SSH port is freshly allocated (config.FreePort), never inherited.
 //   - Port forwards are DROPPED, never inherited.
-//   - A cloud clone gets its own cloud-init identity — see cloneCloud.
+//   - A cloud clone gets its own cloud-init identity; see cloneCloud.
 //
 // Refuses a RUNNING source. A qcow2 backing file must never change after an
 // overlay is made from it (the overlay's unwritten blocks are read straight
-// through to the backing file — if that file mutates, the overlay is reading
+// through to the backing file: if that file mutates, the overlay is reading
 // stale-vs-live blocks at random, i.e. corrupt); a running source is a qemu
 // process writing to its disk continuously, so there is no instant at which
 // "the disk right now" is a safe backing file. Refusing is simpler and
@@ -43,8 +43,8 @@ func Clone(name, newName string) (VM, error) {
 	//
 	// The second is specific to cloning and worse. The overlay below
 	// references the SOURCE's disk BY PATH, not by copy. Without a lock, a
-	// concurrent Destroy of the source — which passes its own running check,
-	// because the source is stopped, which is exactly what cloning requires —
+	// concurrent Destroy of the source, which passes its own running check,
+	// because the source is stopped, which is exactly what cloning requires,
 	// can remove that disk between the check here and the qemu-img call. The
 	// clone is then created successfully, appears in List, and fails only on
 	// first start with "Could not open backing file". Taking the lock closes
@@ -60,7 +60,7 @@ func Clone(name, newName string) (VM, error) {
 		return VM{}, err
 	}
 	if qemu.Running(src) {
-		return VM{}, fmt.Errorf("%w: %s: stop it before cloning -- a qcow2 overlay's backing file must not change after the overlay is made, and a running VM is writing to its disk continuously", ErrAlreadyRunning, name)
+		return VM{}, fmt.Errorf("%w: %s: stop it before cloning, since a qcow2 overlay's backing file must not change after the overlay is made, and a running VM is writing to its disk continuously", ErrAlreadyRunning, name)
 	}
 
 	// Name validation duplicates plan()'s three rules (non-empty, no
@@ -90,19 +90,19 @@ func Clone(name, newName string) (VM, error) {
 	//   COPY (plain configuration, cloning it is the whole point):
 	//     Mode, OS, ISO, RAM, CPUs, Disk (the size string), Installed
 	//     (state of the disk content being cloned, not an identity), Share,
-	//     Recipes, Backend, Base (the shared catalog image path -- already
+	//     Recipes, Backend, Base (the shared catalog image path, already
 	//     shared by every VM built from the same image, cloning changes
 	//     nothing about that sharing), SSHUser, ConsolePassword (a VNC
-	//     console password, not a network-facing secret or an identity --
+	//     console password, not a network-facing secret or an identity,
 	//     see cloudinit.consolePasswordBlock's own reasoning for why it is
 	//     stored in the clear at all).
 	//
 	//   FRESH (identity-bearing; a copy here is the bug this function
 	//   exists to prevent):
-	//     SSHPort (config.FreePort, above). Forwards (dropped -- see the
+	//     SSHPort (config.FreePort, above). Forwards (dropped; see the
 	//     comment on the zero value below). Name (the parameter). Dir is
 	//     recomputed by Save() itself. The cloud-init instance ID is not a
-	//     config.VM field at all -- see cloneCloud.
+	//     config.VM field at all; see cloneCloud.
 	clone := &config.VM{
 		Name:      newName,
 		Mode:      src.Mode,
@@ -116,7 +116,7 @@ func Clone(name, newName string) (VM, error) {
 		SSHPort:   port,
 		// Forwards is left at its zero value (nil), not copied. A forward is
 		// a host TCP listener the CLONE would try to bind the moment it
-		// starts -- if the source is (or later is) running with the same
+		// starts; if the source is (or later is) running with the same
 		// forward, both VMs fight over one host port, exactly the collision
 		// class validateForwards (forward.go) exists to prevent for SSHPort.
 		// Silently keeping them would be an indefensible foot-gun (see this
@@ -155,7 +155,7 @@ func Clone(name, newName string) (VM, error) {
 func cloneDisk(src, clone *config.VM) error {
 	switch src.Mode {
 	case "live":
-		// A live VM has no disk.qcow2 at all -- it boots off the ISO plus an
+		// A live VM has no disk.qcow2 at all: it boots off the ISO plus an
 		// apkovl overlay that apkovlBackend.Prepare REBUILDS from vm.toml on
 		// every single start (see apkovl.go's Prepare comment). There is
 		// nothing here to clone: the clone's own first start builds its own
@@ -176,7 +176,7 @@ func cloneDisk(src, clone *config.VM) error {
 
 	default:
 		// Not reached by anything plan() can produce today, but a silent
-		// no-op here would leave a clone with neither a disk nor an error --
+		// no-op here would leave a clone with neither a disk nor an error,
 		// worse than failing loudly on a mode this function does not know
 		// about yet.
 		return fmt.Errorf("clone: unknown mode %q", src.Mode)
@@ -214,7 +214,7 @@ func overlay(src, dst string) error {
 // start, by cloudinitBackend.Prepare). Two cases follow from that:
 //
 //  1. Source never started (disk.qcow2 does not exist yet): there is no
-//     drift to preserve -- the source is, right now, indistinguishable from
+//     drift to preserve: the source is, right now, indistinguishable from
 //     a freshly-Created VM pointed at the same Base. clone.Base already
 //     equals src.Base (copied above), so the CORRECT clone is to create
 //     NOTHING here and let the clone's own first start build its own
@@ -222,7 +222,7 @@ func overlay(src, dst string) error {
 //     fresh. This is not a shortcut: doing anything else would mean
 //     inventing state the source never had.
 //
-//  2. Source has started (disk.qcow2 exists, with real drift -- installed
+//  2. Source has started (disk.qcow2 exists, with real drift, installed
 //     packages, home directories, whatever the guest has done since first
 //     boot): the clone overlays the SOURCE's disk (not Base), a chain of
 //     two backing files, which qemu supports natively and is the only way
@@ -238,18 +238,18 @@ func overlay(src, dst string) error {
 //     disk.qcow2 already exists ("if _, err := os.Stat(v.DiskPath()); err
 //     == nil { return nil }"). If Clone pre-creates the clone's disk.qcow2
 //     (which case 2 must, to preserve drift) and stops there, the clone's
-//     seed.iso is NEVER written -- Prepare no-ops on first start because
+//     seed.iso is NEVER written: Prepare no-ops on first start because
 //     the disk exists, Args still unconditionally attaches
 //     "<ovl>/seed.iso" as a cdrom, and qemu fails at start with "Could not
 //     open seed.iso" (the exact historical failure TestSeedErrorsWithoutXorriso
 //     guards against for a different cause). This is a harder failure than
-//     "cloud-init treats it as the same instance and skips first boot" --
+//     "cloud-init treats it as the same instance and skips first boot":
 //     it never gets that far.
 //
 //     So case 2 builds the seed itself, right here, doing the same three
 //     steps Prepare would have (ensure the client keypair, read the
-//     clone's own recipe bodies, call cloudinit.Seed) but against `clone`
-//     -- whose Name is already the new name. cloudinit.Seed's meta-data
+//     clone's own recipe bodies, call cloudinit.Seed) but against `clone`,
+//     whose Name is already the new name. cloudinit.Seed's meta-data
 //     writes `instance-id: "stoat-" + v.Name` (see metaDataTemplate), so
 //     seeding against clone rather than src is what gives the clone a
 //     genuinely NEW cloud-init instance ID, not a copy of the source's.
@@ -257,7 +257,7 @@ func overlay(src, dst string) error {
 //     instance at boot and run its per-instance modules (user creation,
 //     authorized_keys) again instead of finding a matching instance-id
 //     already recorded on the overlaid disk and skipping first boot
-//     entirely -- the exact failure the design doc's item 4 warns about.
+//     entirely, the exact failure the design doc's item 4 warns about.
 func cloneCloud(src, clone *config.VM) error {
 	if _, err := os.Stat(src.DiskPath()); err != nil {
 		// Case 1: nothing to do. clone.Base already points at the same
@@ -274,7 +274,7 @@ func cloneCloud(src, clone *config.VM) error {
 	// new. Mirrors cloudinitBackend.Prepare's own steps (keys.Ensure,
 	// keys.PublicKey, read each recipe body, cloudinit.Seed) because
 	// Prepare itself will no-op on the clone's first start now that
-	// disk.qcow2 exists -- see the function comment above.
+	// disk.qcow2 exists; see the function comment above.
 	if err := keys.Ensure(); err != nil {
 		return err
 	}

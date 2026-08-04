@@ -43,7 +43,7 @@ func TestStaleToastTimerDoesNotClearTheCurrentToast(t *testing.T) {
 
 	mm, _ := m.Update(toastExpiredMsg{gen: stale})
 	if got := mm.(model).toast.text; got != "second" {
-		t.Errorf("toast = %q, want %q — the stale timer cleared the live toast", got, "second")
+		t.Errorf("toast = %q, want %q: the stale timer cleared the live toast", got, "second")
 	}
 	mm, _ = mm.(model).Update(toastExpiredMsg{gen: mm.(model).toastGen})
 	if got := mm.(model).toast.text; got != "" {

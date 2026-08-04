@@ -105,7 +105,7 @@ func TestPlanAlpineCloudIsCloudinitNotApkovl(t *testing.T) {
 }
 
 // filepath.Join does not special-case an absolute second element, so joining
-// "isos/" onto a browsed path yields ".../isos/home/u/x.iso" — a path that
+// "isos/" onto a browsed path yields ".../isos/home/u/x.iso", a path that
 // does not exist. An image outside isos/ has to be recorded absolute.
 func TestPlanBYOOutsideIsosRecordsAnAbsolutePath(t *testing.T) {
 	root(t)
@@ -254,7 +254,7 @@ func TestCreateWritesVMToml(t *testing.T) {
 	if err := recipes.Install(); err != nil {
 		t.Fatal(err)
 	}
-	// A real recipe name, as recipes.List returns it — plan now refuses names
+	// A real recipe name, as recipes.List returns it; plan now refuses names
 	// that are not actually available for the VM's OS and backend.
 	v, err := Create(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso", Recipes: []string{"devtools.alpine.sh"}})
 	if err != nil {
@@ -273,7 +273,7 @@ func TestCreateWritesVMToml(t *testing.T) {
 // concurrency gap: FreePort reads every VM's port, picks a free one and
 // returns it, but the caller only COMMITS that choice when it writes vm.toml
 // some time later. Two callers interleaved in that gap both saw the same free
-// port and both took it, producing two VMs that fight over one host socket —
+// port and both took it, producing two VMs that fight over one host socket,
 // which surfaces much later as a bind failure from qemu naming neither VM.
 //
 // The CLI could not hit this (one VM per invocation), but an MCP server
@@ -337,7 +337,7 @@ func TestConcurrentCreatesGetDistinctPorts(t *testing.T) {
 // disk size, matching what the TUI form has always produced.
 //
 // A cloud VM's qcow2 is a CoW overlay and inherits its BASE image's virtual
-// size — Ubuntu 24.04's is 3.5G with a 2.4G root. backend/cloudinit.go only
+// size: Ubuntu 24.04's is 3.5G with a 2.4G root. backend/cloudinit.go only
 // resizes when Disk is set, so an empty size means the overlay is never grown,
 // installing a desktop fills it, apt exits 100, and cloud-init reports a bare
 // "error" that reads as a broken recipe. That was diagnosed and fixed once
@@ -375,7 +375,7 @@ func TestCloudVMGetsADiskSize(t *testing.T) {
 // expects the same, because the suffix separates ssh-pushed shell recipes from
 // cloud-init fragments. Nothing checked a Spec's names against that list, so
 // `--recipes xfce` was accepted, written to vm.toml, and failed only on
-// `stoat up` with "open .../recipes/xfce: no such file or directory" — a
+// `stoat up` with "open .../recipes/xfce: no such file or directory", a
 // create that succeeded and produced a VM that could not start. Hit for real
 // while boot-testing.
 func TestCreateRejectsAnUnavailableRecipe(t *testing.T) {

@@ -44,7 +44,7 @@ func TestUpdateImmutableFields(t *testing.T) {
 }
 
 // Setting an immutable field to the value it already has is not a change
-// request and must not be refused -- an MCP tool or CLI flag that round
+// request and must not be refused: an MCP tool or CLI flag that round
 // trips a full VM through Patch shouldn't be punished for fields it never
 // meant to touch.
 func TestUpdateImmutableFieldsAllowedWhenUnchanged(t *testing.T) {
@@ -351,7 +351,7 @@ func TestUpdateDiskRejectsLeadingPlus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("qemu-img info: %v: %s", err, out)
 	}
-	// Must still be 1G, not grown by 1G to 2G -- the exact bug ParseSize
+	// Must still be 1G, not grown by 1G to 2G: the exact bug ParseSize
 	// exists to prevent (see ParseSize's own comment in core.go).
 	if !strings.Contains(string(out), `"virtual-size": 1073741824`) {
 		t.Fatalf("disk grew despite the relative size being refused: %s", out)
@@ -394,7 +394,7 @@ func TestUpdateDiskOnCloudVMWithoutOverlayYet(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	// disk.qcow2 deliberately does not exist -- Create never makes a cloud
+	// disk.qcow2 deliberately does not exist: Create never makes a cloud
 	// overlay eagerly, and neither does this test.
 	if _, err := Update("work", Patch{Disk: ptr("4G")}); !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("err = %v, want ErrInvalidSpec (start it once first)", err)
@@ -417,7 +417,7 @@ func TestUpdateDoesNotChangeUnrelatedFields(t *testing.T) {
 }
 
 // Sanity check that Patch's int-pointer fields really do distinguish
-// "not set" from "set to zero" -- CPUs: ptr(0) must be REJECTED (cpus must
+// "not set" from "set to zero": CPUs: ptr(0) must be REJECTED (cpus must
 // be at least 1), not silently ignored as if nil.
 func TestUpdatePatchZeroValueIsAReadValue(t *testing.T) {
 	root(t)

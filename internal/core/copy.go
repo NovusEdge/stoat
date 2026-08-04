@@ -26,15 +26,15 @@ import (
 // other way to stop.
 //
 // REMOTE-PATH QUOTING: remotePath is placed into scp's argv completely
-// unquoted, on purpose — not an oversight carried over from Exec's
+// unquoted, on purpose, not an oversight carried over from Exec's
 // shellJoin. Exec sends its command through the GUEST'S shell (ssh
 // concatenates trailing args and hands them to a remote `sh -c`), so it MUST
 // quote to survive that re-parse. scp is different: since OpenSSH 9.0 (the
-// version on every host this was checked against — `ssh -V` here reports
+// version on every host this was checked against (`ssh -V` here reports
 // 10.4p1) it uses the SFTP protocol by default, not the legacy SCP protocol,
 // and `man scp`'s CAVEATS section says explicitly that careful shell quoting
 // is a concern only for the legacy protocol (`-O`). Under SFTP there is no
-// remote shell in the path at all — scp parses "user@host:path" locally and
+// remote shell in the path at all: scp parses "user@host:path" locally and
 // hands path to the SFTP subsystem as a literal byte string. A remote path
 // containing a space therefore needs NO escaping and MUST NOT be given any:
 // wrapping it in quotes the way shellJoin does would create a file on the
@@ -45,13 +45,13 @@ import (
 // BOOT-VERIFIED 2026-08-03 on real Alpine 3.24.1 cloud, both directions,
 // including `cptest:/tmp/my file.txt` arriving as ONE file with a space in it.
 // Had the remote path been shell-quoted the way Exec quotes its argv, the
-// guest would have got a file literally named with quote characters — so Exec
+// guest would have got a file literally named with quote characters, so Exec
 // and this function genuinely need OPPOSITE treatment, and both halves of that
 // are now checked against the same guest rather than reasoned about.
 //
 // The SFTP default does carry one dependency worth knowing: the guest must
 // provide an sftp subsystem, and OpenSSH 9+ does NOT silently fall back to the
-// legacy protocol when it is missing — scp fails outright. Alpine's cloud
+// legacy protocol when it is missing: scp fails outright. Alpine's cloud
 // image ships /usr/lib/ssh/sftp-server with `Subsystem sftp internal-sftp`
 // (verified on the same boot), so this is fine for the images stoat ships.
 // A stripped BYO guest without it will fail with scp's own error rather than
@@ -66,7 +66,7 @@ func CopyTo(ctx context.Context, name, localPath, remotePath string) error {
 	return doCopy(ctx, name, localPath, remotePath, true)
 }
 
-// CopyFrom is CopyTo's mirror — see its doc comment for the shared design
+// CopyFrom is CopyTo's mirror; see its doc comment for the shared design
 // (ctx, quoting, sandboxing).
 func CopyFrom(ctx context.Context, name, remotePath, localPath string) error {
 	return doCopy(ctx, name, localPath, remotePath, false)
@@ -101,7 +101,7 @@ func doCopy(ctx context.Context, name, localPath, remotePath string, toRemote bo
 	}
 
 	// ctx expiring kills the scp process, which surfaces as a generic
-	// *exec.ExitError rather than ctx.Err() — see Exec's identical handling
+	// *exec.ExitError rather than ctx.Err(); see Exec's identical handling
 	// for why that distinction is worth preserving: a caller that cannot tell
 	// "timed out" from "scp itself failed" will retry something that was
 	// never going to finish.
@@ -111,7 +111,7 @@ func doCopy(ctx context.Context, name, localPath, remotePath string, toRemote bo
 
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && stderr.Len() > 0 {
-		// scp ran and failed — its own stderr (no such file, permission
+		// scp ran and failed: its own stderr (no such file, permission
 		// denied, ...) is a far better error than a bare exit status.
 		return fmt.Errorf("%s: scp: %s", name, strings.TrimSpace(stderr.String()))
 	}

@@ -9,14 +9,14 @@ import (
 
 // TestParseSnapshotsRealOutput parses the actual table QEMU prints. The
 // samples below are the real format from `qemu-img snapshot -l` and the
-// monitor's `info snapshots`, not an invented one — the columns are padded to
+// monitor's `info snapshots`, not an invented one: the columns are padded to
 // fit their content, so anything parsing by byte offset breaks the first time
 // a tag is longer than the header.
 func TestParseSnapshotsRealOutput(t *testing.T) {
 	// CAPTURED VERBATIM from `qemu-img snapshot -l` on a real qcow2 (qemu-img
 	// 11.0.2, 2026-08-04), not written from memory. The first version of this
 	// test used an invented sample that got the header wrong (VM SIZE rather
-	// than VM_SIZE) and omitted the ICOUNT column entirely — parsing by fields
+	// than VM_SIZE) and omitted the ICOUNT column entirely; parsing by fields
 	// happens to survive both, but the test would have been asserting against
 	// a format QEMU does not print.
 	stopped := `Snapshot list:
@@ -39,7 +39,7 @@ ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT
 
 	// CAPTURED VERBATIM over QMP from a real running Alpine VM (2026-08-04),
 	// CRLF line endings and all. Note the ID and ICOUNT columns are "--", NOT
-	// numbers — a running VM's snapshots have no numeric id. The invented
+	// numbers: a running VM's snapshots have no numeric id. The invented
 	// sample this replaced used "1" there, which is why the unit test happily
 	// passed while `stoat snapshot <vm>` listed nothing at all on a running
 	// VM: parseSnapshots was requiring an ID that QEMU never prints.
@@ -95,7 +95,7 @@ func TestParseSnapshotsIgnoresNonRows(t *testing.T) {
 	}
 }
 
-// A live VM is diskless by design — an ISO booted into a tmpfs root. There is
+// A live VM is diskless by design: an ISO booted into a tmpfs root. There is
 // nowhere to put a snapshot and nothing that would survive one, so every
 // entry point must refuse it rather than producing a confusing qemu-img error
 // about a missing file.
@@ -120,7 +120,7 @@ func TestSnapshotRefusesLiveVM(t *testing.T) {
 
 // A tag reaches the monitor as a bare word in "savevm <tag>", so whitespace in
 // one would be read as extra arguments and mean something other than what was
-// asked. Refused rather than mangled — the same rule passwordKeys applies to
+// asked. Refused rather than mangled, the same rule passwordKeys applies to
 // sendkey, for the same reason.
 func TestSnapshotRejectsBadTags(t *testing.T) {
 	root(t)

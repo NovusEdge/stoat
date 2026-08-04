@@ -41,7 +41,7 @@ type imageOption struct {
 	// bytes is the image's size and exact is whether it was measured rather
 	// than declared: a file already on disk is stat'd, one still to be
 	// downloaded carries the catalog's approximation. Resolved once in
-	// buildImages, which runs on form-open and after a download — never per
+	// buildImages, which runs on form-open and after a download, never per
 	// render, so the stat costs nothing in the draw path.
 	bytes int64
 	exact bool
@@ -64,8 +64,8 @@ func (o imageOption) isBYO() bool { return o.entry == nil }
 
 // imagePath resolves file to an absolute path. A browsed BYO image is already
 // absolute and lives outside isos/; everything else is a bare name under it.
-// filepath.Join does NOT special-case an absolute second element -- joining
-// isos/ onto "/home/u/x.iso" yields "…/isos/home/u/x.iso" -- so the two cases
+// filepath.Join does NOT special-case an absolute second element, so joining
+// isos/ onto "/home/u/x.iso" yields "…/isos/home/u/x.iso". The two cases
 // have to be told apart here rather than at each call site.
 func (o imageOption) imagePath() (string, error) {
 	if filepath.IsAbs(o.file) {
@@ -84,18 +84,18 @@ func (o imageOption) imagePath() (string, error) {
 // 24, down from 30, to make room for the size column: the BYO row is the
 // widest the form draws (os, backend, filename, size, tag) and at 30 the whole
 // row came to 65 cells against a 60-cell value column. The filename is the
-// only one of the five with slack — every other column is sized to its
-// content — so it is the one that gives.
+// only one of the five with slack. Every other column is sized to its
+// content, so it is the one that gives.
 const byoFileWidth = 24
 
 // osUnknown is shown when iso.Infer could not name a BYO file's OS. It used
 // to render as "?", which tells the user neither what happened nor that
-// anything is still selectable — this is a state, not an error.
+// anything is still selectable. This is a state, not an error.
 const osUnknown = "unknown"
 
 // imageMetaWidth is the second column of an image row: the catalog entry's
 // variant, or a BYO file's backend. It must fit the widest of BOTH, which is
-// "13 (trixie)" at 11 — at 10 that one row overflowed by a single cell and
+// "13 (trixie)" at 11. At 10 that one row overflowed by a single cell and
 // pushed debian's size column one right of every other row's.
 // TestImageMetaColumnFitsEveryValue keeps it honest.
 const imageMetaWidth = 11
@@ -159,7 +159,7 @@ func byoOptionFromPath(path string) (imageOption, error) {
 }
 
 // matchLocalImage is core.MatchLocal. The picker and core.Create must agree on
-// which file a catalog entry means — the form now names the ENTRY and lets
+// which file a catalog entry means. The form now names the ENTRY and lets
 // core resolve it, so two copies of this would let the picker offer one file
 // and Create build on another.
 var matchLocalImage = core.MatchLocal
@@ -203,7 +203,7 @@ func buildImages() []imageOption {
 }
 
 // imageBytes is the on-disk size of a file under isos/. Failure is not an
-// error worth surfacing — the file was listed a moment ago and could have
+// error worth surfacing: the file was listed a moment ago and could have
 // been removed since, and a missing size just means the row shows none.
 func imageBytes(file string) (int64, bool) {
 	fi, err := os.Stat(filepath.Join(config.Root(), "isos", file))
@@ -220,12 +220,12 @@ var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 // catalog knows, in catalog order, led by "" meaning "whatever iso.Infer
 // guessed".
 //
-// This row exists because Infer names an OS in exactly one case — a filename
+// This row exists because Infer names an OS in exactly one case: a filename
 // containing "alpine" that ends in .iso. Every qcow2, every img and every
 // unrecognised file comes back with an empty OS, which flows into
 // recipes.List, where both branches compare against a real OS name parsed off
 // a recipe's filename. An empty OS matches nothing, so before this row a BYO
-// image was offered NO recipes at all, ever — a hand-downloaded Ubuntu cloud
+// image was offered NO recipes at all, ever. A hand-downloaded Ubuntu cloud
 // image got none while the byte-identical catalog entry got xfce and
 // devtools.
 //
@@ -246,8 +246,8 @@ func byoOSNames() []string {
 // never resizes as optional rows appear.
 //
 // Sized off the HINT lines, which are the widest thing the form regularly
-// shows. The mode hints are 44 and 45 cells, so at the old width of 56 —
-// a 44-cell value column — they wrapped by a single character and left a
+// shows. The mode hints are 44 and 45 cells, so at the old width of 56
+// (a 44-cell value column) they wrapped by a single character and left a
 // dangling word under every mode row. 60 cells of value column clears all
 // of them but the cloud disk hint, which is 71 and would need a pane too
 // wide to sit in an 80-column terminal.
@@ -263,7 +263,7 @@ type formModel struct {
 	imgIdx      int
 	byoBackend  string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
 	byoOS       string // override for the selected BYO image's OS; "" means "use iso.Infer's guess"
-	mode        string // "live" | "disk" — meaningful only while the selected image's backend is apkovl
+	mode        string // "live" | "disk"; meaningful only while the selected image's backend is apkovl
 	err         string
 	fetching    bool
 	fetchingOS  string
@@ -271,7 +271,7 @@ type formModel struct {
 	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
 	recipeSel   map[string]bool // names currently checked
 	// randomPassword swaps the fixed, documented console password for a
-	// generated one. Cloud images only — see build().
+	// generated one. Cloud images only, see build().
 	randomPassword bool
 	dl             dlStats // last snapshot of the in-flight download
 }
@@ -297,14 +297,14 @@ const (
 )
 
 // focusOrder is the tab-traversal order of focus positions, which must match
-// the visual order fields are rendered in by viewForm — not the order the
+// the visual order fields are rendered in by viewForm, not the order the
 // field constants happen to be declared in.
 type focusOrder []int
 
 // order returns the tab-traversal order for the form's current state: name,
 // image, [backend override, BYO only], [mode, apkovl only], ram, cpus,
 // [disk, effective disk mode only], share, recipes. Conditional fields are
-// omitted rather than included-but-hidden — viewForm doesn't render them in
+// omitted rather than included-but-hidden: viewForm doesn't render them in
 // those states, so landing focus there would silently edit an invisible
 // field (the same reasoning fDisk already followed pre-Task-8). recipes is
 // always included, even with zero recipes matching: viewForm always renders
@@ -392,7 +392,7 @@ func (f formModel) resolvedSSHUser() string {
 		return ""
 	}
 	// The cloud-init seed creates exactly one account, cloudinit.User, so
-	// anything provisioned through that backend connects as it — including a
+	// anything provisioned through that backend connects as it, including a
 	// BYO file the user has just declared to be a cloud image via fBackend.
 	// Left to fall through, a BYO image would record an empty SSHUser, sshx
 	// would default that to root, and cloud images lock root: ssh and
@@ -408,7 +408,7 @@ func (f formModel) resolvedSSHUser() string {
 // effectiveMode is the Mode build() will write. cloudinit is always "cloud"
 // (a cloud image boots straight off its overlay, no install step); ssh is
 // always "disk" (an unrecognised BYO file is assumed to need a real install,
-// then manual/ssh provisioning — the apkovl live path only exists for
+// then manual/ssh provisioning; the apkovl live path only exists for
 // Alpine). apkovl keeps the user-controlled live/disk toggle exactly as
 // before Task 8.
 func (f formModel) effectiveMode() string {
@@ -423,7 +423,7 @@ func (f formModel) effectiveMode() string {
 }
 
 // refreshRecipes recomputes the recipe list for the currently selected
-// image's OS/backend and clears any selection made against the old list —
+// image's OS/backend and clears any selection made against the old list:
 // a recipe name from one OS is meaningless once the picker moves to another.
 func (f *formModel) refreshRecipes() {
 	f.recipeNames, _ = recipes.List(f.resolvedOS(), f.resolvedBackend())
@@ -463,7 +463,7 @@ func newForm() formModel {
 	// An explicit width is required, not cosmetic: bubbles v2.1.1 sizes an
 	// internal buffer to Width()+1 when rendering a placeholder, so with the
 	// width unset the placeholder is cut to its first rune ("name" -> "n").
-	// Only safe on rows that append nothing after the input — a width also
+	// Only safe on rows that append nothing after the input: a width also
 	// pads the VALUE out to it, which would push the " MB" after ram far right.
 	f.inputs[fName].SetWidth(formContentWidth - fieldValueColumn)
 	f.inputs[fName].Focus()
@@ -531,9 +531,9 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.form.refreshRecipes()
 		note := ""
 		if !msg.verified {
-			// An unverified image download must be visible, not silent —
+			// An unverified image download must be visible, not silent:
 			// this is the only consumer of Release.Verified.
-			note = " — UNVERIFIED (no checksum)"
+			note = ": UNVERIFIED (no checksum)"
 		}
 		cmd := m.showToast("downloaded "+msg.path+note, false)
 		return m, cmd
@@ -551,7 +551,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		case "?":
-			// Only a help toggle when no text field has focus — otherwise "?"
+			// Only a help toggle when no text field has focus. Otherwise "?"
 			// is just a character the user is trying to type into name/share.
 			if m.form.focus < fieldCount {
 				break
@@ -658,7 +658,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.form.focus == fISO {
 				opt := m.form.selected()
 				if opt == nil || opt.entry == nil {
-					cmd := m.showToast("byo images are already local — nothing to download", true)
+					cmd := m.showToast("byo images are already local, nothing to download", true)
 					return m, cmd
 				}
 				if m.form.fetching {
@@ -713,7 +713,7 @@ func (f *formModel) refocus() {
 }
 
 // spec turns the form into a core.Spec. Everything that decides what the VM
-// IS — image resolution, OS, backend, ssh user, mode, defaults, validation —
+// IS (image resolution, OS, backend, ssh user, mode, defaults, validation)
 // lives in core, so the CLI and an MCP server get the same VM the form does.
 // What stays here is the two checks only the form can make, about its own
 // picker rather than about the VM.
@@ -798,7 +798,7 @@ func (m model) viewForm() string {
 			marker = selStyle.Render(glyphCursor)
 			// Text inputs are NOT wrapped: a textinput's view carries its own
 			// cursor styling, and a styled substring's \x1b[0m resets the
-			// enclosing style too — so wrapping produced a row that was accent
+			// enclosing style too, so wrapping produced a row that was accent
 			// up to the cursor and default after it. The ❯ and the input's own
 			// cursor already mark focus. Picker rows are plain strings and wrap
 			// safely.
@@ -813,7 +813,7 @@ func (m model) viewForm() string {
 	group()
 
 	opt := f.selected()
-	imgLabel := "— (none)"
+	imgLabel := "- (none)"
 	if opt != nil {
 		imgLabel = opt.label()
 	}
@@ -822,7 +822,7 @@ func (m model) viewForm() string {
 	if opt != nil && opt.isBYO() {
 		row(fBackend, "backend", f.resolvedBackend())
 		// A BYO file's OS is almost never inferable from its name, and an
-		// unset one silently means "no recipes at all" — so the row says
+		// unset one silently means "no recipes at all", so the row says
 		// "unknown" rather than rendering blank, and the hint says what
 		// setting it buys.
 		osValue := f.resolvedOS()
@@ -854,9 +854,9 @@ func (m model) viewForm() string {
 		row(fDisk, "disk", f.inputs[fDisk].View())
 	case "cloud":
 		row(fDisk, "disk", f.inputs[fDisk].View())
-		b.hint("cloud images ship ~2.4G of usable root — raise this to install anything")
+		b.hint("cloud images ship ~2.4G of usable root, raise this to install anything")
 	default:
-		b.row("", "disk", dimStyle.Render("— (live mode)"))
+		b.row("", "disk", dimStyle.Render("- (live mode)"))
 	}
 	group()
 
@@ -875,9 +875,9 @@ func (m model) viewForm() string {
 		}
 		b.row(marker, "console", radio("stoat", !f.randomPassword)+"  "+radio("random", f.randomPassword))
 		// cloudinit is always cloud mode (effectiveMode above), and a cloud VM
-		// never gets a QEMU window (qemu.NeedsWindow) -- this password is only
+		// never gets a QEMU window (qemu.NeedsWindow), so this password is only
 		// ever typed at the VNC socket the detail screen surfaces.
-		b.hint("stoat user's login over VNC — cloud VMs have no qemu window")
+		b.hint("stoat user's login over VNC, cloud VMs have no qemu window")
 	}
 
 	// The download block and the error are full-width blocks, not field rows,
@@ -910,7 +910,7 @@ func (m model) viewForm() string {
 // non-crashing landing spot in the focus cycle either way.
 func (f formModel) recipesLabel() string {
 	if len(f.recipeNames) == 0 {
-		return dimStyle.Render("— (no matching recipes)")
+		return dimStyle.Render("- (no matching recipes)")
 	}
 	items := make([]string, len(f.recipeNames))
 	for i, name := range f.recipeNames {

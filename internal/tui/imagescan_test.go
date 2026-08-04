@@ -79,7 +79,7 @@ func TestScanImagesFindsOnlyImagesOutsideHiddenDirs(t *testing.T) {
 }
 
 // A file's size is shown next to it, so a scan that reports zero for
-// everything would render a column of "0 B" -- and stat failures must not
+// everything would render a column of "0 B", and stat failures must not
 // abort the walk.
 func TestScanImagesReportsSize(t *testing.T) {
 	root := t.TempDir()
@@ -96,7 +96,7 @@ func TestScanImagesReportsSize(t *testing.T) {
 }
 
 // An unreadable directory is normal in a home directory and must not end the
-// walk -- everything after it would silently go missing.
+// walk, or everything after it would silently go missing.
 func TestScanImagesSurvivesAnUnreadableDir(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read a 0000 directory")
@@ -117,14 +117,14 @@ func TestScanImagesSurvivesAnUnreadableDir(t *testing.T) {
 }
 
 // If nothing keeps reading (the finder is left, or the modal closes on a
-// selection), the walk must still stop -- otherwise the goroutine blocks
+// selection), the walk must still stop, otherwise the goroutine blocks
 // forever on the 5th pending batch (out has capacity 4) and leaks, holding an
 // open WalkDir, once per abandoned scan.
 func TestScanImagesStopsWhenCancelled(t *testing.T) {
 	root := t.TempDir()
 	// More than fits in the channel's buffer (4 batches) plus one more, so
-	// the goroutine is guaranteed to still be producing -- and blocked on a
-	// send -- when cancel fires.
+	// the goroutine is guaranteed to still be producing, and blocked on a
+	// send, when cancel fires.
 	for i := 0; i < 200; i++ {
 		p := filepath.Join(root, fmt.Sprintf("img%03d.iso", i))
 		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {

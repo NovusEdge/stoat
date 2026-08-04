@@ -38,12 +38,12 @@ func TestWantsAutoProvisionPrompt(t *testing.T) {
 		want bool
 	}{
 		{"live, never provisioned", autoVM(t, "live", recipes, ""), true},
-		{"live, previously succeeded — the reboot wiped it", autoVM(t, "live", recipes, ok), true},
+		{"live, previously succeeded, the reboot wiped it", autoVM(t, "live", recipes, ok), true},
 		{"disk, never provisioned", autoVM(t, "disk", recipes, ""), true},
-		{"disk, previously succeeded — still installed", autoVM(t, "disk", recipes, ok), false},
+		{"disk, previously succeeded, still installed", autoVM(t, "disk", recipes, ok), false},
 		{"disk, previous run failed", autoVM(t, "disk", recipes, failed), true},
 		{"no recipes", autoVM(t, "live", nil, ""), false},
-		{"cloud — cloud-init already did it", autoVM(t, "cloud", recipes, ""), false},
+		{"cloud, cloud-init already did it", autoVM(t, "cloud", recipes, ""), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

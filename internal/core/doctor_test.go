@@ -30,7 +30,7 @@ func TestDoctorStructure(t *testing.T) {
 
 		if c.OK {
 			// A passing check has nothing to complain about and nothing to
-			// fix -- a Fix on a passing check would be a caller-visible lie
+			// fix; a Fix on a passing check would be a caller-visible lie
 			// ("here's how to install a thing you already have").
 			if len(c.Fix) != 0 {
 				t.Errorf("%s: OK but carries a Fix %v", c.Name, c.Fix)
@@ -55,7 +55,7 @@ func TestDoctorStructure(t *testing.T) {
 	}
 
 	// With PATH cleared, every LookPath-backed check must fail and must
-	// offer a Fix -- this part IS safe to pin down, because clearing PATH
+	// offer a Fix; this part IS safe to pin down, because clearing PATH
 	// makes the outcome deterministic rather than dependent on the host.
 	for _, c := range checks {
 		if c.Name == "/dev/kvm" {

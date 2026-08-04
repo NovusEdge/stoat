@@ -2,7 +2,7 @@
 // VM, callable with no interactive input and returning structured data.
 //
 // It exists because creating a VM used to be possible only by driving a
-// Bubbletea form — image resolution, OS inference, backend choice, port
+// Bubbletea form: image resolution, OS inference, backend choice, port
 // allocation, vm.toml and the qcow2 all lived in internal/tui. The CLI had no
 // create command for exactly that reason, and an MCP server would have had to
 // reimplement it. The TUI, the CLI and an MCP server all sit on top of this.
@@ -54,7 +54,7 @@ type Spec struct {
 	Image string
 
 	// OS and Backend override what the filename implies. They apply to BYO
-	// images only — a catalog entry states both, and is authoritative.
+	// images only; a catalog entry states both, and is authoritative.
 	OS      string
 	Backend string
 
@@ -71,7 +71,7 @@ type Spec struct {
 
 	// ConsolePassword: empty means config.DefaultConsolePassword, "random"
 	// generates one, anything else is used verbatim. Written for the
-	// cloudinit backend only — see config.VM.ConsolePassword for why no
+	// cloudinit backend only; see config.VM.ConsolePassword for why no
 	// other backend needs one.
 	ConsolePassword string
 }
@@ -81,15 +81,15 @@ type Spec struct {
 //
 // A cloud VM's overlay (backed by Base) and its cloud-init seed are
 // deliberately NOT created here: qemu.Start's ensureCloudOverlay creates them
-// once, on first start, since — unlike a live VM's apkovl, rebuilt every start
-// — a cloud overlay holds real guest state that must never be discarded, and
+// once, on first start, since, unlike a live VM's apkovl, rebuilt every start,
+// a cloud overlay holds real guest state that must never be discarded, and
 // creating it here would also mean creating it again for a VM that is never
 // started.
 func Create(s Spec) (*config.VM, error) {
 	// Held across plan AND Save. plan allocates an ssh port and checks the
 	// name is free; neither is committed until Save writes vm.toml, so two
 	// callers interleaved in that gap both pick the same port and both believe
-	// the name is theirs. Plan on its own is deliberately NOT locked — it is a
+	// the name is theirs. Plan on its own is deliberately NOT locked: it is a
 	// dry run for callers that want to show an error early (the TUI form), and
 	// Create re-plans under the lock rather than trusting that result.
 	unlock, err := config.Lock()
@@ -119,8 +119,8 @@ func Create(s Spec) (*config.VM, error) {
 
 // Plan is Create without any side effects: it validates a Spec and returns the
 // VM that Create would write. A caller with somewhere better to show an error
-// than Create's return value — a form that wants it inline, next to the field
-// that caused it — checks with Plan first.
+// than Create's return value, a form that wants it inline, next to the field
+// that caused it, checks with Plan first.
 //
 // It is also the whole of validation and resolution, testable without writing
 // to the data root.
@@ -173,8 +173,8 @@ func plan(s Spec) (*config.VM, error) {
 	//
 	// Cloud mode needs this as much as disk mode, for a reason that is not
 	// obvious: its qcow2 is a CoW overlay, and an overlay inherits its BASE
-	// image's virtual size. Cloud images are sized to boot and nothing more —
-	// Ubuntu 24.04's is 3.5G with a 2.4G root — so without a size the overlay
+	// image's virtual size. Cloud images are sized to boot and nothing more:
+	// Ubuntu 24.04's is 3.5G with a 2.4G root, so without a size the overlay
 	// is created and never resized (backend/cloudinit.go only resizes when
 	// Disk is set), installing a desktop fills the disk, apt exits 100, and
 	// cloud-init reports a bare "error" that reads as a broken recipe rather
@@ -183,7 +183,7 @@ func plan(s Spec) (*config.VM, error) {
 	// The TUI never hit it because its form pre-fills 8G on every mode, so a
 	// cloud VM built there always carried a size. Defaulting only disk mode
 	// here made the CLI produce a DIFFERENT VM from the TUI for the same
-	// request — precisely the divergence this package exists to remove.
+	// request, precisely the divergence this package exists to remove.
 	//
 	// Live mode is excluded because it is genuinely diskless: an ISO booted
 	// into a tmpfs root, with no qcow2 to size.
@@ -223,7 +223,7 @@ func plan(s Spec) (*config.VM, error) {
 		v.Base = img.abs
 		// Only a cloud image needs this. cloud-init locks every account by
 		// default, so without a console password the VNC console (a cloud VM
-		// never gets a qemu window — qemu.NeedsWindow) shows a login prompt
+		// never gets a qemu window, qemu.NeedsWindow) shows a login prompt
 		// with no valid answer. A live Alpine VM already logs root in at the
 		// console with no password, and a disk VM's password is whatever the
 		// user sets during the guest's own installer.
@@ -246,8 +246,8 @@ func plan(s Spec) (*config.VM, error) {
 
 // modeFor decides boot media. cloudinit is always "cloud" (a cloud image boots
 // straight off its overlay, no install step); ssh is always "disk" (an
-// unrecognised image is assumed to need a real install, then ssh — the apkovl
-// live path only exists for Alpine). apkovl keeps the caller's live/disk
+// unrecognised image is assumed to need a real install, then ssh (the apkovl
+// live path only exists for Alpine.) apkovl keeps the caller's live/disk
 // choice.
 func modeFor(backend, want string) (string, error) {
 	switch backend {
@@ -281,7 +281,7 @@ func ParseSize(s string) (int64, error) {
 		return 0, fmt.Errorf("empty")
 	}
 	// qemu-img also accepts relative sizes ("+8G"), and strconv.ParseFloat
-	// happily reads "+8" as 8 — so "+8G" would pass a grow check as "8G" and
+	// happily reads "+8" as 8, so "+8G" would pass a grow check as "8G" and
 	// then ADD 8G, leaving vm.toml recording "+8G" and disagreeing with the
 	// disk forever after. Refused rather than translated.
 	if strings.HasPrefix(s, "+") || strings.HasPrefix(s, "-") {
@@ -314,7 +314,7 @@ func ParseSize(s string) (int64, error) {
 // fragment from the shared one. Nothing enforced that a Spec's names came from
 // that list, so `stoat create x --recipes xfce` was accepted, written to
 // vm.toml, and only failed on `stoat up` with "open .../recipes/xfce: no such
-// file or directory" — a create that succeeded and produced a VM that cannot
+// file or directory", a create that succeeded and produced a VM that cannot
 // start.
 //
 // The error names what IS available, because the failure is nearly always a

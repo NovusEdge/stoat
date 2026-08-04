@@ -16,14 +16,14 @@ import (
 
 // The access box sits beside the VM list and answers "how do I get into this
 // one" without a trip to the detail screen. It exists because the answer is
-// genuinely different per VM — root with a key on Alpine live, stoat with a
+// genuinely different per VM: root with a key on Alpine live, stoat with a
 // key over ssh and a password at the console on cloud images, and whatever
-// you typed into the installer on a disk VM — and guessing wrong leaves you
+// you typed into the installer on a disk VM. Guessing wrong leaves you
 // staring at a login prompt.
 
 // accessWidth is the box's content width, sized so the lines it holds do not
 // wrap: a label column plus "stoat@127.0.0.1:65535" or a shortened key path.
-// Values longer than the remaining room are truncated rather than wrapped —
+// Values longer than the remaining room are truncated rather than wrapped:
 // a wrapped path splits mid-token and reads as two broken lines.
 const accessWidth = 40
 
@@ -64,7 +64,7 @@ func accessBox(v *config.VM, cloudInit string, ciProg progress.Model, width int)
 		// VM's console drops straight into a shell.
 		line("console", "root"+dimStyle.Render("  (no password)"))
 	case v.Mode == "cloud":
-		line("console", warnStyle.Render("locked — ssh only"))
+		line("console", warnStyle.Render("locked: ssh only"))
 	default:
 		line("console", dimStyle.Render("set during install"))
 	}

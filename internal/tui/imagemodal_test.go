@@ -194,14 +194,14 @@ func TestBYOLabelIsBoundedAndNamesTheUnknown(t *testing.T) {
 		t.Errorf("label %q still renders the unnamed OS as a bare question mark", label)
 	}
 	// The label renders in the form's VALUE column, not the whole pane, so
-	// that is the width it has to fit — a row one cell over wraps.
+	// that is the width it has to fit; a row one cell over wraps.
 	if w, avail := lipgloss.Width(label), formContentWidth-fieldValueColumn; w > avail {
 		t.Errorf("byo label is %d cells, wider than the %d-cell value column", w, avail)
 	}
 }
 
-// The BYO row is the widest the form draws — os, backend, filename, size,
-// tag — so it is the one that overflows first when a column is added.
+// The BYO row is the widest the form draws (os, backend, filename, size,
+// tag), so it is the one that overflows first when a column is added.
 func TestImageRowsFitTheValueColumn(t *testing.T) {
 	avail := formContentWidth - fieldValueColumn
 	longest := imageOption{
@@ -240,7 +240,7 @@ func TestBYOOSOverrideDrivesResolvedOS(t *testing.T) {
 	}
 }
 
-// The override must not leak across images — it described the previous file.
+// The override must not leak across images; it described the previous file.
 func TestSelectImageClearsTheBYOOverrides(t *testing.T) {
 	f := formModel{
 		images: []imageOption{
@@ -276,11 +276,11 @@ func TestBYOOSNamesCoverTheCatalogAndAllowUnset(t *testing.T) {
 
 // A BYO image declared to be a cloud image must record the account the seed
 // actually creates. Left empty, sshx defaults to root, and cloud images lock
-// root — so ssh and provisioning both fail on a VM that looks fine.
+// root, so ssh and provisioning both fail on a VM that looks fine.
 func TestBYOCloudinitConnectsAsTheSeedUser(t *testing.T) {
 	f := formModel{images: []imageOption{{file: "mystery.qcow2", backend: "cloudinit", sshUser: ""}}}
 	if got := f.resolvedSSHUser(); got != cloudinit.User {
-		t.Errorf("resolvedSSHUser = %q, want %q — the account the seed creates", got, cloudinit.User)
+		t.Errorf("resolvedSSHUser = %q, want %q (the account the seed creates)", got, cloudinit.User)
 	}
 }
 
@@ -338,13 +338,13 @@ func TestDeclaringTheOSMakesRecipesAppear(t *testing.T) {
 }
 
 // The size column is right-aligned, and humanBytes keeps a decimal below 100
-// ("66.0 MiB"), so the widest value is "~66.0 MiB" — nine cells, not the eight
+// ("66.0 MiB"), so the widest value is "~66.0 MiB", nine cells, not the eight
 // you would guess from the largest image. Undersized, the status column shifts
 // on exactly the small-image rows, which is alpine-virt, the row the sizes
 // exist to make comparable.
 func TestSizeColumnFitsTheWidestLabel(t *testing.T) {
 	cases := []imageOption{
-		{bytes: 66 * 1024 * 1024},               // ~66.0 MiB — the widest
+		{bytes: 66 * 1024 * 1024},               // ~66.0 MiB, the widest
 		{bytes: 595 * 1024 * 1024},              // ~595 MiB
 		{bytes: 352 * 1024 * 1024, exact: true}, // 352 MiB
 		{bytes: 1288490188, exact: true},        // 1.2 GiB
@@ -383,7 +383,7 @@ func TestEveryCatalogEntryDeclaresASize(t *testing.T) {
 }
 
 // A single-variant OS resolves straight from the first level, so that level is
-// the only place its size is ever seen — the group has to carry it.
+// the only place its size is ever seen, so the group has to carry it.
 func TestSingleVariantGroupCarriesItsImage(t *testing.T) {
 	groups := groupImages(testImages())
 	for _, g := range groups {
@@ -395,13 +395,13 @@ func TestSingleVariantGroupCarriesItsImage(t *testing.T) {
 
 // The second column holds a catalog variant OR a BYO backend, and every value
 // must fit it. One that does not overflows by a cell and shifts the size
-// column on that row alone — which is what "13 (trixie)" did against a
+// column on that row alone, which is what "13 (trixie)" did against a
 // 10-cell column, and which no width test catches, because the ROW still fits
 // the pane. Only the alignment breaks.
 func TestImageMetaColumnFitsEveryValue(t *testing.T) {
 	for _, e := range iso.Catalog() {
 		if w := lipgloss.Width(e.Variant); w > imageMetaWidth {
-			t.Errorf("catalog variant %q is %d cells, column is %d — its size will misalign",
+			t.Errorf("catalog variant %q is %d cells, column is %d, its size will misalign",
 				e.Variant, w, imageMetaWidth)
 		}
 	}
@@ -430,7 +430,7 @@ func byoVariants(t *testing.T, mo *imageModal) {
 }
 
 // choose an image… must be reachable via the normal drill-in even though
-// testImages gives the byo group exactly one real file — the single-variant
+// testImages gives the byo group exactly one real file, and the single-variant
 // shortcut that resolves other one-image groups straight from the OS level
 // would otherwise make the entry unreachable whenever there's only one BYO
 // file (or none at all).
@@ -466,8 +466,8 @@ func TestCatalogRowsAlignTheirSizeColumn(t *testing.T) {
 }
 
 // The whole point of the mode: type part of a name and the non-matching
-// images go away. Asserted on drawn output, not on the model's item slice --
-// a filter that matches but does not redraw is the bug this catches.
+// images go away. Asserted on drawn output, not on the model's item slice,
+// since a filter that matches but does not redraw is the bug this catches.
 func TestFinderFiltersAsYouType(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	mo.byo = true
@@ -517,7 +517,7 @@ func TestFinderMatchesFuzzilyNotJustSubstrings(t *testing.T) {
 // A typed ~ must expand before it filters. Scanned paths are absolute, so a
 // raw "~/Downloads" matches nothing in "/home/u/Downloads/alpine.iso"
 // character-for-character (fuzzy matching still requires every rune to
-// appear, in order) -- the most natural way to type a home-relative
+// appear, in order), so the most natural way to type a home-relative
 // location made the screen look like it had found nothing at all.
 func TestByoFilterExpandsATildeQuery(t *testing.T) {
 	home := t.TempDir()
@@ -532,7 +532,7 @@ func TestByoFilterExpandsATildeQuery(t *testing.T) {
 	})
 
 	// Type it one key at a time through the real update path, exactly as a
-	// user would -- not by poking SetFilterText directly, since the bug is
+	// user would, not by poking SetFilterText directly, since the bug is
 	// in what updateByo hands the list, not in the list's own filtering.
 	for _, r := range "~/Downloads" {
 		mo.update(keyMsg(string(r)))
@@ -544,8 +544,8 @@ func TestByoFilterExpandsATildeQuery(t *testing.T) {
 	}
 }
 
-// Results stream in while the walk is still running, so the pane must say so
-// -- an empty box with no explanation reads as "there are no images".
+// Results stream in while the walk is still running, so the pane must say so:
+// an empty box with no explanation reads as "there are no images".
 func TestFinderSaysItIsStillLooking(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	mo.byo = true
@@ -573,7 +573,7 @@ func TestFinderSaysWhenItFoundNothing(t *testing.T) {
 	}
 }
 
-// esc goes back a level rather than closing the modal -- the byo screen
+// esc goes back a level rather than closing the modal: the byo screen
 // follows the same rule as every other sub-mode here, because the user is
 // one step into a choice and dumping them out would discard it.
 func TestByoEscGoesBackToTheVariantList(t *testing.T) {
@@ -593,7 +593,7 @@ func TestByoEscGoesBackToTheVariantList(t *testing.T) {
 		t.Error("esc did not leave the byo screen")
 	}
 
-	// State alone would pass even if view() still drew the byo screen --
+	// State alone would pass even if view() still drew the byo screen, so
 	// assert on what is actually redrawn.
 	out := ansi.Strip(mo.view())
 	if !strings.Contains(out, "choose an image…") {
@@ -605,7 +605,7 @@ func TestByoEscGoesBackToTheVariantList(t *testing.T) {
 }
 
 // Re-entering the finder must start clean: leaving it (esc) does not cancel
-// the running scan by itself -- if the old scan's messages keep landing (see
+// the running scan by itself, and if the old scan's messages keep landing (see
 // TestReEnteringFinderDoesNotDoubleResults), every result would be appended
 // twice, adjacent, because the old list's items survive across openByo.
 func TestReEnteringByoDoesNotDoubleResults(t *testing.T) {
@@ -626,7 +626,7 @@ func TestReEnteringByoDoesNotDoubleResults(t *testing.T) {
 }
 
 // Choosing a found image must produce a real BYO option appended to the
-// modal's own slice -- app.go re-adopts mo.images and resolves the returned
+// modal's own slice, since app.go re-adopts mo.images and resolves the returned
 // index against it.
 func TestByoChoosingAppendsTheImage(t *testing.T) {
 	dir := t.TempDir()
@@ -657,7 +657,7 @@ func TestByoChoosingAppendsTheImage(t *testing.T) {
 
 // The scan pumps itself: every batch message carries the command that fetches
 // the next one. A gate that drops non-key messages does not merely delay
-// results, it ENDS the chain -- so drive it through the real app.Update, not
+// results, it ENDS the chain, so drive it through the real app.Update, not
 // the modal in isolation.
 func TestScanResultsReachTheByoScreenThroughTheApp(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
@@ -711,7 +711,7 @@ func TestScanKeepsPumpingAfterABatch(t *testing.T) {
 }
 
 // Choosing choose an image… must swap the variant list for a focused text
-// field over a result list -- asserted on the drawn output, not the mode
+// field over a result list, asserted on the drawn output, not the mode
 // flag, since a flag that flips without a redraw is invisible to the user.
 func TestChoosingByoDrawsAFocusedInput(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
@@ -738,7 +738,7 @@ func TestChoosingByoDrawsAFocusedInput(t *testing.T) {
 // screen, mirroring TestModalFitsTheSmallestTerminal: a modal's failure mode
 // is that it renders fine at the developer's window and corrupts at someone
 // else's, and app.go still draws panes at 60x20. Covers every state that
-// differs in height -- scanning, results present, empty-after-scan, and the
+// differs in height: scanning, results present, empty-after-scan, and the
 // inline-error state, which is the tallest: a rejected path can be long
 // enough (a t.TempDir() directory) to wrap the error line to two.
 func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
@@ -766,7 +766,7 @@ func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
 			mo.openByo()
 			// A directory, not a nonexistent path: byoOptionFromPath's
 			// rejection embeds the full path, and a temp dir's is long
-			// enough to actually wrap inside modalContentWidth -- the worst
+			// enough to actually wrap inside modalContentWidth, the worst
 			// case for height, unlike a short hand-typed bad path.
 			mo.byoInput.SetValue(dir)
 			mo.update(keyMsg("enter"))
@@ -818,8 +818,8 @@ func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
 	if !strings.Contains(out, dir) {
 		t.Errorf("a 200-column terminal still truncated the directory %q:\n%s", dir, out)
 	}
-	// Check the row itself for a truncation mark, not the whole screen --
-	// "searching …" is a legitimate ellipsis on its own status line.
+	// Check the row itself for a truncation mark, not the whole screen,
+	// since "searching …" is a legitimate ellipsis on its own status line.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "alpine.iso") && strings.Contains(line, "…") {
 			t.Errorf("the result row is still truncated on a 200-column terminal: %q", line)
@@ -829,8 +829,8 @@ func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
 
 // The user's actual requirement, verbatim: "the BYO filepicker doesn't show
 // full filenames which is a shame, we need full file names for it to be
-// useful." A realistic filename must render whole -- no ellipsis inside it
-// -- at the smallest supported terminal, an intermediate one, and a large
+// useful." A realistic filename must render whole, with no ellipsis inside it,
+// at the smallest supported terminal, an intermediate one, and a large
 // one alike. Growing the modal, eliding the directory and dropping the size
 // column all exist only in service of this; if the name itself ever gets
 // cut, everything else was pointless.
@@ -872,7 +872,7 @@ func TestByoScreenNeverTruncatesTheFileName(t *testing.T) {
 }
 
 // grepLine returns the first line of out containing needle, for test
-// output -- so a failure shows the one row that matters instead of the
+// output, so a failure shows the one row that matters instead of the
 // whole box.
 func grepLine(out, needle string) string {
 	for _, line := range strings.Split(out, "\n") {
@@ -885,7 +885,7 @@ func grepLine(out, needle string) string {
 
 // The only situation the name is allowed to lose characters: it alone
 // already reaches or exceeds the row's full width, even at the floor. It is
-// middle-elided rather than cut from the tail, keeping both ends -- the
+// middle-elided rather than cut from the tail, keeping both ends: the
 // base name up front and the version/extension at the back, which is what
 // TestByoScreenNeverTruncatesTheFileName's 33-cell name never has to
 // exercise since it always fits.
@@ -916,7 +916,7 @@ func TestFoundRowMiddleElidesAPathologicallyLongName(t *testing.T) {
 }
 
 // The box must also grow sanely at an ordinary "bigger than the floor but
-// nowhere near huge" terminal -- centred, and never overflowing it, the
+// nowhere near huge" terminal, centred, and never overflowing it, the
 // same invariant TestByoScreenFitsTheSmallestTerminal and
 // TestModalFitsTheSmallestTerminal check at the other end of the range.
 func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
@@ -926,7 +926,7 @@ func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
 	mo.setFound([]foundImage{{path: "/home/u/vms/alpine.iso", size: 1}})
 
 	m := model{width: 100, height: 30, modal: mo}
-	// Resize explicitly, the same way renderModal does every real frame --
+	// Resize explicitly, the same way renderModal does every real frame:
 	// this test wants to observe growth, unlike the smallest-terminal tests,
 	// which deliberately never resize so they keep exercising the box's
 	// original fixed size.
@@ -938,7 +938,7 @@ func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
 	if h := lipgloss.Height(box); h > m.height {
 		t.Errorf("modal is %d lines tall, terminal is %d", h, m.height)
 	}
-	// The box should actually have grown past the smallest-terminal floor --
+	// The box should actually have grown past the smallest-terminal floor,
 	// otherwise this test would pass even if resize did nothing at all.
 	if w := lipgloss.Width(box); w <= smallWidth {
 		t.Errorf("modal did not grow at 100 columns: still %d cells wide", w)
@@ -975,7 +975,7 @@ func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
 	}
 }
 
-// Arrow keys must move the list's selection, not the text field -- and the
+// Arrow keys must move the list's selection, not the text field, and the
 // DRAWN highlight must follow, since a cursor that moves in state but not on
 // screen is invisible to the user.
 func TestArrowKeysMoveTheByoSelectionAndTheHighlightFollows(t *testing.T) {
@@ -1013,7 +1013,7 @@ func TestArrowKeysMoveTheByoSelectionAndTheHighlightFollows(t *testing.T) {
 }
 
 // Up/down must reach the list rather than being swallowed by the focused
-// text field -- bubbles/textinput ignores them, but this is the contract
+// text field, since bubbles/textinput ignores them, but this is the contract
 // that matters, not an assumption about the component's own key handling.
 func TestArrowKeysDoNotLeakIntoTheByoTextField(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
@@ -1029,7 +1029,7 @@ func TestArrowKeysDoNotLeakIntoTheByoTextField(t *testing.T) {
 }
 
 // Typing a real path and pressing enter must select it even with no results
-// list match -- this is how an image OUTSIDE $HOME (never found by the scan)
+// list match: this is how an image OUTSIDE $HOME (never found by the scan)
 // gets chosen now that the tree browser is gone.
 func TestTypingARealPathSelectsIt(t *testing.T) {
 	dir := t.TempDir()
@@ -1059,7 +1059,7 @@ func TestTypingARealPathSelectsIt(t *testing.T) {
 }
 
 // ~ and ~/... must expand to the user's home directory before the path is
-// resolved -- typed paths are the one entry point in this modal that takes
+// resolved, since typed paths are the one entry point in this modal that takes
 // free text, so it's the one place a user is likely to type it.
 func TestTypingATildePathExpands(t *testing.T) {
 	home := t.TempDir()
@@ -1082,7 +1082,7 @@ func TestTypingATildePathExpands(t *testing.T) {
 	}
 }
 
-// A path that doesn't exist must stay open and say why, right on screen --
+// A path that doesn't exist must stay open and say why, right on screen:
 // not close the modal, not silently do nothing.
 func TestTypingANonexistentPathShowsAnErrorAndStaysOpen(t *testing.T) {
 	dir := t.TempDir()
@@ -1111,7 +1111,7 @@ func TestTypingANonexistentPathShowsAnErrorAndStaysOpen(t *testing.T) {
 	}
 }
 
-// A directory must also be rejected, with the reason drawn -- byoOptionFromPath
+// A directory must also be rejected, with the reason drawn, since byoOptionFromPath
 // is the authority on this rule, and it is doing it right below.
 func TestTypingADirectoryShowsAnErrorAndStaysOpen(t *testing.T) {
 	dir := t.TempDir()
@@ -1152,7 +1152,7 @@ func TestTypingEmptyPathDoesNothing(t *testing.T) {
 }
 
 // esc from the byo screen must return to the variant list, not out of the
-// modal -- same rule every sub-mode here follows, asserted on what's
+// modal, the same rule every sub-mode here follows, asserted on what's
 // actually redrawn.
 func TestEscWhileByoReturnsToVariantList(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
@@ -1180,7 +1180,7 @@ func TestEscWhileByoReturnsToVariantList(t *testing.T) {
 }
 
 // The non-key message gate in app.go must cover the byo screen, or neither
-// the scan's batches nor the field's cursor blink ever reach it -- see
+// the scan's batches nor the field's cursor blink ever reach it, see
 // 81cbd92 for the shape of bug this guards against (a swallowed non-key
 // message that ended a chain rather than stalling it).
 func TestByoReceivesNonKeyMessages(t *testing.T) {

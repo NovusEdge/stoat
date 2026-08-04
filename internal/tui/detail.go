@@ -140,7 +140,7 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// tea.SetClipboard uses OSC 52: no xclip/wl-copy dependency, no
 			// X11-vs-Wayland branch, and it works over ssh. Never toast the
-			// password itself — just confirm it moved.
+			// password itself, just confirm it moved.
 			copied := tea.SetClipboard(v.ConsolePassword)
 			toasted := m.showToast(v.Name+": console password copied to clipboard", false)
 			return m, tea.Batch(copied, toasted)
@@ -165,7 +165,7 @@ func consolePasswordAvailable(v *config.VM) bool {
 
 // typeConsolePassword has qemu type v's console password into the guest, off
 // the UI goroutine: sending it can take a while (one monitor round trip per
-// character, deliberately paced — see qemu.TypeConsolePassword), and the TUI
+// character, deliberately paced (see qemu.TypeConsolePassword), and the TUI
 // must stay responsive while that happens.
 func typeConsolePassword(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
@@ -199,25 +199,25 @@ func (m model) viewDetail() string {
 	facts.gap()
 
 	line := func(k, val string) { facts.row("", k, val) }
-	// A cloud VM has no ISO — it boots an overlay of a base image — so the
-	// row would otherwise render as an empty label.
+	// A cloud VM has no ISO. It boots an overlay of a base image instead, so
+	// the row would otherwise render as an empty label.
 	if v.ISO != "" {
 		line("iso", v.ISO)
 	} else if v.Base != "" {
 		line("image", filepath.Base(v.Base))
 	}
 	if v.Mode == "disk" {
-		size := "—"
+		size := "-"
 		if fi, err := os.Stat(v.DiskPath()); err == nil {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
 		// Until this is true the VM boots its installer ISO, so "p" would be
-		// provisioning the installer's tmpfs — startProvision refuses with
+		// provisioning the installer's tmpfs. startProvision refuses with
 		// the same instruction rather than timing out on ssh. The next start
 		// sets it automatically once the install has written to the disk; "i"
 		// is the override for when that guess is wrong either way.
-		installed := warnStyle.Render("no — run " + installerName(v) + " in the qemu window, then restart")
+		installed := warnStyle.Render("no: run " + installerName(v) + " in the qemu window, then restart")
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}
@@ -228,14 +228,14 @@ func (m model) viewDetail() string {
 	// qemu.NeedsWindow is the one case that gets a real qemu window (a
 	// disk-mode VM mid-install); every other VM is headless, and the VNC
 	// socket bound in that case (internal/qemu/args.go) is otherwise
-	// invisible anywhere in the UI — surface it, since it's the only way to
+	// invisible anywhere in the UI, so surface it: it's the only way to
 	// get a display on a headless VM.
 	if !qemu.NeedsWindow(v) {
 		line("vnc", v.VNCPath()+dimStyle.Render("  connect a VNC viewer here for a display"))
 	}
 	// How to get in. The console line matters most for cloud images: they
 	// lock every account, so without a password the console shows a login
-	// prompt with no valid answer — and the moment you need it is the moment
+	// prompt with no valid answer, and the moment you need it is the moment
 	// ssh isn't working, which is the worst time to go looking. This
 	// password is only ever set for the cloudinit backend (form.go), which
 	// is always cloud mode, so it is always reached over VNC, never a qemu
@@ -243,7 +243,7 @@ func (m model) viewDetail() string {
 	if v.ConsolePassword != "" {
 		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (over vnc, above)"))
 	} else if v.Mode == "cloud" {
-		line("console", warnStyle.Render("no password set — console login is not possible"))
+		line("console", warnStyle.Render("no password set: console login is not possible"))
 	}
 	if v.Share != "" {
 		line("share", v.Share+dimStyle.Render(" "+glyphTo+" /mnt/host"))

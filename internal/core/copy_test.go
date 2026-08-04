@@ -41,7 +41,7 @@ func TestCopyFromUnknownVM(t *testing.T) {
 	}
 }
 
-// A stopped VM must be refused before scp is ever dialled — see doCopy's
+// A stopped VM must be refused before scp is ever dialled; see doCopy's
 // comment, and Exec's identical reasoning in exec_test.go.
 func TestCopyToStoppedVMIsNotRunning(t *testing.T) {
 	root(t)

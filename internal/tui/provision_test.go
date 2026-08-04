@@ -7,7 +7,7 @@ import (
 )
 
 // TestInstallerName: a known OS with an Installer in the registry gets named
-// exactly; an unknown OS or one with no Installer stays generic — naming the
+// exactly; an unknown OS or one with no Installer stays generic. Naming the
 // wrong installer is worse than staying general.
 func TestInstallerName(t *testing.T) {
 	cases := []struct {

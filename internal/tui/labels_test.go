@@ -8,7 +8,7 @@ import (
 )
 
 // TestRecipeLabel covers the display-only rename. VM.Recipes still stores the
-// filename — recipes.Read opens it — so this must never be fed back into a
+// filename, and recipes.Read opens it, so this must never be fed back into a
 // config; it exists because "xfce.alpine.sh" told the user about a per-OS
 // suffix the picker had already filtered on.
 func TestRecipeLabel(t *testing.T) {
@@ -98,7 +98,7 @@ func TestWrapItemsKeepsRowsInsideThePane(t *testing.T) {
 		}
 	}
 
-	// Every item must survive the wrap — losing one silently would hide a
+	// Every item must survive the wrap. Losing one silently would hide a
 	// recipe the user could otherwise select.
 	for _, it := range items {
 		if !strings.Contains(out, it) {

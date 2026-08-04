@@ -15,7 +15,7 @@ import (
 
 // vmItem is one row of the VM list. A single type covers both good VMs and
 // broken ones (a directory whose vm.toml won't parse) because the cursor
-// ranges over them as one sequence — modelling them as two lists would mean
+// ranges over them as one sequence. Modelling them as two lists would mean
 // reimplementing that interleaving on top of bubbles/list.
 type vmItem struct {
 	vm     *config.VM     // nil for a broken entry
@@ -36,7 +36,7 @@ func (i vmItem) FilterValue() string { return i.name() }
 
 // vmDelegate renders stoat's own row format inside bubbles/list, so adopting
 // the component's scrolling and filtering doesn't mean adopting its visual
-// language — no purple selection bar, no per-item description block.
+// language: no purple selection bar, no per-item description block.
 type vmDelegate struct{}
 
 func (vmDelegate) Height() int  { return 1 }
@@ -63,7 +63,7 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		plain := fmt.Sprintf("%-14s broken: %s", it.broken.Name, brokenReason(it.broken.Err))
 		// A long reason wraps inside the pane. paneAt wraps the whole rendered
 		// list as one blob and has no idea this line starts 4 columns in (the
-		// cursor, the glyph, and the space after it) — left to it, the
+		// cursor, the glyph, and the space after it). Left to it, the
 		// continuation lands flush against the pane's padding, under the
 		// cursor instead of under the text. Wrapping here first, with a
 		// hanging indent matching that prefix, means every physical line
@@ -81,7 +81,7 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 
 	v := it.vm
 	dot, dotStyle := glyphStopped, downStyle
-	state := dimStyle.Render("—")
+	state := dimStyle.Render("-")
 	if qemu.Running(v) {
 		dot, dotStyle = glyphRunning, upStyle
 		state = fmt.Sprintf("up %s  :%d", qemu.Uptime(v), v.SSHPort)
@@ -89,7 +89,7 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	// The dot and the state stay OUTSIDE the selection wrap: a styled
 	// substring ends in \x1b[0m, which resets the enclosing style too, so
 	// wrapping a row that starts with a coloured dot leaves everything after
-	// it unhighlighted, and a trailing dim "—" would render unbolded inside
+	// it unhighlighted, and a trailing dim "-" would render unbolded inside
 	// an otherwise highlighted row.
 	label := fmt.Sprintf("%-14s %-5s %5dM %2dc  ", v.Name, v.Mode, v.RAM, v.CPUs)
 	if selected {
@@ -105,7 +105,7 @@ const (
 	// Wide enough for the widest row the format can produce with values that
 	// are actually reachable: a 14-char name, 5-digit RAM, 2-digit cpus, an
 	// uptime just under 1000 hours and a 5-digit port (the edit form allows
-	// up to 65535). Sized off the RUNNING row on purpose — a stopped one is
+	// up to 65535). Sized off the RUNNING row on purpose, since a stopped one is
 	// only 38 cells, which is why an undersized value looks fine in every
 	// test render and then wraps the port onto its own line the moment
 	// something is actually up. A terminal narrower than this still clamps
@@ -234,19 +234,19 @@ func (m *model) syncListHeight() {
 }
 
 // filterActive reports whether the filter input owns the keyboard. While it
-// does, stoat's own single-letter bindings (n, d, p, s, q) must not fire —
+// does, stoat's own single-letter bindings (n, d, p, s, q) must not fire:
 // they are characters the user is typing into the search box.
 func (m model) filterActive() bool { return m.list.SettingFilter() }
 
 // listStatusLine renders the filter state under the pane, so an applied
-// filter is visible after the input closes — otherwise a filtered list looks
-// like VMs have gone missing.
+// filter is visible after the input closes, since otherwise a filtered list
+// looks like VMs have gone missing.
 func listStatusLine(l list.Model) string {
 	if l.SettingFilter() {
 		return l.FilterInput.View()
 	}
 	if l.IsFiltered() {
-		return dimStyle.Render(fmt.Sprintf("search %q — %d of %d · esc clears",
+		return dimStyle.Render(fmt.Sprintf("search %q: %d of %d · esc clears",
 			l.FilterValue(), len(l.VisibleItems()), len(l.Items())))
 	}
 	return ""

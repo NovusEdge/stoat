@@ -15,7 +15,7 @@ import (
 )
 
 // ErrAppliedAtBoot is returned by Apply for a VM whose backend already ran
-// its recipes at first boot and has no post-boot apply step at all — the
+// its recipes at first boot and has no post-boot apply step at all: the
 // cloudinit backend, whose recipes are merged into the cloud-init seed and
 // consumed by the guest's own cloud-init service before sshd is even
 // reachable from stoat's side (internal/backend/cloudinit.go's Prepare;
@@ -31,10 +31,10 @@ var ErrAppliedAtBoot = errors.New("recipes for this backend already ran at first
 type ApplyOpts struct {
 	// Only restricts the run to a subset of the VM's OWN recipe list,
 	// naming entries exactly as they appear in VM.Recipes (full filenames,
-	// e.g. "xfce.alpine.sh" — the same identifiers Recipes and CheckRecipes
+	// e.g. "xfce.alpine.sh", the same identifiers Recipes and CheckRecipes
 	// use). Empty means "every recipe the VM has".
 	//
-	// Only does NOT let a caller run a recipe the VM was not created with —
+	// Only does NOT let a caller run a recipe the VM was not created with:
 	// that would bypass the applicability check Create already made
 	// (core.go's checkRecipes) for a name nobody vetted against this VM's
 	// OS/backend. A caller that wants a recipe added first goes through
@@ -50,21 +50,21 @@ type ApplyOpts struct {
 // make it. Nothing elsewhere in this package invokes it as a side effect of
 // Create or Start.
 //
-// The actual run is sshx.Provision — unchanged, not reimplemented. Apply's
+// The actual run is sshx.Provision, unchanged, not reimplemented. Apply's
 // job is entirely the caller-facing decisions Provision itself has no way to
 // make: which VM, which backend, and which subset. Progress is NOT a new
 // channel: Provision writes "=== recipe NAME ===" markers to
 // v.ProvisionLogPath() exactly as it does when the TUI's autoprov path
 // drives it, and internal/tui/provstep.go already knows how to tail that
 // file. A caller here gets the identical log through Logs(name, WhichApply)
-// or Wait(ctx, name, UntilApplied) — both already exist and both already
+// or Wait(ctx, name, UntilApplied), both already exist and both already
 // read that same file, so nothing here invents a second progress path.
 //
 // ctx: Apply is the second operation in this package (after Exec) with a
-// real reason for one — a desktop recipe can take minutes. sshx.Provision now
+// real reason for one: a desktop recipe can take minutes. sshx.Provision now
 // takes ctx itself and runs each recipe under exec.CommandContext, so
 // cancelling ctx here kills the in-flight ssh process (SIGTERM, then a grace
-// period — see sshx.recipeShutdownGrace) rather than merely stopping this
+// period; see sshx.recipeShutdownGrace) rather than merely stopping this
 // call from waiting on it. Provision also checks ctx.Err() between recipes,
 // so a cancellation landing in the gap between two doesn't start one more
 // ssh process only to kill it immediately. Apply passes ctx straight through
@@ -106,7 +106,7 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	}
 
 	// run is v with Recipes narrowed to targets. config.VM is a plain value
-	// struct (see internal/config/config.go) — no mutex, no owned resource —
+	// struct (see internal/config/config.go), no mutex, no owned resource,
 	// so copying it and pointing sshx.Provision at the copy is exactly as
 	// safe as calling it on v directly, and it is what lets Only reuse
 	// Provision as-is instead of it needing a subset parameter added to a
@@ -124,17 +124,17 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 // disk.
 //
 // docs/design/guest-subsystem.md §5 specifies an in-band front-matter
-// contract — "# stoat:name", "# stoat:description", "# stoat:os",
+// contract, "# stoat:name", "# stoat:description", "# stoat:os",
 // "# stoat:requires", "# stoat:stages" comments a recipe script would
-// declare — as the source for a recipe's real metadata. THAT PARSER DOES
+// declare, as the source for a recipe's real metadata. THAT PARSER DOES
 // NOT EXIST. internal/recipes has no code that reads those tags, and no
 // recipe file in the tree carries them: every .sh and .yaml recipe here has
-// only free-form prose comments (checked directly — xfce.alpine.sh,
+// only free-form prose comments (checked directly: xfce.alpine.sh,
 // xfce.debian.cloud.yaml, devtools.cloud.yaml, all of them). So Recipe
 // cannot report a declared Description, Requires, or Stages without
 // inventing a format nobody has agreed to, which is exactly the gap this
 // change was told to report rather than paper over. What IS populated below
-// is derived purely from the filename and from what else exists on disk —
+// is derived purely from the filename and from what else exists on disk;
 // no script content is parsed, no comment is treated as documentation.
 type Recipe struct {
 	// Name is the full filename ("xfce.alpine.cloud.yaml"), exactly what
@@ -144,15 +144,15 @@ type Recipe struct {
 	// extension and its OS/backend-suffix segment stripped
 	// ("xfce.alpine.sh" -> "xfce"). Mirrors internal/tui/labels.go's
 	// recipeLabel exactly (that function is unexported in package tui,
-	// which this package must not import — tui sits above core in the
+	// which this package must not import (tui sits above core in the
 	// layering, and reaching back down would be the cycle
 	// docs/design/guest-subsystem.md §3.2 explicitly avoids for a related
-	// reason). Kept here as a small, independent copy rather than a shared
+	// reason), kept here as a small, independent copy rather than a shared
 	// export, since the two calls are one line each.
 	Label string
 	// TargetOS is the OS this specific file is pinned to, read off its own
 	// filename ("alpine" for "xfce.alpine.sh", "debian" for
-	// "xfce.debian.cloud.yaml"). Empty for a SHARED cloud-config fragment —
+	// "xfce.debian.cloud.yaml"). Empty for a SHARED cloud-config fragment;
 	// see Shared.
 	TargetOS string
 	// Shared reports whether this is a cloud-config fragment offered to
@@ -166,7 +166,7 @@ type Recipe struct {
 // RecipeFilter selects the recipes Recipes returns: the exact set
 // recipes.List(OS, Backend) would offer a VM with that OS and backend,
 // each with what Recipe above can honestly report about it. Both fields are
-// required — there is no "every OS" or "every backend" scope, matching
+// required: there is no "every OS" or "every backend" scope, matching
 // recipes.List itself, which cannot answer that question either.
 type RecipeFilter struct {
 	OS      string
@@ -190,7 +190,7 @@ func Recipes(f RecipeFilter) ([]Recipe, error) {
 	return out, nil
 }
 
-// recipeLabel mirrors internal/tui/labels.go's function of the same name —
+// recipeLabel mirrors internal/tui/labels.go's function of the same name;
 // see Recipe.Label's comment for why this is a small independent copy
 // rather than a shared export.
 func recipeLabel(file string) string {
@@ -204,7 +204,7 @@ func recipeLabel(file string) string {
 
 // recipeMetadata builds a Recipe for name, a filename recipes.List already
 // confirmed applies to backendName. The OS-suffix parsing here matches
-// recipes.List's own (internal/recipes/recipes.go) exactly, on purpose —
+// recipes.List's own (internal/recipes/recipes.go) exactly, on purpose:
 // diverging would make Recipe's TargetOS disagree with why the file was
 // even in the list.
 func recipeMetadata(name, backendName string) Recipe {
@@ -226,7 +226,7 @@ func recipeMetadata(name, backendName string) Recipe {
 }
 
 // RecipeIssue names one recipe a Spec asked for that osName/backendName
-// cannot run, and why — never a bare bool. See CheckRecipes.
+// cannot run, and why, never a bare bool. See CheckRecipes.
 type RecipeIssue struct {
 	Name   string
 	Reason string
@@ -237,21 +237,21 @@ type RecipeIssue struct {
 // call a caller can make BEFORE building a Spec at all, and it explains each
 // failure instead of only naming what else is available.
 //
-// Only entries that are NOT applicable come back — a name that resolves
+// Only entries that are NOT applicable come back: a name that resolves
 // fine has nothing to report, so a caller checking "will these work" reads
 // an empty result as a clean answer rather than having to filter out an "OK"
 // entry per name.
 //
 // The reasons below are derived structurally: from the requested file's own
 // name, from guest.Lookup(osName), and from what else exists on disk (an
-// OS-specific override suppressing a shared fragment — see recipes.List's
+// OS-specific override suppressing a shared fragment; see recipes.List's
 // own doc comment on "overridden"). They do NOT draw on a recipe's declared
-// requirements ("requires: systemd" and the like) — as Recipe's doc comment
-// explains, that front-matter contract is not implemented anywhere in
+// requirements ("requires: systemd" and the like), as Recipe's doc comment
+// explains, since that front-matter contract is not implemented anywhere in
 // internal/recipes yet. So "xfce.cloud.yaml is not offered to alpine
 // because alpine has its own xfce.alpine.cloud.yaml" is a real, true reason
-// this can give today; "xfce requires systemd, alpine uses openrc" — the
-// exact example in docs/design/core-api.md §4 — is not, until that parser
+// this can give today; "xfce requires systemd, alpine uses openrc", the
+// exact example in docs/design/core-api.md §4, is not, until that parser
 // exists.
 func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, error) {
 	available, err := recipes.List(osName, backendName)
@@ -275,7 +275,7 @@ func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, er
 
 // recipeIssueReason explains why name is not offered to osName/backendName,
 // without consulting anything beyond the filename, guest.Lookup, and
-// whether other files exist on disk — see CheckRecipes' doc comment on why
+// whether other files exist on disk; see CheckRecipes' doc comment on why
 // it stops there.
 func recipeIssueReason(name, osName, backendName string) string {
 	if _, err := os.Stat(recipes.Path(name)); err != nil {

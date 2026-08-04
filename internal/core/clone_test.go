@@ -69,7 +69,7 @@ func TestCloneRefusesRunningSource(t *testing.T) {
 	}
 }
 
-// A live VM has no disk.qcow2 at all — Clone must succeed without
+// A live VM has no disk.qcow2 at all; Clone must succeed without
 // qemu-img and without fabricating one.
 func TestCloneLiveModeCopiesConfigWithNoDisk(t *testing.T) {
 	root(t)
@@ -132,7 +132,7 @@ func TestCloneDropsForwards(t *testing.T) {
 }
 
 // A disk-mode VM's disk.qcow2 is a real, independent file. The clone must
-// become a qcow2 overlay backed by it — near-instant, and tiny until the
+// become a qcow2 overlay backed by it, near-instant, and tiny until the
 // clone diverges.
 func TestCloneDiskModeCreatesOverlay(t *testing.T) {
 	haveQemuImg(t)
@@ -178,7 +178,7 @@ func TestCloneDiskModeCreatesOverlay(t *testing.T) {
 
 // A cloud VM that has never started has no disk.qcow2 (see Create's own
 // comment on why: the overlay is built lazily by cloudinitBackend.Prepare
-// on first start). Clone must not fabricate one — the clone's own first
+// on first start). Clone must not fabricate one: the clone's own first
 // start builds a fresh overlay-on-Base and a fresh seed, which is what gives
 // it a genuinely new cloud-init instance ID.
 func TestCloneCloudModeNeverStartedLeavesDiskToFirstStart(t *testing.T) {
@@ -214,7 +214,7 @@ func TestCloneCloudModeNeverStartedLeavesDiskToFirstStart(t *testing.T) {
 
 // A cloud VM that HAS started has real drift on its disk.qcow2. Cloning it
 // must preserve that drift (overlay on the source's disk, not Base) AND
-// must eagerly rebuild the seed against the clone's own name — because
+// must eagerly rebuild the seed against the clone's own name, because
 // cloudinitBackend.Prepare no-ops the instant disk.qcow2 already exists, and
 // would otherwise leave the clone with no seed.iso at all (a hard qemu
 // start failure), not merely a stale instance ID.

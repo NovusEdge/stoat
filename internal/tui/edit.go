@@ -54,7 +54,7 @@ const (
 )
 
 // editModes is the cycle offered on the mode row. "cloud" is included but
-// guarded at save time — see validate.
+// guarded at save time; see validate.
 var editModes = []string{"live", "disk", "cloud"}
 
 func newEdit(v *config.VM) editModel {
@@ -126,7 +126,7 @@ func backendForMode(v *config.VM, mode string) string {
 }
 
 // backendOf reports the provisioning backend for v, deriving it from Mode
-// when the field is empty — VMs created before the backend field existed have
+// when the field is empty. VMs created before the backend field existed have
 // no value, and defaulting those to "ssh" would offer an Alpine VM the wrong
 // recipes.
 func backendOf(v *config.VM) string {
@@ -308,13 +308,13 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 	// that base there is nothing to boot, so the mode cannot simply be
 	// switched on.
 	if e.mode == "cloud" && next.Base == "" {
-		return nil, fmt.Errorf("cloud mode needs a base image — create a new VM from the catalog instead")
+		return nil, fmt.Errorf("cloud mode needs a base image: create a new VM from the catalog instead")
 	}
 	// The mirror of the above. A cloud VM has no ISO, and ISOPath() on an
 	// empty ISO resolves to the data root DIRECTORY, so qemu is handed
 	// "-cdrom ~/.stoat" and refuses to start.
 	if e.mode != "cloud" && next.ISO == "" {
-		return nil, fmt.Errorf("%s mode needs an iso — this vm only has a cloud base image", e.mode)
+		return nil, fmt.Errorf("%s mode needs an iso, but this vm only has a cloud base image", e.mode)
 	}
 	// Backend follows the mode where the two are inseparable: only a cloud
 	// VM can use the cloudinit seed, and a VM leaving cloud mode has to fall
@@ -358,7 +358,7 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 }
 
 // parseSize is core.ParseSize. The create path and the edit path must accept
-// and refuse exactly the same strings — they used to be two functions, and the
+// and refuse exactly the same strings. They used to be two functions, and the
 // relative-size bug ("+8G" means GROW BY to qemu-img) was fixed on this one
 // only, so creating an 8G disk silently made a 16G one for a whole release.
 var parseSize = core.ParseSize
@@ -385,7 +385,7 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 		// a missing image with no hint that this form caused it.
 		if v.Mode == "disk" && missing {
 			if running {
-				return errMsg("stop " + v.Name + " first — switching to disk mode has to create its disk")
+				return errMsg("stop " + v.Name + " first: switching to disk mode has to create its disk")
 			}
 			size := a.resizeTo
 			if size == "" {
@@ -420,11 +420,11 @@ func saveEdit(a *applied, running bool) tea.Cmd {
 		note := ""
 		switch {
 		case running && a.sshChanged:
-			note = " — restart to apply (ssh port changes with it)"
+			note = ": restart to apply (ssh port changes with it)"
 		case running:
-			note = " — restart to apply"
+			note = ": restart to apply"
 		case a.resizeTo != "":
-			note = " — disk grown to " + a.resizeTo + "; grow the filesystem inside the guest too"
+			note = ": disk grown to " + a.resizeTo + "; grow the filesystem inside the guest too"
 		}
 		return vmSavedMsg{vm: &v, restart: running, note: note}
 	}
@@ -438,7 +438,7 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenDetail
 			m.showHelp = false
 			// Re-arm the detail screen's ticker. It only re-arms itself while
-			// screen == screenDetail, so the visit to this form killed it —
+			// screen == screenDetail, so the visit to this form killed it,
 			// leaving uptime, running state and the provision-log tail frozen
 			// until the user went out to the list and back.
 			m.detailGen++
@@ -527,7 +527,7 @@ func (m model) viewEdit() string {
 
 	b := fields{width: editContentWidth}
 	// row draws a field. A changed field carries a dim "was X" so the pane
-	// shows what is about to be written versus what is on disk — an edit form
+	// shows what is about to be written versus what is on disk. An edit form
 	// that looks identical whether or not you have touched it makes it far
 	// too easy to save something you didn't mean to.
 	row := func(i int, label, value string) {
@@ -597,7 +597,7 @@ func (m model) viewEdit() string {
 		note(dimStyle.Render("no changes"))
 	}
 	if qemu.Running(e.vm) {
-		note(warnStyle.Render("running — ram/cpus/ssh apply on restart"))
+		note(warnStyle.Render("running: ram/cpus/ssh apply on restart"))
 	}
 	if e.err != "" {
 		note(errStyle.Render(e.err))
@@ -615,7 +615,7 @@ func (m model) viewEdit() string {
 
 func editRecipesLabel(e editModel) string {
 	if len(e.recipeNames) == 0 {
-		return dimStyle.Render("— (no matching recipes)")
+		return dimStyle.Render("(no matching recipes)")
 	}
 	items := make([]string, len(e.recipeNames))
 	for i, name := range e.recipeNames {

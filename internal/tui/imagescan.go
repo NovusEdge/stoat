@@ -40,7 +40,7 @@ type foundImage struct {
 // cancel, when closed, ends the walk at the next batch boundary. Without it a
 // caller who stops reading (the finder is left, or the modal closes on a
 // selection) leaves the goroutine parked forever on an unconsumed send once
-// four batches (128 images) pile up in the buffer -- out is capacity 4 and a
+// four batches (128 images) pile up in the buffer: out is capacity 4 and a
 // bare send blocks. A nil cancel is fine; the send just never has a second
 // case to race against.
 func scanImages(root string, cancel <-chan struct{}) <-chan []foundImage {
@@ -50,7 +50,7 @@ func scanImages(root string, cancel <-chan struct{}) <-chan []foundImage {
 		defer close(out)
 		batch := make([]foundImage, 0, scanBatch)
 		// flush reports whether the batch was delivered. false means cancel
-		// fired first and the walk must stop -- returning fs.SkipAll from the
+		// fired first and the walk must stop. Returning fs.SkipAll from the
 		// WalkDirFunc is what actually ends filepath.WalkDir.
 		flush := func() bool {
 			if len(batch) == 0 {
@@ -126,7 +126,7 @@ func hasImageExt(name string) bool {
 //
 // gen is the scan generation waitForImages was issued for. The modal stamps
 // its current generation into every waitForImages call and drops any message
-// whose gen doesn't match -- a message parked on a scan that has since been
+// whose gen doesn't match: a message parked on a scan that has since been
 // abandoned (esc, or re-entering the finder) would otherwise be delivered
 // against the NEW scan, doubling its results or ending it early.
 type imagesFoundMsg struct {
@@ -145,7 +145,7 @@ func waitForImages(ch <-chan []foundImage, gen int) tea.Cmd {
 	}
 }
 
-// homeDir is the scan root. A failure here is not worth an error path -- the
+// homeDir is the scan root. A failure here is not worth an error path, since the
 // current directory is a reasonable place to look for a disk image, and the
 // tree browser is still there for anywhere else.
 func homeDir() string {

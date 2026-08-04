@@ -9,7 +9,7 @@ import (
 )
 
 // th names the colors this package draws with. The values live in
-// internal/theme, which the installer draws from too — a color is defined
+// internal/theme, which the installer draws from too: a color is defined
 // once, in one package, or the two binaries drift apart.
 type themeColors struct {
 	accent, up, down, warn, err, dim color.Color
@@ -33,7 +33,7 @@ var (
 	downStyle   = lipgloss.NewStyle().Foreground(th.down)
 	selStyle    = lipgloss.NewStyle().Foreground(th.accent).Bold(true)
 
-	// paneStyle is the one border every screen draws with — a rounded box
+	// paneStyle is the one border every screen draws with: a rounded box
 	// in the theme accent, with breathing room inside. No screen builds its
 	// own lipgloss.NewStyle().Border(...); they all go through pane().
 	paneStyle = lipgloss.NewStyle().
@@ -56,7 +56,7 @@ func paneFrame() int { return paneStyle.GetHorizontalFrameSize() }
 // total rendered width (border + padding included) to fit a terminal of
 // that width; 0 leaves the box sized to its content.
 // pane leaves the box sized to its content whenever that content already
-// fits within maxWidth (0 means "always fits") — a box that hugs its rows
+// fits within maxWidth (0 means "always fits"). A box that hugs its rows
 // reads better than one stretched to the terminal's edge. Width is only
 // forced down, and only as far as maxWidth, when the content would
 // otherwise overflow a narrow terminal.
@@ -81,7 +81,7 @@ func pane(title, body string, maxWidth int) string {
 // Glyphs are named here for the same reason colours are: so a symbol means
 // one thing across every screen and changing it is one edit, not a grep.
 //
-// Nothing upstream to reuse — bubbletea and lipgloss export no glyphs at all,
+// Nothing upstream to reuse: bubbletea and lipgloss export no glyphs at all,
 // and bubbles keeps its own bullet unexported and writes arrows as raw
 // literals in its key help. So these are ours to name.
 const (
@@ -115,7 +115,7 @@ func radio(label string, on bool) string {
 const rowGap = "\n\n"
 
 // paneAt draws a pane whose content is held at a fixed width, for screens
-// whose rows come and go — a download block, an error line, a conditional
+// whose rows come and go, e.g. a download block, an error line, a conditional
 // disk row. pane() hugs its content, so without this the box changes width
 // (and re-centers) the moment an optional row appears, which reads as the
 // layout jumping under the user mid-action. width is still clamped to the

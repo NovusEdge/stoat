@@ -56,7 +56,7 @@ func TestForwardOnRunningVMSavesButSignalsPending(t *testing.T) {
 	}
 
 	// The save still happened. "Takes effect at next start" is not a refusal,
-	// and the two must never look the same to a caller — which is exactly why
+	// and the two must never look the same to a caller, which is exactly why
 	// this is a return value and not a sentinel error: a caller writing the
 	// ordinary `if err != nil` would otherwise report a failure for an
 	// operation that wrote vm.toml.
@@ -70,7 +70,7 @@ func TestForwardOnRunningVMSavesButSignalsPending(t *testing.T) {
 }
 
 // A stopped VM's forwards are live the moment the VM next starts, so Forward
-// reports them as active immediately — there is nothing pending.
+// reports them as active immediately: there is nothing pending.
 func TestForwardOnStoppedVMIsActive(t *testing.T) {
 	root(t)
 	if err := (&config.VM{Name: "web", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {

@@ -84,7 +84,7 @@ func TestParse(t *testing.T) {
 		{"rm", []string{"rm", "alpine"}, &Args{Cmd: "rm", VM: "alpine"}, false},
 		{"rm -y", []string{"rm", "-y", "alpine"}, &Args{Cmd: "rm", VM: "alpine", Yes: true}, false},
 		// This case used to assert an ERROR, with the comment "flag stops
-		// parsing at first positional" — it was pinning the parser's limitation
+		// parsing at first positional": it was pinning the parser's limitation
 		// as though it were intended behaviour, even though usage() has always
 		// documented exactly this form ("rm <name> [-y]"). rm now pulls the
 		// positional off before flag parsing, the same as create and recipe
@@ -202,7 +202,7 @@ func TestParseRecipe(t *testing.T) {
 }
 
 // cliRoot points STOAT_HOME at a fresh temp dir for one test, exactly like
-// core's own root(t) helper — reimplemented here rather than imported,
+// core's own root(t) helper: reimplemented here rather than imported,
 // since it lives in package core, not exported for reuse.
 func cliRoot(t *testing.T) string {
 	t.Helper()
@@ -269,7 +269,7 @@ func TestRunLSOutput(t *testing.T) {
 }
 
 // runDown must refuse before printing its "stopping..." progress line, not
-// after — matching the pre-core behaviour where the running/not-running
+// after, matching the pre-core behaviour where the running/not-running
 // check happened before anything was written to stdout.
 func TestRunDownNotRunning(t *testing.T) {
 	cliRoot(t)
@@ -304,7 +304,7 @@ func TestRunDownUnknownVM(t *testing.T) {
 
 // runRM must refuse a running VM before the delete confirmation prompt even
 // shows, matching pre-core behaviour exactly (a running VM was never asked
-// "delete? [y/N]" — it just failed).
+// "delete? [y/N]": it just failed).
 func TestRunRMRunningRefusesBeforePrompting(t *testing.T) {
 	dir := cliRoot(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
@@ -320,7 +320,7 @@ func TestRunRMRunningRefusesBeforePrompting(t *testing.T) {
 	// its doc comment) and only "running" for as long as it survives, and
 	// Main()'s EnsureRoot/recipes.Install/keys.Ensure setup is enough extra
 	// wall-clock time for a test sandbox to reap it before the check ever
-	// runs — the same reason internal/core's own fakeRunning-based tests
+	// runs, the same reason internal/core's own fakeRunning-based tests
 	// check state right after spawning it, not after unrelated work. Calling
 	// runRM straight away keeps that gap effectively zero.
 	// -y is passed specifically to prove the refusal happens before the

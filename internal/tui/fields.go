@@ -9,7 +9,7 @@ import (
 
 // Every screen that shows rows of "label   value" renders through fields.
 // Before this, five files each hand-padded their own rows with
-// fmt.Sprintf("%-8s") — at three different label widths — and three of them
+// fmt.Sprintf("%-8s"), at three different label widths, and three of them
 // repeated a bare 11 (as strings.Repeat(" ", 11), as an eleven-space string
 // literal, and as contentWidth-11) for the indent a continuation line needs.
 // Changing the label column meant finding all of those; missing one left a
@@ -27,7 +27,7 @@ const fieldValueColumn = fieldMarkerWidth + fieldLabelWidth
 //
 // width is the block's total content width. Set it and a value too long for
 // the row wraps inside the value column, so the continuation lines stay
-// under the value rather than running back to the pane's left edge — which
+// under the value rather than running back to the pane's left edge, which
 // is what happens if the pane is left to do the wrapping. Zero means "size
 // to the content", for blocks short enough that it cannot come up.
 type fields struct {
@@ -42,7 +42,7 @@ func (f *fields) row(marker, label, value string) {
 	f.rows = append(f.rows, []string{marker, label, value})
 }
 
-// hint adds a dim line under the row above, aligned to the value column —
+// hint adds a dim line under the row above, aligned to the value column:
 // the sentence saying what that row actually does.
 func (f *fields) hint(text string) {
 	f.rows = append(f.rows, []string{"", "", dimStyle.Render(text)})
@@ -58,13 +58,13 @@ func (f *fields) gap() { f.rows = append(f.rows, []string{"", "", ""}) }
 const noteMark = "\x00note"
 
 // note adds a dim remark under the row above, starting at the LABEL column
-// rather than the value column — it is a remark ABOUT the field, not another
+// rather than the value column, since it is a remark ABOUT the field, not another
 // value for it, so it reads wrong indented under the value.
 //
 // Notes are drawn as their own full-width lines rather than table rows: a
 // lipgloss table cannot span columns, and the text is wider than the label
 // cell, so in a cell it would wrap mid-word. Splitting the table around them
-// is safe precisely because every column here has a FIXED width — the
+// is safe precisely because every column here has a FIXED width: the
 // segments either side of a note still line up. Callers that leave width at
 // zero (the value column then auto-sizes) must not use notes; only the two
 // forms do, and both set a width.
@@ -103,20 +103,20 @@ func (f *fields) String() string {
 func (f *fields) renderRows(rows [][]string) string {
 	return table.New().
 		// An all-empty border: the table is a layout grid here, not a drawn
-		// box — the pane around it owns the only border on screen.
+		// box; the pane around it owns the only border on screen.
 		Border(lipgloss.Border{}).
 		BorderTop(false).BorderLeft(false).BorderRight(false).
 		BorderHeader(false).BorderRow(false).BorderColumn(false).
 		// BorderBottom stays ON deliberately: with it off, lipgloss v1.1.0's
 		// table drops the last data row entirely (three rows render as two).
 		// The glyphs are all empty, so leaving it on draws nothing and costs
-		// no line — turning it off costs a row.
+		// no line; turning it off costs a row.
 		//
 		// The real fault is table.computeHeight(), which returns one line too
 		// few for a table with no headers, and which String() applies as a
 		// hard MaxHeight clamp. That arithmetic is unchanged in lipgloss
 		// v2.0.5; v2 only stops CALLING it, by clamping to
-		// min(t.height, computeHeight()) — and t.height is 0 unless someone
+		// min(t.height, computeHeight()), and t.height is 0 unless someone
 		// calls .Height(). So the migration must not "clean up" this line on
 		// the grounds that v2 fixed the bug: it did not, and calling .Height()
 		// on this table brings it straight back, in either version.

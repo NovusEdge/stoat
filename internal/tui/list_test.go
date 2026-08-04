@@ -11,7 +11,7 @@ import (
 
 // resetSeq is the SGR reset sequence lipgloss emits at the end of a styled
 // substring. v1 wrote it as "\x1b[0m"; v2's ANSI writer omits the redundant
-// "0" parameter and writes "\x1b[m" instead — both mean the same thing to a
+// "0" parameter and writes "\x1b[m" instead. Both mean the same thing to a
 // terminal, but a literal string match has to pick one.
 const resetSeq = "\x1b[m"
 
@@ -24,7 +24,7 @@ const resetSeq = "\x1b[m"
 func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 	// v1 forced true-color output here because a Renderer could otherwise
 	// downsample styles for a "dumb" terminal (relevant in CI, where stdout
-	// isn't a tty). v2 removed the Renderer entirely — Style is a plain
+	// isn't a tty). v2 removed the Renderer entirely: Style is a plain
 	// value type that always renders full ANSI escapes, so there is nothing
 	// left to force.
 	vms := []*config.VM{
@@ -69,7 +69,7 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 // deleting the wrong VM: config.Load is DIRECTORY-keyed, but a vm.toml's
 // "name" field can diverge from its directory (reachable through the "e"
 // edit path). Two VM directories are built here, "work" and "work2", where
-// work/vm.toml claims name="work2" — exactly the reproduction from the
+// work/vm.toml claims name="work2", exactly the reproduction from the
 // review. Deleting the *config.VM the cursor was actually on (work) must
 // remove the work directory and leave work2 untouched, regardless of what
 // either vm.toml's name field says.

@@ -19,7 +19,7 @@ import (
 // .part files are half-finished downloads. iso.Infer happily matches one
 // ("…cloudimg-amd64.img.part" contains "cloudimg"), so without this they show
 // up as selectable images and a VM can be built on a truncated file. Aborting
-// a download is routine — it is minutes long with no cancel key — so these do
+// a download is routine, minutes long with no cancel key, so these do
 // accumulate.
 func LocalImages() []string {
 	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
@@ -44,7 +44,7 @@ func LocalImages() []string {
 // alpine entry with a direct URL and Flavor == "", same as any other
 // direct-URL entry (see iso.Resolve's doc comment for why). Gating on OS alone
 // skipped the exact basename match for every alpine entry, including this one,
-// and fell through to the Infer-based loop below — which, depending on the
+// and fell through to the Infer-based loop below, which, depending on the
 // local directory's contents, can match the wrong file among several with the
 // same backend/OS pair.
 func MatchLocal(e iso.Entry, files []string) string {
@@ -66,7 +66,7 @@ func MatchLocal(e iso.Entry, files []string) string {
 		// A FLAVOURED entry must also match its flavour in the filename.
 		//
 		// iso.Infer only reports an OS and a backend, and alpine-standard and
-		// alpine-virt share both — so without this the first alpine .iso on
+		// alpine-virt share both, so without this the first alpine .iso on
 		// disk satisfied BOTH entries. `stoat images` then reported alpine-virt
 		// as downloaded when only the standard ISO was present, and creating
 		// from alpine-virt silently built a VM on the standard image: a 352 MiB
@@ -76,7 +76,7 @@ func MatchLocal(e iso.Entry, files []string) string {
 		// Alpine's published filenames begin with exactly the flavour string
 		// the catalog stores ("alpine-virt" -> alpine-virt-3.24.1-x86_64.iso),
 		// which is what makes this a reliable discriminator rather than a
-		// guess. Entries with no flavour are unaffected — they matched by exact
+		// guess. Entries with no flavour are unaffected: they matched by exact
 		// basename above.
 		if e.Flavor != "" && !strings.Contains(f, e.Flavor) {
 			continue
@@ -162,7 +162,7 @@ func resolveImage(spec string) (image, error) {
 // derives the SSH user from the result.
 //
 // The cloud-init seed creates exactly one account, cloudinit.User, so anything
-// provisioned through that backend connects as it — including a file the
+// provisioned through that backend connects as it, including a file the
 // caller has just declared to be a cloud image. Left to fall through, a BYO
 // image would record an empty SSHUser, sshx would default that to root, and
 // cloud images lock root: ssh and applying recipes would both fail on a VM

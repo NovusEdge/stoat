@@ -29,11 +29,11 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 	if !strings.Contains(out, "stoat / stoat") {
 		t.Errorf("detail pane does not show the credential pair:\n%s", out)
 	}
-	// It must be clear the password is not an ssh credential — the seed
+	// It must be clear the password is not an ssh credential. The seed
 	// refuses password auth over the forwarded port. Cloud VMs never get a
 	// qemu window (qemu.NeedsWindow), so the row must point at the vnc
 	// socket the detail screen also surfaces, not a window that never
-	// appears — see IMPORTANT 3 in the final review.
+	// appears (see IMPORTANT 3 in the final review).
 	if !strings.Contains(out, "vnc") {
 		t.Error("detail pane does not say the password is reached over vnc")
 	}
@@ -125,7 +125,7 @@ func containsFocus(o focusOrder, want int) bool {
 
 // TestCloudVMGetsADiskSize is the regression test for a reported failure that
 // looked like a broken recipe and was not. A CoW overlay inherits its BASE
-// image's virtual size, and cloud images are sized to boot and nothing more —
+// image's virtual size, and cloud images are sized to boot and nothing more.
 // Ubuntu 24.04's is 3.5G with a 2.4G root. Installing a desktop filled it,
 // apt exited 100, and cloud-init reported a bare "error" with no mention of
 // disk space anywhere the user could see.
@@ -154,7 +154,7 @@ func TestCloudVMGetsADiskSize(t *testing.T) {
 		t.Fatalf("mode = %q, want cloud", vm.Mode)
 	}
 	if vm.Disk == "" {
-		t.Error("a cloud VM was built with no disk size — its overlay would inherit the base image's, which cannot fit a desktop")
+		t.Error("a cloud VM was built with no disk size: its overlay would inherit the base image's, which cannot fit a desktop")
 	}
 
 	// And the size row must be reachable, or the user cannot change it.

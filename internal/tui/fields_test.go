@@ -27,7 +27,7 @@ func TestFieldsKeepsEveryRow(t *testing.T) {
 }
 
 // Every screen's value must start at the same column, whether or not the row
-// carries a focus marker — that is the whole point of the shared helper.
+// carries a focus marker: that is the whole point of the shared helper.
 func TestFieldsValueColumn(t *testing.T) {
 	var f fields
 	f.row("", "ram", "4096")

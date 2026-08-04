@@ -9,7 +9,7 @@ import (
 
 // keySpace is what tea.KeyMsg.String() returns for the space bar, named once
 // because it is the one binding in the program whose spelling is decided by
-// bubbletea rather than by us — v2 reports it as "space" rather than " ".
+// bubbletea rather than by us: v2 reports it as "space" rather than " ".
 // Every switch case, key.Binding and test that means "space" goes through
 // this, so that change is one edit and not a silent no-match at runtime.
 const keySpace = "space"
@@ -17,7 +17,7 @@ const keySpace = "space"
 // footerHelp renders both the short (single-line) and full (toggled by "?")
 // help footers. Its Styles are intentionally blank: every color still comes
 // from theme.go, applied per-binding via plainKey/styledKey below, so a
-// binding like "s" (ssh) can be dimmed independently of its neighbors —
+// binding like "s" (ssh) can be dimmed independently of its neighbors,
 // something help.Model's own uniform Styles can't do.
 var footerHelp = func() help.Model {
 	h := help.New()
@@ -53,7 +53,7 @@ func renderFooter(km help.KeyMap, width int, showAll bool) string {
 	h.SetWidth(width)
 	// help.Model gives up truncating once its running total passes the width
 	// (it can only cut where an ellipsis still fits), and then appends every
-	// remaining binding — so the short footer can come back WIDER than the
+	// remaining binding, so the short footer can come back WIDER than the
 	// terminal and wrap, pushing the whole screen up. Cut it here instead.
 	return ansi.Truncate(h.View(km), width, "…")
 }
@@ -75,7 +75,7 @@ var keyCtrlC = plainKey([]string{"ctrl+c"}, "ctrl+c", "quit")
 // sshKeyStyle picks the color for the "s" (ssh) binding: normal (dim) when
 // the selected VM is running and thus actually ssh-able, down (a duller,
 // "offline" shade already used elsewhere for stopped/broken VMs) when it is
-// not — ssh can never work in that state, so the binding stays listed
+// not, since ssh can never work in that state, so the binding stays listed
 // (its position in the footer doesn't jump around) but visibly muted.
 func sshKeyStyle(available bool) lipgloss.Style {
 	if available {
@@ -121,8 +121,8 @@ func (h listHelp) FullHelp() [][]key.Binding {
 }
 
 // detailHelp is the help.KeyMap for the detail screen. consolePassword
-// reflects whether the selected VM is running and has a console password set
-// — the "t" (type into guest) and "c" (copy to host clipboard) bindings only
+// reflects whether the selected VM is running and has a console password set.
+// The "t" (type into guest) and "c" (copy to host clipboard) bindings only
 // do anything then, so they are only listed then.
 type detailHelp struct {
 	sshAvailable    bool
