@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
@@ -186,14 +187,15 @@ func fromConfig(v *config.VM) VM {
 	if qemu.Running(v) {
 		state = StateRunning
 	}
+	osName, backend := inferMissing(v)
 	return VM{
 		// The DIRECTORY, not v.Name; see the identity note above load(). This
 		// is the identifier every other operation in this package accepts, so
 		// it is the only one List may hand out.
 		Name:            filepath.Base(v.Dir),
-		OS:              v.OS,
+		OS:              osName,
 		Mode:            v.Mode,
-		Backend:         v.Backend,
+		Backend:         backend,
 		State:           state,
 		RAM:             v.RAM,
 		CPUs:            v.CPUs,
@@ -217,6 +219,52 @@ func fromConfig(v *config.VM) VM {
 			MonitorSocket: v.MonitorPath(),
 		},
 	}
+}
+
+// inferMissing fills v.OS and v.Backend from v.ISO's filename, in memory
+// only, for a vm.toml predating those two fields (see iso.Infer's own doc
+// comment; this is the same guess the form makes for a BYO image at create
+// time, just applied retroactively on load instead of never at all).
+//
+// Only an EMPTY field is filled: v.toml is the user's stated intent, and a
+// filename guess never overrides it, even when they disagree. This never
+// writes v.toml back out, so List/Get stay read-only; a v.toml missing these
+// fields keeps missing them on disk forever, and gets the same guess again
+// on every future load.
+//
+// Backend gets the same treatment as OS, not skipped: backend.For(v) falls
+// back to guest.Lookup(v.OS).Backend whenever v.Backend is empty, and that
+// fallback is WRONG for an entry like alpine-cloud, whose Backend
+// (cloudinit) overrides its OS's usual one (apkovl, alpine's guest.Registry
+// default). Filling OS but leaving Backend empty would make that fallback
+// fire and pick apkovl for a cloud-init image. iso.Infer decides Backend
+// from the filename's extension, the same signal the catalog entries
+// themselves are built from, so it lands on cloudinit for alpine-cloud
+// exactly like the guess Create would have made.
+//
+// Unlike OS, iso.Infer's backend guess never comes back empty (an
+// unrecognised name still resolves to "ssh"). That is not "inventing a
+// default" here: "ssh" and "" both hit backend.For's noop default case, so
+// filling it in changes nothing observable, and doing so keeps this
+// function's two return values symmetric instead of special-casing one.
+//
+// Only v.ISO is consulted, not v.Base (the cloud-mode overlay source): the
+// pre-os-field vm.toml this exists for is the live/disk case in the bug
+// report, and a cloud VM missing OS/Backend is a real but separate gap left
+// for whoever hits it.
+func inferMissing(v *config.VM) (osName, backend string) {
+	osName, backend = v.OS, v.Backend
+	if v.ISO == "" || (osName != "" && backend != "") {
+		return osName, backend
+	}
+	guessedBackend, guessedOS := iso.Infer(filepath.Base(v.ISO))
+	if osName == "" {
+		osName = guessedOS
+	}
+	if backend == "" {
+		backend = guessedBackend
+	}
+	return osName, backend
 }
 
 // List returns every VM in the data root, sorted by name, including broken

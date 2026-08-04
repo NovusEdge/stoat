@@ -248,6 +248,119 @@ func TestIdentityFromListRoundTrips(t *testing.T) {
 	}
 }
 
+// preOSFieldToml is a real example of a vm.toml written before `os` and
+// `backend` existed as fields: exactly the ten keys a pre-registry Create
+// wrote, no os/backend line among them.
+const preOSFieldToml = `name = "test1"
+mode = "live"
+iso = "isos/alpine-standard-3.24.1-x86_64.iso"
+ram = 4096
+cpus = 2
+disk = "8G"
+installed = false
+share = ""
+sshport = 2222
+recipes = []
+`
+
+// TestGetInfersOSAndBackendFromISOWhenFieldsAreEmpty is the bug in task 27:
+// a vm.toml with no os/backend line reported "" for both, even though the
+// ISO filename names the OS unambiguously.
+func TestGetInfersOSAndBackendFromISOWhenFieldsAreEmpty(t *testing.T) {
+	root(t)
+	writeRawVMToml(t, "test1", preOSFieldToml)
+
+	v, err := Get("test1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.OS != "alpine" {
+		t.Errorf("OS = %q, want %q inferred from the iso filename", v.OS, "alpine")
+	}
+	// alpine-standard is a live ISO: apkovl, not the alpine-cloud override.
+	if v.Backend != "apkovl" {
+		t.Errorf("Backend = %q, want %q inferred from the iso filename", v.Backend, "apkovl")
+	}
+}
+
+// TestGetNeverOverridesAnExplicitOS pins that vm.toml is the user's stated
+// intent: an explicit os wins even when it disagrees with the iso filename,
+// because a filename guess must never override what the file actually says.
+func TestGetNeverOverridesAnExplicitOS(t *testing.T) {
+	root(t)
+	writeRawVMToml(t, "test1", `name = "test1"
+mode = "live"
+os = "debian"
+backend = "ssh"
+iso = "isos/alpine-standard-3.24.1-x86_64.iso"
+ram = 4096
+cpus = 2
+sshport = 2222
+`)
+
+	v, err := Get("test1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.OS != "debian" {
+		t.Errorf("OS = %q, want the explicit %q kept, not the iso filename's guess", v.OS, "debian")
+	}
+	if v.Backend != "ssh" {
+		t.Errorf("Backend = %q, want the explicit %q kept", v.Backend, "ssh")
+	}
+}
+
+// TestGetLeavesOSEmptyForAnUnrecognisableImage pins that inference is
+// allowed to fail: a BYO image with no recognisable filename must not get a
+// guessed OS, since a wrong guess is worse than an honest "unknown".
+func TestGetLeavesOSEmptyForAnUnrecognisableImage(t *testing.T) {
+	root(t)
+	writeRawVMToml(t, "test1", `name = "test1"
+mode = "live"
+iso = "isos/disk.qcow2"
+ram = 4096
+cpus = 2
+sshport = 2222
+`)
+
+	v, err := Get("test1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.OS != "" {
+		t.Errorf("OS = %q, want empty: disk.qcow2 names no known OS", v.OS)
+	}
+}
+
+// TestGetDoesNotModifyVMTomlOnDisk pins that inference happens only in
+// memory: List/Get must stay read-only operations, since a backfill that
+// rewrites vm.toml on read would turn `stoat ls` into a mutation.
+func TestGetDoesNotModifyVMTomlOnDisk(t *testing.T) {
+	dir := root(t)
+	writeRawVMToml(t, "test1", preOSFieldToml)
+	path := filepath.Join(dir, "test1", "vm.toml")
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Get("test1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := List(); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("vm.toml changed after Get/List:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
 // TestDestroyRefusesARunningBrokenVM pins a real bug: Destroy's broken-VM
 // branch skipped the running check, on the stated but false grounds that
 // qemu.Running needed a parsed config.VM. It needs only Dir, which that
