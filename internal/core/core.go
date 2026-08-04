@@ -85,7 +85,10 @@ type Spec struct {
 // a cloud overlay holds real guest state that must never be discarded, and
 // creating it here would also mean creating it again for a VM that is never
 // started.
-func Create(s Spec) (*config.VM, error) {
+// It returns the same VM view Get and List hand out, so a caller can act on
+// the result without re-reading it, and so Name is the DIRECTORY here too
+// rather than vm.toml's own name field.
+func Create(s Spec) (VM, error) {
 	// Held across plan AND Save. plan allocates an ssh port and checks the
 	// name is free; neither is committed until Save writes vm.toml, so two
 	// callers interleaved in that gap both pick the same port and both believe
@@ -94,16 +97,16 @@ func Create(s Spec) (*config.VM, error) {
 	// Create re-plans under the lock rather than trusting that result.
 	unlock, err := config.Lock()
 	if err != nil {
-		return nil, err
+		return VM{}, err
 	}
 	defer unlock()
 
 	v, err := plan(s)
 	if err != nil {
-		return nil, err
+		return VM{}, err
 	}
 	if err := v.Save(); err != nil {
-		return nil, err
+		return VM{}, err
 	}
 	if v.Mode == "disk" {
 		out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
@@ -111,10 +114,10 @@ func Create(s Spec) (*config.VM, error) {
 			// Leave no trace of a failed creation: otherwise the list shows a
 			// VM with no disk.qcow2 that can never boot.
 			os.RemoveAll(v.Dir)
-			return nil, fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
+			return VM{}, fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
 		}
 	}
-	return v, nil
+	return fromConfig(v), nil
 }
 
 // Plan is Create without any side effects: it validates a Spec and returns the
