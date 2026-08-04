@@ -18,6 +18,7 @@
 
 * [TUI](reference/tui.md)
 * [CLI](reference/cli.md)
+* [JSON output](reference/json.md)
 
 ## Recipes
 
