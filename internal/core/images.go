@@ -119,9 +119,55 @@ func Images() ([]CatalogImage, error) {
 	return out, nil
 }
 
+// DownloadResult reports what actually happened to the bytes DownloadImage
+// fetched, beyond the plain success/error a caller already gets from the
+// returned error.
+//
+// Verified and ChecksumAvailable are kept as two separate facts rather than
+// one bool because they answer different questions: ChecksumAvailable says
+// whether a published digest existed to check against at all (some catalog
+// entries, e.g. the Alpine ISOs, have none: see iso.Catalog's ChecksumURL
+// comments), and Verified says whether Download actually matched the bytes
+// against it. Collapsing them would make "no checksum was available" and
+// "a checksum existed but wasn't confirmed" look identical, and a user
+// booting a downloaded disk image deserves to know which one happened.
+//
+// A checksum that was available but MISMATCHED is not a third state here:
+// iso.Download treats a mismatch as a hard failure, removes the partial
+// file, and returns an error instead of a Release DownloadImage can report
+// on, so that case surfaces through DownloadImage's error return, not
+// through this struct.
+type DownloadResult struct {
+	// Path is the downloaded file's path relative to the data root (e.g.
+	// "isos/x.iso"), exactly what iso.Download returns.
+	Path string
+	// Verified is true only when the downloaded bytes were checked against
+	// a published digest and matched.
+	Verified bool
+	// ChecksumAvailable is true when a published digest existed to check
+	// against, whether or not Verified ended up true. It is what lets a
+	// caller tell "downloaded, nothing to verify against" apart from
+	// "downloaded, verified".
+	ChecksumAvailable bool
+}
+
+// downloadResult builds a DownloadResult from a Release iso.Download has
+// already populated (see Release.SHA256 and Release.Verified), plus the
+// path Download returned. Split out from DownloadImage so the mapping from
+// iso.Release's fields to DownloadResult can be tested without a network
+// call.
+func downloadResult(path string, r *iso.Release) DownloadResult {
+	return DownloadResult{
+		Path:              path,
+		Verified:          r.Verified,
+		ChecksumAvailable: r.SHA256 != "",
+	}
+}
+
 // DownloadImage fetches catalog entry id into isos/, reporting progress
 // through progress(done, total) exactly as iso.Download does (total is 0
-// when the server never sent Content-Length).
+// when the server never sent Content-Length), and reports what verification
+// actually happened (see DownloadResult).
 //
 // # Cancellation
 //
@@ -142,7 +188,7 @@ func Images() ([]CatalogImage, error) {
 // Resolve returns rather than interrupting it. That is a bounded 30s worst
 // case on a metadata request, not an unbounded multi-minute image transfer,
 // which is why it is left alone rather than widening the change.
-func DownloadImage(ctx context.Context, id string, progress func(done, total int64)) error {
+func DownloadImage(ctx context.Context, id string, progress func(done, total int64)) (DownloadResult, error) {
 	var entry iso.Entry
 	found := false
 	for _, e := range iso.Catalog() {
@@ -152,18 +198,21 @@ func DownloadImage(ctx context.Context, id string, progress func(done, total int
 		}
 	}
 	if !found {
-		return fmt.Errorf("%w: %s", ErrNotFound, id)
+		return DownloadResult{}, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 
 	// Checked up front so an already-cancelled ctx costs no network at all.
 	if err := ctx.Err(); err != nil {
-		return err
+		return DownloadResult{}, err
 	}
 
 	release, err := iso.Resolve(entry)
 	if err != nil {
-		return err
+		return DownloadResult{}, err
 	}
-	_, err = iso.Download(ctx, release, progress)
-	return err
+	path, err := iso.Download(ctx, release, progress)
+	if err != nil {
+		return DownloadResult{}, err
+	}
+	return downloadResult(path, release), nil
 }

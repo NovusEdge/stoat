@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/testutil"
 )
 
 // TestTickGenerationOnlyReArmsCurrentChain proves the fix for the ticker
@@ -242,6 +243,163 @@ func TestCopyConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 	if strings.Contains(got.toast.text, "stoat") {
 		t.Fatalf("toast must not contain the password itself: %q", got.toast.text)
+	}
+}
+
+// TestDetailShowsForwards proves a VM's declared port forwards are rendered
+// on the detail screen. Before this, core.VM.Forwards had no reader anywhere
+// in the TUI (the migration plan's D1), which is how the edit screen was
+// able to assign a VM's ssh port to a host port another VM had already
+// forwarded without anyone noticing.
+func TestDetailShowsForwards(t *testing.T) {
+	v := &config.VM{
+		Name: "fwd-vm", Mode: "live", Dir: t.TempDir(),
+		Forwards: []config.PortForward{{HostPort: 8080, GuestPort: 80}},
+	}
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if !strings.Contains(out, "8080") || !strings.Contains(out, "80") {
+		t.Fatalf("detail view missing the declared forward 8080->80:\n%s", out)
+	}
+}
+
+// TestDetailOmitsForwardsRowWhenNone proves a VM with no declared forwards
+// renders without a "forward" row at all, rather than an empty one: the
+// same convention every other optional row on this screen (iso, share,
+// recipes, …) already follows.
+func TestDetailOmitsForwardsRowWhenNone(t *testing.T) {
+	v := &config.VM{Name: "no-fwd", Mode: "live", Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+	out := ansi.Strip(m.viewDetail())
+
+	if strings.Contains(out, "forward") {
+		t.Fatalf("VM with no forwards must not render a forward row:\n%s", out)
+	}
+	// Also catches a stray active/next-start caption rendered on its own
+	// (facts.row with an empty label), which the "forward" check above
+	// would miss since that line never contains the word "forward" itself.
+	if strings.Contains(out, "in effect") || strings.Contains(out, "next start") {
+		t.Fatalf("VM with no forwards must not render an effect caption either:\n%s", out)
+	}
+}
+
+// TestDetailForwardsDistinguishRunningFromStopped proves the rendering never
+// collapses "in effect" and "applies at next start" into the same text: a
+// running VM's forwards must read differently from a stopped VM's, because
+// qemu cannot hot-add a hostfwd rule to a live process (docs/design/core-
+// api.md §8 decision 5). Running is faked the same way the rest of this
+// package's tests do: qemu.Running keys off the pidfile at v.Dir, not a
+// live process, so writing one is enough.
+func TestDetailForwardsDistinguishRunningFromStopped(t *testing.T) {
+	fwds := []config.PortForward{{HostPort: 8080, GuestPort: 80}}
+
+	stopped := &config.VM{Name: "stopped-fwd", Mode: "live", Dir: t.TempDir(), Forwards: fwds}
+	mStopped := model{screen: screenDetail, width: 100, height: 40}
+	mStopped.detail = newDetail(stopped)
+	outStopped := ansi.Strip(mStopped.viewDetail())
+
+	running := &config.VM{Name: "running-fwd", Mode: "live", Dir: t.TempDir(), Forwards: fwds}
+	stop := testutil.FakeRunning(t, running.Dir)
+	defer stop()
+	mRunning := model{screen: screenDetail, width: 100, height: 40}
+	mRunning.detail = newDetail(running)
+	outRunning := ansi.Strip(mRunning.viewDetail())
+
+	if !strings.Contains(outStopped, "in effect") {
+		t.Fatalf("stopped VM's forwards must say they are in effect:\n%s", outStopped)
+	}
+	if strings.Contains(outStopped, "next start") {
+		t.Fatalf("stopped VM's forwards must not also claim a next-start caveat:\n%s", outStopped)
+	}
+	if !strings.Contains(outRunning, "next start") {
+		t.Fatalf("running VM's forwards must say they apply at next start, not now:\n%s", outRunning)
+	}
+	if strings.Contains(outRunning, "in effect") {
+		t.Fatalf("running VM's forwards must not also claim to be in effect now:\n%s", outRunning)
+	}
+}
+
+// TestLogPagerOpensAndEscCloses proves "L" opens the console log pager (via
+// its logOpenedMsg round trip, since the read happens in a Cmd off the UI
+// goroutine) and esc closes it again, handing the detail screen's normal
+// body back.
+func TestLogPagerOpensAndEscCloses(t *testing.T) {
+	// core.Logs (which openLogPager calls) resolves the VM by name under
+	// config.Root(), not by v.Dir, so the fixture has to live there: a
+	// t.TempDir() VM with no matching config.Root() entry is "not found" to
+	// it regardless of what v.Dir points at.
+	t.Setenv("STOAT_HOME", t.TempDir())
+	v := &config.VM{Name: "pager-vm", Mode: "live"}
+	if err := v.Save(); err != nil {
+		t.Fatalf("saving fixture vm.toml: %v", err)
+	}
+	if err := os.WriteFile(v.ConsoleLogPath(), []byte("boot line one\nboot line two\n"), 0o644); err != nil {
+		t.Fatalf("writing console.log: %v", err)
+	}
+
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+
+	newM, cmd := m.updateDetail(keyMsg("L"))
+	got := newM.(model)
+	if got.detail.pager != nil {
+		t.Fatalf("pager should not open synchronously; opening reads the log off the UI goroutine")
+	}
+	if cmd == nil {
+		t.Fatalf("expected a Cmd to open the pager")
+	}
+	msg := cmd()
+	opened, ok := msg.(logOpenedMsg)
+	if !ok {
+		t.Fatalf("expected logOpenedMsg, got %T (%v)", msg, msg)
+	}
+
+	newM, _ = got.updateDetail(opened)
+	got = newM.(model)
+	if got.detail.pager == nil {
+		t.Fatalf("logOpenedMsg should have installed the pager")
+	}
+
+	out := ansi.Strip(got.viewDetail())
+	if !strings.Contains(out, "boot line two") {
+		t.Fatalf("pager view missing the console log content:\n%s", out)
+	}
+	if !strings.Contains(out, "esc close") {
+		t.Fatalf("pager view missing its esc-close hint:\n%s", out)
+	}
+
+	newM, _ = got.updateDetail(keyMsg("esc"))
+	got = newM.(model)
+	if got.detail.pager != nil {
+		t.Fatalf("esc should have closed the pager")
+	}
+	// Back to the ordinary detail body, not stuck on the pager's view.
+	out = ansi.Strip(got.viewDetail())
+	if strings.Contains(out, "boot line two") {
+		t.Fatalf("closed pager must not still be rendering the log:\n%s", out)
+	}
+}
+
+// TestLogPagerEscTakesPriorityOverDetailBindings proves that while the pager
+// is open, esc closes IT rather than falling through to the detail screen's
+// own esc/back binding, which would otherwise leave the pager's viewport
+// state dangling on a screen the user has already left.
+func TestLogPagerEscTakesPriorityOverDetailBindings(t *testing.T) {
+	v := &config.VM{Name: "pager-vm-2", Mode: "live", Dir: t.TempDir()}
+	m := model{screen: screenDetail, width: 100, height: 40}
+	m.detail = newDetail(v)
+	m.detail.pager = &logPager{}
+
+	newM, _ := m.updateDetail(keyMsg("esc"))
+	got := newM.(model)
+	if got.screen != screenDetail {
+		t.Fatalf("esc with the pager open must not also navigate back to the list; screen=%v", got.screen)
+	}
+	if got.detail.pager != nil {
+		t.Fatalf("esc must close the pager")
 	}
 }
 

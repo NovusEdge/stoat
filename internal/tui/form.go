@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -129,13 +128,6 @@ func (o imageOption) label() string {
 		size + "  " + dimStyle.Render("byo")
 }
 
-// localImageFiles is core.LocalImages, sorted for a stable picker order.
-func localImageFiles() []string {
-	out := core.LocalImages()
-	sort.Strings(out)
-	return out
-}
-
 // byoOptionFromPath turns a path the user browsed to into the same option
 // shape localImageFiles produces for a file already in isos/. It must stay
 // the same shape: everything downstream (backend/OS inference, and the ssh
@@ -164,53 +156,37 @@ func byoOptionFromPath(path string) (imageOption, error) {
 // and Create build on another.
 var matchLocalImage = core.MatchLocal
 
-// buildImages assembles the form's image picker: every catalog entry (in
-// Catalog order), each flagged with whether it's already downloaded, then
-// every local file that isn't claimed by a catalog entry, as BYO options.
+// buildImages assembles the form's image picker from core.Images(): every
+// catalog entry (in Catalog order), each flagged with whether it's already
+// downloaded, then every local file that isn't claimed by a catalog entry,
+// as BYO options. Matching a catalog entry to its local file and deciding
+// whether the size shown is exact or the catalog's declared approximation is
+// core's job now, not a second copy of it here (see core.Images' doc); this
+// only decides how the picker PRESENTS what core reports.
+//
+// core.CatalogImage carries an ID but not the richer iso.Entry (Variant,
+// SSHUser) the picker's rows and resolvedSSHUser want, so a downloaded-or-not
+// catalog row is still paired with its iso.Entry by ID here. The error core.Images
+// returns is not surfaced: LocalImages, underneath it, already swallows an
+// unreadable isos/ dir as "no local files" rather than an error, so there is
+// nothing left for a caller to react to.
 func buildImages() []imageOption {
-	files := localImageFiles()
-	matched := map[string]bool{}
-	var out []imageOption
+	imgs, _ := core.Images()
+	catalog := map[string]iso.Entry{}
 	for _, e := range iso.Catalog() {
-		e := e
-		opt := imageOption{entry: &e, backend: e.Backend, osName: e.OS, sshUser: e.SSHUser,
-			bytes: e.Size}
-		if f := matchLocalImage(e, files); f != "" {
-			opt.file = f
-			matched[f] = true
-			// A downloaded image knows its own size exactly, so the catalog's
-			// approximation stops being the best answer available.
-			if n, ok := imageBytes(f); ok {
-				opt.bytes, opt.exact = n, true
-			}
-		}
-		out = append(out, opt)
+		catalog[e.ID] = e
 	}
-	for _, f := range files {
-		if matched[f] {
+	out := make([]imageOption, len(imgs))
+	for i, ci := range imgs {
+		if ci.ID == "" {
+			out[i] = imageOption{file: ci.File, backend: ci.Backend, osName: ci.OS, bytes: ci.Bytes, exact: ci.Exact}
 			continue
 		}
-		backend, osName := iso.Infer(f)
-		opt := imageOption{file: f, backend: backend, osName: osName}
-		// A BYO file is local by definition, so its size is always the exact
-		// one; there is no catalog entry to approximate from.
-		if n, ok := imageBytes(f); ok {
-			opt.bytes, opt.exact = n, true
-		}
-		out = append(out, opt)
+		e := catalog[ci.ID]
+		out[i] = imageOption{entry: &e, backend: e.Backend, osName: e.OS, sshUser: e.SSHUser,
+			file: ci.File, bytes: ci.Bytes, exact: ci.Exact}
 	}
 	return out
-}
-
-// imageBytes is the on-disk size of a file under isos/. Failure is not an
-// error worth surfacing: the file was listed a moment ago and could have
-// been removed since, and a missing size just means the row shows none.
-func imageBytes(file string) (int64, bool) {
-	fi, err := os.Stat(filepath.Join(config.Root(), "isos", file))
-	if err != nil {
-		return 0, false
-	}
-	return fi.Size(), true
 }
 
 // byoBackends is the fixed cycle offered on the fBackend override row.
@@ -274,6 +250,23 @@ type formModel struct {
 	// generated one. Cloud images only, see build().
 	randomPassword bool
 	dl             dlStats // last snapshot of the in-flight download
+
+	// dlCtx/dlCancel are the in-flight fetch's ctx and its CancelFunc; nil
+	// when nothing is running. esc calls dlCancel so the download actually
+	// stops rather than merely being abandoned (core.DownloadImage's ctx
+	// wiring is what makes that real; see fetchImage). dlCtx has no
+	// production reader of its own: it is kept alongside dlCancel so a test
+	// can check ctx.Err() after esc and confirm the cancellation was real,
+	// not just that a flag flipped.
+	dlCtx    context.Context
+	dlCancel context.CancelFunc
+	// dlGen is bumped every time a fetch starts or is cancelled. It is
+	// stamped into imageFetchedMsg/imageFetchErrMsg so an outcome from a
+	// fetch that has since been cancelled (the goroutine keeps running for
+	// one more read after ctx is cancelled) is recognisable as stale and
+	// dropped rather than reviving "fetching" or toasting a "context
+	// canceled" the user did not cause.
+	dlGen int
 }
 
 // field indices into inputs
@@ -482,38 +475,54 @@ func newForm() formModel {
 	return f
 }
 
+// imageFetchedMsg and imageFetchErrMsg both carry gen, the generation the
+// fetch was started under. A cancelled fetch's underlying goroutine (see
+// core.DownloadImage) does not stop instantly, so its outcome can still
+// arrive after esc has already moved dlGen on; updateForm compares gen
+// against the CURRENT m.form.dlGen and drops anything that doesn't match,
+// rather than reviving a "fetching" state or a "context canceled" toast the
+// user did not ask to see.
 type imageFetchedMsg struct {
-	entryID  string
-	path     string
-	verified bool
+	entryID string
+	gen     int
+	// unverified is true when no published checksum existed to check the
+	// download against. The user is about to boot these bytes.
+	unverified bool
 }
-type imageFetchErrMsg string
+type imageFetchErrMsg struct {
+	entryID string
+	err     string
+	gen     int
+}
 
-// fetchImage downloads e. Re-running it on an image that is already local is
-// safe and is how "re-download" works: iso.Download only short-circuits when
-// the local file's digest MATCHES the published one, so a truncated or
-// superseded file mismatches and is refetched in full. Deleting it first
-// would only open a window where a good image is gone and the refetch fails.
-func fetchImage(e iso.Entry) tea.Cmd {
+// fetchImage downloads catalog entry id, reporting progress through dlRecord
+// exactly as before. Re-running it on an image that is already local is safe
+// and is how "re-download" works: core.DownloadImage's checksum check only
+// short-circuits when the local file's digest MATCHES the published one, so
+// a truncated or superseded file mismatches and is refetched in full.
+//
+// ctx is the caller's to cancel. Unlike the direct iso.Resolve/iso.Download
+// call this replaces, core.DownloadImage builds its request from ctx, so
+// cancelling it (updateForm's esc handler) genuinely stops the transfer
+// instead of abandoning a goroutine that keeps writing.
+func fetchImage(ctx context.Context, id string, gen int) tea.Cmd {
 	return func() tea.Msg {
-		r, err := iso.Resolve(e)
+		res, err := core.DownloadImage(ctx, id, dlRecord)
 		if err != nil {
-			return imageFetchErrMsg(e.OS + ": " + err.Error())
+			return imageFetchErrMsg{entryID: id, err: err.Error(), gen: gen}
 		}
-		p, err := iso.Download(context.Background(), r, dlRecord)
-		if err != nil {
-			return imageFetchErrMsg(e.OS + ": " + err.Error())
-		}
-		return imageFetchedMsg{entryID: e.ID, path: p, verified: r.Verified}
+		return imageFetchedMsg{entryID: id, gen: gen, unverified: !res.ChecksumAvailable}
 	}
 }
 
 func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case dlTickMsg:
-		// The chain is anchored to m.form.fetching rather than to a
-		// generation counter: only one download can be in flight at a time,
-		// so when the fetch ends the chain simply stops re-arming.
+		// Anchored to m.form.fetching, not dlGen: the tick chain only needs
+		// to know whether ANY fetch is live, not which one, and fetching is
+		// cleared the instant esc cancels, so the chain stops re-arming right
+		// away rather than ticking a bar for a download that no longer
+		// exists.
 		if !m.form.fetching {
 			return m, nil
 		}
@@ -521,31 +530,53 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, dlTick()
 
 	case imageFetchedMsg:
+		if msg.gen != m.form.dlGen {
+			return m, nil // outcome of a fetch esc already cancelled
+		}
 		m.form.fetching = false
+		m.form.dlCtx, m.form.dlCancel = nil, nil
 		m.form.images = buildImages()
+		path := ""
 		for i, opt := range m.form.images {
 			if opt.entry != nil && opt.entry.ID == msg.entryID {
 				m.form.imgIdx = i
+				path = "isos/" + opt.file
 			}
 		}
 		m.form.refreshRecipes()
-		note := ""
-		if !msg.verified {
-			// An unverified image download must be visible, not silent:
-			// this is the only consumer of Release.Verified.
-			note = ": UNVERIFIED (no checksum)"
+		msgText := "downloaded " + path
+		if msg.unverified {
+			msgText += ": UNVERIFIED (no published checksum)"
 		}
-		cmd := m.showToast("downloaded "+msg.path+note, false)
+		cmd := m.showToast(msgText, msg.unverified)
 		return m, cmd
 
 	case imageFetchErrMsg:
+		if msg.gen != m.form.dlGen {
+			return m, nil // outcome (including the cancellation itself) of a fetch esc already cancelled
+		}
 		m.form.fetching = false
-		cmd := m.showToast(string(msg), true)
+		m.form.dlCtx, m.form.dlCancel = nil, nil
+		cmd := m.showToast(m.form.fetchingOS+": "+msg.err, true)
 		return m, cmd
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
+			// core.DownloadImage builds its request from ctx, so cancelling
+			// it here actually stops the transfer rather than abandoning a
+			// goroutine that keeps writing (the bug this used to be). dlGen
+			// is bumped so the abandoned goroutine's eventual outcome
+			// message, stamped with the OLD generation, is recognised as
+			// stale and dropped instead of reviving "fetching".
+			if m.form.fetching {
+				m.form.dlGen++
+				if m.form.dlCancel != nil {
+					m.form.dlCancel()
+					m.form.dlCtx, m.form.dlCancel = nil, nil
+				}
+				m.form.fetching = false
+			}
 			m.screen = screenList
 			m.status = ""
 			m.showHelp = false
@@ -668,8 +699,11 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form.fetchingOS = opt.entry.OS
 				m.form.dl = dlStats{}
 				m.status = ""
+				m.form.dlGen++
+				ctx, cancel := context.WithCancel(context.Background())
+				m.form.dlCtx, m.form.dlCancel = ctx, cancel
 				dlStart()
-				return m, tea.Batch(fetchImage(*opt.entry), dlTick())
+				return m, tea.Batch(fetchImage(ctx, opt.entry.ID, m.form.dlGen), dlTick())
 			}
 		case "enter":
 			s, err := m.form.spec()

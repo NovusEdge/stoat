@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -25,13 +26,19 @@ type sshReadyMsg struct{ name string }
 // reachable (a disk VM with no OS, a guest that fails to boot) should leave
 // the UI exactly as it was rather than raising an error about a thing nobody
 // requested. Pressing "p" still reports properly.
+//
+// core.Wait(UntilReachable) replaces the old direct sshx.Wait call; the ctx
+// carries the same WaitTimeout ceiling sshx.Provision itself waits under, so
+// a VM that never comes up gives up on the same schedule either path takes.
 func awaitSSH(v *config.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
 		// No cancellation source reaches here: this is a background watch
 		// started right after the VM boots, not tied to any in-flight
 		// caller request.
-		if err := sshx.Wait(context.Background(), v, sshx.WaitTimeout); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), sshx.WaitTimeout)
+		defer cancel()
+		if err := core.Wait(ctx, name, core.UntilReachable); err != nil {
 			return nil
 		}
 		return sshReadyMsg{name}

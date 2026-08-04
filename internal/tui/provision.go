@@ -7,10 +7,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/qemu"
-	"github.com/novusedge/stoat/internal/sshx"
 )
 
 var errNotRunning = errors.New("not running: start it first")
@@ -30,8 +31,9 @@ type provisionDoneMsg struct {
 	err  error
 }
 
-// provision runs a VM's recipes over ssh. Output goes to last-provision.log,
-// which the detail view tails, so nothing is streamed through the model.
+// provision runs a VM's recipes over ssh via core.Apply. Output still goes to
+// last-provision.log (core.Apply calls sshx.Provision unchanged), which the
+// detail view tails, so nothing is streamed through the model.
 func provision(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
 		if !qemu.Running(v) {
@@ -40,7 +42,11 @@ func provision(v *config.VM) tea.Cmd {
 		// No cancellation source reaches here yet: the TUI has no "abort
 		// provision" key, so this is a call site noted for the caller to
 		// decide whether one should exist, not a design decision made here.
-		return provisionDoneMsg{v.Name, sshx.Provision(context.Background(), v)}
+		// core.Apply refuses a cloudinit-backed VM with ErrAppliedAtBoot on
+		// its own; that case should already be caught by startProvision's
+		// refusal below, but app.go's generic err.Error() toast reports it
+		// honestly if it ever reaches here anyway.
+		return provisionDoneMsg{v.Name, core.Apply(context.Background(), v.Name, core.ApplyOpts{})}
 	}
 }
 
@@ -55,11 +61,16 @@ func provision(v *config.VM) tea.Cmd {
 // what happened nor blocks a second real provision from starting right
 // after.
 func (m *model) startProvision(v *config.VM) tea.Cmd {
-	if v.Mode == "cloud" {
-		// cloud-init's packages: list is baked into the seed and only runs
-		// at first boot; there is nothing for ssh-based provisioning to do,
-		// and a cloud recipe is #cloud-config YAML, not a shell script, so
-		// piping it into `sh -s` would just fail.
+	if backend.For(v).Name() == "cloudinit" {
+		// Keyed on the BACKEND, not v.Mode == "cloud": the edit screen's mode
+		// switch can produce mode="disk" with backend="cloudinit" (D9a), a
+		// state this refusal must still catch. cloud-init's packages: list is
+		// baked into the seed and only runs at first boot; there is nothing
+		// for ssh-based provisioning to do, and a cloud recipe is
+		// #cloud-config YAML, not a shell script, so piping it into `sh -s`
+		// would just fail. core.Apply refuses the same state with
+		// ErrAppliedAtBoot; this refusal exists so the user sees it before
+		// anything starts, rather than after a failed attempt.
 		return m.showToast(v.Name+": cloud VMs provision at first boot via cloud-init. Recipes are applied automatically; recreate the VM to change them", true)
 	}
 	// A disk VM is still booting its installer ISO until its OS is on disk;

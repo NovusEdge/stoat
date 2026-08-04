@@ -1,169 +1,223 @@
 package tui
 
 import (
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/recipes"
+	"github.com/novusedge/stoat/internal/core"
 )
 
-func recipesInstall() error { return recipes.Install() }
-
+// editFixture saves a real VM under a fresh STOAT_HOME and opens it for
+// editing. It has to be a real, saved VM rather than a bare struct: the form
+// now routes through core.Update, which loads by NAME under config.Root()
+// (see core.VM.Name's own comment on why identity is the directory), not
+// from whatever the caller happens to be holding in memory.
 func editFixture(t *testing.T) editModel {
 	t.Helper()
 	t.Setenv("STOAT_HOME", t.TempDir())
-	return newEdit(&config.VM{
+	v := &config.VM{
 		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl",
 		ISO: "isos/alpine-standard-3.24.1-x86_64.iso",
 		RAM: 4096, CPUs: 4, Disk: "8G", Share: "~/vms", SSHPort: 2200,
-		Dir: t.TempDir(),
-	})
+	}
+	if err := v.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
+	}
+	return newEdit(v)
 }
 
-func TestParseSize(t *testing.T) {
-	cases := []struct {
-		in   string
-		want int64
-		ok   bool
-	}{
-		{"8G", 8 << 30, true},
-		{"512M", 512 << 20, true},
-		{"1T", 1 << 40, true},
-		{"2048", 2048, true}, // bare bytes, as qemu-img accepts
-		{"1.5G", 1536 << 20, true},
-		{"", 0, false},
-		{"big", 0, false},
-		{"0G", 0, false},
-		{"-4G", 0, false},
-	}
-	for _, c := range cases {
-		got, err := parseSize(c.in)
-		if c.ok && err != nil {
-			t.Errorf("parseSize(%q) errored: %v", c.in, err)
-			continue
-		}
-		if !c.ok {
-			if err == nil {
-				t.Errorf("parseSize(%q) = %d, want an error", c.in, got)
-			}
-			continue
-		}
-		if got != c.want {
-			t.Errorf("parseSize(%q) = %d, want %d", c.in, got, c.want)
+func TestParseSizeRejectsRelative(t *testing.T) {
+	for _, in := range []string{"+8G", "-4G", "+512M"} {
+		if _, err := core.ParseSize(in); err == nil {
+			t.Errorf("ParseSize(%q) was accepted; it is a RELATIVE size", in)
 		}
 	}
-}
 
-// TestEditRefusesDiskShrink covers the friendly half of the shrink guard.
-// qemu-img itself refuses a shrink without --shrink (verified: exit 1,
-// "Use the --shrink option"), and saveEdit never passes it. So this is not
-// the last line of defence, it is the one that answers in stoat's own words
-// instead of a raw qemu-img error, and before anything is written.
-func TestEditRefusesDiskShrink(t *testing.T) {
+	// And it must be refused all the way through the edit form, not just by
+	// the parser: this is the exact string a past release wrote into a live
+	// VM's vm.toml (see core.ParseSize's own comment), so this is not a
+	// synthetic case.
 	e := editFixture(t)
-	e.inputs[eDisk].SetValue("4G") // was 8G
-
-	_, err := e.validate(nil)
-	if err == nil {
-		t.Fatal("shrinking the disk was accepted; that silently destroys data")
-	}
-	if !strings.Contains(err.Error(), "grow") {
-		t.Errorf("error = %q, should explain that disks only grow", err)
-	}
-
-	// Growing is fine, and is reported so the caller knows to run qemu-img.
-	e.inputs[eDisk].SetValue("16G")
-	a, err := e.validate(nil)
+	e.inputs[eDisk].SetValue("+8G")
+	p, err := e.buildPatch()
 	if err != nil {
-		t.Fatalf("growing the disk was refused: %v", err)
+		t.Fatalf("buildPatch: %v", err)
 	}
-	if a.resizeTo != "16G" {
-		t.Errorf("resizeTo = %q, want 16G", a.resizeTo)
-	}
-	if a.vm.Disk != "16G" {
-		t.Errorf("vm.Disk = %q, want 16G", a.vm.Disk)
+	if _, errText := saveEdit(e.name(), p, false); errText == "" {
+		t.Error("a relative disk size was accepted")
+	} else if !strings.Contains(errText, "absolute") {
+		t.Errorf("error = %q, should say to use an absolute size", errText)
 	}
 }
 
-// TestEditRefusesPortCollision covers the other way this form can break a
-// working VM: two VMs forwarding the same host port means the second one
-// silently fails to start.
-func TestEditRefusesPortCollision(t *testing.T) {
-	e := editFixture(t)
-	others := []*config.VM{
-		{Name: "work", SSHPort: 2200},
-		{Name: "other", SSHPort: 2201},
+// TestEditRefusesDiskShrink covers the ordinary half of the shrink guard:
+// growing works, shrinking a normally-stored size is refused.
+func TestEditRefusesDiskShrink(t *testing.T) {
+	e := editFixture(t) // disk = "8G"
+	e.inputs[eDisk].SetValue("4G")
+
+	p, err := e.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if _, errText := saveEdit(e.name(), p, false); errText == "" {
+		t.Fatal("shrinking the disk was accepted; that silently destroys data")
+	} else if !strings.Contains(errText, "grow") {
+		t.Errorf("error = %q, should explain that disks only grow", errText)
 	}
 
-	e.inputs[eSSHPort].SetValue("2201")
-	if _, err := e.validate(others); err == nil {
-		t.Fatal("a colliding ssh port was accepted")
-	} else if !strings.Contains(err.Error(), "other") {
-		t.Errorf("error = %q, should name the VM holding the port", err)
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed: skipping the growth half, which resizes a real image")
+	}
+	e2 := editFixture(t)
+	if out, err := exec.Command("qemu-img", "create", "-f", "qcow2", e2.vm.DiskPath(), "8G").CombinedOutput(); err != nil {
+		t.Fatalf("qemu-img create: %v: %s", err, out)
+	}
+	e2.inputs[eDisk].SetValue("16G")
+	p2, err := e2.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	msg, errText := saveEdit(e2.name(), p2, false)
+	if errText != "" {
+		t.Fatalf("growing the disk was refused: %s", errText)
+	}
+	saved, ok := msg.(vmSavedMsg)
+	if !ok {
+		t.Fatalf("saveEdit returned %T, want vmSavedMsg", msg)
+	}
+	if saved.vm.Disk != "16G" {
+		t.Errorf("vm.Disk = %q, want 16G", saved.vm.Disk)
+	}
+}
+
+// TestEditRefusesDiskShrinkWithUnparseableCurrentSize is the regression test
+// for the data-destroying bug this migration fixes (D2): the old form parsed
+// the VM's CURRENT disk size, and when THAT parse failed, skipped the shrink
+// check entirely and resized anyway. "+8G" is not a hypothetical value; it is
+// the exact string core.ParseSize's own comment says a past release wrote
+// into vm.toml. Such a VM could be "shrunk" to 1G, which ran qemu-img resize
+// and truncated the image. core.validateDiskGrow refuses outright when the
+// current size won't parse, and this form must not be looser than core.
+func TestEditRefusesDiskShrinkWithUnparseableCurrentSize(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	v := &config.VM{
+		Name: "broken-disk", Mode: "disk", OS: "alpine", Backend: "apkovl",
+		ISO: "isos/alpine.iso", RAM: 4096, CPUs: 4, Disk: "+8G", SSHPort: 2200,
+	}
+	if err := v.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
+	}
+	e := newEdit(v)
+	e.inputs[eDisk].SetValue("1G")
+
+	p, err := e.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if _, errText := saveEdit(e.name(), p, false); errText == "" {
+		t.Fatal("a resize against an unparseable stored disk size (+8G) was accepted; this used to truncate the image")
+	}
+}
+
+// TestEditRefusesPortCollisionWithForward is the regression test for D1: the
+// old form only checked a candidate ssh port against other VMs' SSHPort
+// field, never their declared Forwards. core.Update's validateSSHPort (via
+// validateForwards) also refuses a port matching ANY other VM's forward, so
+// this form must not be looser than that either.
+func TestEditRefusesPortCollisionWithForward(t *testing.T) {
+	e := editFixture(t) // "work", ssh 2200
+	other := &config.VM{
+		Name: "other", Mode: "disk", OS: "alpine", ISO: "isos/x.iso",
+		RAM: 1024, CPUs: 1, SSHPort: 2201,
+		Forwards: []config.PortForward{{HostPort: 2300, GuestPort: 8080}},
+	}
+	if err := other.Save(); err != nil {
+		t.Fatalf("save other vm: %v", err)
+	}
+
+	e.inputs[eSSHPort].SetValue("2300")
+	p, err := e.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if _, errText := saveEdit(e.name(), p, false); errText == "" {
+		t.Fatal("a port colliding with another vm's forward was accepted")
 	}
 
 	// Keeping its own port is not a collision with itself.
 	e.inputs[eSSHPort].SetValue("2200")
-	if _, err := e.validate(others); err != nil {
-		t.Errorf("keeping the VM's own port was rejected: %v", err)
+	p, err = e.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
 	}
-
-	// Out-of-range ports are refused before any collision check.
-	for _, bad := range []string{"80", "0", "99999", "http"} {
-		e.inputs[eSSHPort].SetValue(bad)
-		if _, err := e.validate(others); err == nil {
-			t.Errorf("port %q was accepted", bad)
-		}
+	if p.SSHPort != nil {
+		t.Error("keeping the vm's own port should not even produce an SSHPort patch")
 	}
 }
 
-// TestEditRefusesCloudWithoutBase covers the mode switch. A cloud VM boots an
-// overlay of a downloaded base image; without one there is nothing to boot,
-// so flipping the mode would produce a VM that fails at start with a far less
-// obvious message than this one.
-func TestEditRefusesCloudWithoutBase(t *testing.T) {
-	e := editFixture(t) // disk-mode Alpine, no Base
-	e.mode = "cloud"
-
-	_, err := e.validate(nil)
-	if err == nil {
-		t.Fatal("cloud mode was accepted for a VM with no base image")
-	}
-	if !strings.Contains(err.Error(), "base image") {
-		t.Errorf("error = %q, should mention the missing base image", err)
-	}
-}
-
-func TestEditValidatesRAMAndCPUs(t *testing.T) {
+func TestEditBuildPatchRejectsUnparseableNumbers(t *testing.T) {
 	for _, c := range []struct{ field, value string }{
-		{"ram", "64"}, {"ram", "0"}, {"ram", "lots"}, {"ram", ""},
-		{"cpus", "0"}, {"cpus", "-2"}, {"cpus", "many"},
+		{"ram", "lots"}, {"ram", ""},
+		{"cpus", "many"},
+		{"ssh", "http"},
 	} {
 		e := editFixture(t)
-		idx := eRAM
-		if c.field == "cpus" {
-			idx = eCPUs
+		switch c.field {
+		case "ram":
+			e.inputs[eRAM].SetValue(c.value)
+		case "cpus":
+			e.inputs[eCPUs].SetValue(c.value)
+		case "ssh":
+			e.inputs[eSSHPort].SetValue(c.value)
 		}
-		e.inputs[idx].SetValue(c.value)
-		if _, err := e.validate(nil); err == nil {
+		if _, err := e.buildPatch(); err == nil {
+			t.Errorf("%s=%q was accepted by buildPatch", c.field, c.value)
+		}
+	}
+}
+
+// TestEditRAMAndCPURangesEnforcedByCore covers ranges buildPatch no longer
+// checks itself: it only refuses what it can't even parse, and defers to
+// core.Update (via saveEdit) for the rest, same as the ssh port range.
+func TestEditRAMAndCPURangesEnforcedByCore(t *testing.T) {
+	for _, c := range []struct{ field, value string }{
+		{"ram", "64"}, {"ram", "0"},
+		{"cpus", "0"}, {"cpus", "-2"},
+	} {
+		e := editFixture(t)
+		switch c.field {
+		case "ram":
+			e.inputs[eRAM].SetValue(c.value)
+		case "cpus":
+			e.inputs[eCPUs].SetValue(c.value)
+		}
+		p, err := e.buildPatch()
+		if err != nil {
+			t.Fatalf("buildPatch: %v", err)
+		}
+		if _, errText := saveEdit(e.name(), p, false); errText == "" {
 			t.Errorf("%s=%q was accepted", c.field, c.value)
 		}
 	}
 }
 
 // TestEditCarriesRecipeSelection checks the round trip: the form opens with
-// the VM's current recipes checked, and saves exactly what is checked in
+// the VM's current recipes checked, and patches exactly what is checked, in
 // recipeNames order.
 func TestEditCarriesRecipeSelection(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{
 		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl",
 		ISO: "isos/alpine.iso", RAM: 4096, CPUs: 4, Disk: "8G",
-		SSHPort: 2200, Dir: t.TempDir(),
-		Recipes: []string{"xfce.alpine.sh"},
+		SSHPort: 2200, Recipes: []string{"xfce.alpine.sh"},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
 	}
 	e := newEdit(v)
 	if !e.recipeSel["xfce.alpine.sh"] {
@@ -172,49 +226,70 @@ func TestEditCarriesRecipeSelection(t *testing.T) {
 
 	e.recipeNames = []string{"a.alpine.sh", "b.alpine.sh", "c.alpine.sh"}
 	e.recipeSel = map[string]bool{"c.alpine.sh": true, "a.alpine.sh": true}
-	a, err := e.validate(nil)
+	p, err := e.buildPatch()
 	if err != nil {
-		t.Fatalf("validate: %v", err)
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if p.Recipes == nil {
+		t.Fatal("Recipes patch not set despite a changed selection")
 	}
 	want := []string{"a.alpine.sh", "c.alpine.sh"} // recipeNames order
-	if len(a.vm.Recipes) != 2 || a.vm.Recipes[0] != want[0] || a.vm.Recipes[1] != want[1] {
-		t.Errorf("Recipes = %v, want %v", a.vm.Recipes, want)
+	got := *p.Recipes
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Recipes = %v, want %v", got, want)
+	}
+
+	// An unchanged selection must not even produce a Recipes patch: nil
+	// means "leave it alone" to core.Update, and setting it to the same
+	// value it already has is not the same thing as not mentioning it.
+	e2 := newEdit(v)
+	e2.recipeNames = []string{"xfce.alpine.sh"}
+	p2, err := e2.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if p2.Recipes != nil {
+		t.Errorf("Recipes patch set for an untouched selection: %v", *p2.Recipes)
 	}
 }
 
-// TestEditDoesNotMutateUntilSaved pins the ordering that keeps a failed save
-// from lying: validate builds a copy, so the live VM is untouched until the
-// write succeeds.
-func TestEditDoesNotMutateUntilSaved(t *testing.T) {
+// TestEditBuildPatchDoesNotMutateVM pins the ordering that keeps a failed
+// save from lying: buildPatch reads the form into a Patch, so the live VM
+// is untouched until core.Update's own write succeeds.
+func TestEditBuildPatchDoesNotMutateVM(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{
 		Name: "work", Mode: "disk", OS: "alpine", ISO: "isos/alpine.iso",
-		RAM: 4096, CPUs: 4, Disk: "8G", SSHPort: 2200, Dir: t.TempDir(),
+		RAM: 4096, CPUs: 4, Disk: "8G", SSHPort: 2200,
+	}
+	if err := v.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
 	}
 	e := newEdit(v)
 	e.inputs[eRAM].SetValue("16384")
 
-	if _, err := e.validate(nil); err != nil {
-		t.Fatalf("validate: %v", err)
+	if _, err := e.buildPatch(); err != nil {
+		t.Fatalf("buildPatch: %v", err)
 	}
 	if v.RAM != 4096 {
-		t.Errorf("validate mutated the live VM: RAM = %d, want 4096", v.RAM)
+		t.Errorf("buildPatch mutated the live VM: RAM = %d, want 4096", v.RAM)
 	}
 }
 
 // TestEditTabOrderSkipsDiskInLiveMode mirrors the create form's rule: focus
 // must never land on a row viewEdit doesn't draw, or keystrokes silently edit
-// an invisible field.
+// an invisible field. Mode is immutable now, so this reads e.vm.Mode
+// directly rather than a separately-tracked form field.
 func TestEditTabOrderSkipsDiskInLiveMode(t *testing.T) {
 	e := editFixture(t)
-	e.mode = "live"
+	e.vm.Mode = "live"
 	for _, f := range e.order() {
 		if f == eDisk {
 			t.Fatalf("eDisk is in the focus order for live mode: %v", e.order())
 		}
 	}
 
-	e.mode = "disk"
+	e.vm.Mode = "disk"
 	found := false
 	for _, f := range e.order() {
 		if f == eDisk {
@@ -228,41 +303,61 @@ func TestEditTabOrderSkipsDiskInLiveMode(t *testing.T) {
 
 // TestEditCloudVMSavesWithoutADiskSize is the regression test for a reported
 // bug: a cloud VM boots a CoW overlay of its base image and carries no disk
-// size in vm.toml at all, so the field opens empty, and validate demanded
-// one, making every cloud VM impossible to save with "disk size is required".
+// size in vm.toml at all, so the field opens empty, and a blank field must
+// not be turned into a disk patch.
 func TestEditCloudVMSavesWithoutADiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{
 		Name: "fed", Mode: "cloud", OS: "fedora", Backend: "cloudinit",
-		RAM: 4096, CPUs: 4, SSHPort: 2202, Dir: t.TempDir(), Base: "/tmp/base.qcow2",
+		RAM: 4096, CPUs: 4, SSHPort: 2202, Base: "/tmp/base.qcow2",
+	}
+	if err := v.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
 	}
 	e := newEdit(v)
 	if e.inputs[eDisk].Value() != "" {
 		t.Fatalf("expected an empty disk field for a cloud VM, got %q", e.inputs[eDisk].Value())
 	}
 
-	a, err := e.validate(nil)
+	p, err := e.buildPatch()
 	if err != nil {
-		t.Fatalf("a cloud VM could not be saved: %v", err)
+		t.Fatalf("buildPatch: %v", err)
 	}
-	if a.resizeTo != "" {
-		t.Errorf("a blank disk field asked for a resize to %q", a.resizeTo)
+	if p.Disk != nil {
+		t.Errorf("a blank disk field asked for a resize to %q", *p.Disk)
 	}
 
-	// Filling it in is still a grow request.
+	// Filling it in is still read as a grow request...
 	e.inputs[eDisk].SetValue("40G")
-	a, err = e.validate(nil)
+	p2, err := e.buildPatch()
 	if err != nil {
-		t.Fatalf("growing a cloud overlay was refused: %v", err)
+		t.Fatalf("buildPatch: %v", err)
 	}
-	if a.resizeTo != "40G" {
-		t.Errorf("resizeTo = %q, want 40G", a.resizeTo)
+	if p2.Disk == nil || *p2.Disk != "40G" {
+		t.Errorf("growing a cloud overlay was not patched through: %+v", p2)
+	}
+	// ...but core refuses to actually run it until the overlay exists:
+	// Create deliberately never creates one (qemu.Start's ensureCloudOverlay
+	// does, on first start), so there is nothing yet for qemu-img to grow.
+	if _, errText := saveEdit(e.name(), p2, false); errText == "" {
+		t.Error("growing an overlay that was never created should be refused")
 	}
 
-	// A disk-mode VM still requires one, since it has no base to fall back on.
-	d := newEdit(&config.VM{Name: "d", Mode: "disk", ISO: "isos/x.iso", RAM: 1024, CPUs: 1, SSHPort: 2200, Dir: t.TempDir()})
-	d.inputs[eDisk].SetValue("")
-	if _, err := d.validate(nil); err == nil {
+	// A disk-mode VM still requires one: it has no base to fall back on.
+	d := &config.VM{Name: "d", Mode: "disk", ISO: "isos/x.iso", RAM: 1024, CPUs: 1, Disk: "8G", SSHPort: 2203}
+	if err := d.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
+	}
+	de := newEdit(d)
+	de.inputs[eDisk].SetValue("")
+	dp, err := de.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if dp.Disk == nil {
+		t.Fatal("clearing a disk-mode vm's disk field should still reach core as a patch")
+	}
+	if _, errText := saveEdit(de.name(), dp, false); errText == "" {
 		t.Error("disk mode accepted an empty disk size")
 	}
 }
@@ -295,126 +390,15 @@ func TestEditChangeMarkers(t *testing.T) {
 	if !clean.dirty() {
 		t.Error("selecting a recipe did not mark the form dirty")
 	}
-
-	// Mode changes count too.
-	md := editFixture(t)
-	md.mode = "live"
-	if !md.dirty() {
-		t.Error("changing the mode did not mark the form dirty")
-	}
 }
 
-// TestParseSizeRejectsRelative covers a size qemu-img accepts but means
-// something else by: "+8G" GROWS BY 8G, while strconv.ParseFloat reads "+8"
-// as 8, so the grow check would clear it as "grow to 8G". A 4G disk would
-// become 12G while vm.toml recorded the literal "+8G", disagreeing with the
-// disk from then on. Verified against qemu-img: an 8G image given "+8G"
-// becomes 16G.
-func TestParseSizeRejectsRelative(t *testing.T) {
-	for _, in := range []string{"+8G", "-4G", "+512M"} {
-		if _, err := parseSize(in); err == nil {
-			t.Errorf("parseSize(%q) was accepted; it is a RELATIVE size", in)
-		}
-	}
-
-	// And it must be refused at the form level, not just in the parser.
+// TestEditModeRowRemoved pins the feature removal (D3): mode is immutable in
+// core.Update, so the edit pane must no longer offer a live/disk/cloud row.
+func TestEditModeRowRemoved(t *testing.T) {
 	e := editFixture(t)
-	e.inputs[eDisk].SetValue("+8G")
-	if _, err := e.validate(nil); err == nil {
-		t.Error("a relative disk size was accepted by validate")
-	} else if !strings.Contains(err.Error(), "absolute") {
-		t.Errorf("error = %q, should say to use an absolute size", err)
-	}
-}
-
-// TestModeSwitchToDiskNeedsADiskFile is the regression test for the worst
-// finding in review: the create form records a disk size for every non-cloud
-// VM, but only creates disk.qcow2 in disk mode. So a live VM has "8G" in its
-// vm.toml and no file, and flipping it to disk mode left the size unchanged,
-// which meant no resize ran, the save succeeded, and the next start died on a
-// missing image with nothing pointing back at this form.
-func TestModeSwitchToDiskNeedsADiskFile(t *testing.T) {
-	// saveEdit shells out to qemu-img to create the missing disk, so this
-	// test needs the real tool; skip rather than fail where it isn't
-	// installed (CI), which would make the suite permanently red.
-	if _, err := exec.LookPath("qemu-img"); err != nil {
-		t.Skip("qemu-img not installed: skipping disk-creation test")
-	}
-	t.Setenv("STOAT_HOME", t.TempDir())
-	dir := t.TempDir()
-	v := &config.VM{
-		Name: "live1", Mode: "live", OS: "alpine", Backend: "apkovl",
-		ISO: "isos/alpine.iso", RAM: 4096, CPUs: 4, Disk: "8G",
-		SSHPort: 2200, Dir: dir,
-	}
-	if _, err := os.Stat(v.DiskPath()); !os.IsNotExist(err) {
-		t.Fatalf("fixture should have no disk file: %v", err)
-	}
-
-	e := newEdit(v)
-	e.mode = "disk"
-	a, err := e.validate(nil)
-	if err != nil {
-		t.Fatalf("live -> disk was refused: %v", err)
-	}
-
-	// saveEdit must create the missing disk rather than writing a vm.toml
-	// that promises one.
-	msg := saveEdit(a, false)()
-	if s, ok := msg.(statusMsg); ok {
-		t.Fatalf("save failed: %s", s)
-	}
-	if _, err := os.Stat(v.DiskPath()); err != nil {
-		t.Errorf("switching to disk mode did not create the disk: %v", err)
-	}
-}
-
-// TestModeSwitchOffCloudNeedsAnISO covers the mirror of the cloud-needs-a-base
-// guard. A cloud VM has no ISO, and ISOPath() on an empty ISO resolves to the
-// data root DIRECTORY, so qemu would be handed "-cdrom ~/.stoat" and refuse
-// to start.
-func TestModeSwitchOffCloudNeedsAnISO(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	e := newEdit(&config.VM{
-		Name: "fed", Mode: "cloud", OS: "fedora", Backend: "cloudinit",
-		RAM: 4096, CPUs: 4, SSHPort: 2202, Dir: t.TempDir(), Base: "/tmp/b.qcow2",
-	})
-	for _, mode := range []string{"live", "disk"} {
-		e.mode = mode
-		if _, err := e.validate(nil); err == nil {
-			t.Errorf("cloud -> %s was accepted with no iso to boot", mode)
-		} else if !strings.Contains(err.Error(), "iso") {
-			t.Errorf("error = %q, should mention the missing iso", err)
-		}
-	}
-}
-
-// TestModeSwitchResyncsRecipes covers the cross-backend leak: the recipe list
-// is per-backend and the backend follows the mode, so a cloud fragment must
-// stop being on offer (and stop being saved) once the VM is no longer cloud.
-func TestModeSwitchResyncsRecipes(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if err := recipesInstall(); err != nil {
-		t.Fatal(err)
-	}
-	e := newEdit(&config.VM{
-		Name: "u", Mode: "cloud", OS: "ubuntu", Backend: "cloudinit",
-		ISO: "isos/u.iso", RAM: 4096, CPUs: 4, SSHPort: 2203,
-		Dir: t.TempDir(), Base: "/tmp/b.qcow2",
-		Recipes: []string{"xfce.cloud.yaml"},
-	})
-	if !e.recipeSel["xfce.cloud.yaml"] {
-		t.Fatal("cloud fragment did not open pre-checked")
-	}
-
-	e.mode = "live"
-	e.syncRecipes()
-	if e.recipeSel["xfce.cloud.yaml"] {
-		t.Error("a cloud fragment survived the switch to live mode")
-	}
-	for _, n := range e.recipeNames {
-		if strings.HasSuffix(n, ".cloud.yaml") {
-			t.Errorf("live mode still offers the cloud fragment %q", n)
-		}
+	m := model{screen: screenEdit, width: 100, height: 40, edit: e}
+	out := ansi.Strip(m.viewEdit())
+	if strings.Contains(out, "live") || strings.Contains(out, "cloud") {
+		t.Errorf("edit pane still shows a mode row: %s", out)
 	}
 }

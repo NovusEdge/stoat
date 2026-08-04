@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/iso"
@@ -96,7 +97,7 @@ func TestImagesUndownloadedEntryReportsDeclaredSize(t *testing.T) {
 // catalog entry must fail as ErrNotFound without ever touching the network.
 func TestDownloadImageUnknownID(t *testing.T) {
 	root(t)
-	err := DownloadImage(context.Background(), "no-such-catalog-entry", nil)
+	_, err := DownloadImage(context.Background(), "no-such-catalog-entry", nil)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -119,9 +120,36 @@ func TestDownloadImageHonoursAlreadyCancelledContext(t *testing.T) {
 	// alpine-virt is a real catalog ID; if this reached iso.Resolve or
 	// iso.Download it would try the network and this test would hang or
 	// fail offline. It must not get that far.
-	err := DownloadImage(ctx, "alpine-virt", nil)
+	_, err := DownloadImage(ctx, "alpine-virt", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+// TestDownloadResultVerified covers a Release Download confirmed against a
+// matching digest: both facts must come back true.
+func TestDownloadResultVerified(t *testing.T) {
+	r := &iso.Release{File: "x.iso", SHA256: strings.Repeat("a", 64), Verified: true}
+	got := downloadResult("isos/x.iso", r)
+	want := DownloadResult{Path: "isos/x.iso", Verified: true, ChecksumAvailable: true}
+	if got != want {
+		t.Errorf("downloadResult() = %+v, want %+v", got, want)
+	}
+}
+
+// TestDownloadResultNoChecksumAvailable covers a catalog entry with no
+// published digest at all (e.g. the Alpine ISOs): Download still fetches the
+// file, but there was nothing to verify against, and that must be reported
+// as distinct from a confirmed verification, not silently the same "false".
+func TestDownloadResultNoChecksumAvailable(t *testing.T) {
+	r := &iso.Release{File: "alpine-virt.iso"}
+	got := downloadResult("isos/alpine-virt.iso", r)
+	want := DownloadResult{Path: "isos/alpine-virt.iso", Verified: false, ChecksumAvailable: false}
+	if got != want {
+		t.Errorf("downloadResult() = %+v, want %+v", got, want)
+	}
+	if got.ChecksumAvailable {
+		t.Error("ChecksumAvailable = true, want false: this entry published no digest")
 	}
 }
 

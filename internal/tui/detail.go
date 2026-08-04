@@ -19,6 +19,10 @@ import (
 type detailModel struct {
 	vm  *config.VM
 	log string
+	// pager is non-nil only while the console log viewer (key L) is open. It
+	// takes over the detail screen's keyboard and body; see updateDetail and
+	// viewDetail.
+	pager *logPager
 }
 
 func newDetail(v *config.VM) detailModel { return detailModel{vm: v} }
@@ -51,7 +55,22 @@ func tailLog(v *config.VM, n int) string {
 }
 
 func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// The pager owns the keyboard while it's open: esc closes it here,
+	// before any of the detail screen's own bindings (also esc/e/p/…) get a
+	// look at the message, and everything else goes to the viewport.
+	if m.detail.pager != nil {
+		if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" {
+			m.detail.pager = nil
+			return m, nil
+		}
+		cmd := m.detail.pager.update(msg)
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
+	case logOpenedMsg:
+		m.detail.pager = msg.pager
+		return m, nil
 	case tickMsg:
 		if msg.gen != m.detailGen {
 			// A stale chain from a previous visit to the detail screen.
@@ -125,6 +144,8 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "p":
 			return m, m.startProvision(m.detail.vm)
+		case "L":
+			return m, openLogPager(m.detail.vm.Name)
 		case "t":
 			v := m.detail.vm
 			if !consolePasswordAvailable(v) {
@@ -188,6 +209,11 @@ func (m model) viewDetail() string {
 		return lipgloss.JoinVertical(lipgloss.Center, parts...)
 	}
 
+	if m.detail.pager != nil {
+		m.detail.pager.resize(m.width, m.height)
+		return lipgloss.JoinVertical(lipgloss.Center, m.detail.pager.view(m.width))
+	}
+
 	state := downStyle.Render("stopped")
 	if qemu.Running(v) {
 		state = upStyle.Render("running")
@@ -225,6 +251,31 @@ func (m model) viewDetail() string {
 	}
 	sshUser := sshx.User(v)
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
+	// Forwards are otherwise invisible everywhere in the TUI (see the
+	// migration plan's D1): showing them here is what lets a user notice
+	// "oh, another VM already has that port" before the edit screen lets
+	// them collide with it. Omitted entirely when there are none, rather
+	// than a "forwards: none" row, matching every other optional row above.
+	if len(v.Forwards) > 0 {
+		label := "forward"
+		for _, f := range v.Forwards {
+			line(label, fmt.Sprintf("%d %s %d (guest)", f.HostPort, glyphTo, f.GuestPort))
+			label = ""
+		}
+		// qemu's user-mode netdev argv is fixed at process launch; it has no
+		// way to hot-add a hostfwd rule to a running process. So a forward
+		// declared while the VM is running is saved to vm.toml (and WILL
+		// apply) but has no effect on the qemu process already up. This is
+		// exactly the distinction docs/design/core-api.md §8 decision 5
+		// exists to keep visible: "applied later" must never read the same
+		// as "already true". Rendered as its own line, in its own color, so
+		// it cannot be mistaken for a caption on the rows above it.
+		effect := upStyle.Render("in effect")
+		if qemu.Running(v) {
+			effect = warnStyle.Render("saved, applies at next start (not the running process)")
+		}
+		facts.row("", "", effect)
+	}
 	// qemu.NeedsWindow is the one case that gets a real qemu window (a
 	// disk-mode VM mid-install); every other VM is headless, and the VNC
 	// socket bound in that case (internal/qemu/args.go) is otherwise

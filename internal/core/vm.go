@@ -109,6 +109,21 @@ type VM struct {
 	SSHPort int
 	SSHUser string
 
+	// ISO and Base are plain vm.toml facts. They are here because a caller
+	// asking what a VM IS needs them, and without them the TUI would have to
+	// keep a second config.Load beside every core.Get.
+	ISO  string
+	Base string
+
+	// ConsolePassword is the password for the VNC console, which is the only
+	// way into a cloud VM whose accounts are otherwise locked. A user cannot
+	// use it without being shown it, so it is here.
+	//
+	// It must NEVER reach a wire format. The CLI's JSON DTO omits it, and that
+	// omission is the reason the DTO layer exists rather than json tags on
+	// this type.
+	ConsolePassword string
+
 	// Forwards are the user-declared host->guest port forwards. Carried here
 	// rather than behind a separate accessor so there is exactly one way to
 	// read a VM's state: a caller that has called Get has everything, and
@@ -170,20 +185,23 @@ func fromConfig(v *config.VM) VM {
 		// The DIRECTORY, not v.Name; see the identity note above load(). This
 		// is the identifier every other operation in this package accepts, so
 		// it is the only one List may hand out.
-		Name:      filepath.Base(v.Dir),
-		OS:        v.OS,
-		Mode:      v.Mode,
-		Backend:   v.Backend,
-		State:     state,
-		RAM:       v.RAM,
-		CPUs:      v.CPUs,
-		Disk:      v.Disk,
-		Share:     v.Share,
-		Recipes:   v.Recipes,
-		SSHPort:   v.SSHPort,
-		SSHUser:   v.SSHUser,
-		Forwards:  v.Forwards,
-		Installed: v.Installed,
+		Name:            filepath.Base(v.Dir),
+		OS:              v.OS,
+		Mode:            v.Mode,
+		Backend:         v.Backend,
+		State:           state,
+		RAM:             v.RAM,
+		CPUs:            v.CPUs,
+		Disk:            v.Disk,
+		Share:           v.Share,
+		Recipes:         v.Recipes,
+		SSHPort:         v.SSHPort,
+		SSHUser:         v.SSHUser,
+		ISO:             v.ISO,
+		Base:            v.Base,
+		ConsolePassword: v.ConsolePassword,
+		Forwards:        v.Forwards,
+		Installed:       v.Installed,
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),

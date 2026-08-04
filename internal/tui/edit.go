@@ -1,9 +1,9 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -25,11 +25,15 @@ import (
 // It is a separate model from formModel rather than a mode of it: the create
 // form's whole centre of gravity is the image picker and its download, none
 // of which applies to a VM that already exists.
+//
+// There is no mode field here: mode used to be editable (live/disk/cloud),
+// but core.Update holds it immutable (see core/update.go's checkImmutable),
+// and this form must not be looser than core. Removing the row is a real,
+// deliberate feature removal, not an oversight.
 type editModel struct {
 	vm     *config.VM
 	inputs []textinput.Model
 	focus  int
-	mode   string
 	err    string
 
 	recipeNames []string
@@ -49,16 +53,11 @@ const (
 
 // focus positions past the text inputs
 const (
-	eMode = eFieldCount + iota
-	eRecipes
+	eRecipes = eFieldCount + iota
 )
 
-// editModes is the cycle offered on the mode row. "cloud" is included but
-// guarded at save time; see validate.
-var editModes = []string{"live", "disk", "cloud"}
-
 func newEdit(v *config.VM) editModel {
-	e := editModel{vm: v, mode: v.Mode, recipeSel: map[string]bool{}}
+	e := editModel{vm: v, recipeSel: map[string]bool{}}
 	vals := []string{
 		strconv.Itoa(v.RAM),
 		strconv.Itoa(v.CPUs),
@@ -83,46 +82,15 @@ func newEdit(v *config.VM) editModel {
 	e.inputs[eRAM].Focus()
 
 	// Recipes are offered for the VM's own os/backend pair, exactly as the
-	// create form does, so a cloud VM is never offered a shell recipe.
+	// create form does, so a cloud VM is never offered a shell recipe. This
+	// list is built once: unlike the old mode switch, nothing on this form
+	// can change the (OS, backend) pair, so it never needs resyncing.
 	names, _ := recipes.List(v.OS, backendOf(v))
 	e.recipeNames = names
 	for _, r := range v.Recipes {
 		e.recipeSel[r] = true
 	}
 	return e
-}
-
-// brokenPortHolder reports the name of a broken VM directory whose raw
-// vm.toml claims port, or "" if none does. Broken VMs never reach m.vms, so
-// the caller cannot see them any other way.
-func brokenPortHolder(port int, self string) string {
-	broken, err := config.ListBroken()
-	if err != nil {
-		return ""
-	}
-	for _, b := range broken {
-		if b.Name == self {
-			continue
-		}
-		if p, err := config.BrokenSSHPort(b.Name); err == nil && p == port {
-			return b.Name
-		}
-	}
-	return ""
-}
-
-// backendForMode is the backend a VM would use in the given mode. Only the
-// cloud pairing is forced: the cloudinit seed exists solely for cloud mode,
-// and a VM leaving it has to fall back to ssh. A disk-mode Alpine VM keeps
-// apkovl, which is why this is not a simple mode->backend table.
-func backendForMode(v *config.VM, mode string) string {
-	if mode == "cloud" {
-		return "cloudinit"
-	}
-	if backendOf(v) == "cloudinit" {
-		return "ssh"
-	}
-	return backendOf(v)
 }
 
 // backendOf reports the provisioning backend for v, deriving it from Mode
@@ -139,12 +107,25 @@ func backendOf(v *config.VM) string {
 	return "ssh"
 }
 
-// order is the tab-traversal order for the current mode. Rows viewEdit does
-// not draw are omitted rather than included-but-hidden, so focus can never
-// land somewhere invisible and edit a field the user can't see.
+// parseSize is core.ParseSize. edit.go no longer calls this itself (disk
+// size validation moved to core.Update), but form.go's create-VM disk field
+// still does its own presentational parse before a Spec is ever built, the
+// same way buildPatch's RAM/CPUs/SSHPort fields do here, and needs a name
+// for it.
+var parseSize = core.ParseSize
+
+// name is this VM's identity for core.Update and config.Load: the
+// directory, never the vm.toml `name` field, which can diverge from it (see
+// core.VM.Name's own comment on why the directory is authoritative). e.vm.Dir
+// is always set, either by config.Load or by a VM this form saved earlier.
+func (e editModel) name() string { return filepath.Base(e.vm.Dir) }
+
+// order is the tab-traversal order for the VM's mode. Rows viewEdit does not
+// draw are omitted rather than included-but-hidden, so focus can never land
+// somewhere invisible and edit a field the user can't see.
 func (e editModel) order() []int {
-	o := []int{eMode, eRAM, eCPUs}
-	if e.mode != "live" {
+	o := []int{eRAM, eCPUs}
+	if e.vm.Mode != "live" {
 		o = append(o, eDisk)
 	}
 	o = append(o, eShare, eSSHPort)
@@ -186,9 +167,6 @@ func (e editModel) original(i int) string {
 // dirty reports whether anything at all differs from the VM on disk, so the
 // footer can say whether "enter" would write nothing.
 func (e editModel) dirty() bool {
-	if e.mode != e.vm.Mode {
-		return true
-	}
 	for i := 0; i < eFieldCount; i++ {
 		if e.changed(i) != "" {
 			return true
@@ -204,30 +182,6 @@ func (e editModel) dirty() bool {
 		}
 	}
 	return false
-}
-
-// syncRecipes re-reads the recipes available for the currently selected
-// mode's backend and drops any selection that is no longer on offer.
-func (e *editModel) syncRecipes() {
-	names, _ := recipes.List(e.vm.OS, backendForMode(e.vm, e.mode))
-	e.recipeNames = names
-	valid := map[string]bool{}
-	for _, n := range names {
-		valid[n] = true
-	}
-	for n := range e.recipeSel {
-		if !valid[n] {
-			delete(e.recipeSel, n)
-		}
-	}
-	if e.recipeIdx >= len(names) {
-		e.recipeIdx = 0
-	}
-	// The recipes row leaves the focus order when it empties.
-	if e.focus == eRecipes && len(names) == 0 {
-		e.focus = eSSHPort
-		e.refocus()
-	}
 }
 
 func (e *editModel) refocus() {
@@ -258,93 +212,57 @@ func prevIn(o []int, focus int) int {
 	return o[0]
 }
 
-// applied is the VM as edited, plus whether the disk needs resizing. It never
-// mutates the live VM: the caller only adopts it once the write succeeds, so
-// a failed save can't leave the pane showing state that was never persisted.
-type applied struct {
-	vm         config.VM
-	resizeTo   string // non-empty when the qcow2 must be grown
-	sshChanged bool
-}
-
-// validate turns the form's text into a VM, refusing the edits that would
-// destroy data or collide. The guards are the whole point of this function:
-// mode, disk and sshport are all editable here, and all three can break a VM
-// that currently works.
-func (e editModel) validate(others []*config.VM) (*applied, error) {
+// buildPatch turns the form's text into a core.Patch naming only the fields
+// the user actually touched: a Patch pointer left nil never reaches
+// core.Update, so a field the user never typed into can't be silently
+// rewritten (notably Share, whose read-expands/write-verbatim asymmetry with
+// "~" means setting it unconditionally would rewrite every edited VM's
+// share path to an absolute one).
+//
+// This function is deliberately thin. RAM/CPUs/SSHPort's numeric ranges, the
+// disk shrink guard and the ssh port collision check all used to live here;
+// core.Update enforces every one of them now, under config.Lock(), against
+// fresh data rather than a UI snapshot. Duplicating a rule core already owns
+// is exactly how the two drifted before: this form's disk shrink guard used
+// to skip itself outright when the VM's stored size wouldn't parse ("+8G",
+// the exact value a past release wrote), silently truncating the image.
+// What is left here is presentational only: an unparseable integer gets an
+// inline error before it ever reaches core, rather than a vaguer one core
+// would give for a field it can't even parse into a number.
+func (e editModel) buildPatch() (core.Patch, error) {
 	ram, err := strconv.Atoi(strings.TrimSpace(e.inputs[eRAM].Value()))
-	if err != nil || ram < 256 {
-		return nil, fmt.Errorf("ram must be a number of MB, at least 256")
+	if err != nil {
+		return core.Patch{}, fmt.Errorf("ram must be a number of MB")
 	}
 	cpus, err := strconv.Atoi(strings.TrimSpace(e.inputs[eCPUs].Value()))
-	if err != nil || cpus < 1 {
-		return nil, fmt.Errorf("cpus must be at least 1")
+	if err != nil {
+		return core.Patch{}, fmt.Errorf("cpus must be a number")
 	}
 	port, err := strconv.Atoi(strings.TrimSpace(e.inputs[eSSHPort].Value()))
-	if err != nil || port < 1024 || port > 65535 {
-		return nil, fmt.Errorf("ssh port must be between 1024 and 65535")
+	if err != nil {
+		return core.Patch{}, fmt.Errorf("ssh port must be a number")
 	}
-	for _, o := range others {
-		if o.Name != e.vm.Name && o.SSHPort == port {
-			return nil, fmt.Errorf("port %d is already used by %s", port, o.Name)
+
+	var p core.Patch
+	if ram != e.vm.RAM {
+		p.RAM = &ram
+	}
+	if cpus != e.vm.CPUs {
+		p.CPUs = &cpus
+	}
+	if share := strings.TrimSpace(e.inputs[eShare].Value()); share != e.vm.Share {
+		p.Share = &share
+	}
+	if port != e.vm.SSHPort {
+		p.SSHPort = &port
+	}
+	// Only a disk-mode or cloud-mode VM has a size of its own, and the row
+	// isn't even drawn for a live VM (see order()), so a live VM's input is
+	// stale and must not be read.
+	if e.vm.Mode != "live" {
+		if size := strings.TrimSpace(e.inputs[eDisk].Value()); size != e.vm.Disk {
+			p.Disk = &size
 		}
-	}
-	// config.List drops VMs whose vm.toml won't parse, but the port such a VM
-	// was using is still committed to its disk image. config.FreePort goes out
-	// of its way to scan those; not doing the same here would re-open the
-	// collision from the other side.
-	if name := brokenPortHolder(port, e.vm.Name); name != "" {
-		return nil, fmt.Errorf("port %d is already used by %s (broken vm.toml)", port, name)
-	}
-
-	next := *e.vm
-	next.RAM = ram
-	next.CPUs = cpus
-	next.Share = strings.TrimSpace(e.inputs[eShare].Value())
-	next.SSHPort = port
-	next.Mode = e.mode
-
-	// A cloud VM boots from an overlay of a downloaded base image. Without
-	// that base there is nothing to boot, so the mode cannot simply be
-	// switched on.
-	if e.mode == "cloud" && next.Base == "" {
-		return nil, fmt.Errorf("cloud mode needs a base image: create a new VM from the catalog instead")
-	}
-	// The mirror of the above. A cloud VM has no ISO, and ISOPath() on an
-	// empty ISO resolves to the data root DIRECTORY, so qemu is handed
-	// "-cdrom ~/.stoat" and refuses to start.
-	if e.mode != "cloud" && next.ISO == "" {
-		return nil, fmt.Errorf("%s mode needs an iso, but this vm only has a cloud base image", e.mode)
-	}
-	// Backend follows the mode where the two are inseparable: only a cloud
-	// VM can use the cloudinit seed, and a VM leaving cloud mode has to fall
-	// back to ssh provisioning. Otherwise the VM's own backend is kept.
-	next.Backend = backendForMode(e.vm, e.mode)
-
-	out := &applied{vm: next, sshChanged: port != e.vm.SSHPort}
-
-	// Only a disk-mode VM has a size of its own. A cloud VM boots a CoW
-	// overlay of its base image and carries no size in vm.toml at all, so
-	// demanding one here rejected every cloud VM's first save; there the
-	// field is an optional "grow the overlay to". A live VM has no disk.
-	if size := strings.TrimSpace(e.inputs[eDisk].Value()); e.mode == "disk" && size == "" {
-		return nil, fmt.Errorf("disk size is required in disk mode")
-	} else if e.mode != "live" && size != "" {
-		if size != e.vm.Disk {
-			oldBytes, err1 := parseSize(e.vm.Disk)
-			newBytes, err2 := parseSize(size)
-			if err2 != nil {
-				return nil, fmt.Errorf("disk size: %v", err2)
-			}
-			// Shrinking a qcow2 truncates it and corrupts the filesystem
-			// inside. qemu-img will happily do it; stoat won't.
-			if err1 == nil && newBytes < oldBytes {
-				return nil, fmt.Errorf("disk can only grow (%s → %s would destroy data)", e.vm.Disk, size)
-			}
-			out.resizeTo = size
-		}
-		next.Disk = size
-		out.vm = next
 	}
 
 	var picked []string
@@ -353,15 +271,53 @@ func (e editModel) validate(others []*config.VM) (*applied, error) {
 			picked = append(picked, n)
 		}
 	}
-	out.vm.Recipes = picked
-	return out, nil
+	if !sameRecipes(picked, e.vm.Recipes) {
+		p.Recipes = &picked
+	}
+	return p, nil
 }
 
-// parseSize is core.ParseSize. The create path and the edit path must accept
-// and refuse exactly the same strings. They used to be two functions, and the
-// relative-size bug ("+8G" means GROW BY to qemu-img) was fixed on this one
-// only, so creating an 8G disk silently made a 16G one for a whole release.
-var parseSize = core.ParseSize
+func sameRecipes(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// editErrorText renders one of core.Update's errors as the sentence this
+// pane shows inline, keyed by errors.Is rather than the wrapped text, so a
+// wording change inside core can't silently stop matching here.
+func editErrorText(err error) string {
+	// strip drops a sentinel's own text wherever it appears in the wrapped
+	// message: validateSSHPort re-wraps validateForwards' own ErrInvalidSpec
+	// as "ssh port: %w", so the sentinel text is not always a prefix.
+	strip := func(sentinel error) string {
+		return strings.Replace(err.Error(), sentinel.Error()+": ", "", 1)
+	}
+	switch {
+	case errors.Is(err, core.ErrDiskShrink):
+		return "disk can only grow (" + strip(core.ErrDiskShrink) + " would destroy data)"
+	case errors.Is(err, core.ErrAlreadyRunning):
+		return strip(core.ErrAlreadyRunning)
+	case errors.Is(err, core.ErrNotFound):
+		return "this vm no longer exists"
+	case errors.Is(err, core.ErrInvalidSpec):
+		return strip(core.ErrInvalidSpec)
+	case errors.Is(err, core.ErrImmutableField):
+		// Unreachable from this form: buildPatch never sets Name, OS,
+		// Backend or Mode. Kept so a future field added here without
+		// checking core's mutability rules fails with a clear message
+		// instead of a raw, unmapped one.
+		return "can't be changed here: " + strip(core.ErrImmutableField)
+	default:
+		return err.Error()
+	}
+}
 
 type vmSavedMsg struct {
 	vm      *config.VM
@@ -369,65 +325,33 @@ type vmSavedMsg struct {
 	note    string
 }
 
-// saveEdit writes the VM and grows its disk if asked. The resize runs BEFORE
-// the config write: if qemu-img fails, vm.toml still describes the disk that
-// actually exists rather than one that doesn't.
-func saveEdit(a *applied, running bool) tea.Cmd {
-	return func() tea.Msg {
-		v := a.vm
-		_, diskErr := os.Stat(v.DiskPath())
-		missing := os.IsNotExist(diskErr)
-
-		// A live VM records a disk size (the create form writes one for every
-		// non-cloud VM) but has no disk.qcow2, because buildVM only creates
-		// one in disk mode. Switching such a VM to disk mode therefore has to
-		// create the file, or the save "succeeds" and the next start dies on
-		// a missing image with no hint that this form caused it.
-		if v.Mode == "disk" && missing {
-			if running {
-				return errMsg("stop " + v.Name + " first: switching to disk mode has to create its disk")
-			}
-			size := a.resizeTo
-			if size == "" {
-				size = v.Disk
-			}
-			out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), size).CombinedOutput()
-			if err != nil {
-				return errMsg("qemu-img create: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
-			}
-			v.Disk = size
-			a.resizeTo = "" // created at the requested size already
-		}
-
-		if a.resizeTo != "" {
-			if running {
-				return errMsg("stop " + v.Name + " before resizing its disk (nothing was saved)")
-			}
-			// A cloud VM's overlay is created lazily on first start, so before
-			// then there is nothing to grow. Say so rather than letting
-			// qemu-img fail with "Could not open".
-			if missing {
-				return errMsg("start " + v.Name + " once before growing its disk (nothing was saved)")
-			}
-			out, err := exec.Command("qemu-img", "resize", v.DiskPath(), a.resizeTo).CombinedOutput()
-			if err != nil {
-				return errMsg("qemu-img resize: " + strings.TrimSpace(string(out)) + " (nothing was saved)")
-			}
-		}
-		if err := v.Save(); err != nil {
-			return errMsg(err.Error())
-		}
-		note := ""
-		switch {
-		case running && a.sshChanged:
-			note = ": restart to apply (ssh port changes with it)"
-		case running:
-			note = ": restart to apply"
-		case a.resizeTo != "":
-			note = ": disk grown to " + a.resizeTo + "; grow the filesystem inside the guest too"
-		}
-		return vmSavedMsg{vm: &v, restart: running, note: note}
+// saveEdit applies p to name through core.Update: the disk resize (if any)
+// and the vm.toml write both happen inside that call, under config.Lock(),
+// exactly like every other core mutator. It is a plain function, not a
+// tea.Cmd, and is called synchronously from updateEdit's "enter" handler so
+// a validation failure can be shown inline in m.edit.err immediately, in the
+// same place buildPatch's own presentational errors go, rather than as a
+// toast. The IO this does (qemu-img resize, when the disk changed) is the
+// same call this form used to make from inside a tea.Cmd; the UI blocks for
+// it either way, since nothing here overlapped it with a spinner before.
+func saveEdit(name string, p core.Patch, running bool) (msg tea.Msg, errText string) {
+	if _, err := core.Update(name, p); err != nil {
+		return nil, editErrorText(err)
 	}
+	v, err := config.Load(name)
+	if err != nil {
+		return nil, err.Error()
+	}
+	note := ""
+	switch {
+	case running && p.SSHPort != nil:
+		note = ": restart to apply (ssh port changes with it)"
+	case running:
+		note = ": restart to apply"
+	case p.Disk != nil:
+		note = ": disk grown to " + v.Disk + "; grow the filesystem inside the guest too"
+	}
+	return vmSavedMsg{vm: v, restart: running, note: note}, ""
 }
 
 func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -459,26 +383,7 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.edit.refocus()
 			return m, nil
 		case "left", "right":
-			switch m.edit.focus {
-			case eMode:
-				d := 1
-				if msg.String() == "left" {
-					d = -1
-				}
-				i := 0
-				for j, md := range editModes {
-					if md == m.edit.mode {
-						i = j
-					}
-				}
-				m.edit.mode = editModes[(i+d+len(editModes))%len(editModes)]
-				// The recipe list is per-backend, and the backend follows the
-				// mode. Without this the picker keeps offering (and validate
-				// keeps writing) a cloud fragment to a now-live VM, which the
-				// ssh path would try to execute as a shell script.
-				m.edit.syncRecipes()
-				return m, nil
-			case eRecipes:
+			if m.edit.focus == eRecipes {
 				if n := len(m.edit.recipeNames); n > 0 {
 					d := 1
 					if msg.String() == "left" {
@@ -486,8 +391,8 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.edit.recipeIdx = (m.edit.recipeIdx + d + n) % n
 				}
-				return m, nil
 			}
+			return m, nil
 		case keySpace:
 			if m.edit.focus == eRecipes && len(m.edit.recipeNames) > 0 {
 				n := m.edit.recipeNames[m.edit.recipeIdx]
@@ -495,13 +400,18 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
-			a, err := m.edit.validate(m.vms)
+			p, err := m.edit.buildPatch()
 			if err != nil {
 				m.edit.err = err.Error()
 				return m, nil
 			}
+			saved, errText := saveEdit(m.edit.name(), p, qemu.Running(m.edit.vm))
+			if errText != "" {
+				m.edit.err = errText
+				return m, nil
+			}
 			m.edit.err = ""
-			return m, saveEdit(a, qemu.Running(m.edit.vm))
+			return m, func() tea.Msg { return saved }
 		}
 	}
 
@@ -548,24 +458,12 @@ func (m model) viewEdit() string {
 		b.row(marker, label, value)
 	}
 
-	modeParts := make([]string, len(editModes))
-	for i, md := range editModes {
-		modeParts[i] = radio(modeLabel(md), md == e.mode)
-	}
-	modeRow := strings.Join(modeParts, "  ")
-	if e.mode != e.vm.Mode {
-		modeRow += warnStyle.Render("  " + glyphWas + " was " + e.vm.Mode)
-	}
-	row(eMode, "mode", modeRow)
-	b.hint(modeHint(e.mode))
-	b.gap()
-
 	row(eRAM, "ram", e.inputs[eRAM].View()+dimStyle.Render(" MB"))
 	row(eCPUs, "cpus", e.inputs[eCPUs].View())
 	// The disk row is drawn only where it means something: a size of its own
 	// in disk mode, an optional "grow the overlay to" in cloud mode, and
 	// nothing at all for a live VM, which has no disk.
-	if e.mode != "live" {
+	if e.vm.Mode != "live" {
 		row(eDisk, "disk", e.inputs[eDisk].View())
 		// The hint is dropped once the field is changed, so the "was X"
 		// marker sits alone next to the value it refers to.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -344,5 +346,74 @@ func TestCheckRecipesShellRecipeOnCloudinitBackend(t *testing.T) {
 	}
 	if !strings.Contains(issues[0].Reason, "cloudinit") {
 		t.Errorf("Reason = %q, does not explain the backend mismatch", issues[0].Reason)
+	}
+}
+
+// writeRecipe drops a recipe file straight into root's recipes/ dir,
+// bypassing recipes.Install/the bundled set, so a test can pin exact front
+// matter without editing a shipped recipe.
+func writeRecipe(t *testing.T, dir, name, body string) {
+	t.Helper()
+	recipesDir := filepath.Join(dir, "recipes")
+	if err := os.MkdirAll(recipesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipesDir, name), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCheckRecipesUsesDeclaredCapabilityReason is the case this change was
+// for: a recipe declaring "requires: systemd" with no "os" restriction of
+// its own must produce docs/design/core-api.md §4's exact example,
+// "requires systemd, alpine uses openrc", drawn from recipes.UnsupportedReason
+// against the recipe's OWN declared metadata, not the generic "not offered
+// to alpine/apkovl" the structural fallback would give for the same file.
+//
+// The filename still pins gizmo.debian.sh to debian (so recipes.List
+// excludes it for alpine, same as any other recipe), but the front matter
+// deliberately omits "stoat:os": that is what isolates the capability check
+// from the OS check UnsupportedReason also makes, proving THIS reason came
+// from "requires", not from the filename.
+func TestCheckRecipesUsesDeclaredCapabilityReason(t *testing.T) {
+	dir := root(t)
+	writeRecipe(t, dir, "gizmo.debian.sh", "#!/bin/sh\n# stoat:name        gizmo\n# stoat:requires    systemd\nset -e\necho hi\n")
+
+	issues, err := CheckRecipes("alpine", "apkovl", []string{"gizmo.debian.sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly 1", issues)
+	}
+	want := "requires systemd, alpine uses openrc"
+	if !strings.Contains(issues[0].Reason, want) {
+		t.Errorf("Reason = %q, want it to contain %q", issues[0].Reason, want)
+	}
+}
+
+// TestCheckRecipesFallsBackWithNoDeclaredMetadata covers a recipe with no
+// front-matter block at all (every *.cloud.yaml fragment today, by design):
+// ReadMetadata returns the zero Metadata, UnsupportedReason has nothing to
+// say, and CheckRecipes must fall back to the structural reason rather than
+// reporting no issue or an empty one. xfce.cloud.yaml requested for fedora
+// hits recipes.List's real "Fedora is kept out of the shared set entirely"
+// rule (recipes.go), a reason only the structural path can give.
+func TestCheckRecipesFallsBackWithNoDeclaredMetadata(t *testing.T) {
+	root(t)
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := CheckRecipes("fedora", "cloudinit", []string{"xfce.cloud.yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %+v, want exactly 1", issues)
+	}
+	want := "not in the shared cloud-recipe set"
+	if !strings.Contains(issues[0].Reason, want) {
+		t.Errorf("Reason = %q, want it to contain %q (the structural fallback)", issues[0].Reason, want)
 	}
 }

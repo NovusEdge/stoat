@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"path"
@@ -207,7 +208,7 @@ func TestBuildRejectsRelativeDiskSize(t *testing.T) {
 }
 
 // TestFormAndParseSizeAgreeOnDiskStrings asserts build()'s disk validation and
-// edit.go's parseSize accept and reject the exact same strings, so the two
+// core.ParseSize accept and reject the exact same strings, so the two
 // validators cannot silently drift apart and disagree about what the same
 // disk size means.
 func TestFormAndParseSizeAgreeOnDiskStrings(t *testing.T) {
@@ -228,7 +229,7 @@ func TestFormAndParseSizeAgreeOnDiskStrings(t *testing.T) {
 			f.inputs[fDisk].SetValue(s)
 
 			_, buildErr := f.build()
-			_, sizeErr := parseSize(s)
+			_, sizeErr := core.ParseSize(s)
 
 			// Empty is a special case on the form: it means "use the default",
 			// not "invalid": parseSize alone would refuse it, but build() must
@@ -365,52 +366,101 @@ func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
 	}
 }
 
-// TestDownloadSurvivesLeavingTheForm is the regression test for the review's
-// C1. Leaving the form with "esc" does not cancel the fetch. There is no
-// cancel, so the goroutine keeps writing. If "n" then handed out a fresh
-// form, "fetching" would reset to false and a second space would start a
-// SECOND download of the same file: two writers interleaving into one .part,
-// each verifying its own read stream, so both pass the checksum and the
-// image that lands is a corrupt splice marked verified.
-func TestDownloadSurvivesLeavingTheForm(t *testing.T) {
+// TestEscCancelsInFlightDownload replaces what used to be
+// TestDownloadSurvivesLeavingTheForm: esc no longer abandons the fetch
+// goroutine, it CANCELS it. core.DownloadImage builds its request from the
+// ctx fetchImage hands it, so cancelling that ctx (what esc now does) is what
+// actually stops the transfer, not just the UI's opinion that one is
+// running. This is the fix for app.go's long-standing "esc during a download
+// leaves the goroutine running" open item.
+func TestEscCancelsInFlightDownload(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
 	space := keyMsg(keySpace)
 	m := model{screen: screenForm, form: newForm(), provisioning: map[string]provState{}}
 	m.form.focus = fISO
 
-	out, _ := m.Update(space)
+	out, cmd := m.Update(space)
 	m = out.(model)
-	if !m.form.fetching {
+	if !m.form.fetching || cmd == nil {
 		t.Fatal("space did not start a download")
 	}
+	ctx := m.form.dlCtx
+	if ctx == nil || ctx.Err() != nil {
+		t.Fatal("download's ctx missing or already cancelled before esc")
+	}
 
-	// esc back to the list; the fetch keeps running.
 	out, _ = m.Update(keyMsg("esc"))
 	m = out.(model)
 	if m.screen != screenList {
 		t.Fatalf("esc left screen %v, want the list", m.screen)
 	}
-	if !m.form.fetching {
-		t.Fatal("fetching flag was cleared even though nothing cancelled the download")
+	if m.form.fetching {
+		t.Error("esc left fetching set even though the download was cancelled")
+	}
+	if m.form.dlCancel != nil {
+		t.Error("esc left a stale cancel func behind")
+	}
+	if ctx.Err() == nil {
+		t.Error("esc did not cancel the download's ctx: the goroutine is still reading")
 	}
 
-	// "n" must NOT hand out a fresh form while that download is live.
+	// "n" is now safe to hand out a fresh form: nothing is writing anymore.
+	before := m.form.inputs[fName].Value()
+	m.form.inputs[fName].SetValue("marker")
 	out, _ = m.Update(keyMsg("n"))
 	m = out.(model)
-	if !m.form.fetching {
-		t.Error(`"n" reset the form and cleared fetching: a second space would corrupt the image`)
+	if m.screen != screenForm {
+		t.Fatal(`"n" did not reopen the form`)
+	}
+	if m.form.inputs[fName].Value() == "marker" {
+		t.Error(`"n" reused the cancelled form instead of handing out a fresh one`)
+	}
+	_ = before
+
+	// A second space must start a genuinely new download rather than being
+	// refused as if one were still in flight.
+	m.form.focus = fISO
+	out, cmd = m.Update(space)
+	m = out.(model)
+	if !m.form.fetching || cmd == nil {
+		t.Fatal("a second download did not start after the first was cancelled")
+	}
+	if m.form.dlCancel == nil {
+		t.Fatal("the second download has no cancel func")
+	}
+}
+
+// TestStaleFetchOutcomeAfterCancelIsIgnored: the goroutine core.DownloadImage
+// runs in does not stop the instant ctx is cancelled (unblocking a Read
+// takes one more pass), so its outcome message can still land after esc. It
+// must not resurrect "fetching" or toast a "context canceled" the user did
+// not cause; the generation stamped on the message is what tells updateForm
+// it is stale.
+func TestStaleFetchOutcomeAfterCancelIsIgnored(t *testing.T) {
+	m := model{screen: screenForm, form: newForm(), provisioning: map[string]provState{}}
+	m.form.fetching = true
+	m.form.dlGen = 1
+	_, cancel := context.WithCancel(context.Background())
+	m.form.dlCancel = cancel
+
+	out, _ := m.Update(keyMsg("esc"))
+	m = out.(model)
+	if m.form.fetching {
+		t.Fatal("esc should have cleared fetching immediately")
+	}
+	if m.form.dlGen != 2 {
+		t.Fatalf("dlGen = %d, want 2 (esc must bump it so a stale message is recognisable)", m.form.dlGen)
 	}
 
-	// ...so a second space is refused rather than starting a rival writer.
-	before := m.form.fetchingOS
-	out, cmd := m.Update(space)
+	// The abandoned goroutine's error, stamped with the OLD generation.
+	out, cmd := m.Update(imageFetchErrMsg{entryID: "x", err: "context canceled", gen: 1})
 	m = out.(model)
-	if cmd != nil {
-		t.Error("a second space started another download while one was in flight")
+	if m.form.fetching {
+		t.Error("a stale fetch outcome turned fetching back on")
 	}
-	if m.form.fetchingOS != before {
-		t.Errorf("in-flight download was retargeted: %q -> %q", before, m.form.fetchingOS)
+	if cmd != nil {
+		t.Error("a stale fetch outcome should not toast: the user already cancelled it")
 	}
 }
 
@@ -425,7 +475,7 @@ func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 	m.form.fetching = true
 	m.form.fetchingOS = "ubuntu"
 
-	out, _ := m.Update(imageFetchErrMsg("ubuntu: checksum mismatch"))
+	out, _ := m.Update(imageFetchErrMsg{entryID: "ubuntu-24.04", err: "checksum mismatch", gen: m.form.dlGen})
 	m = out.(model)
 	if m.form.fetching {
 		t.Error("a failed fetch left the fetching flag set")

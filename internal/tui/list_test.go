@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/testutil"
 )
 
 // resetSeq is the SGR reset sequence lipgloss emits at the end of a styled
@@ -100,5 +101,38 @@ func TestDeleteTargetsDirectoryNotName(t *testing.T) {
 	}
 	if _, err := os.Stat(work2Dir); err != nil {
 		t.Fatalf("work2 directory should still exist: %v", err)
+	}
+}
+
+// TestDeleteBrokenVMRefusesWhileRunning pins the fix for the live D5 bug:
+// deleteBrokenVM used to reimplement Delete's data-root containment check by
+// hand and call os.RemoveAll directly, never checking whether a qemu process
+// was still running against the directory. "d" then "y" on a broken row
+// could delete the directory, pidfile, monitor socket and disk out from
+// under a live qemu. It now goes through core.Destroy, which checks first.
+func TestDeleteBrokenVMRefusesWhileRunning(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+
+	dir := filepath.Join(root, "broken")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Unparseable on purpose: this is what makes it a "broken" VM directory
+	// rather than a good one.
+	if err := os.WriteFile(filepath.Join(dir, "vm.toml"), []byte("mode = ===not toml==="), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := testutil.FakeRunning(t, dir)
+	defer stop()
+
+	msg := deleteBrokenVM("broken")()
+
+	if _, ok := msg.(errMsg); !ok {
+		t.Fatalf("deleteBrokenVM while running = %#v, want an errMsg refusing the delete", msg)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("broken directory should still exist while its qemu process is running: %v", err)
 	}
 }

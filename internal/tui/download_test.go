@@ -1,10 +1,50 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/novusedge/stoat/internal/iso"
 )
+
+// TestFetchImageRespectsCancelledContext is fetchImage's own proof that
+// cancellation is real, not just a model flag: core.DownloadImage checks
+// ctx.Err() before it does anything network-shaped (images.go), so a
+// pre-cancelled ctx makes this deterministic and network-free while still
+// exercising the exact path esc now drives (fetchImage -> core.DownloadImage
+// -> the caller's ctx), rather than a fake standing in for it.
+func TestFetchImageRespectsCancelledContext(t *testing.T) {
+	entry := iso.Catalog()[0]
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// dlStart/dlProgress is the same shared cell fetchImage's hardcoded
+	// dlRecord callback writes to; resetting it first means a nonzero done
+	// afterwards can only mean the callback fired, i.e. a network stage was
+	// reached despite the cancelled ctx.
+	dlStart()
+
+	msg := fetchImage(ctx, entry.ID, 7)()
+	got, ok := msg.(imageFetchErrMsg)
+	if !ok {
+		t.Fatalf("got %#v, want imageFetchErrMsg", msg)
+	}
+	if got.gen != 7 {
+		t.Errorf("gen = %d, want 7 (fetchImage must stamp the generation it was given)", got.gen)
+	}
+	if !strings.Contains(got.err, "context canceled") {
+		t.Errorf("err = %q, want it to report the cancellation", got.err)
+	}
+	// The real assertion: a cancelled fetch never reaches the network stage
+	// at all (core.DownloadImage checks ctx.Err() before iso.Resolve), which
+	// is exactly what makes this test fast and deterministic rather than a
+	// race against a real transfer. No progress callback should have fired.
+	if s := dlSnapshot(time.Now()); s.done != 0 {
+		t.Errorf("progress reported %d bytes done against a pre-cancelled ctx", s.done)
+	}
+}
 
 func TestHumanBytes(t *testing.T) {
 	cases := []struct {

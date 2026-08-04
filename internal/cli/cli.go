@@ -740,12 +740,18 @@ func runPull(a *Args, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "\r%s  %3d%%  %s / %s", a.VM, pct, humanSize(done), humanSize(total))
 		}
 	}
-	if err := core.DownloadImage(context.Background(), a.VM, progress); err != nil {
+	res, err := core.DownloadImage(context.Background(), a.VM, progress)
+	if err != nil {
 		fmt.Fprintln(stderr, "\nstoat: pull:", err)
 		return ExitFail
 	}
 	if !a.Quiet {
-		fmt.Fprintf(stdout, "\r%s downloaded%s\n", a.VM, strings.Repeat(" ", 30))
+		// Say so when nothing checked the bytes. This image gets booted.
+		note := ""
+		if !res.ChecksumAvailable {
+			note = ": UNVERIFIED (no published checksum)"
+		}
+		fmt.Fprintf(stdout, "\r%s downloaded%s%s\n", a.VM, note, strings.Repeat(" ", 30))
 	}
 	return ExitOK
 }

@@ -157,7 +157,7 @@ func (h detailHelp) FullHelp() [][]key.Binding {
 	rows := [][]key.Binding{
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
 		{plainKey([]string{"i"}, "i", "installed"), h.ssh()},
-		{plainKey([]string{"p"}, "p", "provision")},
+		{plainKey([]string{"p"}, "p", "provision"), plainKey([]string{"L"}, "L", "console log")},
 	}
 	if h.consolePassword {
 		rows = append(rows, []key.Binding{

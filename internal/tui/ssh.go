@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -39,15 +40,17 @@ func sshInto(v *config.VM) tea.Cmd {
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 255 {
-				// ssh itself failed to connect. Reuse sshx's banner-aware
-				// readiness check (the same one Provision waits on) instead
-				// of guessing from the exit code alone, so the message can
-				// tell a guest that's still booting apart from one that's
-				// genuinely unreachable (e.g. a disk VM with no key
-				// installed and no sshd ever going to answer).
+				// ssh itself failed to connect. Reuse core's banner-aware
+				// readiness check (the same signal Apply/Provision wait on)
+				// instead of guessing from the exit code alone, so the
+				// message can tell a guest that's still booting apart from
+				// one that's genuinely unreachable (e.g. a disk VM with no
+				// key installed and no sshd ever going to answer).
 				// No cancellation source reaches here: this runs after ssh
 				// has already exited, in a plain tea.ExecProcess callback.
-				if sshx.Wait(context.Background(), v, reachabilityProbe) != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), reachabilityProbe)
+				defer cancel()
+				if core.Wait(ctx, v.Name, core.UntilReachable) != nil {
 					return errMsg(fmt.Sprintf(
 						"%s: still booting, sshd not reachable yet on port %d, try again shortly",
 						v.Name, v.SSHPort))

@@ -126,16 +126,17 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 // docs/design/guest-subsystem.md §5 specifies an in-band front-matter
 // contract, "# stoat:name", "# stoat:description", "# stoat:os",
 // "# stoat:requires", "# stoat:stages" comments a recipe script would
-// declare, as the source for a recipe's real metadata. THAT PARSER DOES
-// NOT EXIST. internal/recipes has no code that reads those tags, and no
-// recipe file in the tree carries them: every .sh and .yaml recipe here has
-// only free-form prose comments (checked directly: xfce.alpine.sh,
-// xfce.debian.cloud.yaml, devtools.cloud.yaml, all of them). So Recipe
-// cannot report a declared Description, Requires, or Stages without
-// inventing a format nobody has agreed to, which is exactly the gap this
-// change was told to report rather than paper over. What IS populated below
-// is derived purely from the filename and from what else exists on disk;
-// no script content is parsed, no comment is treated as documentation.
+// declare, as the source for a recipe's real metadata. internal/recipes now
+// has that parser (ParseMetadata/ReadMetadata) and CheckRecipes uses it (see
+// recipeIssueReason), but every phase-1 shell recipe that carries the tags
+// today declares only name/description/os/requires/stages for ITSELF, not a
+// summary this type could surface for an arbitrary (OS, backend) pair
+// without re-parsing each file Recipes returns, which this function
+// deliberately does not do (see its own doc comment: no script content is
+// read here). So Recipe still cannot honestly report a declared
+// Description, Requires, or Stages without that extra read; what IS
+// populated below is derived purely from the filename and from what else
+// exists on disk.
 type Recipe struct {
 	// Name is the full filename ("xfce.alpine.cloud.yaml"), exactly what
 	// ApplyOpts.Only, Spec.Recipes and recipes.Read all expect.
@@ -242,17 +243,18 @@ type RecipeIssue struct {
 // an empty result as a clean answer rather than having to filter out an "OK"
 // entry per name.
 //
-// The reasons below are derived structurally: from the requested file's own
-// name, from guest.Lookup(osName), and from what else exists on disk (an
-// OS-specific override suppressing a shared fragment; see recipes.List's
-// own doc comment on "overridden"). They do NOT draw on a recipe's declared
-// requirements ("requires: systemd" and the like), as Recipe's doc comment
-// explains, since that front-matter contract is not implemented anywhere in
-// internal/recipes yet. So "xfce.cloud.yaml is not offered to alpine
-// because alpine has its own xfce.alpine.cloud.yaml" is a real, true reason
-// this can give today; "xfce requires systemd, alpine uses openrc", the
-// exact example in docs/design/core-api.md §4, is not, until that parser
-// exists.
+// The reasons below prefer a recipe's own declared front matter
+// (internal/recipes.ParseMetadata/UnsupportedReason) when it has any: "xfce
+// requires systemd, alpine uses openrc", the exact example in
+// docs/design/core-api.md §4, is real now. Where a recipe declares no
+// metadata (every *.cloud.yaml fragment today, by design; see
+// recipeIssueReason) the reason falls back to one derived structurally:
+// from the requested file's own name, from guest.Lookup(osName), and from
+// what else exists on disk (an OS-specific override suppressing a shared
+// fragment; see recipes.List's own doc comment on "overridden"). So
+// "xfce.cloud.yaml is not offered to alpine because alpine has its own
+// xfce.alpine.cloud.yaml" is still a real, true structural reason this can
+// give, for exactly the recipes that have no better one to give instead.
 func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, error) {
 	available, err := recipes.List(osName, backendName)
 	if err != nil {
@@ -273,10 +275,13 @@ func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, er
 	return issues, nil
 }
 
-// recipeIssueReason explains why name is not offered to osName/backendName,
-// without consulting anything beyond the filename, guest.Lookup, and
-// whether other files exist on disk; see CheckRecipes' doc comment on why
-// it stops there.
+// recipeIssueReason explains why name is not offered to osName/backendName.
+// It prefers a capability-based reason drawn from the recipe's own declared
+// front matter (internal/recipes.ParseMetadata/UnsupportedReason), and falls
+// back to one derived structurally, from the filename, guest.Lookup, and
+// whether other files exist on disk, when the recipe declares no metadata;
+// see CheckRecipes' doc comment for why a structural fallback still exists
+// at all.
 func recipeIssueReason(name, osName, backendName string) string {
 	if _, err := os.Stat(recipes.Path(name)); err != nil {
 		return fmt.Sprintf("no such recipe %q", name)
@@ -285,11 +290,34 @@ func recipeIssueReason(name, osName, backendName string) string {
 	isCloudFragment := strings.HasSuffix(name, ".cloud.yaml")
 	isShellRecipe := strings.HasSuffix(name, ".sh") && !isCloudFragment
 
+	// The backend mismatches below (a shell recipe pushed to a cloudinit VM,
+	// or a cloud fragment offered to a backend with no cloud-init seed to
+	// merge it into) are checked before metadata and win outright: they are
+	// about HOW a recipe gets applied, which no front-matter tag declares,
+	// so there is nothing for UnsupportedReason to say that would improve on
+	// this.
 	switch {
 	case isCloudFragment && backendName != "cloudinit":
 		return fmt.Sprintf("%s is a cloud-init fragment; the %s backend applies recipes over ssh after boot, not from a cloud-init seed", name, backendName)
 	case isShellRecipe && backendName == "cloudinit":
 		return fmt.Sprintf("%s is a shell recipe pushed over ssh; the cloudinit backend applies its recipes from the seed at first boot instead", name)
+	}
+
+	// Backend is applicable; whether name is a match for osName is what a
+	// recipe's own declared front matter, when present, can now answer with
+	// a real reason ("requires systemd, alpine uses openrc") instead of one
+	// guessed from the filename, and that reason wins when both exist. A
+	// parse error or a recipe with no "# stoat:" block at all (every
+	// *.cloud.yaml fragment today; see docs/design/guest-subsystem.md §5's
+	// phase split) leaves m at its zero value, UnsupportedReason then
+	// returns "", and the structural switch below is what actually answers.
+	if m, err := recipes.ReadMetadata(name); err == nil {
+		if reason := recipes.UnsupportedReason(osName, m); reason != "" {
+			return fmt.Sprintf("%s: %s", name, reason)
+		}
+	}
+
+	switch {
 	case isCloudFragment:
 		base := strings.TrimSuffix(name, ".cloud.yaml")
 		if i := strings.LastIndex(base, "."); i >= 0 {

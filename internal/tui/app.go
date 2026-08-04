@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
@@ -8,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -119,11 +122,30 @@ func Run() error {
 		list:         newVMList(),
 		spin:         newSpinner(),
 	}
-	if err := qemu.Preflight(); err != nil {
-		m.preflight = err.Error()
-	}
+	m.preflight = preflightReport(core.Doctor())
 	_, err := tea.NewProgram(m).Run()
 	return err
+}
+
+// preflightReport renders every failing host check as one block, one line
+// per check plus its fix command when there is one. qemu.Preflight (what
+// this replaces) only ever showed a single string for whichever binary or
+// device it happened to hit first; core.Doctor runs every probe and returns
+// a Fix for each failure, so showing all of them, with the command that
+// clears each one, is the entire reason to make this switch.
+func preflightReport(checks []core.HostCheck) string {
+	var lines []string
+	for _, c := range checks {
+		if c.OK {
+			continue
+		}
+		line := c.Name + ": " + c.Detail
+		if len(c.Fix) > 0 {
+			line += "\n  fix: " + strings.Join(c.Fix, " && ")
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) Init() tea.Cmd { return loadVMs }

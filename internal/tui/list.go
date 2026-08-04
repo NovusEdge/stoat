@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -10,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
@@ -40,7 +39,9 @@ func startVM(v *config.VM) tea.Cmd {
 		// A live VM's root is wiped by the boot about to happen, so a log from
 		// its previous life describes work that no longer exists.
 		ensureNoStaleLog(v)
-		if err := qemu.Start(v); err != nil {
+		// core.Start resolves by DIRECTORY, not the vm.toml name field; see the
+		// identity note on core.VM.Name.
+		if err := core.Start(filepath.Base(v.Dir)); err != nil {
 			return errMsg(err.Error())
 		}
 		return vmStartedMsg{v}
@@ -53,7 +54,7 @@ type vmStartedMsg struct{ vm *config.VM }
 
 func stopVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
-		if err := qemu.Stop(v); err != nil {
+		if err := core.Stop(filepath.Base(v.Dir)); err != nil {
 			return errMsg(err.Error())
 		}
 		return statusMsg(v.Name + " stopped")
@@ -208,25 +209,28 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func deleteVM(v *config.VM) tea.Cmd {
 	return func() tea.Msg {
-		name := v.Name
-		if err := v.Delete(); err != nil {
+		// The DIRECTORY is the identity core.Destroy acts on, not v.Name (the
+		// vm.toml field, which can diverge from it); see core.VM's identity
+		// note. TestDeleteTargetsDirectoryNotName pins this.
+		name := filepath.Base(v.Dir)
+		if err := core.Destroy(name); err != nil {
 			return errMsg(err.Error())
 		}
 		return statusMsg(name + " deleted")
 	}
 }
 
-// deleteBrokenVM removes a broken VM's directory by name. There is no
-// *config.VM to call Delete on. The whole point is that its vm.toml
-// couldn't be parsed into one, so this reimplements Delete's data-root
-// containment check directly against the directory path.
+// deleteBrokenVM removes a broken VM's directory by name, through
+// core.Destroy. There is no *config.VM to hand it, but Destroy accepts a
+// broken VM the same as a good one, and unlike this function's old body it
+// checks first whether a qemu process is still running against that
+// directory. The old body reimplemented the data-root containment check by
+// hand and skipped that check entirely, which meant deleting a broken row
+// could rip the directory, pidfile, monitor socket and disk out from under a
+// live qemu; see core.Destroy's comment for the incident this describes.
 func deleteBrokenVM(name string) tea.Cmd {
 	return func() tea.Msg {
-		dir := filepath.Join(config.Root(), name)
-		if filepath.Dir(dir) != config.Root() {
-			return errMsg(fmt.Sprintf("refusing to delete %q: outside the data root", dir))
-		}
-		if err := os.RemoveAll(dir); err != nil {
+		if err := core.Destroy(name); err != nil {
 			return errMsg(err.Error())
 		}
 		return statusMsg(name + " deleted")
