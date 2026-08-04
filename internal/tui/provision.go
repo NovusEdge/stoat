@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -36,7 +37,10 @@ func provision(v *config.VM) tea.Cmd {
 		if !qemu.Running(v) {
 			return provisionDoneMsg{v.Name, errNotRunning}
 		}
-		return provisionDoneMsg{v.Name, sshx.Provision(v)}
+		// No cancellation source reaches here yet: the TUI has no "abort
+		// provision" key, so this is a call site noted for the caller to
+		// decide whether one should exist, not a design decision made here.
+		return provisionDoneMsg{v.Name, sshx.Provision(context.Background(), v)}
 	}
 }
 

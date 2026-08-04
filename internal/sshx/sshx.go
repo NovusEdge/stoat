@@ -2,12 +2,14 @@
 package sshx
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -156,10 +158,26 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 	return err == nil && string(buf) == "SSH-"
 }
 
+// recipeShutdownGrace is how long a recipe's ssh process gets to exit after
+// ctx is cancelled before it is killed outright. cmd.Cancel below sends
+// SIGTERM instead of exec.CommandContext's default SIGKILL so ssh gets the
+// chance to close its session (and let a remote shell it started react)
+// cleanly; this bounds that grace period rather than waiting on it forever.
+const recipeShutdownGrace = 5 * time.Second
+
 // Provision runs each of v's recipes over ssh, streaming output to
 // last-provision.log. The detail view tails that file on a ticker, so there
 // is no channel plumbing between this and the UI.
-func Provision(v *config.VM) (err error) {
+//
+// ctx cancels the in-flight ssh process, not just the caller's wait on it:
+// each recipe runs under exec.CommandContext, so a cancelled apply actually
+// kills ssh rather than leaving it running against the guest after Provision
+// has returned. The initial wait for sshd is different: Wait is a local dial
+// loop with no process to kill, so it is raced against ctx.Done() below
+// instead of being made to accept a ctx itself — cancelling there simply lets
+// Provision return early while that goroutine finishes on its own, bounded by
+// WaitTimeout regardless.
+func Provision(ctx context.Context, v *config.VM) (err error) {
 	logx.L().Info("provision start", "vm", v.Name, "recipes", strings.Join(v.Recipes, ","))
 	defer func() {
 		if err != nil {
@@ -176,12 +194,28 @@ func Provision(v *config.VM) (err error) {
 	defer log.Close()
 
 	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
-	if err := Wait(v, WaitTimeout); err != nil {
-		fmt.Fprintf(log, "FAILED: %v\n", err)
-		return err
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- Wait(v, WaitTimeout) }()
+	select {
+	case <-ctx.Done():
+		fmt.Fprintf(log, "CANCELLED: %v\n", ctx.Err())
+		return ctx.Err()
+	case err := <-waitDone:
+		if err != nil {
+			fmt.Fprintf(log, "FAILED: %v\n", err)
+			return err
+		}
 	}
 
 	for _, name := range v.Recipes {
+		// Checked before each recipe, not only relied on via cmd.Run below: a
+		// ctx cancelled between recipes must stop here rather than starting
+		// one more ssh process it will only have to kill.
+		if err := ctx.Err(); err != nil {
+			fmt.Fprintf(log, "CANCELLED: %v\n", err)
+			return err
+		}
+
 		body, err := recipes.Read(name)
 		if err != nil {
 			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
@@ -189,11 +223,23 @@ func Provision(v *config.VM) (err error) {
 		}
 		fmt.Fprintf(log, "\n=== recipe %s ===\n", name)
 
-		cmd := exec.Command("ssh", Args(v, "sh", "-s")...)
+		cmd := exec.CommandContext(ctx, "ssh", Args(v, "sh", "-s")...)
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.WaitDelay = recipeShutdownGrace
 		cmd.Stdin = strings.NewReader(body)
 		cmd.Stdout = log
 		cmd.Stderr = log
 		if err := cmd.Run(); err != nil {
+			// ctx being the cause is reported honestly rather than as a plain
+			// recipe FAILED: waitApplied (internal/core/wait.go) only ever
+			// treats a final "done" line as success, so either wording leaves
+			// it correctly "not applied" — but a human reading the log, or a
+			// caller sniffing Logs' text, must not read a cancellation as if
+			// the recipe itself had failed.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+				return ctxErr
+			}
 			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return fmt.Errorf("recipe %s: %w", name, err)
 		}

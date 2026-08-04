@@ -1,8 +1,14 @@
 package sshx
 
 import (
+	"context"
+	"errors"
 	"net"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -242,5 +248,163 @@ func TestWaitTimesOutOnClosedPort(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "x") {
 		t.Errorf("error should name the vm, got %v", err)
+	}
+}
+
+// TestProvisionCancelDuringWaitReturnsPromptly covers the other half of
+// cancellation: a ctx already cancelled before sshd ever answers must not
+// leave Provision blocked in Wait for up to WaitTimeout (here, a port with
+// nothing listening, so Wait would otherwise run the full timeout).
+func TestProvisionCancelDuringWaitReturnsPromptly(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	if err := os.MkdirAll(filepath.Join(root, "recipes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	v := &config.VM{Name: "x", SSHPort: 1, Dir: t.TempDir()} // port 1: nothing listens
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := Provision(ctx, v)
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("Provision took %s to notice an already-cancelled ctx during Wait", elapsed)
+	}
+
+	log, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatalf("reading provision log: %v", err)
+	}
+	if !strings.Contains(string(log), "CANCELLED") {
+		t.Errorf("provision log does not mention cancellation:\n%s", log)
+	}
+}
+
+// installFakeSSH puts a stand-in "ssh" on PATH ahead of the real one. It
+// records its own pid to pidFile, then execs into "sleep 30" — replacing its
+// own process image rather than forking a child — so the pid recorded is
+// the pid that Provision's cmd.Process actually signals, exactly as it would
+// be for a real ssh process. The rest of PATH is kept so the script's own
+// "sleep" can still be resolved.
+func installFakeSSH(t *testing.T, pidFile string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho $$ > " + shellQuoteForTest(pidFile) + "\nexec sleep 30\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+}
+
+func shellQuoteForTest(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// waitForFile polls until path exists or timeout, so the test does not race
+// the fake ssh script writing its pid before cancelling.
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s never appeared within %s", path, timeout)
+}
+
+// processAlive reports whether pid still exists, using signal 0 — the
+// standard liveness probe that delivers nothing but still fails against a
+// dead pid.
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// TestProvisionCancelKillsTheSSHProcess is the strong version of the
+// cancellation test: it does not just assert Provision unblocks, it asserts
+// the ssh process it started is actually gone afterwards. Falsified by
+// reverting Provision's exec.CommandContext to exec.Command, which makes
+// this test hang past its own deadline waiting for a process cancel never
+// touches.
+func TestProvisionCancelKillsTheSSHProcess(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	if err := os.MkdirAll(filepath.Join(root, "recipes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "recipes", "long.sh"), []byte("sleep 30\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vmDir := t.TempDir()
+	pidFile := filepath.Join(vmDir, "ssh.pid")
+	installFakeSSH(t, pidFile)
+
+	// A listener that answers the SSH banner immediately stands in for
+	// sshd, so Wait clears at once and Provision moves on to the recipe.
+	port := acceptOnly(t, "SSH-2.0-OpenSSH_9.6\r\n")
+
+	v := &config.VM{Name: "x", SSHPort: port, Dir: vmDir, Recipes: []string{"long.sh"}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		waitForFile(t, pidFile, 3*time.Second)
+		cancel()
+	}()
+
+	provisionErr := make(chan error, 1)
+	go func() { provisionErr <- Provision(ctx, v) }()
+
+	<-done
+	select {
+	case err := <-provisionErr:
+		if err == nil {
+			t.Error("Provision returned nil error for a cancelled run")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Provision did not return within 10s of cancellation")
+	}
+
+	pidBytes, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("reading pidfile: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil {
+		t.Fatalf("parsing pid: %v", err)
+	}
+	// The kill is not necessarily instantaneous (cmd.Cancel sends SIGTERM,
+	// with WaitDelay as the SIGKILL backstop), so give it a moment before
+	// declaring the process still alive.
+	deadline := time.Now().Add(6 * time.Second)
+	for processAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if processAlive(pid) {
+		t.Errorf("ssh process (pid %d) is still running after Provision's ctx was cancelled", pid)
+	}
+
+	log, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatalf("reading provision log: %v", err)
+	}
+	if !strings.Contains(string(log), "CANCELLED") {
+		t.Errorf("provision log does not mention cancellation:\n%s", log)
+	}
+	if strings.Contains(string(log), "\ndone") {
+		t.Errorf("provision log reports success for a cancelled run:\n%s", log)
 	}
 }

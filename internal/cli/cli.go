@@ -1060,9 +1060,13 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "provisioning %s...\n", a.VM)
 	}
 
+	// No cancellation source reaches here yet: runProvision has no signal
+	// handling of its own, so this is a call site noted for the caller to
+	// decide whether Ctrl-C should cancel an in-flight provision, not a
+	// design decision made here.
 	logPath := filepath.Join(v.Dir, "last-provision.log")
 	done := make(chan error, 1)
-	go func() { done <- sshx.Provision(v) }()
+	go func() { done <- sshx.Provision(context.Background(), v) }()
 
 	if perr := streamFile(logPath, stdout, done); perr != nil {
 		fmt.Fprintln(stderr, "stoat: provision:", perr)

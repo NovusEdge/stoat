@@ -61,19 +61,17 @@ type ApplyOpts struct {
 // read that same file, so nothing here invents a second progress path.
 //
 // ctx: Apply is the second operation in this package (after Exec) with a
-// real reason for one — a desktop recipe can take minutes. But sshx.Provision
-// itself takes no context (it shells out with exec.Command, not
-// exec.CommandContext), and it lives outside the two files this change may
-// touch. So ctx here is honoured on a best-effort basis: checked before the
-// run starts, and raced against completion once it does, so a caller whose
-// ctx is cancelled gets CONTROL back promptly. What it does NOT do is kill
-// the underlying ssh process — unlike Exec, which runs its own
-// exec.CommandContext and can. That in-flight ssh keeps running against the
-// guest until it finishes or the guest goes away, orphaned from the caller
-// that gave up on it. Fixing that for real means threading a context into
-// sshx.Provision down to its exec.Command call, which is a real, separate
-// change outside this brief's two files — reported, not silently patched
-// around here.
+// real reason for one — a desktop recipe can take minutes. sshx.Provision now
+// takes ctx itself and runs each recipe under exec.CommandContext, so
+// cancelling ctx here kills the in-flight ssh process (SIGTERM, then a grace
+// period — see sshx.recipeShutdownGrace) rather than merely stopping this
+// call from waiting on it. Provision also checks ctx.Err() between recipes,
+// so a cancellation landing in the gap between two doesn't start one more
+// ssh process only to kill it immediately. Apply passes ctx straight through
+// rather than adding a second layer of cancellation on top: an earlier
+// version raced its own goroutine against ctx.Done() because Provision could
+// not be cancelled at all, which is no longer true and would now just be a
+// redundant, less complete copy of what Provision itself does.
 func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	v, err := load(name)
 	if err != nil {
@@ -107,10 +105,6 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 		return nil
 	}
 
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
 	// run is v with Recipes narrowed to targets. config.VM is a plain value
 	// struct (see internal/config/config.go) — no mutex, no owned resource —
 	// so copying it and pointing sshx.Provision at the copy is exactly as
@@ -122,14 +116,7 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	run := *v
 	run.Recipes = targets
 
-	done := make(chan error, 1)
-	go func() { done <- sshx.Provision(&run) }()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
+	return sshx.Provision(ctx, &run)
 }
 
 // Recipe is one recipe file resolved for a specific (OS, backend) pair, with

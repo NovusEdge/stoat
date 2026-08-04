@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 
@@ -89,19 +90,39 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 	}
 }
 
-// A valid Only subset must pass validation and reach the actual run — proven
-// here without a real sshd by handing Apply an ALREADY-CANCELLED context:
-// sshx.Provision would otherwise block for up to sshx.WaitTimeout (90s)
-// dialling a port nothing is listening on, which is not a cost a unit test
-// should pay. Apply checks ctx before starting the run, so a pre-cancelled
-// ctx surfaces immediately as ctx.Err() — but only AFTER Only has been
-// validated against v.Recipes, so getting context.Canceled back here is
-// proof the subset was accepted, not a false pass from an earlier refusal.
+// A valid Only subset must pass validation and reach the actual run —
+// proven without a real sshd or the full sshx.WaitTimeout (90s): a bare TCP
+// listener that answers with the "SSH-" banner satisfies sshx.Wait's
+// reachability check (bannerReady) almost instantly, getting Provision past
+// "waiting for ssh" and into its per-recipe ctx.Err() check, where an
+// ALREADY-CANCELLED ctx returns context.Canceled immediately. That proves
+// two things at once: Only accepted "a.alpine.sh" (no ErrRecipeNotApplicable
+// — a rejection would have returned before ctx was ever consulted), and the
+// call reached sshx.Provision's own ctx-aware cancellation, not a second,
+// separate one.
 func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 	dir := root(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Write([]byte("SSH-2.0-fake\r\n"))
+			c.Close()
+		}
+	}()
+	port := ln.Addr().(*net.TCPAddr).Port
+
 	v := &config.VM{
 		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
-		RAM: 512, CPUs: 1, SSHPort: 2200,
+		RAM: 512, CPUs: 1, SSHPort: port,
 		Recipes: []string{"a.alpine.sh", "b.alpine.sh"},
 	}
 	if err := v.Save(); err != nil {
@@ -113,9 +134,9 @@ func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := Apply(ctx, "work", ApplyOpts{Only: []string{"a.alpine.sh"}})
+	err = Apply(ctx, "work", ApplyOpts{Only: []string{"a.alpine.sh"}})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled (proves Only validated and the run was reached)", err)
+		t.Fatalf("err = %v, want context.Canceled (proves Only validated and the run reached sshx.Provision)", err)
 	}
 }
 
