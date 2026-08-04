@@ -47,7 +47,7 @@ const BannerArt = `███████╗████████╗ ███
 // of them.
 //
 // It exists because bubbles v2's textinput.New() hardcodes DefaultDarkStyles(),
-// which paints unfocused text ANSI colour 7 — on a light terminal that is grey
+// which paints unfocused text ANSI colour 7: on a light terminal that is grey
 // on white. v1's TextStyle was a zero Style, so the value simply inherited the
 // terminal's own foreground, which is right on any background and is what the
 // rest of stoat relies on (this package names six colours and none of them is a

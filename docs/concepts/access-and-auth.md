@@ -2,7 +2,7 @@
 
 Every VM stoat manages is reached over SSH, forwarded to a loopback port on
 the host. There is no console-based login flow for day-to-day use, no
-password, and no separate stoat-level credential system — it's all built on
+password, and no separate stoat-level credential system. It's all built on
 one SSH keypair stoat generates for itself.
 
 ## The client keypair
@@ -20,28 +20,28 @@ stoat can reach it without a password.
 
 How the key gets installed depends on the image type:
 
-**Live Alpine VMs** (`internal/apkovl/apkovl.go`) — stoat builds an Alpine
+**Live Alpine VMs** (`internal/apkovl/apkovl.go`): stoat builds an Alpine
 `apkovl` overlay tarball that the initramfs unpacks at boot. It writes
 `root/.ssh/authorized_keys` containing stoat's client public key, and enables
 `sshd` as a default-runlevel service. Root's SSH access is what's configured;
 there is no other user on these VMs.
 
-**Cloud images** (`internal/cloudinit/cloudinit.go`) — a NoCloud cloud-init
+**Cloud images** (`internal/cloudinit/cloudinit.go`): a NoCloud cloud-init
 seed ISO is built with a fixed `#cloud-config` `users:` block that creates a
 `stoat` user (with passwordless sudo) and lists stoat's client public key
 under that user's `ssh_authorized_keys`. The seed also sets `ssh_pwauth:
 false`, so cloud-init never enables password authentication in the first
 place.
 
-Either way, the same single client keypair is the credential — stoat doesn't
-mint a per-VM key.
+Either way, the same single client keypair is the credential, and stoat
+doesn't mint a per-VM key.
 
 ## The guest host key (live VMs only)
 
 Live Alpine VMs are rebuilt fresh on every boot, which would normally mean a
 new SSH host key each time and a host-key warning on every connection.
-`internal/keys/keys.go` avoids that by generating one more keypair — the
-"guest host key" — once, and `apkovl.Build` bakes it into the overlay as
+`internal/keys/keys.go` avoids that by generating one more keypair, the
+"guest host key", once, and `apkovl.Build` bakes it into the overlay as
 `etc/ssh/ssh_host_ed25519_key(.pub)` on every build. The host key is stable
 across boots even though the VM itself is not persistent.
 
@@ -62,7 +62,7 @@ per image when a VM is created from the catalog:
 | `ubuntu-24.04`, `debian-13`, `fedora-cloud`, `arch-cloud` | `cloudinit` | `stoat` |
 
 The `stoat` user is used for the cloud images specifically because that's the
-user stoat's own cloud-init seed creates and keys — not each distro's usual
+user stoat's own cloud-init seed creates and keys, not each distro's usual
 default user (e.g. `ubuntu` on Ubuntu's image).
 
 `internal/sshx/sshx.go` builds the actual SSH invocation (`Args`), used for
@@ -76,18 +76,18 @@ ssh -p <SSHPort> \
   <SSHUser or root>@127.0.0.1
 ```
 
-The connection always targets `127.0.0.1` on the VM's forwarded `SSHPort` —
+The connection always targets `127.0.0.1` on the VM's forwarded `SSHPort`.
 QEMU forwards the guest's port 22 to that loopback port on the host, so
 there's never a routable address involved.
 
 The interactive path, used when you press `s` in the TUI (`internal/tui/ssh.go`),
-builds a very similar argument list — same host-key options, same
-`-i id_stoat`, same `root@127.0.0.1` target for live VMs — but deliberately
+builds a very similar argument list: same host-key options, same
+`-i id_stoat`, same `root@127.0.0.1` target for live VMs, but deliberately
 **omits `BatchMode=yes`**. `Args` (used for unattended provisioning) needs SSH
 to fail immediately rather than block waiting for input that will never come.
 The interactive path hands the terminal to a real, attended `ssh` process, so
-if key auth doesn't work — for instance, a disk-mode VM that was installed
-manually and never had the key provisioned — SSH is free to fall back to
+if key auth doesn't work, for instance a disk-mode VM that was installed
+manually and never had the key provisioned, SSH is free to fall back to
 prompting for a password at the terminal, the same as running `ssh` by hand.
 
 ## Why host key checking is off
@@ -97,7 +97,7 @@ This is deliberate, not a shortcut: live Alpine VMs are rebuilt by stoat
 constantly, and even with the stable guest host key described above, disk and
 cloud VMs generate their own host keys independently. Strict checking would
 mean a stale or mismatched `known_hosts` entry breaking a connection to a VM
-stoat just built — the kind of false alarm host-key checking exists to avoid,
+stoat just built, the kind of false alarm host-key checking exists to avoid,
 not the kind it's meant to catch.
 
 ## Passwords: console only, never over SSH
@@ -111,7 +111,7 @@ behave differently:
 
 | VM type | Console login |
 |---|---|
-| Alpine **live** | `root`, nothing to type — the account has no password |
+| Alpine **live** | `root`, nothing to type: the account has no password |
 | Alpine **disk** | whatever you set when you ran the guest's own installer |
 | **Cloud** image | the `stoat` user, with the console password stoat set |
 
@@ -123,7 +123,7 @@ stoat set a console password, that combination produced a login prompt in the
 QEMU window with no valid answer at all: `root` locked by the image, `stoat`
 with no password, and password auth refused over SSH.
 
-New cloud VMs are created with a console password — the fixed, documented
+New cloud VMs are created with a console password: the fixed, documented
 value `stoat` by default, or a generated 32-character hex string if you pick
 **random** on the `console` row of the new-VM form. Either way it appears on
 the detail screen:
@@ -154,9 +154,9 @@ cloud-init reads it once at first boot. An existing VM therefore keeps
 whatever it was created with. The detail screen says so plainly:
 
 ```
-  console   no password set — console login is not possible
+  console   no password set: console login is not possible
 ```
 
 To fix one, either recreate it, or set `console_password` in its `vm.toml`
 (`E` on the detail screen) and delete its `disk.qcow2` so the overlay and
-seed are rebuilt on the next start — which discards everything in that VM.
+seed are rebuilt on the next start, which discards everything in that VM.

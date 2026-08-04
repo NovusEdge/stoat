@@ -1,4 +1,4 @@
-# Core API — Operation Surface
+# Core API: Operation Surface
 
 **Status:** proposal for review. Branch `core-api`. Written 2026-08-02.
 
@@ -6,7 +6,7 @@
 
 **Consumers:** the TUI, the CLI, and an MCP server. Every operation must be callable with no interactive input and must return structured data, because two of those three cannot answer a prompt or read a rendered string.
 
-**Design rule used throughout:** an operation earns its place if a caller would otherwise have to reimplement it by combining others *and could get it wrong*. `Restart` is just `Stop`+`Start` and does not earn a slot. `Clone` looks like `Create`+copy but is not — getting it right means qcow2 backing files, a fresh SSH port, a new host key and a new cloud-init instance ID.
+**Design rule used throughout:** an operation earns its place if a caller would otherwise have to reimplement it by combining others *and could get it wrong*. `Restart` is just `Stop`+`Start` and does not earn a slot. `Clone` looks like `Create`+copy but is not: getting it right means qcow2 backing files, a fresh SSH port, a new host key and a new cloud-init instance ID.
 
 ---
 
@@ -57,7 +57,7 @@ type Progress struct {
 }
 ```
 
-`Stages` being declared up front is what makes a progress bar honest. When it is empty the caller must render elapsed time and a spinner, never a percentage — the existing rule in `provstep.go` generalised.
+`Stages` being declared up front is what makes a progress bar honest. When it is empty the caller must render elapsed time and a spinner, never a percentage: the existing rule in `provstep.go` generalised.
 
 ---
 
@@ -66,7 +66,7 @@ type Progress struct {
 | Operation | Signature | Notes |
 |---|---|---|
 | **Create** | `Create(ctx, Spec) (VM, error)` | Declarative, one call. Allocates port, writes `vm.toml`, creates disk. Does **not** start unless `Spec.Start`. |
-| **List** | `List(ctx) ([]VM, error)` | Includes broken VMs as `StateBroken` rather than omitting them — today they are a separate concept the caller must know about. |
+| **List** | `List(ctx) ([]VM, error)` | Includes broken VMs as `StateBroken` rather than omitting them; today they are a separate concept the caller must know about. |
 | **Get** | `Get(ctx, name) (VM, error)` | Full record including live state and progress. |
 | **Update** | `Update(ctx, name, Patch) (VM, error)` | Only fields safe to change; see §2.1. |
 | **Destroy** | `Destroy(ctx, name, DestroyOpts) error` | Stops first if running. `KeepDisk` for the "unregister but keep data" case. |
@@ -95,7 +95,7 @@ Changing some fields on an existing VM is meaningless or destructive, and the cu
 
 - **Safe, applies at next start:** RAM, CPUs, Share, SSH port.
 - **Safe, applies immediately:** recipe list (it only affects the next apply).
-- **Constrained:** disk size may only grow, and only in absolute terms — `qemu-img resize` reads a leading `+` as *grow by*, which is how an 8G disk silently became 16G (fixed on the create path; the same rule applies here).
+- **Constrained:** disk size may only grow, and only in absolute terms: `qemu-img resize` reads a leading `+` as *grow by*, which is how an 8G disk silently became 16G (fixed on the create path; the same rule applies here).
 - **Not changeable:** name (that is `Clone`+`Destroy`), OS, backend, mode after first boot.
 
 `Update` returns `ErrImmutableField` naming the field rather than silently ignoring it.
@@ -110,7 +110,7 @@ Changing some fields on an existing VM is meaningless or destructive, and the cu
 | **Stop** | `Stop(ctx, name, StopOpts) error` | Graceful via monitor `system_powerdown`, `Force` for immediate kill, `Timeout` before escalating. |
 | **Wait** | `Wait(ctx, name, Until) error` | Block until `Reachable` / `Applied` / `Stopped`. Cancellable. |
 
-No `Restart` — `Stop` then `Start`, and a caller cannot get that wrong.
+No `Restart`: `Stop` then `Start`, and a caller cannot get that wrong.
 
 `Wait` is separate from `StartOpts.Wait` because a caller that started a VM earlier (or found one already starting) still needs to block on it. An agent polling `Get` in a loop is the failure mode this prevents.
 
@@ -121,7 +121,7 @@ No `Restart` — `Stop` then `Start`, and a caller cannot get that wrong.
 | Operation | Signature | Notes |
 |---|---|---|
 | **Apply** | `Apply(ctx, name, ApplyOpts) error` | Runs the VM's recipes. `Only []string` to run a subset. Streams progress into `VM.Progress`. |
-| **Recipes** | `Recipes(ctx, RecipeFilter) ([]Recipe, error)` | What applies to a given OS/backend, **with its declared metadata** — name, description, stages, requirements. |
+| **Recipes** | `Recipes(ctx, RecipeFilter) ([]Recipe, error)` | What applies to a given OS/backend, **with its declared metadata**: name, description, stages, requirements. |
 | **CheckRecipes** | `CheckRecipes(ctx, os, backend, names) ([]RecipeIssue, error)` | Validates applicability *before* creating. Returns why each is unusable rather than a bare bool. |
 
 `CheckRecipes` is what makes the enforcement decision usable by an agent: it can ask "will these work on Alpine?" and get `xfce: requires systemd, alpine uses openrc` instead of building a broken VM and reading a black screen.
@@ -137,7 +137,7 @@ No `Restart` — `Stop` then `Start`, and a caller cannot get that wrong.
 | **CopyTo / CopyFrom** | `CopyTo(ctx, name, local, remote) error` | Files in and out without making the user set up a share. |
 | **Logs** | `Logs(ctx, name, Which) (io.ReadCloser, error)` | `Console` or `Apply`. Streaming, so a TUI can tail. |
 
-`Exec` does not gate at this layer (§8, decision 1) — it is a library call, and the TUI and CLI already let a user run anything. Enforcement lives in the MCP server, which is the boundary an agent crosses.
+`Exec` does not gate at this layer (§8, decision 1): it is a library call, and the TUI and CLI already let a user run anything. Enforcement lives in the MCP server, which is the boundary an agent crosses.
 
 ---
 
@@ -147,8 +147,8 @@ Applying recipes currently *asks* "run recipes? y/N", for a stated and good reas
 
 The API keeps the principle and moves the decision to the caller:
 
-- `Spec.Apply` — intent stated at create time.
-- `Apply(...)` — an explicit call.
+- `Spec.Apply`: intent stated at create time.
+- `Apply(...)`: an explicit call.
 - Never implicit. `Start` alone never applies recipes.
 
 The TUI keeps its prompt and passes the answer. The MCP server requires the agent to have asked for it. Neither can apply recipes by accident.
@@ -165,9 +165,9 @@ These are the "quick VM-based testing" features that make stoat pleasant rather 
 | **Snapshot** | `Snapshot(ctx, name, label) error` | `qemu-img snapshot -c` on a stopped VM; QMP `savevm` for live. "Set it up, snapshot, break it, restore" is the core testing loop, and it is the single feature that makes stoat *better* than re-creating a VM rather than merely faster. |
 | **Restore** | `Restore(ctx, name, label) error` | Reset to a known state without a rebuild. For an agent, this is how you get a clean environment per task without paying a full create. |
 | **Snapshots** | `Snapshots(ctx, name) ([]Snapshot, error)` | List with labels, sizes, timestamps. |
-| **Forward** | `Forward(ctx, name, []PortForward) error` | Today only :22 is forwarded. Testing a web service in a VM means reaching :8080 — currently impossible without hand-editing QEMU args. Applies at next start. |
+| **Forward** | `Forward(ctx, name, []PortForward) error` | Today only :22 is forwarded. Testing a web service in a VM means reaching :8080, currently impossible without hand-editing QEMU args. Applies at next start. |
 | **Images** | `Images(ctx) ([]Image, error)` | Catalog plus local, with download state and size. |
-| **DownloadImage** | `DownloadImage(ctx, id, progress chan<- Progress) error` | Cancellable — today `esc` leaves the goroutine running, a known open item. |
+| **DownloadImage** | `DownloadImage(ctx, id, progress chan<- Progress) error` | Cancellable: today `esc` leaves the goroutine running, a known open item. |
 | **Doctor** | `Doctor(ctx) ([]Check, error)` | Structured dependency/environment checks, not printed text. |
 | **Prune** | `Prune(ctx, PruneOpts) ([]string, error)` | Remove broken VMs and orphaned images. |
 
@@ -184,24 +184,24 @@ All of these are wanted. Ordered by effort, so the cheap wins land early and the
 | 5 | `Forward` | low | A `[]PortForward` on the VM, rendered into the existing `hostfwd` argument. Config field plus arg construction. |
 | 6 | `Exec` | medium | ssh exec with structured `{stdout, stderr, exit}`. Mechanically simple; the *safety* design is the work (§8.1). |
 | 7 | `CopyTo` / `CopyFrom` | medium | scp against the same connection settings. Care needed around paths and the guest user. |
-| 8 | `Prune` | medium | Needs a confident definition of "orphaned" for images and broken VMs — deleting the wrong thing is unrecoverable. |
+| 8 | `Prune` | medium | Needs a confident definition of "orphaned" for images and broken VMs: deleting the wrong thing is unrecoverable. |
 | 9 | `Clone` | high | Not a copy: backing-file overlay, fresh SSH port, new host key, new MAC, **new cloud-init instance ID** or first boot is skipped. Every one of those is a silent failure if missed. |
 | 10 | `Snapshot` / `Restore` / `Snapshots` | high | Two mechanisms (§8.2), and it forces the monitor→QMP migration. Highest value of the lot, and worth doing properly rather than early. |
 
 **Deliberately not included:**
 
-- `Restart` — trivially `Stop`+`Start`.
-- `Rename` — `Clone`+`Destroy`, and an in-place rename would have to rewrite paths, the cloud-init instance ID and the host key anyway.
-- Template/golden-image export — `Clone` plus `Snapshot` covers the need; revisit if it doesn't.
-- Live migration, resource hot-plug, nested virtualisation — not what stoat is for.
+- `Restart`: trivially `Stop`+`Start`.
+- `Rename`: `Clone`+`Destroy`, and an in-place rename would have to rewrite paths, the cloud-init instance ID and the host key anyway.
+- Template/golden-image export: `Clone` plus `Snapshot` covers the need; revisit if it doesn't.
+- Live migration, resource hot-plug, nested virtualisation: not what stoat is for.
 
 ---
 
-## 8. Decisions — settled 2026-08-02
+## 8. Decisions, settled 2026-08-02
 
-**1. `Exec` safety — allow freely at the API layer; enforce at the MCP layer.** `core.Exec` does not gate: it is a library call, and the TUI and CLI already let a user run anything. The MCP server is where enforcement lives, because that is the boundary an agent crosses. Design pending research into what MCP actually guarantees versus what clients choose to honour (§8.1). Intent: deterministic blocking of host-reaching and destructive operations, plus human approval for the rest, rather than trusting an agent to behave.
+**1. `Exec` safety: allow freely at the API layer; enforce at the MCP layer.** `core.Exec` does not gate: it is a library call, and the TUI and CLI already let a user run anything. The MCP server is where enforcement lives, because that is the boundary an agent crosses. Design pending research into what MCP actually guarantees versus what clients choose to honour (§8.1). Intent: deterministic blocking of host-reaching and destructive operations, plus human approval for the rest, rather than trusting an agent to behave.
 
-**2. Snapshot mechanism — both, chosen by VM state.** Stopped → `qemu-img snapshot -c/-a` (simple, no running process needed). Running → QMP `savevm`/`loadvm` (captures RAM, no stop required). One API, two implementations, picked by state. Note this makes QMP a hard requirement: stoat currently speaks the *human* monitor protocol, and `sendkey.go:11-13` already flags the eventual switch to QMP as "one edit" — this is what forces it.
+**2. Snapshot mechanism: both, chosen by VM state.** Stopped → `qemu-img snapshot -c/-a` (simple, no running process needed). Running → QMP `savevm`/`loadvm` (captures RAM, no stop required). One API, two implementations, picked by state. Note this makes QMP a hard requirement: stoat currently speaks the *human* monitor protocol, and `sendkey.go:11-13` already flags the eventual switch to QMP as "one edit", this is what forces it.
 
 **3. `Create` requires the image, with an auto mode.** Default `Spec.AutoDownload = true` for convenience; when false, a missing image returns `ErrImageNotDownloaded` and the caller fetches it explicitly with progress. Explicit is what an agent wants; auto is what a human wants; the flag defaults to the human.
 
@@ -211,10 +211,10 @@ All of these are wanted. Ordered by effort, so the cheap wins land early and the
 
 | Class | Stopped | Running |
 |---|---|---|
-| **Cosmetic** — recipe list, share path | allowed | allowed (affects next apply/boot) |
-| **Boot-time** — RAM, CPUs, SSH port, port forwards | allowed | allowed, takes effect at next start, and the API says so |
-| **Destructive** — disk grow | allowed | **refused** while running |
-| **Immutable** — name, OS, backend, mode after first boot | refused | refused |
+| **Cosmetic**: recipe list, share path | allowed | allowed (affects next apply/boot) |
+| **Boot-time**: RAM, CPUs, SSH port, port forwards | allowed | allowed, takes effect at next start, and the API says so |
+| **Destructive**: disk grow | allowed | **refused** while running |
+| **Immutable**: name, OS, backend, mode after first boot | refused | refused |
 
 `Update` returns `ErrRequiresStopped` (naming the field) rather than silently deferring a change the caller believes took effect. The distinction that matters: "applied later" and "refused" must never look the same to a caller.
 
@@ -257,20 +257,20 @@ But the spec **is** normative in the other direction: *"Servers **MUST**: valida
 
 So: a guarantee stoat wants must be enforced by stoat. Client-side approval is welcome and should be supported well, but it is never the boundary.
 
-### 10.2 The 9p share — read-only host, writable sandbox
+### 10.2 The 9p share: read-only host, writable sandbox
 
 Today there is one export: the user's chosen directory, read-write, `security_model=none`, `mount_tag=host` (`args.go:75`, fstab written by `apkovl.go:134`). An agent with `Exec` on such a VM has a direct host write path.
 
-Proposed model — two exports:
+Proposed model, two exports:
 
 | Tag | Host path | Access | Security model |
 |---|---|---|---|
 | `host` | the user's chosen directory | **`readonly=on`** | `mapped-xattr` |
 | `work` | `~/.stoat/shared/<vm>/` | read-write | `mapped-xattr` |
 
-**Why `readonly=on` works:** it is enforced by QEMU on the host side — *"Enables exporting 9p share as a readonly mount for guests. By default read-write access is given."* The guest cannot remount it writable; the export itself refuses writes.
+**Why `readonly=on` works:** it is enforced by QEMU on the host side, *"Enables exporting 9p share as a readonly mount for guests. By default read-write access is given."* The guest cannot remount it writable; the export itself refuses writes.
 
-**Why path-traversal cannot be blocked in stoat, and what replaces it:** stoat never sees 9p operations — QEMU serves them directly. A guest can create a symlink inside the share pointing anywhere, and under `security_model=none` that is a *real symlink on the host*, so any host-side path check stoat could write is defeated before it runs.
+**Why path-traversal cannot be blocked in stoat, and what replaces it:** stoat never sees 9p operations, QEMU serves them directly. A guest can create a symlink inside the share pointing anywhere, and under `security_model=none` that is a *real symlink on the host*, so any host-side path check stoat could write is defeated before it runs.
 
 The mechanism that does work is `security_model=mapped-xattr`, which stores *"uid, gid, mode bits and link target as file attributes"*. A guest-created symlink stops being a host symlink, so it cannot be followed out of the export. This is the actual traversal defence; it is QEMU's, not ours.
 
@@ -282,39 +282,39 @@ The mechanism that does work is `security_model=mapped-xattr`, which stores *"ui
 
 ### 10.3 MCP tool taxonomy
 
-Three classes, annotated honestly and — crucially — enforced independently of whether the client honours the annotation.
+Three classes, annotated honestly and, crucially, enforced independently of whether the client honours the annotation.
 
 | Class | Tools | Annotations | Server-side rule |
 |---|---|---|---|
 | **Read-only** | `list_vms`, `vm_status`, `list_images`, `list_recipes`, `check_recipes`, `logs`, `doctor` | `readOnlyHint: true`, `destructiveHint: false` | Always allowed. Cannot mutate by construction. |
-| **Mutating** | `create`, `start`, `stop`, `apply_recipes`, `update`, `clone`, `snapshot`, `restore`, `forward` | `readOnlyHint: false`, `destructiveHint: false` (additive) | Allowed. Bounded — they can only affect stoat-managed VMs. |
+| **Mutating** | `create`, `start`, `stop`, `apply_recipes`, `update`, `clone`, `snapshot`, `restore`, `forward` | `readOnlyHint: false`, `destructiveHint: false` (additive) | Allowed. Bounded: they can only affect stoat-managed VMs. |
 | **Destructive** | `destroy`, `prune` | `destructiveHint: true` | Allowed but irreversible; the natural candidate for elicitation when the client supports it. |
 | **Execution** | `exec`, `copy_to` | `destructiveHint: true`, `openWorldHint: true` | Runs arbitrary code in a guest. See below. |
 
 **What the server blocks deterministically**, regardless of client behaviour:
 
-1. **No host paths as arguments.** `exec` runs *in a guest*; it never accepts a host path. `copy_to`/`copy_from` accept host paths only under `~/.stoat/shared/<vm>/`, resolved and checked after `filepath.EvalSymlinks`, rejecting anything outside — this check is possible here precisely because stoat performs the copy itself, unlike 9p.
+1. **No host paths as arguments.** `exec` runs *in a guest*; it never accepts a host path. `copy_to`/`copy_from` accept host paths only under `~/.stoat/shared/<vm>/`, resolved and checked after `filepath.EvalSymlinks`, rejecting anything outside; this check is possible here precisely because stoat performs the copy itself, unlike 9p.
 2. **VM name must resolve to a stoat-managed VM.** No arbitrary target.
 3. **Rate limiting**, which the spec makes a server `MUST`.
 4. **`additionalProperties: false`** on every tool schema, so unexpected parameters are rejected rather than ignored (OWASP MCP guidance).
-5. **Tool descriptions carry no hidden instructions** and are the full text a user would see — the defence against description-poisoning being invisible in a client's abbreviated UI.
+5. **Tool descriptions carry no hidden instructions** and are the full text a user would see: the defence against description-poisoning being invisible in a client's abbreviated UI.
 
-**Optional, opt-in:** `Spec.AllowExec` recorded per VM, so `exec` can be refused on VMs never created for it. Default: allowed, since the VM is the containment boundary and refusing by default makes stoat useless to an agent. The share model in §10.2 is what makes that default defensible — an agent's `Exec` has no host write path unless one was explicitly granted.
+**Optional, opt-in:** `Spec.AllowExec` recorded per VM, so `exec` can be refused on VMs never created for it. Default: allowed, since the VM is the containment boundary and refusing by default makes stoat useless to an agent. The share model in §10.2 is what makes that default defensible: an agent's `Exec` has no host write path unless one was explicitly granted.
 
-### 10.4 Threat model — what this does and does not defend
+### 10.4 Threat model: what this does and does not defend
 
 **Defends against:**
 
-- An agent (or an injected instruction reaching one) writing host files through a guest — the read-only share plus `mapped-xattr` removes the path.
-- Symlink escape from the share — `mapped-xattr`.
-- A client that never prompts, or runs in a bypass mode — server-side rules do not depend on prompting.
-- Unexpected tool parameters — strict schemas.
+- An agent (or an injected instruction reaching one) writing host files through a guest: the read-only share plus `mapped-xattr` removes the path.
+- Symlink escape from the share: `mapped-xattr`.
+- A client that never prompts, or runs in a bypass mode: server-side rules do not depend on prompting.
+- Unexpected tool parameters: strict schemas.
 
 **Does not defend against, and must not be claimed to:**
 
 - **A malicious guest escaping QEMU.** That is QEMU's boundary, not stoat's. If it falls, everything above is irrelevant.
 - **An agent destroying VM state it was legitimately given access to.** `destroy` on the wrong VM is a correctly-executed instruction; snapshots are the mitigation, not permissions.
-- **Prompt injection in general.** The documented "lethal trifecta" — a tool that acts, untrusted input, and an exfiltration channel — is live here: an agent that runs a command in a guest, reads its output, and acts on it can be steered by that output. Narrowing the share limits the *blast radius*; it does not stop the agent being fooled.
+- **Prompt injection in general.** The documented "lethal trifecta" (a tool that acts, untrusted input, and an exfiltration channel) is live here: an agent that runs a command in a guest, reads its output, and acts on it can be steered by that output. Narrowing the share limits the *blast radius*; it does not stop the agent being fooled.
 - **A poisoned or rug-pulled tool definition** from *another* MCP server in the same session influencing how stoat's tools get called. Cross-server interference is the host's problem.
 
 ---

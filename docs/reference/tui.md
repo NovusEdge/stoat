@@ -1,11 +1,11 @@
 # TUI Reference
 
-`stoat` with no subcommand launches the interactive terminal UI (`internal/tui`). It needs a terminal at least **60 columns by 20 rows**; anything smaller shows `terminal too small — resize to at least 60x20` instead of a corrupted layout.
+`stoat` with no subcommand launches the interactive terminal UI (`internal/tui`). It needs a terminal at least **60 columns by 20 rows**; anything smaller shows `terminal too small: resize to at least 60x20` instead of a corrupted layout.
 
 Global rules that hold on every screen:
 
 - **ctrl+c** quits immediately, from any screen and from inside any y/N prompt.
-- **?** toggles the footer between its short form (one line) and full form (a bordered help panel) — except while a text field has focus, where `?` is just a character being typed.
+- **?** toggles the footer between its short form (one line) and full form (a bordered help panel), except while a text field has focus, where `?` is just a character being typed.
 - The list screen's row/pane widths are fixed; they don't resize as VMs, names, or filters change.
 
 ## Screens
@@ -25,11 +25,11 @@ The list shows every VM directory under the data root as one sequence: valid VMs
 
 ### Row format
 
-A good VM's row is `name  mode  RAMMc  cpus` followed by either a dim `—` (stopped) or `up <uptime>  :<sshport>` (running):
+A good VM's row is `name  mode  RAMMc  cpus` followed by either a dim `-` (stopped) or `up <uptime>  :<sshport>` (running):
 
 ```
 ❯ ● work           live   4096M  4c   up 2h15m  :2222
-  ○ scratch        disk   2048M  2c   —
+  ○ scratch        disk   2048M  2c   -
 ```
 
 `●`/`○` mark running/stopped. A broken entry instead shows the parse error:
@@ -45,22 +45,22 @@ A good VM's row is `name  mode  RAMMc  cpus` followed by either a dim `—` (sto
 | `enter` | Start / stop the selected VM | Running → stops; stopped → starts. On a broken entry: "cannot start (d to delete)". |
 | `→` / `l` | Open detail screen | Only for a valid VM; on a broken entry shows the same "cannot start" message. |
 | `s` | ssh into the VM | Only when running, else status becomes "not running". Dimmed in the footer whenever the selected VM isn't ssh-able. |
-| `p` | Provision | Runs the same guard chain as the detail screen's `p` — see [Provisioning](#provisioning-progress). |
+| `p` | Provision | Runs the same guard chain as the detail screen's `p`, see [Provisioning](#provisioning-progress). |
 | `/` | Search | Opens the filter input; typing filters the list by VM name. |
 | `n` | New VM | Opens the new-VM form. If a download is still in flight from a previous visit to the form, that same form (and its download) is reused instead of being reset. |
-| `d` | Delete | On a stopped VM or a broken entry, arms a `delete <name>? y/N` prompt. On a running VM: "stop `<name>` first" — refuses. |
+| `d` | Delete | On a stopped VM or a broken entry, arms a `delete <name>? y/N` prompt. On a running VM, refuses with "stop `<name>` first". |
 | `j`/`↓`, `k`/`↑`, `pgup`, `pgdown`, `home`, `end`, `g`, `G` | Move / page | Forwarded to the underlying list component. |
 | `esc` | Clear search, or cancel a pending prompt | See ordering note below. |
 | `q` | Quit | |
 | `ctrl+c` | Quit | |
 | `?` | Toggle help | |
 
-**Prompt handling.** While the delete confirmation (`delete <name>? y/N`) or the auto-provision offer (see below) is showing, *every* key is consumed by that prompt: `y` confirms, anything else cancels it. This is why `n` doesn't fall through to "new VM" while a prompt with an "N" option is up. If a search filter is applied *and* a delete prompt is pending, pressing `esc` cancels the delete but leaves the filter in place — the delete-prompt check runs before the filter-clearing check, which is the safer of the two orderings.
+**Prompt handling.** While the delete confirmation (`delete <name>? y/N`) or the auto-provision offer (see below) is showing, *every* key is consumed by that prompt: `y` confirms, anything else cancels it. This is why `n` doesn't fall through to "new VM" while a prompt with an "N" option is up. If a search filter is applied *and* a delete prompt is pending, pressing `esc` cancels the delete but leaves the filter in place: the delete-prompt check runs before the filter-clearing check, which is the safer of the two orderings.
 
 **Search.** `/` opens a filter input that owns the keyboard (so `n`/`d`/`p`/`s`/`q` type into it rather than triggering their bindings). Once a filter is applied, the line under the list reads:
 
 ```
-search "wor" — 1 of 3 · esc clears
+search "wor": 1 of 3 · esc clears
 ```
 
 `esc` at that point clears the filter and restores the full list.
@@ -75,7 +75,7 @@ Shows one VM's facts in a titled pane: mode + running/stopped state, a one-line 
 |---|---|---|
 | `e` | Open the edit form | |
 | `E` | Open raw `vm.toml` in `$EDITOR` | Falls back to `vi` if `$EDITOR` is unset. On return, the VM is reloaded from disk; a reload failure is shown as a status message. |
-| `i` | Toggle "installed" | Disk-mode VMs only — "installed only applies to disk vms" otherwise. Marks a disk VM as having had its OS installed at the console, which is a prerequisite for provisioning it. |
+| `i` | Toggle "installed" | Disk-mode VMs only, "installed only applies to disk vms" otherwise. Marks a disk VM as having had its OS installed at the console, which is a prerequisite for provisioning it. |
 | `s` | ssh into the VM | Running only, else "not running". |
 | `p` | Provision | Same guard chain as the list screen. |
 | `esc` / `←` / `h` / `q` | Back to list | |
@@ -86,7 +86,7 @@ If no VM is selected (e.g. the list was empty), the screen just shows "no vm sel
 
 ## New VM form
 
-Nine possible fields, only some of which are shown (and reachable by tab) at any moment — conditional fields are omitted from the tab order entirely rather than shown-but-disabled, so focus can never land on something invisible.
+Nine possible fields, only some of which are shown (and reachable by tab) at any moment: conditional fields are omitted from the tab order entirely rather than shown-but-disabled, so focus can never land on something invisible.
 
 **Tab order:** name → image → *(backend override, BYO images only)* → *(mode, only when the resolved backend is `apkovl`)* → ram → cpus → *(disk size, only in disk mode)* → share → recipes.
 
@@ -94,8 +94,8 @@ The image picker offers every catalog entry (Alpine, etc.) plus any file already
 
 ### The two keys people get backwards
 
-- **`space`, not `enter`, downloads an image.** With focus on the image row, `space` fetches the selected catalog image (or re-verifies/repairs it if already local — a mismatched checksum triggers a full refetch). `enter` never downloads; it tries to build the VM, and fails with "press space to download `<os>` first" if the image isn't local yet.
-- **`E` on the detail screen opens the raw `vm.toml`; `e` opens the edit form.** (This applies to the detail screen, not the new-VM form — noted here because it's the same "did you mean the capital one" mistake.)
+- **`space`, not `enter`, downloads an image.** With focus on the image row, `space` fetches the selected catalog image (or re-verifies/repairs it if already local, a mismatched checksum triggers a full refetch). `enter` never downloads; it tries to build the VM, and fails with "press space to download `<os>` first" if the image isn't local yet.
+- **`E` on the detail screen opens the raw `vm.toml`; `e` opens the edit form.** (This applies to the detail screen, not the new-VM form, noted here because it's the same "did you mean the capital one" mistake.)
 
 ### Keys
 
@@ -114,7 +114,7 @@ The image picker offers every catalog entry (Alpine, etc.) plus any file already
 
 Recipes offered are filtered to those matching the selected image's OS/backend, and the selection resets whenever the image changes.
 
-While a download is running, a progress block appears under the fields — see [Download progress](#download-progress).
+While a download is running, a progress block appears under the fields, see [Download progress](#download-progress).
 
 ### Console password row (cloud images only)
 
@@ -128,7 +128,7 @@ When the selected image uses the `cloudinit` backend, the form grows a
 
 `←`/`→` or `space` toggles it. **stoat** is the fixed, documented password;
 **random** generates 32 hex characters from `crypto/rand`. This password is
-for the QEMU window only — the seed sets `ssh_pwauth: false`, so it is
+for the QEMU window only: the seed sets `ssh_pwauth: false`, so it is
 refused over the forwarded SSH port. See
 [Access and auth](../concepts/access-and-auth.md).
 
@@ -143,7 +143,7 @@ shows a login prompt with no valid answer.
 
 ## Edit form
 
-The in-TUI editor for a VM that already exists — everything the raw `$EDITOR` round trip on `vm.toml` used to be needed for, minus the fields deliberately left out. Editable fields: **mode**, **ram**, **cpus**, **disk size** (hidden entirely in live mode), **share**, **ssh port**, and **recipes** (hidden if none match the VM's OS/backend). Each changed field shows a dim `← was <old value>` marker next to it.
+The in-TUI editor for a VM that already exists: everything the raw `$EDITOR` round trip on `vm.toml` used to be needed for, minus the fields deliberately left out. Editable fields: **mode**, **ram**, **cpus**, **disk size** (hidden entirely in live mode), **share**, **ssh port**, and **recipes** (hidden if none match the VM's OS/backend). Each changed field shows a dim `← was <old value>` marker next to it.
 
 ### Keys
 
@@ -168,18 +168,18 @@ The in-TUI editor for a VM that already exists — everything the raw `$EDITOR` 
 | CPUs | Must be at least 1. |
 | SSH port | Must be between 1024 and 65535. |
 | Port collision | Refused if another VM (including a broken one whose `vm.toml` won't parse but whose port is still committed to disk) already uses that port. |
-| Switching to `cloud` mode | Refused unless the VM already has a base image: "cloud mode needs a base image — create a new VM from the catalog instead." |
-| Switching away from `cloud` mode | Refused if the VM has no ISO of its own: "`<mode>` mode needs an iso — this vm only has a cloud base image." |
+| Switching to `cloud` mode | Refused unless the VM already has a base image: "cloud mode needs a base image: create a new VM from the catalog instead." |
+| Switching away from `cloud` mode | Refused if the VM has no ISO of its own: "`<mode>` mode needs an iso, but this vm only has a cloud base image." |
 | Disk size, disk mode | Required if empty. |
-| Shrinking the disk | Refused — a qcow2 can only grow: "disk can only grow (`<old>` → `<new>` would destroy data)." |
-| Growing/creating the disk while running | Refused: "stop `<name>` first — switching to disk mode has to create its disk" / "stop `<name>` before resizing its disk (nothing was saved)." |
-| Resizing a cloud overlay that doesn't exist yet | Refused: "start `<name>` once before growing its disk (nothing was saved)" — the overlay is created lazily on first boot. |
+| Shrinking the disk | Refused, a qcow2 can only grow: "disk can only grow (`<old>` → `<new>` would destroy data)." |
+| Growing/creating the disk while running | Refused: "stop `<name>` first: switching to disk mode has to create its disk" / "stop `<name>` before resizing its disk (nothing was saved)." |
+| Resizing a cloud overlay that doesn't exist yet | Refused: "start `<name>` once before growing its disk (nothing was saved)", the overlay is created lazily on first boot. |
 
-A save on a **running** VM is allowed for RAM/CPUs/ssh-port changes, but the pane warns "running — ram/cpus/ssh apply on restart" since they don't take effect until the VM is restarted. If nothing differs from what's on disk, the pane shows "no changes" instead of a save button state.
+A save on a **running** VM is allowed for RAM/CPUs/ssh-port changes, but the pane warns "running: ram/cpus/ssh apply on restart" since they don't take effect until the VM is restarted. If nothing differs from what's on disk, the pane shows "no changes" instead of a save button state.
 
 ## Provisioning progress
 
-Pressing `p` (list or detail) runs `startProvision`, which refuses before ever starting anything if: the VM is in `cloud` mode (recipes apply automatically via cloud-init at first boot — recreate the VM to change them), the VM is a disk VM not yet marked installed (run the installer at the console, then `i`), the VM has no recipes selected, or a provision run for that VM is already in flight.
+Pressing `p` (list or detail) runs `startProvision`, which refuses before ever starting anything if: the VM is in `cloud` mode (recipes apply automatically via cloud-init at first boot, recreate the VM to change them), the VM is a disk VM not yet marked installed (run the installer at the console, then `i`), the VM has no recipes selected, or a provision run for that VM is already in flight.
 
 Once running, a line appears above the status line on both the list and detail screens for every VM currently provisioning:
 
@@ -187,17 +187,17 @@ Once running, a line appears above the status line on both the list and detail s
 ⠋ work · xfce · Unpacking libx11-data... · 1m32s
 ```
 
-That's a spinner, the VM name, the current step (a recipe name parsed from the `=== recipe NAME ===` markers `sshx.Provision` writes to `last-provision.log`, or `starting`/`waiting for ssh` before one begins), the most recent real output line (truncated to 34 characters), and elapsed time. There is deliberately no percentage or progress bar — nothing knows how many steps a recipe has left.
+That's a spinner, the VM name, the current step (a recipe name parsed from the `=== recipe NAME ===` markers `sshx.Provision` writes to `last-provision.log`, or `starting`/`waiting for ssh` before one begins), the most recent real output line (truncated to 34 characters), and elapsed time. There is deliberately no percentage or progress bar: nothing knows how many steps a recipe has left.
 
 ### Auto-provision offer
 
 After starting a VM that has recipes, stoat watches in the background for its ssh to come up (this does **not** block the UI) and then asks, rather than provisioning automatically:
 
 ```
-work is up — run xfce now? y/N
+work is up, run xfce now? y/N
 ```
 
-`y` starts the same provision run `p` would; anything else declines with "not provisioning `<name>` — press p when you want to". The offer is skipped for cloud VMs, for disk VMs not yet installed, and — for disk/cloud VMs only — whenever the previous provision run already finished cleanly (a live VM's root is wiped by every reboot, so it's always offered again).
+`y` starts the same provision run `p` would; anything else declines with "not provisioning `<name>`, press p when you want to". The offer is skipped for cloud VMs, for disk VMs not yet installed, and, for disk/cloud VMs only, whenever the previous provision run already finished cleanly (a live VM's root is wiped by every reboot, so it's always offered again).
 
 ## Download progress
 

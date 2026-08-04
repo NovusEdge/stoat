@@ -1,5 +1,5 @@
 {
-  description = "stoat — a terminal UI for local QEMU VMs (Alpine-first, no libvirt, no daemon)";
+  description = "stoat: a terminal UI for local QEMU VMs (Alpine-first, no libvirt, no daemon)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -41,7 +41,7 @@
             # tree, replacing the lib.fakeHash placeholder this shipped with.
             #
             # IT IS DERIVED FROM go.mod AND go.sum, so it goes stale the moment
-            # a dependency is added, removed or bumped — including a bare
+            # a dependency is added, removed or bumped, including a bare
             # `go mod tidy` that only drops an unused indirect. When it does,
             # `nix build` fails with a hash mismatch that PRINTS the correct
             # value; paste the "got:" line in here. It is not something to

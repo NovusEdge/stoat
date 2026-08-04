@@ -1,6 +1,6 @@
 # CLI Reference
 
-`stoat` with a subcommand runs non-interactively (`internal/cli`); with none, it launches the [TUI](tui.md) instead. No subcommand contains logic of its own — each is a thin wrapper over the same internal packages the TUI uses, so the two interfaces can't drift apart.
+`stoat` with a subcommand runs non-interactively (`internal/cli`); with none, it launches the [TUI](tui.md) instead. No subcommand contains logic of its own: each is a thin wrapper over the same internal packages the TUI uses, so the two interfaces can't drift apart.
 
 ```
 usage: stoat <command> [flags]
@@ -25,7 +25,7 @@ Every subcommand also accepts `-q` / `--quiet` / `--no-interactive` (three names
 
 ## `stoat ls`
 
-Lists every VM directory under the data root, plus any directory whose `vm.toml` failed to parse (shown with a `broken` state and a one-line reason) — broken VMs are real entries, not hidden.
+Lists every VM directory under the data root, plus any directory whose `vm.toml` failed to parse (shown with a `broken` state and a one-line reason). Broken VMs are real entries, not hidden.
 
 ```
 $ stoat ls
@@ -69,7 +69,7 @@ work stopped
 
 ## `stoat ssh <name>`
 
-Looks up `ssh` on `$PATH` and **replaces the current process** with it via `syscall.Exec` (the same as running `ssh` directly) — signals and the terminal behave exactly as a bare `ssh` invocation, and stoat leaves no supervisor process behind.
+Looks up `ssh` on `$PATH` and **replaces the current process** with it via `syscall.Exec` (the same as running `ssh` directly): signals and the terminal behave exactly as a bare `ssh` invocation, and stoat leaves no supervisor process behind.
 
 ```
 $ stoat ssh work
@@ -77,11 +77,11 @@ $ stoat ssh work
 
 `-q` is accepted but has no effect (there is no chatter to suppress before the process is replaced).
 
-**Exit codes:** 0 is not actually observed on success — the process image is gone. 1 if the VM can't be loaded, `ssh` isn't found on `$PATH`, or `exec` itself fails to launch.
+**Exit codes:** 0 is not actually observed on success: the process image is gone. 1 if the VM can't be loaded, `ssh` isn't found on `$PATH`, or `exec` itself fails to launch.
 
 ## `stoat provision <name>`
 
-Runs the VM's recipes over ssh, streaming `last-provision.log` to stdout as it's written (polled every 150ms) — the same log the TUI's detail screen tails, so there is no separate provisioning path to keep in sync.
+Runs the VM's recipes over ssh, streaming `last-provision.log` to stdout as it's written (polled every 150ms), the same log the TUI's detail screen tails, so there is no separate provisioning path to keep in sync.
 
 ```
 $ stoat provision work
@@ -92,11 +92,11 @@ Unpacking libx11-data...
 work provisioned
 ```
 
-A **cloud-mode VM short-circuits**: cloud-init applies its recipes once, automatically, at first boot, baked into the seed when the VM's overlay was created — there is nothing left for ssh-based provisioning to do, and piping a cloud recipe (`#cloud-config` YAML, not a shell script) into `sh -s` would just fail. Instead it prints an explanatory line and exits 0 without touching ssh:
+A **cloud-mode VM short-circuits**: cloud-init applies its recipes once, automatically, at first boot, baked into the seed when the VM's overlay was created, there is nothing left for ssh-based provisioning to do, and piping a cloud recipe (`#cloud-config` YAML, not a shell script) into `sh -s` would just fail. Instead it prints an explanatory line and exits 0 without touching ssh:
 
 ```
 $ stoat provision cloudvm
-cloudvm is a cloud VM — recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.
+cloudvm is a cloud VM: recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.
 ```
 
 `-q` suppresses the `provisioning <name>...` line only; the streamed log and the final line still print.
@@ -115,7 +115,7 @@ scratch deleted
 
 Without `-y`, confirmation is required: interactively it prompts on stdout and reads a line from stdin (anything other than a `y`/`Y` aborts); in `-q`/`--quiet`/`--no-interactive` mode there is no prompt to answer, so it refuses outright instead of guessing. `-y` skips the prompt in either mode.
 
-**Exit codes:** 0 if deleted; 1 if the VM can't be loaded, is running, the confirmation is declined or aborted, `-y` was needed but not given in quiet mode, or the delete itself fails. Note that declining the confirmation prompt is exit 1, not 0 — a script checking `$?` sees "delete didn't happen" as a failure either way, whether the VM was running or the user just said no.
+**Exit codes:** 0 if deleted; 1 if the VM can't be loaded, is running, the confirmation is declined or aborted, `-y` was needed but not given in quiet mode, or the delete itself fails. Note that declining the confirmation prompt is exit 1, not 0: a script checking `$?` sees "delete didn't happen" as a failure either way, whether the VM was running or the user just said no.
 
 ## `stoat logs [-n N]`
 
@@ -155,7 +155,7 @@ Prints the build's version string as `stoat <version>`. Equivalent to the top-le
 
 ## `stoat help`
 
-Prints the full usage message (subcommands, global flags, exit codes) to stdout. The same text is printed to stderr — alongside the specific error — whenever a usage error occurs.
+Prints the full usage message (subcommands, global flags, exit codes) to stdout. The same text is printed to stderr, alongside the specific error, whenever a usage error occurs.
 
 **Exit codes:** always 0.
 
@@ -171,7 +171,7 @@ A usage error (2) always prints both the specific complaint and the full usage t
 
 ## Scripting
 
-- **`-q`, `--quiet`, `--no-interactive`** are three names for the same flag, present on every subcommand. Where it has an effect (`up`, `down`, `provision`, `rm`), it suppresses the "in-progress" chatter (`starting work...`, `provisioning work...`, ...) — final results and all errors print regardless of this flag.
+- **`-q`, `--quiet`, `--no-interactive`** are three names for the same flag, present on every subcommand. Where it has an effect (`up`, `down`, `provision`, `rm`), it suppresses the "in-progress" chatter (`starting work...`, `provisioning work...`, ...); final results and all errors print regardless of this flag.
 - **`rm`** additionally treats `--no-interactive`/`-q` as "there is no one to answer a confirmation prompt": without `-y` it refuses rather than blocking on stdin.
 - **`NO_COLOR`** (any non-empty value) disables ANSI color in `ls`'s output.
 - Color is also **disabled automatically whenever stdout is not a terminal** (checked via `os.ModeCharDevice`), so piping `stoat ls` into `awk`, `grep`, or a file never carries escape codes even without setting `NO_COLOR`. Only `ls`'s `STATE` column is ever colored.

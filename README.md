@@ -4,10 +4,10 @@ A terminal UI and CLI for running local QEMU VMs on Linux. No libvirt, no daemon
 
 ## What it does
 
-- Boots an Alpine live VM that comes up already networked and `ssh`-reachable — an apkovl overlay is baked into the boot, so there's no `setup-alpine` step to get in.
+- Boots an Alpine live VM that comes up already networked and `ssh`-reachable: an apkovl overlay is baked into the boot, so there's no `setup-alpine` step to get in.
 - Also runs Ubuntu, Debian, Fedora, and Arch cloud images, provisioned via cloud-init on first boot.
 - Persistent disk VMs for anything else: install once with the guest's own installer, then boot straight to it.
-- Ships a few ready-made recipes — XFCE, Docker, dev tools, Tailscale — to run post-boot over ssh or bake into a cloud-init seed. `stoat recipe new` scaffolds your own.
+- Ships a few ready-made recipes (XFCE, Docker, dev tools, Tailscale) to run post-boot over ssh or bake into a cloud-init seed. `stoat recipe new` scaffolds your own.
 - QEMU processes are tracked by pidfile, not supervised: `stoat` can exit and the VM keeps running.
 - A TUI for interactive use, and a scriptable CLI (`ls`, `up`, `down`, `ssh`, `provision`, `rm`, `recipe`, `logs`, `doctor`) covering the same operations for scripts and automation.
 
@@ -25,9 +25,9 @@ The list screen, with one running VM, one stopped, and one whose `vm.toml` faile
 
                      ╭────────────────────────────────────────────────────────────────╮
                      │                                                                │
-                     │  ❯ ○ alpine-live    live   2048M  2c  —                        │
+                     │  ❯ ○ alpine-live    live   2048M  2c  -                        │
                      │                                                                │
-                     │    ○ ubuntu-dev     cloud  4096M  4c  —                        │
+                     │    ○ ubuntu-dev     cloud  4096M  4c  -                        │
                      │                                                                │
                      │    ✗ old-vm         broken: toml: line 1: expected '.' or      │
                      │  '=', but got 'i' instead                                      │
@@ -50,7 +50,7 @@ old-vm          -     broken   -     -      -    toml: line 1: expected '.' or, 
 ## Requirements
 
 - Linux with KVM: `/dev/kvm` readable and writable by your user (member of the `kvm` group).
-- `qemu-system-x86_64` and `qemu-img`, built with GTK+OpenGL support — stoat starts QEMU with `-display gtk,gl=on`.
+- `qemu-system-x86_64` and `qemu-img`, built with GTK+OpenGL support: stoat starts QEMU with `-display gtk,gl=on`.
 - `ssh`.
 - `xorriso` (package `libisoburn`), only if you use a cloud-init image (Ubuntu/Debian/Fedora/Arch). Not needed for Alpine live or disk VMs.
 - Go 1.26 to build from source (the version pinned in `go.mod`).
@@ -61,9 +61,9 @@ old-vm          -     broken   -     -      -    toml: line 1: expected '.' or, 
 just setup
 ```
 
-Builds stoat, installs it to `~/.local/bin` (override with `$PREFIX`), offers to add that directory to your `PATH`, and reports which of `qemu-system-x86_64`, `qemu-img`, `ssh`, `xorriso`, and `/dev/kvm` still need attention — with the exact install command for your distro.
+Builds stoat, installs it to `~/.local/bin` (override with `$PREFIX`), offers to add that directory to your `PATH`, and reports which of `qemu-system-x86_64`, `qemu-img`, `ssh`, `xorriso`, and `/dev/kvm` still need attention, with the exact install command for your distro.
 
-For a non-interactive install — CI, scripts:
+For a non-interactive install (CI, scripts):
 
 ```sh
 just build && just install    # or: make build && make install
@@ -80,11 +80,11 @@ stoat
 ```
 
 1. Press `n` for a new VM.
-2. Pick an image and press SPACE to download it (not enter — enter tries to create the VM and tells you to download first).
+2. Pick an image and press SPACE to download it (not enter: enter tries to create the VM and tells you to download first).
 3. Press ENTER to create the VM.
 4. Back on the list, press ENTER to start it.
 5. If you checked any recipes, stoat waits for sshd and then offers to run
-   them: `test1 is up — run xfce now? y/N`. Press `y`, or decline and press
+   them: `test1 is up, run xfce now? y/N`. Press `y`, or decline and press
    `p` whenever you like.
 6. Press `s` to ssh in.
 
@@ -113,13 +113,13 @@ Global flags: `-q`/`--quiet`/`--no-interactive` suppress progress chatter (resul
 
 Every VM is one of three modes:
 
-- **live** — diskless, boots straight from an Alpine ISO, discards all state on stop. Provisioned by an **apkovl** overlay built fresh at every start.
-- **disk** — a qcow2 that survives restarts. You run the guest's own installer once, then flip it to "installed". Provisioned by pushing recipes over **ssh**.
-- **cloud** — a CoW overlay over a shared Ubuntu/Debian/Fedora/Arch base image. Provisioned by a **cloud-init** seed baked in once, at first boot only.
+- **live**: diskless, boots straight from an Alpine ISO, discards all state on stop. Provisioned by an **apkovl** overlay built fresh at every start.
+- **disk**: a qcow2 that survives restarts. You run the guest's own installer once, then flip it to "installed". Provisioned by pushing recipes over **ssh**.
+- **cloud**: a CoW overlay over a shared Ubuntu/Debian/Fedora/Arch base image. Provisioned by a **cloud-init** seed baked in once, at first boot only.
 
-Each VM is a directory under `~/.stoat` (override with `$STOAT_HOME`) holding a hand-editable `vm.toml` plus whatever state its mode keeps — nothing else is shared between VMs. See [docs/concepts/modes-and-backends.md](docs/concepts/modes-and-backends.md) and [docs/concepts/data-root.md](docs/concepts/data-root.md).
+Each VM is a directory under `~/.stoat` (override with `$STOAT_HOME`) holding a hand-editable `vm.toml` plus whatever state its mode keeps, nothing else is shared between VMs. See [docs/concepts/modes-and-backends.md](docs/concepts/modes-and-backends.md) and [docs/concepts/data-root.md](docs/concepts/data-root.md).
 
-Recipes — the scripts and cloud-init fragments that install XFCE, Docker, etc. — are covered in [docs/recipes/overview.md](docs/recipes/overview.md), including how to write your own.
+Recipes (the scripts and cloud-init fragments that install XFCE, Docker, etc.) are covered in [docs/recipes/overview.md](docs/recipes/overview.md), including how to write your own.
 
 ## Status
 
@@ -129,4 +129,4 @@ Pre-1.0 and single-user: stoat assumes it's the only thing managing its `~/.stoa
 
 AGPL-3.0-or-later. Copyright (c) 2026 Aliasgar Khimani (NovusEdge).
 
-Free to clone, run, and modify — including by automated agents and harnesses. Any distributed or network-hosted derivative must publish its source under the same license, so stoat cannot be forked into a proprietary product.
+Free to clone, run, and modify, including by automated agents and harnesses. Any distributed or network-hosted derivative must publish its source under the same license, so stoat cannot be forked into a proprietary product.

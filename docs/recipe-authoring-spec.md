@@ -26,7 +26,7 @@ smallest first.
 
 ---
 
-## Option A — `stoat recipe new <name>` (scaffold only)
+## Option A: `stoat recipe new <name>` (scaffold only)
 
 Writes a skeleton with the parts every recipe needs and gets wrong:
 
@@ -37,8 +37,8 @@ setup-apkrepos -c -1        # community repo + mirror + index refresh
 apk add <packages>
 root_fstype=$(awk '$2 == "/" { print $3 }' /proc/mounts)
 case "$root_fstype" in
-tmpfs | overlay) echo "NOTE: live VM — this is gone on reboot." ;;
-*)               echo "installed on a disk VM — survives a reboot." ;;
+tmpfs | overlay) echo "NOTE: live VM, this is gone on reboot." ;;
+*)               echo "installed on a disk VM, survives a reboot." ;;
 esac
 ```
 
@@ -49,7 +49,7 @@ then opens `$EDITOR` on it.
 - **Cost:** ~40 lines, one CLI subcommand, one embedded template per backend.
 - **Doesn't solve:** per-OS variants, package-name differences.
 
-## Option B — a manifest that generates the per-OS files
+## Option B: a manifest that generates the per-OS files
 
 ```toml
 # ~/.stoat/recipes/src/docker.toml
@@ -70,7 +70,7 @@ with the boilerplate filled in.
   adjacent so a missing variant is obvious.
 - **Cost:** ~200 lines, a template engine, a second file format to learn, and a
   generated/source distinction (do you edit the .sh? what happens to your edit?).
-- **Doesn't solve:** the actually hard part — knowing that Alpine calls it
+- **Doesn't solve:** the actually hard part: knowing that Alpine calls it
   `docker-cli-compose`, Debian `docker-compose-v2`, and Fedora needs
   `@xfce-desktop-environment` rather than `xfce4`. A manifest doesn't discover
   package names; a human still verifies each one.
@@ -80,12 +80,12 @@ part is boilerplate (~15 lines) while the varying part is exactly the knowledge
 a generator can't supply. Compressing 3 files into 1 manifest saves ~45 lines
 and costs ~200.
 
-## Option C — an in-TUI editor
+## Option C: an in-TUI editor
 
 A pane that lists recipes, with new/edit/delete and a text area.
 
-- **Cost:** `bubbles/textarea` pulls in `clipboard`, `go-udiff` and `heredoc` —
-  three new modules — to reimplement, badly, an editor the user already has
+- **Cost:** `bubbles/textarea` pulls in `clipboard`, `go-udiff` and `heredoc`
+  (three new modules) to reimplement, badly, an editor the user already has
   configured. The detail screen's `E` already shells out to `$EDITOR` for
   `vm.toml`; the same trick works for recipes at a fraction of the cost.
 - **Recommendation: no.**
@@ -96,8 +96,8 @@ A pane that lists recipes, with new/edit/delete and a text area.
 
 **Option A, plus two things worth more than any of them:**
 
-1. **`r` on the list/detail screen opens the recipes directory in `$EDITOR`**
-   — the `E` pattern, ~10 lines, and it makes the existing authoring path
+1. **`r` on the list/detail screen opens the recipes directory in `$EDITOR`**,
+   the `E` pattern, ~10 lines, and it makes the existing authoring path
    discoverable, which is its real problem.
 2. **A `stoat recipe check <file>`** that runs `sh -n` and asserts the
    live-vs-disk block is present. That is the one class of mistake the test

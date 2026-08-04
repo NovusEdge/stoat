@@ -19,21 +19,21 @@ install: build
     @echo "installed {{prefix}}/stoat ({{version}})"
     @command -v stoat >/dev/null || echo "note: {{prefix}} is not on your PATH"
 
-# build and install stoat, interactively — checks the host too
+# build and install stoat, interactively: checks the host too
 [group('build')]
 setup:
     go run ./cmd/installer
 
-# build and install stoat without a TTY — for CI and scripts
+# build and install stoat without a TTY: for CI and scripts
 [group('build')]
 setup-headless:
     go run ./cmd/installer --no-tty
 
-# remove the installed binary — never touches ~/.stoat
+# remove the installed binary: never touches ~/.stoat
 [group('build')]
 uninstall:
     rm -f {{prefix}}/stoat
-    @echo "removed {{prefix}}/stoat — your VMs in ${STOAT_HOME:-~/.stoat} were left alone"
+    @echo "removed {{prefix}}/stoat, your VMs in ${STOAT_HOME:-~/.stoat} were left alone"
 
 # run against your real ~/.stoat
 [group('dev')]
@@ -126,9 +126,9 @@ vms:
       else
         dot=$(c 8 '○'); state=$(c 8 "$(printf '%-9s' stopped)")
       fi
-      printf "  %s  %-16s %-6s %s %-9s %6s %5s\n" "$dot" "$n" "$mode" "$state" "${rec:-—}" "${ram:-?}M" "${port:-?}"
+      printf "  %s  %-16s %-6s %s %-9s %6s %5s\n" "$dot" "$n" "$mode" "$state" "${rec:--}" "${ram:-?}M" "${port:-?}"
     done
-    [ "$any" = 1 ] || dim "  no vms yet — run 'just dev' and press n"
+    [ "$any" = 1 ] || dim "  no vms yet: run 'just dev' and press n"
     echo
     head "isos" "$root/isos"
     ls -1sh "$root/isos" 2>/dev/null | sed '1d;s/^/  /' || dim "  none"
@@ -144,7 +144,7 @@ provision-log name n="40":
     #!/usr/bin/env sh
     . "{{justfile_directory()}}/.just/fmt.sh"
     f="${STOAT_HOME:-$HOME/.stoat}/{{name}}/last-provision.log"
-    [ -f "$f" ] || { warn "no provision log for {{name}} — press p in the TUI first"; exit 0; }
+    [ -f "$f" ] || { warn "no provision log for {{name}}: press p in the TUI first"; exit 0; }
     head "provision log" "{{name}}"
     tail -n {{n}} "$f" | sed 's/^/  /'
     echo
@@ -165,7 +165,7 @@ doctor:
     root="${STOAT_HOME:-$HOME/.stoat}"
     [ -d "$root" ] && ok "data root" "$root" || warn2 "data root" "$root (created on first run)"
     if command -v stoat >/dev/null; then ok "stoat on PATH" "$(command -v stoat) ($(stoat --version 2>/dev/null))"
-    else warn2 "stoat on PATH" "not installed — run 'just install'"; fi
+    else warn2 "stoat on PATH" "not installed: run 'just install'"; fi
     echo
     [ "$miss" = 0 ] && printf "  %s all prerequisites present\n" "$(c 2 ✓)" || printf "  %s %s missing\n" "$(c 1 ✗)" "$miss"
 
@@ -180,4 +180,4 @@ clean:
 tag v:
     @git diff --quiet || { echo "working tree dirty"; exit 1; }
     git tag {{v}}
-    @echo "created {{v}} — push with: git push origin {{v}}"
+    @echo "created {{v}}, push with: git push origin {{v}}"
