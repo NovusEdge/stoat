@@ -23,8 +23,11 @@ func TestEmitterResultLine(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["v"] != float64(1) {
-		t.Errorf("v = %v, want 1", got["v"])
+	// Against the constant, not a literal: this asserts that every line
+	// carries the version, which is the contract. Pinning the NUMBER here
+	// would just make a deliberate bump look like a regression.
+	if got["v"] != float64(ContractVersion) {
+		t.Errorf("v = %v, want %d", got["v"], ContractVersion)
 	}
 	if got["type"] != "result" {
 		t.Errorf("type = %v, want result", got["type"])

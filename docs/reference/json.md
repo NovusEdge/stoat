@@ -189,8 +189,7 @@ Check       {"name":"qemu-img","ok":false,"detail":"not found",
 
 PruneItem   {"class":"orphaned_image","path":"/home/u/.stoat/isos/old.iso"}
 
-Recipe      {"name":"xfce.alpine.sh","label":"xfce","target_os":"alpine",
-             "shared":false}
+Recipe      {"name":"xfce","description":"XFCE desktop over SSH or at boot"}
 
 RecipeIssue {"name":"xfce.debian.sh","reason":"built for debian, not alpine"}
 ```
@@ -362,11 +361,30 @@ streaming into "silent until exit".
 
 ## Versioning
 
-`"v"` is an integer **contract** version, not the build version. It is `1`.
+`"v"` is an integer **contract** version, not the build version. It is `2`.
 
 It bumps only for a removal or a meaning change: a field deleted, a unit
 changed, an error code split or repurposed, or `result` ceasing to be last.
 **Additions never bump it.**
+
+### History
+
+**v2.** The recipe system moved from flat files whose target OS was encoded in
+the filename (`xfce.alpine.sh`) to directories with a `recipe.toml` manifest.
+`Recipe` lost `label`, `target_os` and `shared`, and gained `description`;
+recipe names are now bare (`xfce`, not `xfce.alpine.sh`), so every name a
+consumer passes to `create --recipes`, `apply --only` or `check-recipes`
+changed shape too.
+
+**There is no v1 compatibility path, deliberately.** Nothing in stoat reads
+the old format, and nothing here serves it. A consumer built for v1 refuses to
+start against a v2 binary and the reverse also holds, which is what the
+startup version check is for: the failure is a clear refusal naming both
+versions rather than a field quietly missing three calls later.
+
+A data root still holding v1 recipe files is not migrated. The v2 installer
+writes its directories alongside them and ignores the rest, so the stale files
+are inert but visible. Moving them aside is a one-line manual step.
 
 A consumer may rely on:
 

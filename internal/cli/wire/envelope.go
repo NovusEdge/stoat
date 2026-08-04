@@ -19,7 +19,13 @@ import (
 // not the build version. It bumps only for a removal or a meaning change
 // (a field deleted, a unit changed, an error code split or repurposed,
 // "result" stopping being last); additions never bump it.
-const ContractVersion = 1
+//
+// v2: the recipe system moved from flat files whose OS was encoded in the
+// filename to directories with a recipe.toml manifest, and Recipe lost
+// label, target_os and shared. Three fields deleted is exactly the case this
+// number exists for. There is no v1 compatibility path anywhere: a clean
+// break, so nothing has to reason about which shape it is looking at.
+const ContractVersion = 2
 
 // Event types (§2, §4). "result" is the one terminal type; every other type
 // is non-terminal and a consumer MUST ignore any type it does not recognize.

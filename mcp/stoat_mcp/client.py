@@ -28,7 +28,12 @@ from .errors import ContractMismatch, StoatCrashed, StoatError
 
 # Bumped only when json.md's "v" bumps, which happens only for a removal or a
 # meaning change. Additions never bump it, so this does not track features.
-EXPECTED_CONTRACT = 1
+#
+# v2: the recipe system moved to directories with a recipe.toml manifest, and
+# Recipe lost label, target_os and shared. There is no v1 path on either side;
+# a server built for v1 refuses to start against a v2 binary and vice versa,
+# which is the entire point of checking this at startup.
+EXPECTED_CONTRACT = 2
 
 # Non-terminal event types we understand. Anything else is skipped per rule 3.
 EVENT_PROGRESS = "progress"
