@@ -1,0 +1,25 @@
+[project]
+name = "stoat-mcp"
+version = "0.1.0"
+description = "MCP server for stoat, exposing local QEMU VMs to an agent"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Aliasgar Khimani" }]
+dependencies = ["fastmcp>=2.0"]
+
+[project.scripts]
+stoat-mcp = "stoat_mcp.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["stoat_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
