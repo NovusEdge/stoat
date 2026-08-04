@@ -18,6 +18,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
@@ -40,6 +41,12 @@ type Args struct {
 	Quiet bool
 	Yes   bool
 	N     int // logs -n
+
+	// JSON is set by Main from the pre-parse argv scan, never by Parse: the
+	// flag has to be recognized before any FlagSet exists so a usage error
+	// can still produce an envelope. It implies Quiet, so every prose line
+	// already gated on -q disappears without a second condition.
+	JSON bool
 
 	// Sub is the second word for subcommands that have one ("recipe list").
 	// OS and Backend belong to "recipe new"; VM carries the recipe name
@@ -103,6 +110,42 @@ func addQuiet(fs *flag.FlagSet, quiet *bool) {
 	fs.BoolVar(quiet, "q", false, "suppress progress chatter")
 	fs.BoolVar(quiet, "quiet", false, "suppress progress chatter")
 	fs.BoolVar(quiet, "no-interactive", false, "suppress progress chatter (alias for -q)")
+}
+
+// ok writes a command's terminal result. Under --json that is the single
+// "result" line on stdout; otherwise it is nothing at all, and the caller's
+// own text output stands. Every runX returns through here or through fail,
+// so "exactly one terminal line" holds by construction.
+func (a *Args) ok(stdout io.Writer, data any) int {
+	if a.JSON {
+		_ = wire.NewEmitter(stdout).ResultOK(a.Cmd, data)
+	}
+	return ExitOK
+}
+
+// fail reports err and returns ExitFail: one JSON result line on STDOUT under
+// --json (§4: everything structured goes to stdout, errors included, because a
+// consumer that has to merge two pipes to read one result will eventually
+// interleave them wrong), the usual "stoat: <cmd>: <err>" on stderr otherwise.
+func (a *Args) fail(stdout, stderr io.Writer, err error) int {
+	if a.JSON {
+		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.MapError(err))
+		return ExitFail
+	}
+	fmt.Fprintf(stderr, "stoat: %s: %v\n", a.Cmd, err)
+	return ExitFail
+}
+
+// failMsg is fail for a condition the CLI detects itself, where there is no
+// core error to map. sentinel picks the code; msg is the human text, which
+// stays byte-identical to what the command printed before --json existed.
+func (a *Args) failMsg(stdout, stderr io.Writer, sentinel error, msg string) int {
+	if a.JSON {
+		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.MapError(fmt.Errorf("%w: %s", sentinel, msg)))
+		return ExitFail
+	}
+	fmt.Fprintf(stderr, "stoat: %s: %s\n", a.Cmd, msg)
+	return ExitFail
 }
 
 // Parse turns argv (excluding the "stoat" program name) into an Args, or a
@@ -466,6 +509,8 @@ commands:
   help                 show this message
 
 global flags:
+  --json                          one JSON object per line on stdout, errors included;
+                                  implies --quiet and never prompts
   -q, --quiet, --no-interactive   suppress progress chatter (results and errors still print)
   -y                               (rm only) skip the delete confirmation
 
@@ -477,19 +522,55 @@ bare "stoat" with no arguments launches the interactive TUI.`
 // Main parses args and dispatches, returning the process exit code. version
 // is the build's version string (for the `version` subcommand). stdin is
 // used only by `rm`'s confirmation prompt.
-func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writer) int {
-	a, err := Parse(args)
+func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writer) (code int) {
+	// The scan runs before Parse so --json is recognized even when parsing is
+	// what failed: an unknown subcommand still answers in the contract.
+	jsonMode, argv := wire.SplitJSONFlag(args)
+	cmd := ""
+	if len(argv) > 0 {
+		cmd = argv[0]
+	}
+	if jsonMode {
+		// §4's panic guarantee: a consumer sees either a terminal result line
+		// or a dead process, never a silent exit with neither.
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(stderr, "panic: %v\n", r)
+				_ = wire.NewEmitter(stdout).ResultErr(cmd, wire.InternalError(fmt.Sprintf("panic: %v", r)))
+				code = ExitFail
+			}
+		}()
+	}
+
+	a, err := Parse(argv)
 	if err != nil {
+		if jsonMode {
+			_ = wire.NewEmitter(stdout).ResultErr(cmd, wire.UsageError(err.Error()))
+			return ExitUsage
+		}
 		fmt.Fprintln(stderr, "stoat:", err)
 		fmt.Fprintln(stderr, usage())
 		return ExitUsage
 	}
+	a.JSON = jsonMode
+	if jsonMode {
+		// --json is non-interactive by definition, and -q under it is a no-op
+		// rather than an error. Forcing Quiet here is what suppresses the prose
+		// lines: they are all already gated on it.
+		a.Quiet = true
+	}
 
 	switch a.Cmd {
 	case "help":
+		if a.JSON {
+			return a.ok(stdout, map[string]any{"usage": usage()})
+		}
 		fmt.Fprintln(stdout, usage())
 		return ExitOK
 	case "version":
+		if a.JSON {
+			return a.ok(stdout, map[string]any{"version": version, "contract": wire.ContractVersion})
+		}
 		fmt.Fprintln(stdout, "stoat", version)
 		return ExitOK
 	}
@@ -497,17 +578,15 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	// Every other subcommand touches the data root, so it must be
 	// initialised exactly as tui.Run() initialises it, otherwise a
 	// first-run CLI user ends up with a half-initialised ~/.stoat.
-	if err := config.EnsureRoot(); err != nil {
-		fmt.Fprintln(stderr, "stoat:", err)
-		return ExitFail
-	}
-	if err := recipes.Install(); err != nil {
-		fmt.Fprintln(stderr, "stoat:", err)
-		return ExitFail
-	}
-	if err := keys.Ensure(); err != nil {
-		fmt.Fprintln(stderr, "stoat:", err)
-		return ExitFail
+	for _, setup := range []func() error{config.EnsureRoot, recipes.Install, keys.Ensure} {
+		if err := setup(); err != nil {
+			if a.JSON {
+				_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.MapError(err))
+				return ExitFail
+			}
+			fmt.Fprintln(stderr, "stoat:", err)
+			return ExitFail
+		}
 	}
 	// ponytail: same as the TUI, an unopenable log degrades to io.Discard
 	// rather than failing the command the user actually asked for. `logs`

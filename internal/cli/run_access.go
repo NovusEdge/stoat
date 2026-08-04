@@ -1,15 +1,18 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
@@ -25,8 +28,16 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 		err = core.CopyFrom(context.Background(), a.VM, a.Remote, a.Local)
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: cp:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		direction := "from_guest"
+		if a.ToRemote {
+			direction = "to_guest"
+		}
+		return a.ok(stdout, map[string]any{
+			"vm": a.VM, "direction": direction, "local": a.Local, "remote": a.Remote,
+		})
 	}
 	if !a.Quiet {
 		if a.ToRemote {
@@ -57,8 +68,21 @@ func runExec(a *Args, stdout, stderr io.Writer) int {
 	// limit nobody asked for.
 	res, err := core.Exec(context.Background(), a.VM, a.Command)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: exec:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		// Under --json the process exits 0 whenever the command RAN, whatever it
+		// returned (§5): the guest's status is already in exit_code, and
+		// conflating it with stoat's own leaves a consumer unable to tell a
+		// guest exiting 2 from a stoat usage error.
+		//
+		// Embedded, not spread into a map: the DTO's omitempty is what keeps
+		// stdout_base64 absent for the ordinary UTF-8 case, and a map has no
+		// way to say that.
+		return a.ok(stdout, struct {
+			VM string `json:"vm"`
+			wire.ExecResult
+		}{VM: a.VM, ExecResult: wire.FromExecResult(res)})
 	}
 	// Streamed through verbatim, on the matching stream, so a caller can pipe
 	// stdout without stderr contaminating it.
@@ -71,6 +95,15 @@ func runExec(a *Args, stdout, stderr io.Writer) int {
 // terminal behave exactly as a direct `ssh` invocation would, and stoat
 // leaves no supervisor process behind.
 func runSSH(a *Args, stdout, stderr io.Writer) int {
+	if a.JSON {
+		// syscall.Exec destroys the process image, so there is no "after" in
+		// which to write a result line. Refusing is the only honest answer;
+		// faking one would break the "exactly one terminal result" guarantee
+		// for every consumer that ever calls it.
+		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd,
+			wire.UsageError("ssh replaces the stoat process and cannot emit a result; use `stoat --json exec "+a.VM+" ...` for a command, or ssh_port/ssh_user from `stoat --json ls`"))
+		return ExitUsage
+	}
 	v, err := config.Load(a.VM)
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: ssh:", err)
@@ -96,8 +129,7 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 func runProvision(a *Args, stdout, stderr io.Writer) int {
 	v, err := config.Load(a.VM)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: provision:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
 	}
 	if v.Mode == "cloud" {
 		// cloud-init's packages: list only runs at first boot, baked into
@@ -105,6 +137,14 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 		// ssh-based provisioning to do, and piping a recipe (which for cloud
 		// VMs is #cloud-config YAML, not a shell script) into `sh -s` would
 		// just fail.
+		const reason = "cloud VM: recipes are applied by cloud-init at first boot; recreate the VM to change them"
+		if a.JSON {
+			// A consumer has to be able to tell "recipes ran" from "there was
+			// nothing to run" without reading English prose.
+			return a.ok(stdout, map[string]any{
+				"vm": a.VM, "provisioned": false, "skipped_reason": reason,
+			})
+		}
 		fmt.Fprintf(stdout, "%s is a cloud VM: recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.\n", a.VM)
 		return ExitOK
 	}
@@ -120,12 +160,62 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 	done := make(chan error, 1)
 	go func() { done <- sshx.Provision(context.Background(), v) }()
 
-	if perr := streamFile(logPath, stdout, done); perr != nil {
-		fmt.Fprintln(stderr, "stoat: provision:", perr)
-		return ExitFail
+	// Under --json the recipe's raw bytes must not reach stdout: they would sit
+	// in the middle of the JSON Lines stream and every consumer's json.loads
+	// would fail on them. Each appended line becomes a "log" event instead.
+	out := stdout
+	var lw *jsonLogWriter
+	if a.JSON {
+		lw = &jsonLogWriter{em: wire.NewEmitter(stdout), cmd: a.Cmd}
+		out = lw
+	}
+	perr := streamFile(logPath, out, done)
+	if lw != nil {
+		lw.Flush()
+	}
+	if perr != nil {
+		return a.fail(stdout, stderr, perr)
+	}
+	if a.JSON {
+		return a.ok(stdout, map[string]any{
+			"vm": a.VM, "provisioned": true, "skipped_reason": "",
+		})
 	}
 	fmt.Fprintf(stdout, "%s provisioned\n", a.VM)
 	return ExitOK
+}
+
+// jsonLogWriter wraps appended log bytes as one "log" event per line.
+type jsonLogWriter struct {
+	em  *wire.Emitter
+	cmd string
+	buf []byte
+}
+
+func (w *jsonLogWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		w.line(string(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+	}
+	return len(p), nil
+}
+
+// Flush emits a trailing line that never got its newline. A recipe killed
+// mid-write leaves exactly that, and it is the line that says why.
+func (w *jsonLogWriter) Flush() {
+	if len(w.buf) > 0 {
+		w.line(string(w.buf))
+		w.buf = nil
+	}
+}
+
+func (w *jsonLogWriter) line(s string) {
+	_ = w.em.Event(wire.TypeLog, w.cmd, map[string]any{"line": strings.TrimSuffix(s, "\r")})
 }
 
 // streamFile copies newly-appended bytes of path to out every tick until

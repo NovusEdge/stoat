@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -51,13 +52,17 @@ func oneLine(s string) string {
 
 func runLogs(a *Args, stdout, stderr io.Writer) int {
 	if err := logx.Init(); err != nil {
-		fmt.Fprintln(stderr, "stoat: logs:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
 	}
 	lines, err := tailLines(logx.Path(), a.N)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: logs:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		if lines == nil {
+			lines = []string{} // never null: a consumer iterates this
+		}
+		return a.ok(stdout, map[string]any{"lines": lines})
 	}
 	for _, l := range lines {
 		fmt.Fprintln(stdout, l)
@@ -88,8 +93,13 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 	case "list":
 		names, err := recipes.Installed()
 		if err != nil {
-			fmt.Fprintln(stderr, "stoat: recipe list:", err)
-			return ExitFail
+			return a.fail(stdout, stderr, err)
+		}
+		if a.JSON {
+			if names == nil {
+				names = []string{}
+			}
+			return a.ok(stdout, map[string]any{"dir": recipes.Dir(), "recipes": names})
 		}
 		fmt.Fprintln(stdout, recipes.Dir())
 		if len(names) == 0 {
@@ -104,14 +114,21 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 	case "new":
 		path, err := recipes.New(a.VM, a.OS, a.Backend)
 		if err != nil {
-			fmt.Fprintln(stderr, "stoat: recipe new:", err)
-			return ExitFail
+			return a.fail(stdout, stderr, err)
+		}
+		if a.JSON {
+			return a.ok(stdout, map[string]any{"path": path})
 		}
 		fmt.Fprintln(stdout, path)
 		if !a.Quiet {
 			fmt.Fprintln(stdout, "edit it, then pick it in the new-vm form for a matching vm")
 		}
 		return ExitOK
+	}
+	// Unreachable: Parse rejects any action but list/new.
+	if a.JSON {
+		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.UsageError("recipe: unknown action "+a.Sub))
+		return ExitUsage
 	}
 	fmt.Fprintln(stderr, "stoat: recipe: unknown action", a.Sub)
 	return ExitUsage

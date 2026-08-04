@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
 )
 
@@ -42,8 +43,16 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 	if len(a.Forwards) == 0 && !a.Clear {
 		v, err := core.Get(a.VM)
 		if err != nil {
-			fmt.Fprintln(stderr, "stoat: forward:", err)
-			return ExitFail
+			return a.fail(stdout, stderr, err)
+		}
+		if a.JSON {
+			// active is true for a showing: what is on disk is what is live,
+			// unless the VM is stopped, in which case nothing is live at all.
+			return a.ok(stdout, map[string]any{
+				"vm":       a.VM,
+				"forwards": wire.FromPortForwards(v.Forwards),
+				"active":   v.State == core.StateRunning,
+			})
 		}
 		if len(v.Forwards) == 0 {
 			fmt.Fprintf(stdout, "%s has no port forwards\n", a.VM)
@@ -57,8 +66,22 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 
 	active, err := core.Forward(a.VM, a.Forwards)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: forward:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		// applies_at is the field that must exist: "saved but not live yet"
+		// must never be readable as "refused", which is the bug core.Forward's
+		// own doc comment warns about.
+		appliesAt := "now"
+		if !active {
+			appliesAt = "next_start"
+		}
+		return a.ok(stdout, map[string]any{
+			"vm":         a.VM,
+			"forwards":   wire.FromPortForwards(a.Forwards),
+			"active":     active,
+			"applies_at": appliesAt,
+		})
 	}
 	if a.Quiet {
 		return ExitOK
@@ -83,8 +106,13 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 func runPrune(a *Args, stdout, stderr io.Writer) int {
 	removed, err := core.Prune(a.Prune)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: prune:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		return a.ok(stdout, map[string]any{
+			"dry_run": a.Prune.DryRun,
+			"items":   wire.FromPruneItems(removed),
+		})
 	}
 	if len(removed) == 0 {
 		fmt.Fprintln(stdout, "nothing to prune")
@@ -121,40 +149,44 @@ func prunePrefix(class string) string {
 // discarded with no second copy, so it says what it did rather than
 // succeeding silently.
 func runSnapshot(a *Args, stdout, stderr io.Writer) int {
+	// action names which of the three this was, for the wire. Only the matching
+	// case runs; an empty action means no tag was given, so this is a listing.
+	var action string
+	var actErr error
 	switch {
 	case a.Restore:
-		if err := core.Restore(a.VM, a.Tag); err != nil {
-			fmt.Fprintln(stderr, "stoat: snapshot:", err)
-			return ExitFail
-		}
-		if !a.Quiet {
-			fmt.Fprintf(stdout, "%s restored to %s\n", a.VM, a.Tag)
-		}
-		return ExitOK
+		action, actErr = "restore", core.Restore(a.VM, a.Tag)
 	case a.Delete:
-		if err := core.DeleteSnapshot(a.VM, a.Tag); err != nil {
-			fmt.Fprintln(stderr, "stoat: snapshot:", err)
-			return ExitFail
-		}
-		if !a.Quiet {
-			fmt.Fprintf(stdout, "deleted %s\n", a.Tag)
-		}
-		return ExitOK
+		action, actErr = "delete", core.DeleteSnapshot(a.VM, a.Tag)
 	case a.Tag != "":
-		if err := core.TakeSnapshot(a.VM, a.Tag); err != nil {
-			fmt.Fprintln(stderr, "stoat: snapshot:", err)
-			return ExitFail
+		action, actErr = "save", core.TakeSnapshot(a.VM, a.Tag)
+	}
+	if action != "" {
+		if actErr != nil {
+			return a.fail(stdout, stderr, actErr)
+		}
+		if a.JSON {
+			return a.ok(stdout, map[string]any{"vm": a.VM, "tag": a.Tag, "action": action})
 		}
 		if !a.Quiet {
-			fmt.Fprintf(stdout, "saved %s\n", a.Tag)
+			switch action {
+			case "restore":
+				fmt.Fprintf(stdout, "%s restored to %s\n", a.VM, a.Tag)
+			case "delete":
+				fmt.Fprintf(stdout, "deleted %s\n", a.Tag)
+			case "save":
+				fmt.Fprintf(stdout, "saved %s\n", a.Tag)
+			}
 		}
 		return ExitOK
 	}
 
 	snaps, err := core.Snapshots(a.VM)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: snapshot:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		return a.ok(stdout, map[string]any{"vm": a.VM, "snapshots": wire.FromSnapshots(snaps)})
 	}
 	if len(snaps) == 0 {
 		fmt.Fprintf(stdout, "%s has no snapshots\n", a.VM)
@@ -181,11 +213,22 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 // It also prints the fix command when there is one. The installer has always
 // told the user how to repair a failed check; the CLI made them guess.
 func runDoctor(a *Args, stdout, stderr io.Writer) int {
+	checks := core.Doctor()
 	var failed []core.HostCheck
-	for _, c := range core.Doctor() {
+	for _, c := range checks {
 		if !c.OK {
 			failed = append(failed, c)
 		}
+	}
+	if a.JSON {
+		// healthy, not ok: the envelope already owns "ok", and two
+		// differently-scoped ok fields one level apart is a trap. Exit is 0
+		// even when the host is unhealthy (§5): doctor SUCCEEDED at checking,
+		// and exit 1 means stoat failed to answer, not that the answer was no.
+		return a.ok(stdout, map[string]any{
+			"healthy": len(failed) == 0,
+			"checks":  wire.FromHostChecks(checks),
+		})
 	}
 	if len(failed) == 0 {
 		fmt.Fprintln(stdout, "ok")

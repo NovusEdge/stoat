@@ -7,14 +7,17 @@ import (
 	"io"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
 )
 
 func runLS(a *Args, stdout, stderr io.Writer) int {
 	vms, err := core.List()
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: ls:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms)})
 	}
 
 	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
@@ -55,8 +58,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	// after, the same reason it existed here originally.
 	v, err := core.Get(a.VM)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: up:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
 	}
 	// core.Get reports a broken VM as StateBroken rather than an error, so it
 	// can be listed and deleted. Neither is true of starting one: refuse here,
@@ -64,15 +66,21 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	// failing: a progress line that announces something the next line admits
 	// is impossible is worse than no line at all.
 	if v.State == core.StateBroken {
-		fmt.Fprintln(stderr, "stoat: up:", v.Error)
-		return ExitFail
+		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "starting %s...\n", a.VM)
 	}
 	if err := core.Start(a.VM); err != nil {
-		fmt.Fprintln(stderr, "stoat: up:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		// Re-read rather than emitting the pre-Start copy: state is the field a
+		// caller acts on next, and the one this command just changed.
+		if started, err := core.Get(a.VM); err == nil {
+			v = started
+		}
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
 	}
 	fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
 	return ExitOK
@@ -81,18 +89,15 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 func runDown(a *Args, stdout, stderr io.Writer) int {
 	v, err := core.Get(a.VM)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: down:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
 	}
 	// Same reasoning as up: "not running" is true of a broken VM but says
 	// nothing useful, and the parse error is the only thing that helps.
 	if v.State == core.StateBroken {
-		fmt.Fprintln(stderr, "stoat: down:", v.Error)
-		return ExitFail
+		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
 	if v.State != core.StateRunning {
-		fmt.Fprintf(stderr, "stoat: down: %s is not running\n", a.VM)
-		return ExitFail
+		return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "stopping %s...\n", a.VM)
@@ -104,11 +109,15 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		// primary one, and it's what actually produces today's exact message
 		// for that race.
 		if errors.Is(err, core.ErrNotRunning) {
-			fmt.Fprintf(stderr, "stoat: down: %s is not running\n", a.VM)
-		} else {
-			fmt.Fprintln(stderr, "stoat: down:", err)
+			return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
 		}
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		if stopped, err := core.Get(a.VM); err == nil {
+			v = stopped
+		}
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
 	}
 	fmt.Fprintf(stdout, "%s stopped\n", a.VM)
 	return ExitOK
@@ -117,14 +126,17 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	v, err := core.Get(a.VM)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: rm:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
 	}
 	if v.State == core.StateRunning {
-		fmt.Fprintf(stderr, "stoat: rm: %s is running; stop it first\n", a.VM)
-		return ExitFail
+		return a.failMsg(stdout, stderr, core.ErrAlreadyRunning, a.VM+" is running; stop it first")
 	}
 	if !a.Yes {
+		if a.JSON {
+			// --json never prompts (§1): an enforcement boundary a process can
+			// cross by answering a prompt is not a boundary.
+			return a.fail(stdout, stderr, fmt.Errorf("%w: %s", wire.ErrConfirmationRequired, a.VM))
+		}
 		if a.Quiet {
 			fmt.Fprintln(stderr, "stoat: rm: refusing to delete without -y in non-interactive mode")
 			return ExitFail
@@ -142,11 +154,12 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 		// so this only fires on the started-after-the-check race, but it's
 		// what reproduces today's exact "stop it first" message for it.
 		if errors.Is(err, core.ErrAlreadyRunning) {
-			fmt.Fprintf(stderr, "stoat: rm: %s is running; stop it first\n", a.VM)
-		} else {
-			fmt.Fprintln(stderr, "stoat: rm:", err)
+			return a.failMsg(stdout, stderr, core.ErrAlreadyRunning, a.VM+" is running; stop it first")
 		}
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		return a.ok(stdout, map[string]any{"name": a.VM, "deleted": true})
 	}
 	fmt.Fprintf(stdout, "%s deleted\n", a.VM)
 	return ExitOK
@@ -158,11 +171,17 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 func runCreate(a *Args, stdout, stderr io.Writer) int {
 	v, err := core.Create(a.Spec)
 	if err != nil {
+		if a.JSON {
+			return a.fail(stdout, stderr, err)
+		}
 		fmt.Fprintln(stderr, "stoat: create:", err)
 		if errors.Is(err, core.ErrImageNotDownloaded) {
 			fmt.Fprintln(stderr, "stoat: download it from the TUI's image picker first")
 		}
 		return ExitFail
+	}
+	if a.JSON {
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
@@ -177,8 +196,16 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 func runClone(a *Args, stdout, stderr io.Writer) int {
 	v, err := core.Clone(a.VM, a.Tag)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: clone:", err)
-		return ExitFail
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		// forwards_copied is emitted rather than left for the consumer to
+		// notice: the dropped forwards are the surprise in this command.
+		return a.ok(stdout, map[string]any{
+			"vm":              wire.FromVM(v),
+			"source":          a.VM,
+			"forwards_copied": false,
+		})
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "cloned %s to %s (ssh :%d)\n", a.VM, v.Name, v.SSHPort)
