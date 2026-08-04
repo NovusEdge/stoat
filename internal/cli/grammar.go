@@ -1,0 +1,418 @@
+package cli
+
+import (
+	"strings"
+	"time"
+
+	"github.com/novusedge/stoat/internal/core"
+)
+
+// The kong grammar: one struct per subcommand, tags instead of a hand-written
+// FlagSet per case. It replaces ~600 lines of Parse whose bulk was not the
+// interesting part of parsing but the same four mechanical steps repeated 26
+// times: build a FlagSet, pull the positional off BEFORE parsing (because
+// stdlib flag stops at the first non-flag argument), parse, then re-check the
+// argument count by hand.
+//
+// Two tags here are load-bearing and were verified against kong v1.16.0 by
+// running it, not by reading its docs:
+//
+//   - ExecCmd.Command's `passthrough:""`. It must sit on the POSITIONAL, not
+//     on the command: kong refuses a passthrough COMMAND that has more than
+//     one positional (build.go's "must contain exactly one positional
+//     argument"), and exec has two. On the positional it does what exec needs,
+//     which is that `stoat exec work ls --json` sends "--json" to the guest.
+//   - The *pointer fields on UpdateCmd. nil means the flag was absent, and a
+//     flag given as the zero value still yields a non-nil pointer, so
+//     `--share ""` clears a share while an omitted --share leaves it alone.
+//     That distinction is the whole reason core.Patch is pointers, and getting
+//     it wrong makes `update work --ram 8192` silently drop the share.
+type grammar struct {
+	// Quiet is on the root so every subcommand inherits it. --json is
+	// deliberately absent: wire.SplitJSONFlag removes it from argv before kong
+	// ever sees it, so that a usage error can still answer in the JSON
+	// contract, and so exec's guest command keeps its own --json.
+	Quiet bool `short:"q" name:"quiet" aliases:"no-interactive" help:"suppress progress chatter"`
+
+	LS      lsCmd      `cmd:"" name:"ls" help:"list VMs, one line per VM"`
+	Get     getCmd     `cmd:"" help:"show one VM"`
+	Create  createCmd  `cmd:"" help:"create a VM without starting it"`
+	Update  updateCmd  `cmd:"" help:"change a stopped VM; only the flags you pass change"`
+	Up      upCmd      `cmd:"" help:"start a VM"`
+	Down    downCmd    `cmd:"" help:"stop a VM (graceful)"`
+	Wait    waitCmd    `cmd:"" help:"block until a VM reaches a state"`
+	RM      rmCmd      `cmd:"" name:"rm" help:"delete a VM; refuses while running"`
+	Clone   cloneCmd   `cmd:"" help:"copy a VM: overlay disk, fresh ssh port, no forwards"`
+	Exec    execCmd    `cmd:"" help:"run a command in a VM; exits with the GUEST's status"`
+	SSH     sshCmd     `cmd:"" name:"ssh" help:"ssh into a VM, replacing this process"`
+	SSHCmd  sshCmdCmd  `cmd:"" name:"ssh-command" help:"print the ssh argv instead of running it"`
+	CP      cpCmd      `cmd:"" name:"cp" help:"copy a file in or out; one side is <vm>:<path>"`
+	Forward forwardCmd `cmd:"" help:"show, set or clear host:guest port forwards"`
+
+	Images   imagesCmd   `cmd:"" help:"list catalog and local images"`
+	Pull     pullCmd     `cmd:"" help:"download a catalog image"`
+	Snapshot snapshotCmd `cmd:"" help:"list, save, restore or delete a snapshot"`
+	Prune    pruneCmd    `cmd:"" help:"report, or with --apply remove, stale files"`
+
+	Apply        applyCmd        `cmd:"" help:"run the VM's recipes, streaming output"`
+	Provision    provisionCmd    `cmd:"" help:"run recipes, streaming output to stdout"`
+	Recipes      recipesCmd      `cmd:"" help:"list recipes, optionally only applicable ones"`
+	CheckRecipes checkRecipesCmd `cmd:"" help:"report why a recipe would not apply"`
+	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
+
+	Logs    logsCmd    `cmd:"" help:"tail a VM's log, or stoat's own"`
+	Doctor  doctorCmd  `cmd:"" help:"check host prerequisites"`
+	Version versionCmd `cmd:"" help:"print the stoat version"`
+	Help    helpCmd    `cmd:"" help:"show this message"`
+}
+
+type helpCmd struct{}
+
+type lsCmd struct{}
+type imagesCmd struct{}
+type doctorCmd struct{}
+type versionCmd struct{}
+
+type getCmd struct {
+	VM string `arg:"" help:"vm name"`
+}
+
+type upCmd struct {
+	VM string `arg:"" help:"vm name"`
+}
+
+type downCmd struct {
+	VM string `arg:"" help:"vm name"`
+}
+
+type sshCmd struct {
+	VM string `arg:"" help:"vm name"`
+}
+
+type sshCmdCmd struct {
+	VM string `arg:"" help:"vm name"`
+}
+
+type provisionCmd struct {
+	VM string `arg:"" help:"vm name"`
+}
+
+type rmCmd struct {
+	VM  string `arg:"" help:"vm name"`
+	Yes bool   `short:"y" help:"skip the delete confirmation"`
+}
+
+type createCmd struct {
+	Name    string `arg:"" help:"new vm name"`
+	Image   string `required:"" help:"catalog image id, or a path to your own image"`
+	OS      string `help:"override the guest OS inferred from a byo image's filename"`
+	Backend string `help:"override the backend inferred from a byo image's filename"`
+	Mode    string `help:"live or disk (alpine iso only; every other image has one mode)"`
+	RAM     int    `help:"memory in MB"`
+	// name:"cpus" is required: kong's camelCase splitter reads "CPUs" as
+	// "CP"+"Us" and would otherwise name the flag --cp-us.
+	CPUs            int      `name:"cpus" help:"vcpu count"`
+	Disk            string   `help:"disk size, absolute only (8G, 512M)"`
+	Share           string   `help:"host directory to expose in the guest"`
+	ConsolePassword string   `help:"console password; \"random\" generates one"`
+	Recipes         []string `help:"recipe names to record on the VM"`
+}
+
+// updateCmd's pointers are the point: see the type comment on grammar.
+type updateCmd struct {
+	VM      string    `arg:"" help:"vm name"`
+	RAM     *int      `help:"memory in MB"`
+	CPUs    *int      `name:"cpus" help:"vcpu count"`
+	SSHPort *int      `name:"ssh-port" help:"host port forwarded to the guest's sshd"`
+	Disk    *string   `help:"disk size, absolute only and grow-only (16G)"`
+	Share   *string   `help:"host directory to expose in the guest; empty clears it"`
+	Recipes *[]string `help:"replace the recipe list; empty clears it"`
+}
+
+type cloneCmd struct {
+	Source string `arg:"" help:"vm to copy"`
+	Name   string `arg:"" help:"new vm name"`
+}
+
+type execCmd struct {
+	VM string `arg:"" help:"vm name"`
+	// passthrough on the POSITIONAL, never on the command. See grammar's
+	// type comment.
+	Command []string `arg:"" passthrough:"" help:"the guest command, verbatim"`
+}
+
+type cpCmd struct {
+	Source string `arg:"" help:"source, either a host path or <vm>:<path>"`
+	Dest   string `arg:"" help:"destination, either a host path or <vm>:<path>"`
+}
+
+type forwardCmd struct {
+	VM    string   `arg:"" help:"vm name"`
+	Pairs []string `arg:"" optional:"" help:"HOST:GUEST port pairs; none prints the current ones"`
+	Clear bool     `help:"remove every forward from this VM"`
+}
+
+type pullCmd struct {
+	ID string `arg:"" help:"catalog image id (see stoat images)"`
+}
+
+type snapshotCmd struct {
+	VM      string `arg:"" help:"vm name"`
+	Tag     string `arg:"" optional:"" help:"snapshot name; omit to list"`
+	Restore bool   `xor:"action" help:"roll the VM back to <tag>, discarding everything since"`
+	Delete  bool   `xor:"action" help:"remove <tag>"`
+}
+
+type pruneCmd struct {
+	// --apply, not --dry-run: the destructive reading must be the one you
+	// have to type on purpose.
+	Apply  bool `help:"actually delete; without this, prune only reports"`
+	Broken bool `help:"also remove VMs whose vm.toml will not parse"`
+	Images bool `help:"also remove downloaded images no VM refers to"`
+}
+
+type waitCmd struct {
+	VM      string        `arg:"" help:"vm name"`
+	Until   string        `enum:"reachable,applied,stopped" default:"reachable" help:"state to wait for"`
+	Timeout time.Duration `default:"2m" help:"give up after this long"`
+}
+
+type applyCmd struct {
+	VM   string   `arg:"" help:"vm name"`
+	Only []string `help:"subset of the VM's own recipes"`
+}
+
+type recipesCmd struct {
+	OS      string `help:"only recipes applicable to this guest OS"`
+	Backend string `help:"only recipes applicable to this backend"`
+}
+
+type checkRecipesCmd struct {
+	Names   []string `arg:"" help:"recipe names to check"`
+	OS      string   `required:"" help:"guest OS to check against"`
+	Backend string   `help:"backend to check against"`
+}
+
+type recipeCmd struct {
+	List recipeListCmd `cmd:"" help:"list installed recipes and where they live"`
+	New  recipeNewCmd  `cmd:"" help:"scaffold a recipe in the recipes directory"`
+}
+
+type recipeListCmd struct{}
+
+type recipeNewCmd struct {
+	Name    string `arg:"" help:"recipe name"`
+	OS      string `help:"target OS for a new shell recipe"`
+	Backend string `help:"\"cloudinit\" for a cloud-init fragment; shell otherwise"`
+}
+
+type logsCmd struct {
+	VM    string `arg:"" optional:"" help:"vm name; omit to tail stoat's own log"`
+	N     int    `short:"n" default:"50" help:"number of lines to tail"`
+	Which string `enum:"console,apply" default:"console" help:"which log, with a vm name"`
+}
+
+// toArgs flattens the selected command back into the Args every runX already
+// consumes. Args survives this commit on purpose: it keeps the parser change
+// separate from the refactor that would thread these structs through 18 run
+// functions, so a behaviour regression here cannot hide inside that.
+func (g *grammar) toArgs(path string) (*Args, error) {
+	a := &Args{Cmd: path, Quiet: g.Quiet}
+	switch path {
+	case "ls", "images", "doctor", "version":
+
+	case "help":
+		// The `help` COMMAND has to render the text itself; only the -h/--help
+		// FLAG path gets it from kong's own buffer.
+		a.Help = helpText()
+
+	case "get", "up", "down", "ssh", "ssh-command", "provision":
+		a.VM = g.vmFor(path)
+
+	case "rm":
+		a.VM, a.Yes = g.RM.VM, g.RM.Yes
+
+	case "create":
+		c := g.Create
+		a.VM = c.Name
+		a.Spec = core.Spec{
+			Name: c.Name, Image: c.Image, OS: c.OS, Backend: c.Backend, Mode: c.Mode,
+			RAM: c.RAM, CPUs: c.CPUs, Disk: c.Disk, Share: c.Share,
+			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
+		}
+
+	case "update":
+		u := g.Update
+		a.VM = u.VM
+		a.Patch = core.Patch{
+			RAM: u.RAM, CPUs: u.CPUs, SSHPort: u.SSHPort,
+			Disk: u.Disk, Share: u.Share,
+		}
+		if u.Recipes != nil {
+			// The POINTER carries "was it given"; the slice it points at
+			// carries the new list. `--recipes ""` gives a non-nil pointer to
+			// an empty list, which is the instruction to clear, so the pointer
+			// must stay non-nil after trimming.
+			trimmed := trimList(*u.Recipes)
+			a.Patch.Recipes = &trimmed
+		}
+		// Wire names, and the order is fixed here rather than left to a map
+		// walk so the list a caller sees is stable between runs.
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{
+			{"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"ram", u.RAM != nil},
+			{"recipes", u.Recipes != nil}, {"share", u.Share != nil}, {"ssh_port", u.SSHPort != nil},
+		} {
+			if f.set {
+				a.Changed = append(a.Changed, f.name)
+			}
+		}
+		if len(a.Changed) == 0 {
+			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes")
+		}
+
+	case "clone":
+		a.VM, a.Tag = g.Clone.Source, g.Clone.Name
+
+	case "exec":
+		// No empty-command check: kong's own `expected "<command> ..."` fires
+		// first, so one here would be unreachable.
+		a.VM, a.Command = g.Exec.VM, g.Exec.Command
+
+	case "cp":
+		vm, remote, local, toRemote, err := splitCopyArgs(g.CP.Source, g.CP.Dest)
+		if err != nil {
+			return nil, err
+		}
+		a.VM, a.Remote, a.Local, a.ToRemote = vm, remote, local, toRemote
+
+	case "forward":
+		f := g.Forward
+		if f.Clear && len(f.Pairs) > 0 {
+			return nil, usageError("forward: --clear takes no port pairs")
+		}
+		fwds, err := parseForwards(f.Pairs)
+		if err != nil {
+			return nil, usageError("forward: " + err.Error())
+		}
+		a.VM, a.Forwards, a.Clear = f.VM, fwds, f.Clear
+
+	case "pull":
+		a.VM = g.Pull.ID
+
+	case "snapshot":
+		// The mutual exclusion of --restore and --delete is kong's, via
+		// xor:"action"; only the "needs a tag" rule is left here.
+		s := g.Snapshot
+		if (s.Restore || s.Delete) && s.Tag == "" {
+			return nil, usageError("snapshot: --restore and --delete need a tag")
+		}
+		a.VM, a.Tag, a.Restore, a.Delete = s.VM, s.Tag, s.Restore, s.Delete
+
+	case "prune":
+		a.Prune = core.PruneOpts{DryRun: !g.Prune.Apply, Broken: g.Prune.Broken, Images: g.Prune.Images}
+
+	case "wait":
+		w := g.Wait
+		if w.Timeout <= 0 {
+			return nil, usageError("wait: --timeout must be positive")
+		}
+		a.VM, a.Until, a.Timeout = w.VM, core.Until(w.Until), w.Timeout
+
+	case "apply":
+		a.VM, a.Only = g.Apply.VM, trimList(g.Apply.Only)
+
+	case "recipes":
+		a.OS, a.Backend = g.Recipes.OS, g.Recipes.Backend
+
+	case "check-recipes":
+		a.Only, a.OS, a.Backend = trimList(g.CheckRecipes.Names), g.CheckRecipes.OS, g.CheckRecipes.Backend
+		if len(a.Only) == 0 {
+			return nil, usageError("check-recipes: name at least one recipe")
+		}
+
+	case "recipe list":
+		a.Cmd, a.Sub = "recipe", "list"
+
+	case "recipe new":
+		n := g.Recipe.New
+		a.Cmd, a.Sub = "recipe", "new"
+		a.VM, a.OS, a.Backend = n.Name, n.OS, n.Backend
+
+	case "logs":
+		l := g.Logs
+		a.VM, a.N, a.Which = l.VM, l.N, core.Which(l.Which)
+
+	default:
+		return nil, usageError("unknown subcommand " + path)
+	}
+	return a, nil
+}
+
+// trimList splits each element on commas and trims what is left. Both halves
+// are needed, for different reasons:
+//
+//   - Kong splits a FLAG's value on commas but keeps the surrounding
+//     whitespace, so `--only "a.sh, b.sh"` arrives as {"a.sh", " b.sh"} and
+//     that leading space reaches a filename comparison.
+//   - Kong never comma-splits a POSITIONAL, so `check-recipes a.sh,b.sh`
+//     arrives as one element containing a comma. The stdlib flag parser this
+//     replaced did split it, and usage() documented `check-recipes a,b`, so
+//     leaving it would silently turn two recipe names into one bogus one.
+//
+// Doing both here means a positional list and a flag list behave the same,
+// which is what anyone typing either would expect. It returns nil for an
+// all-blank list, so "cleared" stays distinguishable from "not given" by the
+// pointer, never by the length.
+func trimList(in []string) []string {
+	var out []string
+	for _, elem := range in {
+		for _, s := range strings.Split(elem, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// splitCopyArgs resolves `cp <src> <dst>` into a VM, a remote path, a local
+// path and a direction, from which side carried the "<vm>:" prefix. The
+// scp/docker cp spelling, so there is no --to/--from flag to get backwards.
+func splitCopyArgs(src, dst string) (vm, remote, local string, toRemote bool, err error) {
+	srcVM, srcPath, srcRemote := strings.Cut(src, ":")
+	dstVM, dstPath, dstRemote := strings.Cut(dst, ":")
+	switch {
+	case srcRemote == dstRemote:
+		// Both or neither: guest-to-guest is not something one scp invocation
+		// can do across two forwarded ports, and host-to-host is just `cp`.
+		return "", "", "", false, usageError("cp: exactly one side must be <vm>:<path>")
+	case srcRemote:
+		return srcVM, srcPath, dst, false, nil
+	default:
+		return dstVM, dstPath, src, true, nil
+	}
+}
+
+// vmFor reads the VM name off whichever single-positional command was
+// selected. They differ only by struct, so a switch here beats six near
+// identical cases in toArgs.
+func (g *grammar) vmFor(path string) string {
+	switch path {
+	case "get":
+		return g.Get.VM
+	case "up":
+		return g.Up.VM
+	case "down":
+		return g.Down.VM
+	case "ssh":
+		return g.SSH.VM
+	case "ssh-command":
+		return g.SSHCmd.VM
+	case "provision":
+		return g.Provision.VM
+	}
+	return ""
+}

@@ -1,5 +1,5 @@
 // Package cli implements stoat's non-interactive, scriptable interface: a
-// switch on the first argument dispatching into internal/core. No subcommand
+// switch on the parsed subcommand dispatching into internal/core. No subcommand
 // contains business logic of its own: parsing flags, printing, and the
 // confirmation prompt are the whole of it, so the TUI, the CLI and an MCP
 // server can never drift into bugs that reproduce in one and not the others.
@@ -10,14 +10,18 @@
 // here is deliberate: internal/sshx for `ssh`, which execs and replaces this
 // process, and internal/recipes/logx for the two commands that are genuinely
 // about files on the host rather than about a VM.
+//
+// The grammar lives in grammar.go (kong struct tags); this file holds Args,
+// Parse's thin wrapper around kong, and Main's dispatch.
 package cli
 
 import (
-	"flag"
+	"bytes"
 	"fmt"
 	"io"
-	"strings"
 	"time"
+
+	"github.com/alecthomas/kong"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
@@ -44,10 +48,16 @@ type Args struct {
 	N     int // logs -n
 
 	// JSON is set by Main from the pre-parse argv scan, never by Parse: the
-	// flag has to be recognized before any FlagSet exists so a usage error
+	// flag has to be recognized before any parser exists so a usage error
 	// can still produce an envelope. It implies Quiet, so every prose line
 	// already gated on -q disappears without a second condition.
 	JSON bool
+
+	// Help carries kong's generated help text for the `help` subcommand and
+	// for -h/--help. It replaces a hand-written usage() string that had to be
+	// edited by hand every time a flag changed, and silently did not have to
+	// be, which is how it came to document 10 of 26 subcommands.
+	Help string
 
 	// Sub is the second word for subcommands that have one ("recipe list").
 	// OS and Backend belong to "recipe new"; VM carries the recipe name
@@ -92,7 +102,7 @@ type Args struct {
 	Spec core.Spec
 
 	// Until and Timeout belong to "wait"; Which belongs to "logs"; Only
-	// belongs to "apply". All are core's own types where core has one.
+	// belongs to "apply" and carries the names for "check-recipes".
 	Until   core.Until
 	Timeout time.Duration
 	Which   core.Which
@@ -100,8 +110,9 @@ type Args struct {
 
 	// Patch belongs to "update", and Changed names the flags that were
 	// actually GIVEN. core.Patch is all pointers so "not set" differs from
-	// "set to the zero value", and the two must not be conflated: comparing
-	// against zero would make `update work --ram 8192` silently clear share.
+	// "set to the zero value", and kong's own pointer fields carry that
+	// distinction through without a second mechanism: an absent --share is a
+	// nil pointer, and `--share ""` is a pointer to the empty string.
 	Patch   core.Patch
 	Changed []string
 }
@@ -113,18 +124,130 @@ type usageError string
 
 func (e usageError) Error() string { return string(e) }
 
-func newFlagSet(name string) *flag.FlagSet {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard) // Main reports errors itself, once, consistently
-	return fs
+// newParser builds the kong parser. The two options are what keep kong from
+// behaving like a program rather than a library: Exit swallows the os.Exit
+// kong would otherwise call on -h and on a parse error, and Writers sends its
+// help and error output into help rather than to the real stderr, so Main
+// stays the only thing that decides what gets printed and with which exit
+// code. Without both, --json could not answer a usage error in the contract.
+func newParser(g *grammar, help *bytes.Buffer) (*kong.Kong, error) {
+	return kong.New(g,
+		kong.Name("stoat"),
+		kong.Description("Run local QEMU VMs. No libvirt, no daemon.\n\n"+
+			"Bare \"stoat\" with no arguments launches the interactive TUI.\n"+
+			"Add --json to any command for one JSON object per line on stdout,\n"+
+			"errors included; it implies --quiet and never prompts.\n\n"+
+			"exit codes: 0 success, 1 runtime failure, 2 usage error"),
+		// No UsageOnError: it only feeds FatalIfErrorf, which this package
+		// never calls, so it would be configuration implying a behaviour that
+		// does not happen. Main decides what gets printed.
+		kong.Exit(func(int) {}),
+		kong.Writers(help, help),
+	)
 }
 
-// addQuiet registers -q, --quiet and --no-interactive as aliases for the
-// same bool, per the brief: the user named --no-interactive specifically.
-func addQuiet(fs *flag.FlagSet, quiet *bool) {
-	fs.BoolVar(quiet, "q", false, "suppress progress chatter")
-	fs.BoolVar(quiet, "quiet", false, "suppress progress chatter")
-	fs.BoolVar(quiet, "no-interactive", false, "suppress progress chatter (alias for -q)")
+// commandPath joins the selected command's COMMAND nodes, so a nested command
+// comes back as "recipe new". ctx.Command() is deliberately not used: it
+// interleaves positional placeholders ("exec <vm> <command>") and so cannot be
+// switched on.
+func commandPath(ctx *kong.Context) string {
+	var parts []string
+	for _, t := range ctx.Path {
+		if t.Command != nil {
+			parts = append(parts, t.Command.Name)
+		}
+	}
+	return joinSpace(parts)
+}
+
+func joinSpace(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += " "
+		}
+		out += p
+	}
+	return out
+}
+
+// Parse turns argv (excluding the "stoat" program name) into an Args, or a
+// usageError. It never executes anything, which is what makes it testable
+// as a pure function: kong.Parse populates the grammar and returns, and no
+// Run() method exists for it to call.
+func Parse(args []string) (*Args, error) {
+	if len(args) > 0 && args[0] == "exec" {
+		return parseExec(args[1:])
+	}
+
+	var g grammar
+	var help bytes.Buffer
+
+	p, err := newParser(&g, &help)
+	if err != nil {
+		// A malformed grammar is a programming error in grammar.go, not
+		// anything the user typed. It cannot be reached from a test that only
+		// varies argv, so it is reported rather than swallowed.
+		return nil, usageError("cli grammar: " + err.Error())
+	}
+
+	ctx, perr := p.Parse(args)
+
+	// kong writes help into the buffer for -h/--help before returning an
+	// error for the missing command. A non-empty buffer with a failed parse
+	// therefore means "help was asked for", which is a success, not a usage
+	// error. Checked before perr for exactly that reason.
+	if help.Len() > 0 {
+		return &Args{Cmd: "help", Help: help.String()}, nil
+	}
+	if perr != nil {
+		return nil, usageError(perr.Error())
+	}
+	return g.toArgs(commandPath(ctx))
+}
+
+// parseExec handles `exec <vm> <cmd>...` WITHOUT kong, deliberately. Kong's
+// passthrough is not verbatim enough for this command, verified by running it:
+//
+//   - a leading flag token is resolved against the root's own flags first, so
+//     `exec work -q` loses the -q to stoat's --quiet and the guest gets an
+//     empty command;
+//   - a leading shorthand cluster is split, so `exec work -la` reaches the
+//     guest as "-l" "a".
+//
+// Both are silent corruption of the one command whose entire contract is that
+// the guest's argv arrives untouched, and both are invisible to a caller. The
+// argv scan for --json (wire.SplitJSONFlag) already stops at exec's VM name
+// for exactly this reason, so this is the same rule applied twice, not a new
+// special case.
+func parseExec(rest []string) (*Args, error) {
+	if len(rest) == 0 {
+		return nil, usageError("exec: missing vm name")
+	}
+	name, cmd := rest[0], rest[1:]
+	// A leading "--" is accepted and dropped for anyone in the habit of
+	// writing it, but it is not required.
+	if len(cmd) > 0 && cmd[0] == "--" {
+		cmd = cmd[1:]
+	}
+	if len(cmd) == 0 {
+		return nil, usageError("exec: missing command")
+	}
+	return &Args{Cmd: "exec", VM: name, Command: cmd}, nil
+}
+
+// helpText renders the same text `stoat --help` prints, for the `help`
+// subcommand and for --json help. It is generated from the grammar, so unlike
+// the usage() string it replaces, it cannot drift from the actual flags.
+func helpText() string {
+	var g grammar
+	var help bytes.Buffer
+	p, err := newParser(&g, &help)
+	if err != nil {
+		return "cli grammar: " + err.Error()
+	}
+	_, _ = p.Parse([]string{"--help"})
+	return help.String()
 }
 
 // ok writes a command's terminal result. Under --json that is the single
@@ -163,573 +286,6 @@ func (a *Args) failMsg(stdout, stderr io.Writer, sentinel error, msg string) int
 	return ExitFail
 }
 
-// splitList reads a comma-separated flag value, dropping blanks so a trailing
-// comma or a lone "" yields nothing rather than an empty-named entry. It
-// returns nil for an empty value: a caller that needs to distinguish "cleared"
-// from "not given" checks the flag was set, not the length of this.
-func splitList(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// Parse turns argv (excluding the "stoat" program name) into an Args, or a
-// usageError. It never executes anything, which is what makes it testable
-// as a pure function.
-func Parse(args []string) (*Args, error) {
-	if len(args) == 0 {
-		return nil, usageError("no subcommand given")
-	}
-	cmd := args[0]
-	rest := args[1:]
-
-	switch cmd {
-	case "ls", "doctor", "version", "help":
-		fs := newFlagSet(cmd)
-		var quiet bool
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rest); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("%s: unexpected argument %q", cmd, fs.Arg(0)))
-		}
-		return &Args{Cmd: cmd, Quiet: quiet}, nil
-
-	case "up", "down", "ssh", "provision":
-		fs := newFlagSet(cmd)
-		var quiet bool
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rest); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() < 1 {
-			return nil, usageError(fmt.Sprintf("%s: missing vm name", cmd))
-		}
-		if fs.NArg() > 1 {
-			return nil, usageError(fmt.Sprintf("%s: too many arguments", cmd))
-		}
-		return &Args{Cmd: cmd, VM: fs.Arg(0), Quiet: quiet}, nil
-
-	case "rm":
-		// The name is pulled off BEFORE flag parsing when it comes first, the
-		// same trick "create" and "recipe new" use. Go's flag package stops at
-		// the first non-flag argument, so `stoat rm work -y` used to leave -y
-		// unparsed and then reject it as a stray argument, even though the
-		// usage text has always documented exactly that form. Both orders work
-		// now; only `rm -y work` did before.
-		rem := rest
-		var name string
-		if len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
-			name, rem = rem[0], rem[1:]
-		}
-
-		fs := newFlagSet(cmd)
-		var quiet, yes bool
-		addQuiet(fs, &quiet)
-		fs.BoolVar(&yes, "y", false, "skip the delete confirmation")
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if name == "" {
-			if fs.NArg() < 1 {
-				return nil, usageError("rm: missing vm name")
-			}
-			name = fs.Arg(0)
-			if fs.NArg() > 1 {
-				return nil, usageError("rm: too many arguments")
-			}
-		} else if fs.NArg() != 0 {
-			return nil, usageError("rm: too many arguments")
-		}
-		return &Args{Cmd: "rm", VM: name, Quiet: quiet, Yes: yes}, nil
-
-	case "create":
-		// Same positional-before-flags rule as "recipe new" below.
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("create: missing vm name")
-		}
-		name, rem := rest[0], rest[1:]
-
-		fs := newFlagSet(cmd)
-		var quiet bool
-		s := core.Spec{Name: name}
-		fs.StringVar(&s.Image, "image", "", "catalog image id, or a path to your own image")
-		fs.StringVar(&s.OS, "os", "", "override the guest OS inferred from a byo image's filename")
-		fs.StringVar(&s.Backend, "backend", "", "override the backend inferred from a byo image's filename")
-		fs.StringVar(&s.Mode, "mode", "", "live or disk (alpine iso only; every other image has one mode)")
-		fs.IntVar(&s.RAM, "ram", 0, "memory in MB")
-		fs.IntVar(&s.CPUs, "cpus", 0, "vcpu count")
-		fs.StringVar(&s.Disk, "disk", "", "disk size, absolute only (8G, 512M)")
-		fs.StringVar(&s.Share, "share", "", "host directory to expose in the guest")
-		fs.StringVar(&s.ConsolePassword, "console-password", "", `console password; "random" generates one`)
-		recipeList := fs.String("recipes", "", "comma-separated recipe names to record on the VM")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("create: unexpected argument %q", fs.Arg(0)))
-		}
-		if s.Image == "" {
-			return nil, usageError("create: --image is required")
-		}
-		s.Recipes = splitList(*recipeList)
-		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
-
-	case "images":
-		fs := newFlagSet(cmd)
-		var quiet bool
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rest); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("images: unexpected argument %q", fs.Arg(0)))
-		}
-		return &Args{Cmd: "images", Quiet: quiet}, nil
-
-	case "pull":
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("pull: missing image id (see `stoat images`)")
-		}
-		id, rem := rest[0], rest[1:]
-		fs := newFlagSet(cmd)
-		var quiet bool
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("pull: unexpected argument %q", fs.Arg(0)))
-		}
-		return &Args{Cmd: "pull", VM: id, Quiet: quiet}, nil
-
-	case "clone":
-		if len(rest) != 2 {
-			return nil, usageError("clone: need a source and a new name")
-		}
-		return &Args{Cmd: "clone", VM: rest[0], Tag: rest[1]}, nil
-
-	case "prune":
-		fs := newFlagSet(cmd)
-		var quiet bool
-		var opts core.PruneOpts
-		// DryRun is the DEFAULT, inverted by --apply, because every other
-		// spelling makes the destructive reading the easy one to type by
-		// accident. Prune is the only command here that can remove several
-		// unrelated things at once.
-		var apply bool
-		fs.BoolVar(&apply, "apply", false, "actually delete; without this, prune only reports")
-		fs.BoolVar(&opts.Broken, "broken", false, "also remove VMs whose vm.toml will not parse")
-		fs.BoolVar(&opts.Images, "images", false, "also remove downloaded images no VM refers to")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rest); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("prune: unexpected argument %q", fs.Arg(0)))
-		}
-		opts.DryRun = !apply
-		return &Args{Cmd: "prune", Prune: opts, Quiet: quiet}, nil
-
-	case "snapshot":
-		// `stoat snapshot <vm>` lists; `snapshot <vm> <tag>` saves;
-		// `--restore` / `--delete` act on an existing tag. Listing is the
-		// no-argument default for the same reason `forward` prints rather than
-		// clears: the destructive readings of a half-typed command should not
-		// be the ones that happen.
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("snapshot: missing vm name")
-		}
-		name, rem := rest[0], rest[1:]
-		var tag string
-		if len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
-			tag, rem = rem[0], rem[1:]
-		}
-
-		fs := newFlagSet(cmd)
-		var quiet, restore, del bool
-		fs.BoolVar(&restore, "restore", false, "roll the VM back to <tag>, discarding everything since")
-		fs.BoolVar(&del, "delete", false, "remove <tag>")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("snapshot: unexpected argument %q", fs.Arg(0)))
-		}
-		if restore && del {
-			return nil, usageError("snapshot: --restore and --delete are mutually exclusive")
-		}
-		if (restore || del) && tag == "" {
-			return nil, usageError("snapshot: --restore and --delete need a tag")
-		}
-		return &Args{Cmd: "snapshot", VM: name, Tag: tag, Restore: restore, Delete: del, Quiet: quiet}, nil
-
-	case "cp":
-		// `stoat cp <src> <dst>`, where exactly one side is `<vm>:<path>`,
-		// the scp/docker cp spelling. Direction is inferred from which side
-		// carries the colon, so there is no --to/--from flag to get backwards.
-		if len(rest) != 2 {
-			return nil, usageError("cp: need a source and a destination, one of them <vm>:<path>")
-		}
-		srcVM, srcPath, srcRemote := strings.Cut(rest[0], ":")
-		dstVM, dstPath, dstRemote := strings.Cut(rest[1], ":")
-		switch {
-		case srcRemote == dstRemote:
-			// Both or neither: guest-to-guest is not something one scp
-			// invocation can do across two forwarded ports, and host-to-host
-			// is just `cp`.
-			return nil, usageError("cp: exactly one side must be <vm>:<path>")
-		case srcRemote:
-			return &Args{Cmd: "cp", VM: srcVM, Remote: srcPath, Local: rest[1]}, nil
-		default:
-			return &Args{Cmd: "cp", VM: dstVM, Remote: dstPath, Local: rest[0], ToRemote: true}, nil
-		}
-
-	case "forward":
-		// `stoat forward <name> 8080:80 8443:443`, the docker/ssh spelling,
-		// host first. With no pairs it PRINTS the current forwards rather than
-		// clearing them: silently wiping a VM's forwards because an argument
-		// was forgotten is not a mistake worth allowing. Use --clear to mean it.
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("forward: missing vm name")
-		}
-		name, rem := rest[0], rest[1:]
-
-		fs := newFlagSet(cmd)
-		var quiet, clear bool
-		fs.BoolVar(&clear, "clear", false, "remove every forward from this VM")
-		addQuiet(fs, &quiet)
-		// Flags first so the pairs that follow are never eaten by flag parsing.
-		var pairs []string
-		for _, a := range rem {
-			if strings.HasPrefix(a, "-") {
-				if err := fs.Parse([]string{a}); err != nil {
-					return nil, usageError(err.Error())
-				}
-				continue
-			}
-			pairs = append(pairs, a)
-		}
-		if clear && len(pairs) > 0 {
-			return nil, usageError("forward: --clear takes no port pairs")
-		}
-		fwds, err := parseForwards(pairs)
-		if err != nil {
-			return nil, usageError("forward: " + err.Error())
-		}
-		return &Args{Cmd: "forward", VM: name, Forwards: fwds, Clear: clear, Quiet: quiet}, nil
-
-	case "exec":
-		// exec parses NO flags of its own, deliberately. Everything after the
-		// VM name is the guest's command, verbatim: running `stoat exec work
-		// ls -la` must send -la to ls, not have stoat try to interpret it.
-		// A leading "--" is accepted and dropped for anyone in the habit of
-		// writing it, but it is not required.
-		if len(rest) == 0 {
-			return nil, usageError("exec: missing vm name")
-		}
-		name, cmd := rest[0], rest[1:]
-		if len(cmd) > 0 && cmd[0] == "--" {
-			cmd = cmd[1:]
-		}
-		if len(cmd) == 0 {
-			return nil, usageError("exec: missing command")
-		}
-		return &Args{Cmd: "exec", VM: name, Command: cmd}, nil
-
-	case "recipe":
-		// Positionals are pulled off BEFORE flag parsing: Go's flag package
-		// stops at the first non-flag argument, so "recipe new x --os alpine"
-		// would otherwise leave --os unparsed and reported as a stray
-		// argument. Flags therefore come after the name, which is also how
-		// the usage text spells it.
-		if len(rest) == 0 {
-			return nil, usageError(`recipe: expected "list" or "new <name>"`)
-		}
-		sub, rem := rest[0], rest[1:]
-		var name string
-		switch sub {
-		case "list":
-		case "new":
-			if len(rem) == 0 || strings.HasPrefix(rem[0], "-") {
-				return nil, usageError("recipe new: missing name")
-			}
-			name, rem = rem[0], rem[1:]
-		default:
-			return nil, usageError(fmt.Sprintf("recipe: unknown action %q (expected \"list\" or \"new\")", sub))
-		}
-
-		fs := newFlagSet(cmd)
-		var quiet bool
-		osName := fs.String("os", "", "target OS for a new shell recipe (alpine, ubuntu, debian, arch, fedora)")
-		backend := fs.String("backend", "", `"cloudinit" for a cloud-init fragment; shell otherwise`)
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("recipe %s: unexpected argument %q", sub, fs.Arg(0)))
-		}
-		return &Args{Cmd: "recipe", Sub: sub, VM: name, OS: *osName, Backend: *backend, Quiet: quiet}, nil
-
-	case "get", "ssh-command":
-		fs := newFlagSet(cmd)
-		var quiet bool
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rest); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() < 1 {
-			return nil, usageError(fmt.Sprintf("%s: missing vm name", cmd))
-		}
-		if fs.NArg() > 1 {
-			return nil, usageError(fmt.Sprintf("%s: too many arguments", cmd))
-		}
-		return &Args{Cmd: cmd, VM: fs.Arg(0), Quiet: quiet}, nil
-
-	case "wait":
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("wait: missing vm name")
-		}
-		name, rem := rest[0], rest[1:]
-
-		fs := newFlagSet(cmd)
-		var quiet bool
-		until := fs.String("until", string(core.UntilReachable), "reachable, applied or stopped")
-		timeout := fs.Duration("timeout", 2*time.Minute, "give up after this long")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("wait: unexpected argument %q", fs.Arg(0)))
-		}
-		switch core.Until(*until) {
-		case core.UntilReachable, core.UntilApplied, core.UntilStopped:
-		default:
-			return nil, usageError(fmt.Sprintf("wait: unknown --until %q (want reachable, applied or stopped)", *until))
-		}
-		if *timeout <= 0 {
-			return nil, usageError("wait: --timeout must be positive")
-		}
-		return &Args{Cmd: "wait", VM: name, Until: core.Until(*until), Timeout: *timeout, Quiet: quiet}, nil
-
-	case "apply":
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("apply: missing vm name")
-		}
-		name, rem := rest[0], rest[1:]
-
-		fs := newFlagSet(cmd)
-		var quiet bool
-		only := fs.String("only", "", "comma-separated subset of the VM's own recipes")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("apply: unexpected argument %q", fs.Arg(0)))
-		}
-		return &Args{Cmd: "apply", VM: name, Only: splitList(*only), Quiet: quiet}, nil
-
-	case "recipes":
-		fs := newFlagSet(cmd)
-		var quiet bool
-		osName := fs.String("os", "", "only recipes applicable to this guest OS")
-		backend := fs.String("backend", "", "only recipes applicable to this backend")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rest); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("recipes: unexpected argument %q", fs.Arg(0)))
-		}
-		return &Args{Cmd: "recipes", OS: *osName, Backend: *backend, Quiet: quiet}, nil
-
-	case "check-recipes":
-		// The names are positional and come first, same rule as everywhere
-		// else here: Go's flag package stops at the first non-flag argument.
-		var names []string
-		rem := rest
-		for len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
-			names = append(names, splitList(rem[0])...)
-			rem = rem[1:]
-		}
-		fs := newFlagSet(cmd)
-		var quiet bool
-		osName := fs.String("os", "", "guest OS to check against")
-		backend := fs.String("backend", "", "backend to check against")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("check-recipes: unexpected argument %q", fs.Arg(0)))
-		}
-		if len(names) == 0 {
-			return nil, usageError("check-recipes: name at least one recipe")
-		}
-		if *osName == "" {
-			return nil, usageError("check-recipes: --os is required")
-		}
-		return &Args{Cmd: "check-recipes", Only: names, OS: *osName, Backend: *backend, Quiet: quiet}, nil
-
-	case "update":
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return nil, usageError("update: missing vm name")
-		}
-		name, rem := rest[0], rest[1:]
-
-		fs := newFlagSet(cmd)
-		var quiet bool
-		var ram, cpus, sshPort int
-		var disk, share, recipeList string
-		fs.IntVar(&ram, "ram", 0, "memory in MB")
-		fs.IntVar(&cpus, "cpus", 0, "vcpu count")
-		fs.IntVar(&sshPort, "ssh-port", 0, "host port forwarded to the guest's sshd")
-		fs.StringVar(&disk, "disk", "", "disk size, absolute only and grow-only (16G)")
-		fs.StringVar(&share, "share", "", "host directory to expose in the guest; empty clears it")
-		fs.StringVar(&recipeList, "recipes", "", "replace the recipe list; empty clears it")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("update: unexpected argument %q", fs.Arg(0)))
-		}
-
-		// fs.Visit walks only the flags actually GIVEN, which is the whole
-		// point: --share "" must clear the share, and an absent --share must
-		// leave it alone, and comparing against the zero value cannot tell
-		// those apart. Nothing here may read a flag variable outside this walk.
-		a := &Args{Cmd: "update", VM: name, Quiet: quiet}
-		fs.Visit(func(f *flag.Flag) {
-			switch f.Name {
-			case "ram":
-				a.Patch.RAM, a.Changed = &ram, append(a.Changed, "ram")
-			case "cpus":
-				a.Patch.CPUs, a.Changed = &cpus, append(a.Changed, "cpus")
-			case "ssh-port":
-				a.Patch.SSHPort, a.Changed = &sshPort, append(a.Changed, "ssh_port")
-			case "disk":
-				a.Patch.Disk, a.Changed = &disk, append(a.Changed, "disk")
-			case "share":
-				a.Patch.Share, a.Changed = &share, append(a.Changed, "share")
-			case "recipes":
-				list := splitList(recipeList)
-				if list == nil {
-					list = []string{} // non-nil: "clear the list", not "untouched"
-				}
-				a.Patch.Recipes, a.Changed = &list, append(a.Changed, "recipes")
-			}
-		})
-		if len(a.Changed) == 0 {
-			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes")
-		}
-		return a, nil
-
-	case "logs":
-		// A VM name is optional: with one, this is that VM's console or apply
-		// log; without one it stays what it has always been, a tail of stoat's
-		// own log. The collision is deliberate (the alternative was a second
-		// subcommand named only to dodge it) and documented in usage().
-		rem := rest
-		var name string
-		if len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
-			name, rem = rem[0], rem[1:]
-		}
-		fs := newFlagSet(cmd)
-		var quiet bool
-		n := fs.Int("n", 50, "number of lines to tail")
-		which := fs.String("which", string(core.WhichConsole), "console or apply (with a vm name)")
-		addQuiet(fs, &quiet)
-		if err := fs.Parse(rem); err != nil {
-			return nil, usageError(err.Error())
-		}
-		if fs.NArg() != 0 {
-			return nil, usageError(fmt.Sprintf("logs: unexpected argument %q", fs.Arg(0)))
-		}
-		switch core.Which(*which) {
-		case core.WhichConsole, core.WhichApply:
-		default:
-			return nil, usageError(fmt.Sprintf("logs: unknown --which %q (want console or apply)", *which))
-		}
-		return &Args{Cmd: "logs", VM: name, Which: core.Which(*which), Quiet: quiet, N: *n}, nil
-
-	default:
-		return nil, usageError(fmt.Sprintf("unknown subcommand %q", cmd))
-	}
-}
-
-func usage() string {
-	return `usage: stoat <command> [flags]
-
-commands:
-  ls                   list VMs, one line per VM
-  create <name> --image <id|path> [--ram MB] [--cpus N] [--disk 8G]
-                [--share DIR] [--recipes a,b] [--mode live|disk]
-                [--os NAME] [--backend NAME] [--console-password random]
-                       create a VM without starting it
-
-  get <name>           show one VM
-  update <name> [--ram MB] [--cpus N] [--disk 16G] [--share DIR]
-                [--ssh-port N] [--recipes a,b]
-                       change a stopped VM; only the flags you pass change
-  up <name>            start a VM
-  down <name>          stop a VM (graceful)
-  wait <name> [--until reachable|applied|stopped] [--timeout 2m]
-                       block until the VM reaches that state
-  apply <name> [--only a,b]
-                       run the VM's recipes, streaming output
-  recipes [--os NAME] [--backend NAME]
-                       list recipes, optionally only applicable ones
-  check-recipes a,b --os NAME [--backend NAME]
-                       report why a recipe would not apply, before creating
-  ssh-command <name>   print the ssh argv instead of running it
-  ssh <name>           ssh into a VM, replacing this process
-  images               list catalog and local images
-  pull <image-id>      download a catalog image
-  clone <vm> <newname>  copy a VM: overlay disk, fresh ssh port, no forwards
-  prune [--apply] [--broken] [--images]
-                       report (or with --apply, remove) stale partial
-                       downloads; opt in to broken VMs and unused images
-  snapshot <vm> [tag] [--restore|--delete]
-                       list, save, restore or delete a snapshot
-  cp <src> <dst>       copy a file in or out; one side is <vm>:<path>
-  forward <name> [8080:80 ...] [--clear]
-                       show, set or clear host:guest port forwards
-  exec <name> <cmd>... run a command in a VM; exits with the GUEST's status.
-                       Everything after <name> is the command, verbatim.
-  provision <name>     run recipes, streaming output to stdout
-  rm <name> [-y]       delete a VM; refuses while running, confirms unless -y
-  logs [<vm>] [-n N] [--which console|apply]
-                       with a vm name, tail that VM's log; without one,
-                       tail stoat's own log (default 50 lines)
-  recipe list          list installed recipes and where they live
-  recipe new <name> [--os alpine] [--backend cloudinit]
-                       scaffold a recipe in the recipes directory
-  doctor               check host prerequisites
-  version              print the stoat version
-  help                 show this message
-
-global flags:
-  --json                          one JSON object per line on stdout, errors included;
-                                  implies --quiet and never prompts
-  -q, --quiet, --no-interactive   suppress progress chatter (results and errors still print)
-  -y                               (rm only) skip the delete confirmation
-
-exit codes: 0 success, 1 runtime failure, 2 usage error
-
-bare "stoat" with no arguments launches the interactive TUI.`
-}
-
 // Main parses args and dispatches, returning the process exit code. version
 // is the build's version string (for the `version` subcommand). stdin is
 // used only by `rm`'s confirmation prompt.
@@ -760,7 +316,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 			return ExitUsage
 		}
 		fmt.Fprintln(stderr, "stoat:", err)
-		fmt.Fprintln(stderr, usage())
+		fmt.Fprintln(stderr, helpText())
 		return ExitUsage
 	}
 	a.JSON = jsonMode
@@ -774,9 +330,9 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	switch a.Cmd {
 	case "help":
 		if a.JSON {
-			return a.ok(stdout, map[string]any{"usage": usage()})
+			return a.ok(stdout, map[string]any{"usage": a.Help})
 		}
-		fmt.Fprintln(stdout, usage())
+		fmt.Fprintln(stdout, a.Help)
 		return ExitOK
 	case "version":
 		if a.JSON {

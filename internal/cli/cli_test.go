@@ -65,7 +65,9 @@ func TestParse(t *testing.T) {
 
 		{"doctor", []string{"doctor"}, &Args{Cmd: "doctor"}, false},
 		{"version", []string{"version"}, &Args{Cmd: "version"}, false},
-		{"help", []string{"help"}, &Args{Cmd: "help"}, false},
+		// help is asserted in TestParseHelpCarriesGeneratedText, not here: its
+		// Args carries the whole generated help string, which this table
+		// compares with DeepEqual and cannot sensibly hardcode.
 
 		{"up", []string{"up", "alpine"}, &Args{Cmd: "up", VM: "alpine"}, false},
 		{"up missing name", []string{"up"}, nil, true},
@@ -204,6 +206,32 @@ func TestParseRecipe(t *testing.T) {
 				t.Errorf("Parse(%v) = %+v, want %+v", c.args, got, c.want)
 			}
 		})
+	}
+}
+
+// Help text is generated from the kong grammar now, so the failure mode is
+// not "the text is stale" (it cannot be) but "the text is empty", which is
+// what `stoat help` did when the help COMMAND set Cmd without rendering
+// anything and only the -h FLAG path worked. Exit code 0 hid it.
+func TestParseHelpCarriesGeneratedText(t *testing.T) {
+	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}} {
+		a, err := Parse(args)
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", args, err)
+		}
+		if a.Cmd != "help" {
+			t.Errorf("Parse(%v) Cmd = %q, want help", args, a.Cmd)
+		}
+		if a.Help == "" {
+			t.Fatalf("Parse(%v) produced empty help text", args)
+		}
+		// Every subcommand has to appear, which is the property a
+		// hand-written usage() string could not keep.
+		for _, want := range []string{"ls", "create", "exec", "check-recipes", "ssh-command", "update"} {
+			if !strings.Contains(a.Help, want) {
+				t.Errorf("Parse(%v) help omits %q", args, want)
+			}
+		}
 	}
 }
 
