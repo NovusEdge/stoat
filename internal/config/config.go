@@ -16,8 +16,8 @@ import (
 
 // PortForward is one user-declared host->guest TCP forward, additional to
 // the SSHPort forward every VM already gets. Validation (range, collisions
-// with other VMs' ports, privileged ports) lives in core.Forward, not here --
-// this package is the on-disk shape only, matching how VM itself carries no
+// with other VMs' ports, privileged ports) lives in core.Forward, not here.
+// This package is the on-disk shape only, matching how VM itself carries no
 // validation of its own fields.
 type PortForward struct {
 	HostPort  int `toml:"hostport"`
@@ -41,7 +41,7 @@ type VM struct {
 	// Forwards are user-declared TCP ports forwarded from the host into the
 	// guest, additional to the SSHPort forward that always exists. Rendered
 	// into qemu's -netdev hostfwd= clauses by internal/qemu.Args. Applied at
-	// NEXT START only -- qemu has no way to hot-add a hostfwd rule to a
+	// next start only. qemu has no way to hot-add a hostfwd rule to a
 	// running user-mode netdev, so editing this field while the VM is
 	// running changes vm.toml immediately but has no effect on the live
 	// process. See core.Forward and core.ErrAppliesAtNextStart, which exist
@@ -60,16 +60,12 @@ type VM struct {
 	// package writing "root" into every vm.toml.
 	SSHUser string `toml:"sshuser"`
 
-	// ConsolePassword is the password for SSHUser at the VM's GRAPHICAL
-	// CONSOLE — reached over VNC (qemu.NeedsWindow is false for every VM
-	// this gets set on: it's only ever written for the cloudinit backend,
-	// which is always cloud mode) — not over ssh. Cloud images lock every
-	// account by default (cloud-init's lock_passwd defaults to true) and
-	// stoat's seed sets ssh_pwauth: false, so without this a cloud VM shows
-	// a login prompt nobody on earth can answer: root is locked and the
-	// stoat user has no password. Empty means no console login is possible,
-	// which is the correct state for a live Alpine VM, whose root already
-	// logs in at the console with no password at all.
+	// ConsolePassword is the password for SSHUser at the VM's graphical
+	// console (VNC), not over ssh. Only ever written for the cloudinit
+	// backend: cloud images lock every account by default and stoat's seed
+	// sets ssh_pwauth: false, so without this the console login is
+	// unanswerable. Empty means no console login, which is correct for a
+	// live Alpine VM, whose root already logs in with no password.
 	ConsolePassword string `toml:"console_password"`
 
 	Dir string `toml:"-"` // absolute path to the VM directory
@@ -97,6 +93,17 @@ func EnsureRoot() error {
 	return nil
 }
 
+// reserved reports whether a directory in the data root is stoat's own rather
+// than a VM. Everything not listed here is treated as a VM directory, so a new
+// one must be added or it gets scanned as a candidate VM.
+func reserved(name string) bool {
+	switch name {
+	case "isos", "recipes", "shared", "logs":
+		return true
+	}
+	return false
+}
+
 // expand resolves a leading ~ against the user's home directory.
 func expand(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
@@ -116,10 +123,21 @@ func (v *VM) VNCPath() string        { return filepath.Join(v.Dir, "vnc.sock") }
 func (v *VM) OvlDir() string         { return filepath.Join(v.Dir, "ovl") }
 func (v *VM) ConsoleLogPath() string { return filepath.Join(v.Dir, "console.log") }
 
+// WorkDir is the VM's writable 9p export, mounted at /mnt/work in the guest.
+//
+// It lives under the data root rather than inside v.Dir so a human has a
+// clean place to browse (~/.stoat/shared/<vm>/) instead of digging through
+// runtime state like qemu.pid and monitor.sock.
+//
+// Derived from v.Dir, not v.Name: the directory basename is the VM's
+// identity everywhere else in stoat (see core.VM.Name), so a vm.toml whose
+// name field disagrees with its directory can't point this at another VM's
+// share.
+func (v *VM) WorkDir() string { return filepath.Join(Root(), "shared", filepath.Base(v.Dir)) }
+
 // ProvisionLogPath is the transcript of the most recent recipe run, written
 // by sshx.Provision. Lives here rather than in sshx so every VM path has one
-// home, matching ConsoleLogPath/DiskPath/etc. — a second copy of this
-// literal is exactly the drift this package exists to prevent.
+// home, matching ConsoleLogPath/DiskPath/etc.
 func (v *VM) ProvisionLogPath() string { return filepath.Join(v.Dir, "last-provision.log") }
 
 // ISOPath resolves the configured ISO against the data root.
@@ -166,7 +184,7 @@ func List() ([]*VM, error) {
 	}
 	var vms []*VM
 	for _, e := range entries {
-		if !e.IsDir() || e.Name() == "isos" || e.Name() == "recipes" {
+		if !e.IsDir() || reserved(e.Name()) {
 			continue
 		}
 		v, err := Load(e.Name())
@@ -198,7 +216,7 @@ func ListBroken() ([]Broken, error) {
 	}
 	var broken []Broken
 	for _, e := range entries {
-		if !e.IsDir() || e.Name() == "isos" || e.Name() == "recipes" {
+		if !e.IsDir() || reserved(e.Name()) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(Root(), e.Name(), "vm.toml")); err != nil {
@@ -222,13 +240,20 @@ func (v *VM) Delete() error {
 	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {
 		return fmt.Errorf("refusing to delete %q: outside the data root", v.Dir)
 	}
+	// The 9p work share lives outside v.Dir, so removing the VM directory
+	// alone leaks it. Guarded the same way: only ever under <root>/shared.
+	if work := v.WorkDir(); filepath.Dir(work) == filepath.Join(Root(), "shared") {
+		if err := os.RemoveAll(work); err != nil {
+			return err
+		}
+	}
 	return os.RemoveAll(v.Dir)
 }
 
 // BrokenSSHPort best-effort reads the sshport out of a VM directory whose
 // vm.toml does not parse, so callers assigning a port can avoid one that a
-// broken VM is still committed to. An error means no port could be read —
-// which is not the same as the VM claiming none.
+// broken VM is still committed to. An error means no port could be read;
+// that is not the same as the VM claiming none.
 func BrokenSSHPort(name string) (int, error) {
 	data, err := os.ReadFile(filepath.Join(Root(), name, "vm.toml"))
 	if err != nil {
@@ -255,11 +280,9 @@ func FreePort() (int, error) {
 			claimed[v.SSHPort] = true
 		}
 	}
-	// A broken vm.toml can't be parsed for its port, but the port it was
-	// using is very likely still committed to that VM's disk image. Rather
-	// than treat "unparseable" as "claims nothing" (which is exactly how the
-	// original collision happened), best-effort regex the raw file text for
-	// a sshport line and reserve that port too.
+	// A broken vm.toml can't be parsed for its port, but that port is very
+	// likely still committed to the VM's disk image, so best-effort regex
+	// the raw file text for it too.
 	if broken, err := ListBroken(); err == nil {
 		for _, b := range broken {
 			if p, err := BrokenSSHPort(b.Name); err == nil {

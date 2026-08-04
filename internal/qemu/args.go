@@ -11,12 +11,10 @@ import (
 // Binary is the QEMU executable stoat drives.
 const Binary = "qemu-system-x86_64"
 
-// NeedsWindow reports whether a human has to look at this VM's screen. Only
-// one case does: a disk-mode VM that has not been installed yet, where the
-// user is driving an OS installer that draws to VGA and would be invisible
-// on a serial console. live and cloud reach ssh with no console interaction
-// at all, and an installed disk VM boots the same way -- for those the
-// window only opens, steals focus, and gets alt-tabbed away from.
+// NeedsWindow reports whether a human has to look at this VM's screen: only
+// an uninstalled disk-mode VM, whose OS installer draws to VGA rather than
+// the serial console. live, cloud, and installed disk VMs reach ssh with no
+// console interaction.
 //
 // Exported so the TUI can describe the right escape hatch (a GTK window vs.
 // the VNC socket) without duplicating this rule.
@@ -27,18 +25,9 @@ func NeedsWindow(v *config.VM) bool {
 // Args returns the argv (excluding argv[0]) for a VM. It is pure: the config
 // must already be resolved, and nothing here touches the filesystem.
 func Args(v *config.VM) []string {
-	// hostfwd is repeatable within a single -netdev's option string: QEMU's
-	// user-mode networking accepts any number of comma-separated
-	// "hostfwd=[tcp|udp]:[hostaddr]:hostport-[guestaddr]:guestport" clauses
-	// on one netdev instance, each opening its own host listener into the
-	// guest. Verified directly, not just read off docs: launched real
-	// qemu-system-x86_64 11.0.2 with
-	// "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:19922-:22,hostfwd=tcp:127.0.0.1:19980-:80"
-	// and confirmed with `ss -ltn` that BOTH 127.0.0.1:19922 and
-	// 127.0.0.1:19980 came up as independent host listeners from that one
-	// netdev. This is why additional forwards are appended clauses on the
-	// SSH netdev rather than a second -netdev/-device pair -- one guest
-	// NIC, N forwarded ports, matching a router's port-forwarding table.
+	// hostfwd is repeatable within a single -netdev's option string, so
+	// additional forwards are appended clauses on the SSH netdev rather than
+	// a second -netdev/-device pair.
 	netdev := fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.SSHPort)
 	for _, f := range v.Forwards {
 		netdev += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:%d", f.HostPort, f.GuestPort)
@@ -51,43 +40,19 @@ func Args(v *config.VM) []string {
 		"-daemonize",
 		"-pidfile", v.PidPath(),
 		"-monitor", "unix:" + v.MonitorPath() + ",server,nowait",
-		// A QMP socket ALONGSIDE the human monitor above, not replacing it.
-		//
-		// The design doc expected snapshots to force a wholesale migration to
-		// QMP. They do not, and doing it that way would mean rewriting Stop
-		// and TypeConsolePassword — two features that work — to gain nothing
-		// they need. QEMU is happy to serve both protocols at once on separate
-		// sockets, so the new operation gets the protocol it needs (framed
-		// JSON, with errors that can be told apart from output) while the
-		// existing two keep the one they already use correctly.
-		//
-		// Both are ",server,nowait": QEMU creates the socket and does not
-		// block waiting for anyone to connect, so a VM nobody ever snapshots
-		// pays nothing for this.
+		// QMP alongside the human monitor, not replacing it: Stop and
+		// TypeConsolePassword still use the monitor, QMP is for snapshots.
+		// ",server,nowait" means QEMU doesn't block waiting for a connection.
 		"-qmp", "unix:" + v.QMPPath() + ",server,nowait",
-		// The guest's serial console, captured unconditionally. An automated VM
-		// has no window and no operator watching it, so this file is the only
-		// postmortem when a boot fails. Cheap: QEMU writes it whether or not
-		// anything ever reads it.
-		//
-		// Note this is the SERIAL console, not the VGA one the display shows.
-		// What lands here depends entirely on the guest's console= setting:
-		// Alpine's generic cloud images point their console at tty0, so this
-		// file gets only early kernel messages, not the full boot. Still, it's
-		// the first place to look when a guest never comes up -- an empty log
-		// here is a real, non-buggy outcome for some guests, not a sign this
-		// broke.
-		//
-		// "-serial file:<path>" TRUNCATES on every start (verified against
-		// real QEMU). The realistic sequence this log exists for is a
-		// headless VM failing to come up and the user restarting it -- with
-		// plain file: that restart destroys the only evidence before anyone
-		// reads it. append=on on an explicit chardev keeps it.
+		// Serial console, captured unconditionally as the only postmortem for
+		// a headless VM. What lands here depends on the guest's console=
+		// setting; Alpine's cloud images only send early kernel messages.
+		// append=on because plain "-serial file:<path>" truncates on every
+		// start, destroying the log on the next restart after a failed boot.
 		"-chardev", "file,id=con0,path=" + v.ConsoleLogPath() + ",append=on",
 		"-serial", "chardev:con0",
-		// Bind loopback explicitly: the QEMU default is 0.0.0.0, which would
-		// publish every guest's SSH (and every user-declared forward) to the
-		// LAN.
+		// Bind loopback explicitly: QEMU's default is 0.0.0.0, which would
+		// publish SSH and every forward to the LAN.
 		"-netdev", netdev,
 		"-device", "virtio-net,netdev=n0",
 	}
@@ -96,34 +61,41 @@ func Args(v *config.VM) []string {
 		a = append(a, "-vga", "virtio", "-display", "gtk,gl=on")
 	} else {
 		// -display none is irreversible on a running qemu, so bind VNC to a
-		// socket at launch. It costs nothing when unused and means the
-		// display is always recoverable for a guest that misbehaves.
+		// socket at launch instead, recoverable for a misbehaving guest.
 		a = append(a, "-display", "none", "-vnc", "unix:"+v.VNCPath())
 	}
 
+	// Two exports (core-api.md §10.2): the user's dir read-only, stoat's
+	// per-VM scratch writable.
+	//
+	// mapped-xattr uses the unprivileged user.* namespace, and stops a
+	// guest-created symlink from being a real host symlink (under `none` it
+	// is one, and a host process walking the share follows it out).
+	//
+	// readonly=on is enforced host-side: `mount -o remount,rw` succeeds in the
+	// guest but writes still fail EROFS. readonly=1 is a parse error.
+	//
+	// -virtfs derives the fsdev id from mount_tag, so the tags must differ.
 	if v.Share != "" {
-		// security_model is mandatory; passthrough needs root and mapped-xattr
-		// needs host xattr support, so none is the only unprivileged option.
 		a = append(a, "-virtfs",
-			fmt.Sprintf("local,path=%s,mount_tag=host,security_model=none", v.Share))
+			fmt.Sprintf("local,path=%s,mount_tag=host,security_model=mapped-xattr,readonly=on", v.Share))
 	}
+	a = append(a, "-virtfs",
+		fmt.Sprintf("local,path=%s,mount_tag=work,security_model=mapped-xattr", v.WorkDir()))
 
-	// Mode owns the BOOT MEDIA -- the qcow2, the installer ISO, the boot
-	// order. It deliberately does not decide anything about how the guest is
-	// provisioned; that is the backend's, below.
+	// Mode owns the boot media: the qcow2, the installer ISO, the boot
+	// order. Provisioning is the backend's job, below.
 	switch v.Mode {
 	case "live":
 		a = append(a, "-cdrom", v.ISOPath())
 		// vvfat synthesizes a valid MBR signature but no boot code, so without
 		// an explicit boot order QEMU's disk-first default can select the
-		// empty overlay the apkovl backend attaches and hang instead of
-		// falling through to the ISO.
+		// empty apkovl overlay and hang instead of falling through to the ISO.
 		a = append(a, "-boot", "d")
 	case "disk":
-		// The qcow2 comes first so it is vda: the installer's disk picker
-		// lists devices in order, and the target must be the obvious answer.
-		// Everything appended after this point is a later device, which is
-		// why the backend's drive goes on the end rather than inline here.
+		// qcow2 comes first so it is vda: the installer's disk picker lists
+		// devices in order and the target must be the obvious answer. The
+		// backend's drive goes on the end, after this.
 		a = append(a, "-drive", "file="+v.DiskPath()+",if=virtio")
 		if !v.Installed {
 			a = append(a, "-cdrom", v.ISOPath())
@@ -134,18 +106,11 @@ func Args(v *config.VM) []string {
 	}
 
 	// The provisioning artifact's drive: the apkovl overlay, the cloud-init
-	// seed, or nothing. Appended last, and unconditionally -- each backend
-	// decides for itself which of v's modes it applies to, so this single
-	// call covers the vvfat overlay a live boot and an uninstalled disk VM
-	// both need, and the seed cdrom a cloud VM needs.
+	// seed, or nothing, per backend.For(v) rather than v.OS. That is what
+	// makes alpine-cloud (OS "alpine", backend "cloudinit") resolve to the
+	// right one instead of an apkovl it can't boot from.
 	//
-	// Asking the backend rather than comparing v.OS == "alpine" is also what
-	// makes alpine-cloud resolve correctly: it is OS "alpine" but backend
-	// "cloudinit" (see internal/backend.For), so an OS comparison would hand
-	// it an apkovl it does not boot from.
-	//
-	// Order is safe to leave until the end: the seed is a cdrom, and the
-	// overlay is only ever a second virtio disk behind either the installer
-	// ISO or the qcow2 that must stay vda.
+	// Safe to append last: the seed is a cdrom, and the overlay is only ever
+	// a second virtio disk behind the installer ISO or the qcow2 (vda).
 	return append(a, backend.For(v).Args(v)...)
 }

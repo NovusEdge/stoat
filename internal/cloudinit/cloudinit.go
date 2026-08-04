@@ -18,6 +18,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
+	"gopkg.in/yaml.v3"
 )
 
 // User is the account the seed creates, and therefore the account anything
@@ -73,10 +74,11 @@ func guestShell(osName string) string {
 // installed (the cloud-init aport prefers doas), so without this the fragment
 // refers to a command that does not exist and every escalating recipe fails.
 //
-// Returned as a #cloud-config-shaped fragment body, not raw text spliced
-// onto the base block: it goes through mergeCloudRecipes alongside any
-// recipe bodies so a recipe's own packages: list still ends up as a single,
-// valid YAML packages: key instead of two competing ones.
+// Returned as its own #cloud-config-shaped fragment body, not raw text
+// spliced onto the base block: it becomes its own document in the
+// cloud-config-archive (see buildArchive), alongside the base users: block
+// and any recipe bodies, so a recipe's own packages: list still ends up
+// merged with this one instead of one silently overwriting the other.
 func extraPackages(osName string) string {
 	o, ok := guest.Lookup(osName)
 	if !ok || len(o.SeedPackages) == 0 {
@@ -91,18 +93,42 @@ func extraPackages(osName string) string {
 	return b.String()
 }
 
-// userData builds the #cloud-config body: the hardware-proven users: block
-// (parameterized by the guest's shell), followed by whatever packages:/
-// runcmd: the OS needs for itself and the VM's selected cloud recipes ask
-// for, merged into a single valid document by mergeCloudRecipes.
-func userData(v *config.VM, pubkey string, recipeBodies []string) string {
+// userData builds the seed's user-data as a cloud-config-archive: the
+// hardware-proven users: block (parameterized by the guest's shell), the
+// OS's own extra packages if it needs any, and every selected cloud
+// recipe's body verbatim, each as its own document. cloud-init merges the
+// documents itself (see buildArchive) -- this package no longer parses any
+// of them for packages:/runcmd:, so a fragment using write_files: or any
+// other key survives instead of being silently dropped.
+func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
 
-	bodies := recipeBodies
+	docs := []string{base, mountsDoc(v)}
 	if extra := extraPackages(v.OS); extra != "" {
-		bodies = append([]string{extra}, bodies...)
+		docs = append(docs, extra)
 	}
-	return base + mergeCloudRecipes(bodies)
+	docs = append(docs, recipeBodies...)
+
+	return buildArchive(docs)
+}
+
+// mountsDoc mounts the 9p exports. Cloud VMs previously got the exports on the
+// QEMU command line and nothing ever mounted them, so the share silently did
+// nothing.
+//
+// nofail is required: some cloud kernels ship no 9p module at all (Debian's
+// does not), and without it an unmountable share holds up boot. ro on the host
+// mount matches what QEMU enforces, so a write fails immediately instead of
+// after a remount that appears to succeed.
+func mountsDoc(v *config.VM) string {
+	const opts = "trans=virtio,version=9p2000.L,%s,_netdev,nofail"
+	var b strings.Builder
+	b.WriteString("#cloud-config\nmounts:\n")
+	b.WriteString(fmt.Sprintf("  - [ work, /mnt/work, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "rw")))
+	if v.Share != "" {
+		b.WriteString(fmt.Sprintf("  - [ host, /mnt/host, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "ro")))
+	}
+	return b.String()
 }
 
 // consolePasswordBlock renders the two lines that make console login work,
@@ -132,73 +158,105 @@ func haveXorriso() bool {
 	return err == nil
 }
 
-// splitYAMLTopLevelKey extracts the value block for a top-level YAML key
-// from a flat cloud-config-style document: the "key:" line itself plus
-// every following line that is blank or indented, stopping at the next
-// non-indented, non-blank line (the next top-level key) or EOF. Returns ""
-// if key is not present as a top-level key.
-func splitYAMLTopLevelKey(doc, key string) string {
-	lines := strings.Split(doc, "\n")
-	var block []string
-	capturing := false
-	for _, line := range lines {
-		if !capturing {
-			if strings.HasPrefix(line, key+":") {
-				capturing = true
-				block = append(block, line)
-			}
-			continue
-		}
-		if line == "" || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-			block = append(block, line)
-			continue
-		}
-		break
-	}
-	return strings.TrimRight(strings.Join(block, "\n"), "\n")
+// haveCloudInit reports whether the cloud-init binary is on PATH. Mirrors
+// haveXorriso above: Arch does not install cloud-init by default (see
+// guest-subsystem.md §10), so schema validation must degrade to "not
+// checked" rather than "assumed valid" -- callers of ValidateFragment must
+// treat a nil error with no annotated output as "not checked", not "passed".
+func haveCloudInit() bool {
+	_, err := exec.LookPath("cloud-init")
+	return err == nil
 }
 
-// yamlListItems returns the item lines under a top-level YAML list key in
-// doc, with the "key:" header line itself stripped off. Returns "" if key
-// is absent.
-func yamlListItems(doc, key string) string {
-	block := splitYAMLTopLevelKey(doc, key)
-	nl := strings.IndexByte(block, '\n')
-	if nl < 0 {
-		return ""
+// ValidateFragment runs `cloud-init schema -c FILE --annotate` against a
+// single #cloud-config document, offline and before boot, and returns the
+// annotated output. It returns ("", nil) when cloud-init is not installed --
+// the caller must not treat that as "valid", only as "unchecked".
+//
+// `cloud-init schema` validates one cloud-config document, not a
+// cloud-config-archive, so this takes a single fragment body -- callers
+// validate each recipe body before it is merged into buildArchive's output.
+func ValidateFragment(body string) (annotated string, err error) {
+	if !haveCloudInit() {
+		return "", nil
 	}
-	return block[nl+1:]
+
+	f, err := os.CreateTemp("", "stoat-cloudinit-schema-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("creating schema-check temp file: %w", err)
+	}
+	defer os.Remove(f.Name())
+
+	if _, err := f.WriteString(body); err != nil {
+		f.Close()
+		return "", fmt.Errorf("writing schema-check temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("writing schema-check temp file: %w", err)
+	}
+
+	out, err := exec.Command("cloud-init", "schema", "-c", f.Name(), "--annotate").CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("cloud-init schema: %w", err)
+	}
+	return string(out), nil
 }
 
-// mergeCloudRecipes splices the packages: and runcmd: lists out of each
-// cloud recipe fragment body and concatenates them into single packages:/
-// runcmd: sections. Fragments are plain #cloud-config documents (see
-// xfce.cloud.yaml); only those two top-level keys are recognized, since
-// that is the shape every cloud recipe in this repo uses. Returns "" if no
-// fragment contributes anything, so a no-recipe VM's user-data stays
-// byte-identical to the hand-verified baseline.
-func mergeCloudRecipes(recipeBodies []string) string {
-	var packages, runcmd []string
-	for _, body := range recipeBodies {
-		if p := yamlListItems(body, "packages"); p != "" {
-			packages = append(packages, p)
-		}
-		if r := yamlListItems(body, "runcmd"); r != "" {
-			runcmd = append(runcmd, r)
-		}
+// mergeHow is the explicit merge directive every document in the archive
+// carries. cloud-init's default merge is dict(no_replace)+list()+str(): two
+// documents both declaring packages: do NOT append, the first one wins and
+// the second is silently discarded. append+recurse_list makes list values
+// (packages:, runcmd:, ...) concatenate instead.
+const mergeHow = "list(append)+dict(recurse_list)"
+
+// withMergeHow injects merge_how as a top-level key into a #cloud-config
+// document body.
+//
+// Per cloud-init's merge model (merging.rst, "Specifying multiple types"), a
+// document's OWN merge_how does not govern how it merges in -- it governs
+// how the NEXT document in the archive merges into the accumulated result.
+// The first document is always merged with the built-in default regardless
+// of what it declares. So to guarantee every later document appends rather
+// than silently losing to an earlier one, every document except the last
+// needs the directive -- and since callers may pass any number of recipe
+// bodies, the last one isn't known in advance, so every document gets it.
+// This matches cloud-init's own worked example in merging.rst, which puts
+// merge_how in both halves of a two-document merge rather than relying on
+// which one happens to be last.
+func withMergeHow(doc string) string {
+	directive := fmt.Sprintf("merge_how: %q\n", mergeHow)
+	if rest, ok := strings.CutPrefix(doc, "#cloud-config\n"); ok {
+		return "#cloud-config\n" + directive + rest
 	}
-	var out strings.Builder
-	if len(packages) > 0 {
-		out.WriteString("packages:\n")
-		out.WriteString(strings.Join(packages, "\n"))
-		out.WriteString("\n")
+	return directive + doc
+}
+
+// archiveDoc is one entry of a cloud-config-archive: cloud-init's own
+// format for a list of {type, content} documents that it merges itself,
+// replacing the packages:/runcmd:-only splicing this package used to do by
+// hand (see doc/examples/cloud-config-archive.txt upstream).
+type archiveDoc struct {
+	Type    string `yaml:"type"`
+	Content string `yaml:"content"`
+}
+
+// buildArchive renders docs as a cloud-config-archive. The
+// "#cloud-config-archive" header is required verbatim on its own first
+// line -- it is what NoCloud's format-detection matches on to unpack the
+// payload as an archive rather than parse it (and fail) as one big
+// #cloud-config document. Each doc is carried through withMergeHow so the
+// archive as a whole merges by appending rather than by cloud-init's
+// default first-one-wins.
+func buildArchive(docs []string) (string, error) {
+	items := make([]archiveDoc, len(docs))
+	for i, d := range docs {
+		items[i] = archiveDoc{Type: "text/cloud-config", Content: withMergeHow(d)}
 	}
-	if len(runcmd) > 0 {
-		out.WriteString("runcmd:\n")
-		out.WriteString(strings.Join(runcmd, "\n"))
-		out.WriteString("\n")
+	out, err := yaml.Marshal(items)
+	if err != nil {
+		return "", fmt.Errorf("marshaling cloud-config-archive: %w", err)
 	}
-	return out.String()
+	return "#cloud-config-archive\n" + string(out), nil
 }
 
 // Seed writes <v.OvlDir()>/seed/{user-data,meta-data} and builds
@@ -219,7 +277,10 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 		return "", err
 	}
 
-	ud := userData(v, pubkey, recipeBodies)
+	ud, err := userData(v, pubkey, recipeBodies)
+	if err != nil {
+		return "", err
+	}
 	if err := os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(ud), 0o644); err != nil {
 		return "", err
 	}

@@ -83,8 +83,7 @@ func Uptime(v *config.VM) time.Duration {
 
 // installedBytes is how much has to be written into a disk VM's qcow2 before
 // stoat believes an OS landed in it. A freshly created 8G qcow2 is ~200 KB of
-// metadata and nothing else; the smallest real install is three orders of
-// magnitude past this, so the gap is not close.
+// metadata and nothing else; the smallest real install is well past this.
 //
 // ponytail: a size check, not a partition-table read. If an install dies
 // halfway and trips this anyway, "i" on the detail screen forces the ISO back.
@@ -92,7 +91,7 @@ const installedBytes = 10 << 20
 
 // diskWritten reports whether v's disk image has had anything real written to
 // it. qcow2 files grow as guest blocks are allocated, so the host-side size is
-// the whole signal — no qemu-img, no NBD mount.
+// the whole signal, with no qemu-img and no NBD mount needed.
 func diskWritten(v *config.VM) bool {
 	fi, err := os.Stat(v.DiskPath())
 	return err == nil && fi.Size() > installedBytes
@@ -105,9 +104,9 @@ func Start(v *config.VM) error {
 		return fmt.Errorf("%s is already running", v.Name)
 	}
 	os.Remove(v.MonitorPath())
-	// The interactive install happens inside the guest, where stoat cannot
-	// watch it finish. Noticing it here — at the next start, which is the
-	// only moment the boot order matters — means nobody has to report it.
+	// The interactive install happens inside the guest, where stoat can't
+	// watch it finish. Checked here, at the next start, since that's the
+	// only moment the boot order matters.
 	if v.Mode == "disk" && !v.Installed && diskWritten(v) {
 		v.Installed = true
 		if err := v.Save(); err != nil {
@@ -117,12 +116,15 @@ func Start(v *config.VM) error {
 		logx.L().Info("disk has an OS on it, marking installed", "vm", v.Name)
 	}
 	// Build whatever pre-boot artifact this VM's backend needs: the apkovl
-	// overlay (live, or an uninstalled disk install) or the cloud-init seed
-	// (cloud mode, first start only). Each backend decides for itself
-	// whether v's current state means there is anything to do -- see
-	// internal/backend for the conditions this replaces.
+	// overlay, or the cloud-init seed (cloud mode, first start only). Each
+	// backend decides for itself whether there's anything to do.
 	if err := backend.For(v).Prepare(v); err != nil {
 		return fmt.Errorf("preparing %s: %w", v.Name, err)
+	}
+	// Before QEMU, not inside Args: a missing export path is fatal, and Args
+	// is pure by contract.
+	if err := prepareShares(v); err != nil {
+		return err
 	}
 	cmd := exec.Command(Binary, Args(v)...)
 	var stderr bytes.Buffer
@@ -135,8 +137,8 @@ func Start(v *config.VM) error {
 		logx.L().Error("start failed", "vm", v.Name, "err", msg)
 		return fmt.Errorf("qemu failed to start: %s", msg)
 	}
-	// Log how to get in, not just that it started: this is the line someone
-	// greps for when a VM is up but they cannot reach it.
+	// Log how to get in, not just that it started. This is the line someone
+	// greps for when a VM is up but unreachable.
 	user := v.SSHUser
 	if user == "" {
 		user = "root"

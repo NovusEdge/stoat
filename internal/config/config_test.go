@@ -291,3 +291,26 @@ func TestFreePortFreshInstallNoVMs(t *testing.T) {
 		l.Close()
 	}
 }
+
+// The 9p work share lives outside the VM directory, so deleting the VM
+// directory alone would leak it.
+func TestDeleteRemovesTheWorkShare(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &VM{Name: "w", Dir: filepath.Join(root, "w")}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(v.WorkDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v.WorkDir(), "f"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Delete(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(v.WorkDir()); !os.IsNotExist(err) {
+		t.Error("work share left behind after Delete")
+	}
+}

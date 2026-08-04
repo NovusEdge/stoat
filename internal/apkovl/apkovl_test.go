@@ -113,7 +113,9 @@ func TestBuildProducesTheAlpineContract(t *testing.T) {
 	}
 }
 
-func TestBuildOmitsFstabWhenNoShare(t *testing.T) {
+// A VM with no configured share still mounts /mnt/work, so localmount is
+// always needed now. Only /mnt/host is conditional.
+func TestBuildOmitsHostMountWhenNoShare(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 	v := &config.VM{Name: "bare", Mode: "live", Dir: filepath.Join(root, "bare")}
@@ -124,8 +126,32 @@ func TestBuildOmitsFstabWhenNoShare(t *testing.T) {
 	if strings.Contains(content["etc/fstab"], "/mnt/host") {
 		t.Error("fstab mounts /mnt/host for a VM with no share")
 	}
-	if _, ok := hdrs["etc/runlevels/boot/localmount"]; ok {
-		t.Error("localmount symlink present for a VM with no share")
+	if !strings.Contains(content["etc/fstab"], "/mnt/work") {
+		t.Error("fstab must mount /mnt/work even with no share configured")
+	}
+	if _, ok := hdrs["etc/runlevels/boot/localmount"]; !ok {
+		t.Error("localmount symlink missing, so /mnt/work would never mount")
+	}
+}
+
+// The host mount is read-only and the work mount is not. nofail is on both:
+// some guest kernels ship no 9p module, and an unmountable share must not
+// hold up boot.
+func TestBuildFstabMountOptions(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &config.VM{Name: "shared", Mode: "live", Share: "/home/u/vms", Dir: filepath.Join(root, "shared")}
+	if err := Build(v); err != nil {
+		t.Fatal(err)
+	}
+	content, _ := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
+	for _, want := range []string{
+		"host /mnt/host 9p trans=virtio,version=9p2000.L,ro,_netdev,nofail 0 0",
+		"work /mnt/work 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0",
+	} {
+		if !strings.Contains(content["etc/fstab"], want) {
+			t.Errorf("fstab missing %q, got:\n%s", want, content["etc/fstab"])
+		}
 	}
 }
 

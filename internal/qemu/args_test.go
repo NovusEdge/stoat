@@ -26,7 +26,7 @@ func TestArgsLive(t *testing.T) {
 		"-monitor unix:/data/live1/monitor.sock,server,nowait",
 		"-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2201-:22",
 		"-device virtio-net,netdev=n0",
-		"-virtfs local,path=/home/u/vms,mount_tag=host,security_model=none",
+		"-virtfs local,path=/home/u/vms,mount_tag=host,security_model=mapped-xattr,readonly=on",
 		"-cdrom /data/isos/alpine.iso",
 		"-drive file=fat:rw:/data/live1/ovl,format=raw,if=virtio",
 	} {
@@ -254,13 +254,50 @@ func TestArgsNoForwardsUnchanged(t *testing.T) {
 	}
 }
 
-func TestArgsNoShare(t *testing.T) {
+// A VM with no configured share still gets the writable `work` export, but
+// must not get a `host` one. Every VM has somewhere to exchange files;
+// only the read-only view of the user's own directory is optional.
+func TestArgsNoShareStillGetsWork(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{
 		Name: "bare", Mode: "live", ISO: "isos/alpine.iso",
 		RAM: 1024, CPUs: 1, SSHPort: 2203, Dir: "/data/bare",
 	}
-	if strings.Contains(joined(Args(v)), "-virtfs") {
-		t.Error("empty share must not produce a -virtfs flag")
+	got := joined(Args(v))
+	want := "-virtfs local,path=/data/shared/bare,mount_tag=work,security_model=mapped-xattr"
+	if !strings.Contains(got, want) {
+		t.Errorf("want %q in:\n%s", want, got)
+	}
+	if strings.Contains(got, "mount_tag=host") {
+		t.Error("empty share must not produce a host export")
+	}
+}
+
+// The host export is read-only and the work export is not. This asymmetry is
+// the security model (core-api.md §10.2), so it is pinned exactly rather than
+// checked loosely: readonly=on is what stops a guest writing to the user's
+// own files, and mapped-xattr is what stops a guest-created symlink becoming
+// a real host symlink.
+func TestArgsShareExportsAreAsymmetric(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "shared", Mode: "live", ISO: "isos/alpine.iso",
+		RAM: 1024, CPUs: 1, SSHPort: 2203, Dir: "/data/shared-vm",
+		Share: "/home/u/vms",
+	}
+	got := joined(Args(v))
+	for _, want := range []string{
+		"-virtfs local,path=/home/u/vms,mount_tag=host,security_model=mapped-xattr,readonly=on",
+		"-virtfs local,path=/data/shared/shared-vm,mount_tag=work,security_model=mapped-xattr",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "security_model=none") {
+		t.Error("security_model=none leaves guest-created symlinks as real host symlinks")
+	}
+	if strings.Contains(got, "mount_tag=work,security_model=mapped-xattr,readonly=on") {
+		t.Error("the work export must be writable")
 	}
 }
