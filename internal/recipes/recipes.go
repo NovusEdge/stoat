@@ -114,6 +114,9 @@ func install(src fs.FS) error {
 	if err := os.MkdirAll(dir(), 0o755); err != nil {
 		return err
 	}
+	if err := sweepV1(); err != nil {
+		return err
+	}
 	items, err := fs.ReadDir(src, ".")
 	if err != nil {
 		return err
@@ -129,6 +132,70 @@ func install(src fs.FS) error {
 		}
 	}
 	return writeManifest(next)
+}
+
+// v1AtticName holds the flat recipe files v1 left in the recipes directory.
+// A dotfile so nothing lists it, and so a second sweep skips it like any
+// other dotfile.
+const v1AtticName = ".v1-removed"
+
+// sweepV1 moves v1's flat recipe files out of the recipes directory, once.
+//
+// v1 kept a recipe in a single file whose target OS was encoded in its name
+// ("xfce.alpine.sh", "xfce.cloud.yaml"). v2 keeps each recipe in a directory
+// with a recipe.toml. Nothing reads the old format, so upgrading otherwise
+// leaves a directory holding both: fifteen dead files sitting next to four
+// live directories, all of them looking equally authoritative to someone
+// opening the folder to write a recipe.
+//
+// The rule is the v2 invariant, not a list of v1 names: a recipe is a
+// DIRECTORY, so any regular file here is not a recipe. That way this carries
+// no knowledge of the old format and keeps working for whatever v1 shipped
+// across its life, including the .bak files Install used to leave behind.
+//
+// Moved rather than deleted. These are cheap to keep and one of them might be
+// something the user wrote by hand, which no rule here can distinguish from
+// something stoat shipped. The attic is a dotfile, so the recipes directory
+// reads as pure v2 either way, and `rm -rf ~/.stoat/recipes/.v1-removed`
+// finishes the job for anyone who wants the disk back.
+func sweepV1() error {
+	entries, err := os.ReadDir(dir())
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for _, e := range entries {
+		// Dotfiles are stoat's own bookkeeping (ManifestName, and this
+		// attic); directories are v2 recipes.
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		stale = append(stale, e.Name())
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+
+	attic := filepath.Join(dir(), v1AtticName)
+	if err := os.MkdirAll(attic, 0o755); err != nil {
+		return err
+	}
+	for _, name := range stale {
+		// An existing attic entry from an earlier sweep wins: it is the older
+		// copy, and overwriting it with a file the user has since re-created
+		// would lose the thing worth keeping.
+		dst := filepath.Join(attic, name)
+		if _, err := os.Stat(dst); err == nil {
+			if err := os.Remove(filepath.Join(dir(), name)); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Rename(filepath.Join(dir(), name), dst); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // installDir installs every file under a v2 recipe directory (name), keyed

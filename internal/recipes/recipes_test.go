@@ -22,6 +22,83 @@ func TestInstallCopiesV2Recipes(t *testing.T) {
 	}
 }
 
+// Upgrading from v1 must leave a recipes directory that reads as pure v2.
+// Otherwise fifteen dead flat files sit next to four live directories, all
+// equally authoritative to someone opening the folder to write a recipe.
+func TestInstallSweepsV1FlatFilesAside(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A representative v1 directory: bundled scripts, a cloud fragment, a
+	// .bak left by v1's own installer, and a hand-written recipe.
+	v1 := []string{"xfce.alpine.sh", "xfce.cloud.yaml", "xfce.cloud.yaml.bak", "mine.sh"}
+	for _, n := range v1 {
+		if err := os.WriteFile(filepath.Join(dir(), n), []byte("# v1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			t.Errorf("%s survived in the recipes root; v2 recipes are directories", e.Name())
+		}
+	}
+	// Moved, not destroyed: one of them may be the user's own, and no rule
+	// here can tell that from something stoat shipped.
+	for _, n := range v1 {
+		if _, err := os.Stat(filepath.Join(dir(), v1AtticName, n)); err != nil {
+			t.Errorf("%s was not preserved in the attic: %v", n, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir(), "xfce", "recipe.toml")); err != nil {
+		t.Errorf("the sweep broke the install itself: %v", err)
+	}
+}
+
+// The sweep runs on every Install, so it has to be safe to run twice. The
+// second pass must not clobber the attic copy with a file the user has since
+// re-created under the same name.
+func TestInstallSweepIsIdempotent(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir(), "mine.sh"), []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	// Same name reappears with different content, as it would if the user
+	// re-created it not realising v1 is gone.
+	if err := os.WriteFile(filepath.Join(dir(), "mine.sh"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir(), v1AtticName, "mine.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original\n" {
+		t.Errorf("attic holds %q, want the ORIGINAL: the older copy is the one worth keeping", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir(), "mine.sh")); !os.IsNotExist(err) {
+		t.Errorf("the second copy survived in the recipes root")
+	}
+}
+
 func TestInstallPreservesUserEdits(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := Install(); err != nil {
