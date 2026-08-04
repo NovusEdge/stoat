@@ -1,31 +1,12 @@
 #cloud-config
 # XFCE desktop fragment for Debian cloud images.
 #
-# Debian needs its own fragment for a reason none of the other cloud images
-# share, and it is not about package names: DEBIAN'S CLOUD KERNEL HAS NO
-# GRAPHICS DRIVERS AT ALL.
-#
-# debian-13-genericcloud ships linux-image-cloud-amd64, a deliberately minimal
-# flavour whose module tree has no drivers/gpu/drm directory whatsoever. No DRM
-# module means no /dev/dri and no /dev/fb0, so systemd-logind's seat0 comes up
-# with no graphics device, and lightdm sits waiting for a seat that will never
-# be able to display anything.
-#
-# The failure is silent and looks like success, which is why this needed a boot
-# test to find: with the shared xfce.cloud.yaml, cloud-init reports
-# "status: done" with "errors: []", 18 xfce4 packages install cleanly,
-# xserver-xorg is present, and `systemctl is-active lightdm` says "active" —
-# while /tmp/.X11-unix is empty and no Xorg process exists. Every check short
-# of looking for the X server itself passes.
-#
-# Verified on debian-13-genericcloud, 2026-08-04. Booting the full kernel gives
-# /dev/dri/card0, Xorg running on vt7, an X0 socket and lightdm active, with a
-# single kernel left in /boot — confirming the diagnosis above.
-#
-# Every step below was forced by an observed failure, and the whole fragment
-# was then re-run unattended on a fresh VM: cloud-init reached "status: done"
-# and the VM came back on the full kernel with Xorg up, ~15 minutes end to end
-# (almost all of it fetching 422 MB of desktop).
+# debian-13-genericcloud ships linux-image-cloud-amd64, a minimal flavour with
+# no drivers/gpu/drm module tree at all: no /dev/dri, no /dev/fb0, so lightdm
+# waits on a seat that can never display anything. The failure is silent and
+# looks like success: cloud-init reports "status: done", xfce4 installs
+# cleanly, and lightdm shows "active", but no Xorg process exists. The fix
+# is to install the full kernel and purge the cloud one.
 packages:
   # The full kernel flavour, which is the entire point of this fragment.
   - linux-image-amd64
@@ -38,61 +19,36 @@ packages:
 
 runcmd:
   # One block, not one item per command, because the first line is a GUARD and
-  # cloud-init runs each runcmd item independently — a bare `exit 0` in its own
-  # item would skip nothing.
+  # cloud-init runs each runcmd item independently, so a bare `exit 0` in its
+  # own item would skip nothing.
   - |
     set -e
 
-    # Finish any package left half-configured by a dpkg ORDERING RACE.
-    #
-    # Observed: plymouth (pulled in by the desktop packages) runs an initramfs
-    # hook that copies /etc/fonts/fonts.conf, but fontconfig was only unpacked,
-    # not yet configured, when the kernel's postinst fired. The hook died with
-    # "cp: cannot stat '/etc/fonts/fonts.conf'", update-initramfs failed, and
-    # linux-image-amd64 was left "install ok unpacked" — so the guard below
-    # correctly refused to purge, and the VM stayed on the cloud kernel.
-    #
-    # By the time runcmd runs, apt has configured everything it could, so
-    # fontconfig is in place and simply re-running the postinst succeeds.
-    # `|| true` because this is a repair attempt: if it cannot fix things, the
-    # guard below is what decides whether it is safe to continue.
+    # Repair: plymouth's initramfs hook can run before fontconfig is
+    # configured, failing update-initramfs and leaving linux-image-amd64
+    # "install ok unpacked" instead of installed. By runcmd, apt has
+    # finished configuring everything else, so re-running fixes it.
+    # `|| true`: the guard below decides whether it's safe to continue.
     DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
 
-    # GUARD: do nothing unless the full kernel actually installed.
-    #
-    # cloud-init's package step can fail (a transient DNS failure during the
-    # apt fetch did exactly this here) and runcmd STILL RUNS afterwards. Without
-    # this check the purge below would remove the only kernel on the system and
-    # leave an unbootable VM. Observed the failed-install half of that.
+    # Guard: do nothing unless the full kernel actually installed. The
+    # package step can fail (e.g. transient DNS) while runcmd still runs,
+    # and purging below would otherwise remove the only kernel.
     dpkg-query -W -f='${Status}' linux-image-amd64 2>/dev/null \
       | grep -q '^install ok installed' || exit 0
 
-    # Purging the RUNNING kernel asks a debconf question, and its default is
-    # the WRONG answer. linux-base/removing-running-kernel is "Abort kernel
-    # removal?" with `Default: true`, so an unattended purge either hangs on
-    # the dialog forever (what happened: dpkg's prerm sat blocked for 17
-    # minutes) or, with DEBIAN_FRONTEND=noninteractive alone, takes the default
-    # and aborts. Preseeding false is the only thing that makes it proceed.
-    #
-    # Removing the running kernel is safe here regardless: it is already loaded
-    # in memory and nothing reads its files again before the reboot below.
+    # linux-base/removing-running-kernel defaults to aborting the purge
+    # (or hanging on the debconf prompt); preseed false so it proceeds.
+    # Safe here: the running kernel is already loaded in memory.
     echo 'linux-base linux-base/removing-running-kernel boolean false' \
       | debconf-set-selections
 
-    # Purge the cloud kernel rather than trying to reorder GRUB's menu.
-    #
-    # Installing linux-image-amd64 alongside it is NOT enough: GRUB_DEFAULT=0
-    # and Debian's generated menu lists the cloud kernel FIRST, so a reboot
-    # comes straight back up with no DRM. Observed exactly that. Removing the
-    # cloud flavour leaves one kernel, so entry 0 is unambiguously right and no
-    # menu-entry string has to be matched.
-    #
-    # BOTH names are needed, and this is the part that is easy to get wrong:
-    # linux-image-cloud-amd64 is only a META-package. Purging it alone frees
-    # 13.3 kB, leaves the real linux-image-<version>-cloud-amd64 installed, and
-    # update-grub still finds two kernels — which is how the first version of
-    # this fragment failed. $(uname -r) is the cloud kernel here because
-    # nothing has rebooted yet.
+    # Purge the cloud kernel instead of reordering GRUB: installing the
+    # full kernel alongside it isn't enough since GRUB_DEFAULT=0 boots
+    # whichever is listed first, and the cloud kernel is. Both package
+    # names are needed: linux-image-cloud-amd64 is only a meta-package,
+    # so purging it alone leaves the real linux-image-<version>-cloud-amd64
+    # installed and update-grub still finds two kernels.
     DEBIAN_FRONTEND=noninteractive \
       apt-get purge -y linux-image-cloud-amd64 "linux-image-$(uname -r)"
 
@@ -100,8 +56,6 @@ runcmd:
     systemctl enable lightdm
     systemctl set-default graphical.target
 
-    # A reboot is required, not cosmetic: the running cloud kernel cannot load
-    # a DRM driver no matter what is installed, so lightdm cannot start a
-    # desktop until the full kernel is running. cloud-init has finished its
-    # work by this point, so rebooting here does not truncate it.
+    # Required: the running cloud kernel can't load a DRM driver no matter
+    # what's installed, so lightdm needs the full kernel booted first.
     reboot

@@ -159,7 +159,7 @@ func consoleCredential(v *config.VM, user string) string {
 	case v.Mode == "live":
 		return "root, no password"
 	case v.Mode == "cloud":
-		return "none — accounts are locked, use ssh"
+		return "none (accounts are locked, use ssh)"
 	default:
 		return "whatever the guest installer was given"
 	}
