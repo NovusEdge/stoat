@@ -67,6 +67,12 @@ func FromPortForwards(fs []core.PortForward) []PortForward {
 //     named among the fields the MCP boundary needs; omitted to match that
 //     example exactly rather than guessed back in. Flagged as a judgment
 //     call: add them if a real caller needs them.
+//   - The VNC socket path, and any rendered command containing it. Display
+//     below carries WHICH surface, never WHERE. A rendered attach command is
+//     not safer than the raw path, it embeds it; and an agent cannot run a
+//     GUI viewer anyway, so the path buys a consumer nothing the rule above
+//     is worth breaking for. A consumer that needs it runs `stoat get`,
+//     which prints it to the human who can use it.
 //
 // Error is present only for a broken VM (empty string omits it, matching
 // every other VM where core.VM.Error is unset).
@@ -85,7 +91,14 @@ type VM struct {
 	SSHUser   string        `json:"ssh_user"`
 	Installed bool          `json:"installed"`
 	Forwards  []PortForward `json:"forwards"`
-	Error     string        `json:"error,omitempty"`
+	// Display is "window" or "vnc" ("" on a broken VM, like every other field
+	// a broken vm.toml cannot supply). Emitted rather than left to be derived
+	// from mode and installed, for the same reason Image.byo is: a structural
+	// rule a consumer has to re-derive is one a consumer will eventually
+	// re-derive wrong, and this particular rule is one stoat reserves the
+	// right to change.
+	Display string `json:"display"`
+	Error   string `json:"error,omitempty"`
 }
 
 func FromVM(v core.VM) VM {
@@ -104,7 +117,10 @@ func FromVM(v core.VM) VM {
 		SSHUser:   v.SSHUser,
 		Installed: v.Installed,
 		Forwards:  FromPortForwards(v.Forwards),
-		Error:     v.Error,
+		// DisplayKind, not DisplayFor: this constructor must not go looking at
+		// PATH, which DisplayFor does once per VM it is handed.
+		Display: core.DisplayKind(v),
+		Error:   v.Error,
 	}
 }
 

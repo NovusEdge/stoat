@@ -83,7 +83,37 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
 	}
 	fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
+	// Re-read for the display line too: Start is what flips a disk VM to
+	// installed, and that flip is exactly what moves the screen off the qemu
+	// window. The pre-Start copy would announce a window that is not there.
+	if started, err := core.Get(a.VM); err == nil {
+		printDisplay(stdout, core.DisplayFor(started))
+	}
 	return ExitOK
+}
+
+// printDisplay says where a VM's screen is and how to reach it.
+//
+// This prints on every start, not only the surprising one, because the
+// surprising one is not detectable from here: a disk VM shows a window until
+// setup-alpine marks it installed, and the start after that silently moves
+// the screen to a VNC socket. A user who was never told the socket exists has
+// no error to search for and no path to guess.
+func printDisplay(w io.Writer, d core.Display) {
+	switch d.Kind {
+	case core.DisplayWindow:
+		fmt.Fprintln(w, "display: a qemu window, for the OS installer's console")
+	case core.DisplayVNC:
+		fmt.Fprintf(w, "display: no qemu window; the screen is on %s\n", d.Socket)
+		if d.Attach.Command == "" {
+			fmt.Fprintf(w, "  no VNC viewer found; install one of: %s\n", strings.Join(d.Attach.Missing, ", "))
+			return
+		}
+		fmt.Fprintf(w, "  attach with: %s\n", d.Attach.Command)
+		if d.Attach.Then != "" {
+			fmt.Fprintf(w, "  %s\n", d.Attach.Then)
+		}
+	}
 }
 
 func runDown(a *Args, stdout, stderr io.Writer) int {

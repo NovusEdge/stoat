@@ -12,9 +12,39 @@ import (
 
 func TestVMGolden(t *testing.T) {
 	got := marshal(t, FromVM(sampleVM()))
-	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce.alpine.sh"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}]}`
+	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce.alpine.sh"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"display":"vnc"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// display names the surface, never the socket. The socket is an absolute host
+// path and those do not reach the wire; a rendered attach command would only
+// embed the same path behind a friendlier name.
+func TestVMDisplayNamesTheSurfaceNotTheSocket(t *testing.T) {
+	fresh := core.VM{Name: "alpinedisk", Mode: "disk", Installed: false,
+		Paths: core.Paths{VNCSocket: "/home/u/.stoat/alpinedisk/vnc.sock"}}
+	got := marshal(t, FromVM(fresh))
+	if !strings.Contains(got, `"display":"window"`) {
+		t.Errorf("a VM mid-install has a real window: %s", got)
+	}
+	installed := fresh
+	installed.Installed = true
+	got = marshal(t, FromVM(installed))
+	if !strings.Contains(got, `"display":"vnc"`) {
+		t.Errorf("an installed disk VM is headless: %s", got)
+	}
+	if strings.Contains(got, "vnc.sock") || strings.Contains(got, "/home/u") {
+		t.Errorf("the socket path reached the wire: %s", got)
+	}
+}
+
+// A broken vm.toml supplies neither mode nor installed, so there is no rule
+// to run and "vnc" would be a guess dressed as a fact.
+func TestVMBrokenHasNoDisplay(t *testing.T) {
+	got := marshal(t, FromVM(core.VM{Name: "wreck", State: core.StateBroken, Error: "bad"}))
+	if !strings.Contains(got, `"display":""`) {
+		t.Errorf("broken VM must not claim a display surface: %s", got)
 	}
 }
 
