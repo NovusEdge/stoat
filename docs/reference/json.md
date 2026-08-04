@@ -240,7 +240,7 @@ so a leak fails the build rather than shipping.
 | `clone` | `{"vm":VM,"source":"work","forwards_copied":false}` |
 | `exec` | `{"vm":"work","exit_code":1,"stdout":"...","stderr":"..."}` |
 | `ssh-command` | `{"argv":["ssh","-p","2200",...]}` |
-| `cp` | `{"vm":"work","direction":"to_guest","local":"/home/u/f","remote":"/tmp/f"}` |
+| `cp` | `{"vm":"work","direction":"to_guest","local":"/home/u/f","remote":"/tmp/f"}` (`local` is always resolved to an absolute path, even if given relative or `~`-prefixed) |
 | `forward` (show) | `{"vm":"work","forwards":[...],"active":true}` |
 | `forward` (set/clear) | `{"vm":"work","forwards":[...],"active":false,"applies_at":"next_start"}` |
 | `images` | `{"images":[Image,...]}` |

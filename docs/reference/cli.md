@@ -255,7 +255,15 @@ $ stoat cp work:/var/log/app.log ./app.log
 copied work:/var/log/app.log to ./app.log
 ```
 
-**Exit codes:** 0 on success; 1 if the copy fails; 2 if neither side or both sides carry a `<vm>:` prefix.
+There is also an explicit-flag form, `--vm`, `--direction` (`to` or `from`), `--local` and `--remote`, alongside the positional one rather than replacing it: a host path that legitimately contains a colon is ambiguous in the `<vm>:<path>` spelling, and a machine caller (the MCP server) needs an unambiguous one. The two forms are mutually exclusive; giving both, or giving some but not all of the flag form's four flags, is a usage error.
+
+```
+$ stoat cp --vm work --direction to --local ./build.sh --remote /root/build.sh
+```
+
+Under `--json`, the result's `local` field is always the **resolved absolute path**, even when a relative or `~`-prefixed path was given, so a caller can verify what actually ran (see [json.md](json.md)).
+
+**Exit codes:** 0 on success; 1 if the copy fails; 2 for a malformed invocation (neither or both sides carry a `<vm>:` prefix, both forms given, or an incomplete flag set).
 
 ## `stoat forward <name> [pairs...]`
 

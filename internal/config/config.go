@@ -104,8 +104,11 @@ func reserved(name string) bool {
 	return false
 }
 
-// expand resolves a leading ~ against the user's home directory.
-func expand(p string) string {
+// Expand resolves a leading ~ against the user's home directory. Exported so
+// callers outside this package (internal/cli's `cp`) resolve a host path the
+// same way vm.toml's own Share field does, rather than growing a second
+// implementation of the same rule.
+func Expand(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, strings.TrimPrefix(p, "~"))
@@ -172,7 +175,7 @@ func Load(name string) (*VM, error) {
 		return nil, err
 	}
 	v.Dir = dir
-	v.Share = expand(v.Share)
+	v.Share = Expand(v.Share)
 	return v, nil
 }
 

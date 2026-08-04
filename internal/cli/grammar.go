@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 )
 
@@ -141,9 +143,30 @@ type execCmd struct {
 	Command []string `arg:"" passthrough:"" help:"the guest command, verbatim"`
 }
 
+// cpCmd carries two mutually exclusive spellings: the positional scp/docker
+// cp form for humans, and an explicit-flag form for a machine caller (§1.1 of
+// docs/design/mcp-server.md) that would otherwise have to reimplement the
+// colon split in splitCopyArgs, and can never tell a host path that legitimately
+// contains a colon from a "<vm>:<path>" compound. Both positionals are
+// `optional:""` so kong accepts either form; toArgs is what enforces "both or
+// neither, not a mix".
+//
+// Direction is a *string, not a plain enum string, specifically so kong's own
+// "enum value is only valid if it is either required or has a valid default"
+// rule (tag.go) does not apply: that rule is skipped for pointer/slice/map
+// kinds. A default would silently copy the wrong way when a caller forgets
+// the flag; `required:""` would make the flag form's own enum mandatory even
+// under the positional form, which kong applies unconditionally to the
+// struct field, not conditionally on which form was used. nil is exactly
+// "the flag form was not used", checked in toArgs.
 type cpCmd struct {
-	Source string `arg:"" help:"source, either a host path or <vm>:<path>"`
-	Dest   string `arg:"" help:"destination, either a host path or <vm>:<path>"`
+	Source string `arg:"" optional:"" help:"source, either a host path or <vm>:<path>"`
+	Dest   string `arg:"" optional:"" help:"destination, either a host path or <vm>:<path>"`
+
+	VM        string  `help:"vm name (flag form; alternative to the positional <vm>:<path>)"`
+	Direction *string `enum:"to,from" help:"to: --local to the guest; from: the guest to --local"`
+	Local     string  `help:"host path (flag form)"`
+	Remote    string  `help:"guest path (flag form)"`
 }
 
 type forwardCmd struct {
@@ -282,11 +305,44 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.VM, a.Command = g.Exec.VM, g.Exec.Command
 
 	case "cp":
-		vm, remote, local, toRemote, err := splitCopyArgs(g.CP.Source, g.CP.Dest)
-		if err != nil {
-			return nil, err
+		c := g.CP
+		positional := c.Source != "" || c.Dest != ""
+		flagged := c.VM != "" || c.Direction != nil || c.Local != "" || c.Remote != ""
+		if positional && flagged {
+			return nil, usageError("cp: use either the positional form or --vm/--direction/--local/--remote, not both")
 		}
-		a.VM, a.Remote, a.Local, a.ToRemote = vm, remote, local, toRemote
+
+		var vm, remote, local string
+		var toRemote bool
+		switch {
+		case flagged:
+			if c.VM == "" || c.Direction == nil || c.Local == "" || c.Remote == "" {
+				return nil, usageError("cp: the flag form needs --vm, --direction, --local and --remote together")
+			}
+			vm, remote, local, toRemote = c.VM, c.Remote, c.Local, *c.Direction == "to"
+		case positional:
+			if c.Source == "" || c.Dest == "" {
+				return nil, usageError("cp: needs a source and a destination")
+			}
+			var err error
+			vm, remote, local, toRemote, err = splitCopyArgs(c.Source, c.Dest)
+			if err != nil {
+				return nil, err
+			}
+		default:
+			return nil, usageError("cp: needs either a source and destination, or --vm/--direction/--local/--remote")
+		}
+
+		// Resolved here, once, so both forms produce the same absolute path
+		// and runCopy (run_access.go) never has to know the difference. This
+		// is also what the JSON contract's "local" field echoes back: a
+		// caller that authorised a relative or ~-prefixed path can verify
+		// what actually ran, not what it typed (docs/design/mcp-server.md §1.1).
+		abs, err := resolveLocal(local)
+		if err != nil {
+			return nil, usageError("cp: local path: " + err.Error())
+		}
+		a.VM, a.Remote, a.Local, a.ToRemote = vm, remote, abs, toRemote
 
 	case "forward":
 		f := g.Forward
@@ -394,6 +450,15 @@ func splitCopyArgs(src, dst string) (vm, remote, local string, toRemote bool, er
 	default:
 		return dstVM, dstPath, src, true, nil
 	}
+}
+
+// resolveLocal turns a cp local path into an absolute one, expanding a
+// leading ~ the same way config.VM.Share already does (config.Expand),
+// rather than a second implementation of that rule. A relative path resolves
+// against the process's cwd via filepath.Abs, the only meaning "relative"
+// can have for a CLI invocation.
+func resolveLocal(p string) (string, error) {
+	return filepath.Abs(config.Expand(p))
 }
 
 // vmFor reads the VM name off whichever single-positional command was
