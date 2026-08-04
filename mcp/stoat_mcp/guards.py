@@ -143,6 +143,14 @@ class RateLimiter:
     """
 
     def __init__(self, capacity: int = 30, refill_per_second: float = 0.5) -> None:
+        if capacity < 1:
+            raise ValueError("capacity must be at least 1, or nothing can ever run")
+        if refill_per_second <= 0:
+            # A bucket that never refills is a bucket that permanently bricks
+            # the tool after `capacity` calls. Refusing at construction beats
+            # discovering it in production, and it is why the message below
+            # can divide by this without a guard.
+            raise ValueError("refill_per_second must be positive")
         self.capacity = capacity
         self.refill_per_second = refill_per_second
         self._buckets: dict[str, tuple[float, float]] = {}
