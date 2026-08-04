@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -30,7 +29,7 @@ type sshReadyMsg struct{ name string }
 // core.Wait(UntilReachable) replaces the old direct sshx.Wait call; the ctx
 // carries the same WaitTimeout ceiling sshx.Provision itself waits under, so
 // a VM that never comes up gives up on the same schedule either path takes.
-func awaitSSH(v *config.VM) tea.Cmd {
+func awaitSSH(v core.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
 		// No cancellation source reaches here: this is a background watch
@@ -55,7 +54,7 @@ func awaitSSH(v *config.VM) tea.Cmd {
 //     reboot. Offering every time is correct, not nagging.
 //   - disk/cloud: packages persist, so offering again after a successful run
 //     would be asking the user to redo work that is still there.
-func wantsAutoProvisionPrompt(v *config.VM) bool {
+func wantsAutoProvisionPrompt(v core.VM) bool {
 	if len(v.Recipes) == 0 {
 		return false
 	}
@@ -80,8 +79,8 @@ func wantsAutoProvisionPrompt(v *config.VM) bool {
 // lastProvisionSucceeded reports whether the VM's most recent provision run
 // finished cleanly. sshx.Provision writes "done" as the final line, and
 // truncates the file at the start of every run, so the tail is unambiguous.
-func lastProvisionSucceeded(v *config.VM) bool {
-	b := tailBytes(v.ProvisionLogPath(), provTailBytes)
+func lastProvisionSucceeded(v core.VM) bool {
+	b := tailBytes(v.Paths.ApplyLog, provTailBytes)
 	if len(b) == 0 {
 		return false
 	}
@@ -97,7 +96,7 @@ func lastProvisionSucceeded(v *config.VM) bool {
 // autoProvisionPrompt is the y/N line shown when a started VM becomes
 // reachable. It names the recipes so the answer is informed: "provision
 // work?" says nothing about what is about to run.
-func autoProvisionPrompt(v *config.VM) string {
+func autoProvisionPrompt(v core.VM) string {
 	names := make([]string, len(v.Recipes))
 	for i, r := range v.Recipes {
 		names[i] = recipeLabel(r)
@@ -109,9 +108,9 @@ func autoProvisionPrompt(v *config.VM) string {
 // VM. Without it, lastProvisionSucceeded and the detail pane's tail both
 // describe a run whose effects were wiped by the reboot. The log is the only
 // thing that survived, because it lives on the host.
-func ensureNoStaleLog(v *config.VM) {
+func ensureNoStaleLog(v core.VM) {
 	if v.Mode != "live" {
 		return
 	}
-	_ = os.Remove(v.ProvisionLogPath())
+	_ = os.Remove(v.Paths.ApplyLog)
 }

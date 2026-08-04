@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -28,12 +29,12 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 	// isn't a tty). v2 removed the Renderer entirely: Style is a plain
 	// value type that always renders full ANSI escapes, so there is nothing
 	// left to force.
-	vms := []*config.VM{
-		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
-		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
+	vms := []core.VM{
+		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Paths: core.Paths{Dir: t.TempDir()}},
 	}
 	m := model{screen: screenList, width: 100, height: 30, list: newVMList(), vms: vms}
-	m.list.SetItems(vmItems(vms, nil))
+	m.list.SetItems(vmItems(vms))
 	m.syncListHeight()
 	out := m.viewList()
 
@@ -67,13 +68,18 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 }
 
 // TestDeleteTargetsDirectoryNotName proves the fix for the "d" handler
-// deleting the wrong VM: config.Load is DIRECTORY-keyed, but a vm.toml's
-// "name" field can diverge from its directory (reachable through the "e"
-// edit path). Two VM directories are built here, "work" and "work2", where
-// work/vm.toml claims name="work2", exactly the reproduction from the
-// review. Deleting the *config.VM the cursor was actually on (work) must
-// remove the work directory and leave work2 untouched, regardless of what
-// either vm.toml's name field says.
+// deleting the wrong VM: everything resolves by DIRECTORY, but a vm.toml's
+// "name" field can diverge from its directory (reachable through the "E" edit
+// path). Two VM directories are built here, "work" and "work2", where
+// work/vm.toml claims name="work2", exactly the reproduction from the review.
+// Deleting the row the cursor was actually on (work) must remove the work
+// directory and leave work2 untouched, regardless of what either vm.toml's
+// name field says.
+//
+// The rows come from core.List rather than being built by hand, because that
+// is now what the model holds and it is where the identity is decided: a
+// core.VM whose Name reported the vm.toml field instead of the directory
+// would delete work2 here.
 func TestDeleteTargetsDirectoryNotName(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -90,10 +96,24 @@ func TestDeleteTargetsDirectoryNotName(t *testing.T) {
 		t.Fatalf("saving work2: %v", err)
 	}
 
+	vms, err := core.List()
+	if err != nil {
+		t.Fatalf("core.List: %v", err)
+	}
+	var row *core.VM
+	for i := range vms {
+		if vms[i].Name == "work" {
+			row = &vms[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("no row named %q in %v", "work", vms)
+	}
+
 	// Simulate the cursor sitting on the "work" row and "d" then "y" being
-	// pressed: pendingDelete holds the *config.VM object itself, not a name.
-	m := model{pendingDelete: work}
-	cmd := deleteVM(m.pendingDelete)
+	// pressed.
+	m := model{pendingDelete: row}
+	cmd := deleteVM(*m.pendingDelete)
 	cmd() // run the tea.Cmd synchronously; the return value only carries the status text
 
 	if _, err := os.Stat(workDir); !os.IsNotExist(err) {
@@ -104,12 +124,14 @@ func TestDeleteTargetsDirectoryNotName(t *testing.T) {
 	}
 }
 
-// TestDeleteBrokenVMRefusesWhileRunning pins the fix for the live D5 bug:
-// deleteBrokenVM used to reimplement Delete's data-root containment check by
-// hand and call os.RemoveAll directly, never checking whether a qemu process
-// was still running against the directory. "d" then "y" on a broken row
-// could delete the directory, pidfile, monitor socket and disk out from
-// under a live qemu. It now goes through core.Destroy, which checks first.
+// TestDeleteBrokenVMRefusesWhileRunning pins the fix for the live D5 bug: the
+// broken-row delete used to reimplement Delete's data-root containment check
+// by hand and call os.RemoveAll directly, never checking whether a qemu
+// process was still running against the directory. "d" then "y" on a broken
+// row could delete the directory, pidfile, monitor socket and disk out from
+// under a live qemu. It now goes through core.Destroy, which checks first,
+// via the same deleteVM a good row uses: a broken VM is a core.VM with
+// StateBroken, not a separate kind of thing with a separate delete path.
 func TestDeleteBrokenVMRefusesWhileRunning(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -127,10 +149,10 @@ func TestDeleteBrokenVMRefusesWhileRunning(t *testing.T) {
 	stop := testutil.FakeRunning(t, dir)
 	defer stop()
 
-	msg := deleteBrokenVM("broken")()
+	msg := deleteVM(core.VM{Name: "broken", State: core.StateBroken})()
 
 	if _, ok := msg.(errMsg); !ok {
-		t.Fatalf("deleteBrokenVM while running = %#v, want an errMsg refusing the delete", msg)
+		t.Fatalf("deleting a broken VM while running = %#v, want an errMsg refusing the delete", msg)
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("broken directory should still exist while its qemu process is running: %v", err)

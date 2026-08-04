@@ -7,18 +7,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
-func provFixture(t *testing.T, log string) *config.VM {
+func provFixture(t *testing.T, log string) core.VM {
 	t.Helper()
 	dir := t.TempDir()
+	applyLog := filepath.Join(dir, "last-provision.log")
 	if log != "" {
-		if err := os.WriteFile(filepath.Join(dir, "last-provision.log"), []byte(log), 0o644); err != nil {
+		if err := os.WriteFile(applyLog, []byte(log), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return &config.VM{Name: "work", Mode: "live", OS: "alpine", SSHPort: 2200, Dir: dir}
+	return core.VM{
+		Name: "work", Mode: "live", OS: "alpine", SSHPort: 2200,
+		Paths: core.Paths{Dir: dir, ApplyLog: applyLog},
+	}
 }
 
 // TestReadProvStep covers what the spinner line actually reports, across the
@@ -85,7 +89,7 @@ func TestReadProvStepReadsOnlyTheTail(t *testing.T) {
 	if step == "" {
 		t.Error("step should never be empty")
 	}
-	if n := len(tailBytes(filepath.Join(v.Dir, "last-provision.log"), provTailBytes)); int64(n) > provTailBytes {
+	if n := len(tailBytes(v.Paths.ApplyLog, provTailBytes)); int64(n) > provTailBytes {
 		t.Errorf("read %d bytes, want at most %d", n, provTailBytes)
 	}
 }
@@ -116,9 +120,10 @@ func TestProvElapsed(t *testing.T) {
 // guest OS is installed.
 func TestProvisionRefusedUntilInstalled(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
-	v := &config.VM{
+	v := core.VM{
 		Name: "alpine-test-1", Mode: "disk", OS: "alpine", Installed: false,
-		SSHPort: 2201, Dir: t.TempDir(), Recipes: []string{"xfce.alpine.sh"},
+		SSHPort: 2201, Recipes: []string{"xfce.alpine.sh"},
+		Paths: core.Paths{Dir: t.TempDir()},
 	}
 
 	// A refusal still returns a Cmd (the one that shows its toast), so the
@@ -142,9 +147,9 @@ func TestProvisionRefusedUntilInstalled(t *testing.T) {
 
 	// A non-Alpine disk VM must not be told to run setup-alpine.
 	m2 := model{provisioning: map[string]provState{}, spin: newSpinner()}
-	m2.startProvision(&config.VM{
+	m2.startProvision(core.VM{
 		Name: "fed", Mode: "disk", OS: "fedora", SSHPort: 2202,
-		Dir: t.TempDir(), Recipes: []string{"x.sh"},
+		Paths: core.Paths{Dir: t.TempDir()}, Recipes: []string{"x.sh"},
 	})
 	if strings.Contains(m2.toast.text, "setup-alpine") {
 		t.Errorf("a fedora VM was told to run setup-alpine: %q", m2.toast.text)

@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -43,10 +43,10 @@ func cloudInitDone(status string) bool {
 // over the same ssh path everything else uses, so it inherits BatchMode and
 // the short connect timeout: a guest that is not up yet fails fast and is
 // reported as "waiting" rather than hanging the poll.
-func checkCloudInit(v *config.VM) tea.Cmd {
+func checkCloudInit(v core.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
-		out, err := exec.Command("ssh", sshx.Args(v, "cloud-init", "status")...).CombinedOutput()
+		out, err := exec.Command("ssh", sshx.Args(cfgVM(v), "cloud-init", "status")...).CombinedOutput()
 		if err != nil {
 			// Not reachable yet is the normal case for the first ~30 seconds
 			// of a boot, so it is a state, not an error.
@@ -62,7 +62,7 @@ func checkCloudInit(v *config.VM) tea.Cmd {
 }
 
 // pollCloudInit schedules the next check.
-func pollCloudInit(v *config.VM) tea.Cmd {
+func pollCloudInit(v core.VM) tea.Cmd {
 	return tea.Tick(cloudInitPoll, func(time.Time) tea.Msg { return cloudInitTickMsg{v.Name} })
 }
 

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -9,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // drainCmds applies msg and then runs the commands it returns, because
@@ -44,10 +43,10 @@ func drainCmds(m model, msg tea.Msg) model {
 
 func listFixture(t *testing.T) model {
 	t.Helper()
-	vms := []*config.VM{
-		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
-		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
-		{Name: "gamma", Mode: "cloud", RAM: 8192, CPUs: 8, SSHPort: 2202, Dir: t.TempDir()},
+	vms := []core.VM{
+		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "gamma", Mode: "cloud", RAM: 8192, CPUs: 8, SSHPort: 2202, Paths: core.Paths{Dir: t.TempDir()}},
 	}
 	m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
 	m = drainCmds(m, tea.WindowSizeMsg{Width: 100, Height: 34})
@@ -92,7 +91,7 @@ func TestSearchKeysDoNotFireBindings(t *testing.T) {
 	if m.screen != screenList {
 		t.Errorf("typing 'n' into search left screen %v, want the list", m.screen)
 	}
-	if m.pendingDelete != nil || m.pendingDeleteBroken != "" {
+	if m.pendingDelete != nil {
 		t.Error("typing 'd' into search armed a delete confirmation")
 	}
 	if !m.filterActive() {
@@ -159,11 +158,11 @@ func TestRefreshKeepsFilterApplied(t *testing.T) {
 	m := typeSearch(listFixture(t), "bet")
 	m = drainCmds(m, keyMsg("enter"))
 
-	vms := []*config.VM{
-		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
-		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
-		{Name: "gamma", Mode: "cloud", RAM: 8192, CPUs: 8, SSHPort: 2202, Dir: t.TempDir()},
-		{Name: "delta", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2203, Dir: t.TempDir()},
+	vms := []core.VM{
+		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "gamma", Mode: "cloud", RAM: 8192, CPUs: 8, SSHPort: 2202, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "delta", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2203, Paths: core.Paths{Dir: t.TempDir()}},
 	}
 	m = drainCmds(m, vmsLoadedMsg{vms: vms})
 
@@ -193,9 +192,9 @@ func TestCursorClampsWhenTheBottomVMDisappears(t *testing.T) {
 	}
 
 	// gamma is deleted; the refresh brings back two VMs.
-	m = drainCmds(m, vmsLoadedMsg{vms: []*config.VM{
-		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir()},
-		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Dir: t.TempDir()},
+	m = drainCmds(m, vmsLoadedMsg{vms: []core.VM{
+		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()}},
+		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Paths: core.Paths{Dir: t.TempDir()}},
 	}})
 
 	v := m.current()
@@ -233,8 +232,8 @@ func TestFirstRunSaysHowToStart(t *testing.T) {
 // entry instead of a continuation of the first.
 func TestBrokenRowContinuationAlignsUnderText(t *testing.T) {
 	m := model{screen: screenList, width: 80, height: 30, list: newVMList(), provisioning: map[string]provState{}}
-	m = drainCmds(m, vmsLoadedMsg{broken: []config.Broken{
-		{Name: "old-vm", Err: errors.New("toml: line 1: expected '.' or '=', but got 'i' instead")},
+	m = drainCmds(m, vmsLoadedMsg{vms: []core.VM{
+		{Name: "old-vm", State: core.StateBroken, Error: "toml: line 1: expected '.' or '=', but got 'i' instead"},
 	}})
 
 	var lines []string

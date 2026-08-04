@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // These tests exist because a whole-branch review found three geometry bugs
@@ -18,13 +18,13 @@ import (
 // back wider than the screen. Every other test in this package asserts
 // behaviour; nothing measured what was actually drawn.
 
-func geoVMs(t *testing.T, n int) []*config.VM {
+func geoVMs(t *testing.T, n int) []core.VM {
 	t.Helper()
-	out := make([]*config.VM, n)
+	out := make([]core.VM, n)
 	for i := range out {
-		out[i] = &config.VM{
-			Name: fmt.Sprintf("vm%02d", i), Mode: "cloud",
-			RAM: 8192, CPUs: 8, SSHPort: 2200 + i, Dir: t.TempDir(),
+		out[i] = core.VM{
+			Name: fmt.Sprintf("vm%02d", i), Mode: "cloud", State: core.StateStopped,
+			RAM: 8192, CPUs: 8, SSHPort: 2200 + i, Paths: core.Paths{Dir: t.TempDir()},
 		}
 	}
 	return out

@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // TestAccessBoxSaysHowToGetIn covers the whole point of the panel: the answer
@@ -14,31 +14,31 @@ import (
 func TestAccessBoxSaysHowToGetIn(t *testing.T) {
 	cases := []struct {
 		name   string
-		vm     *config.VM
+		vm     *core.VM
 		want   []string
 		reject []string
 	}{
 		{
 			"cloud with a console password",
-			&config.VM{Name: "u", Mode: "cloud", SSHPort: 2201, SSHUser: "stoat", ConsolePassword: "stoat"},
+			&core.VM{Name: "u", Mode: "cloud", SSHPort: 2201, SSHUser: "stoat", ConsolePassword: "stoat"},
 			[]string{"stoat@127.0.0.1:2201", "stoat / stoat", "console-only"},
 			nil,
 		},
 		{
 			"live alpine",
-			&config.VM{Name: "l", Mode: "live", SSHPort: 2200},
+			&core.VM{Name: "l", Mode: "live", SSHPort: 2200},
 			[]string{"root@127.0.0.1:2200", "no password"},
 			[]string{"console-only"}, // the ssh/console caveat is cloud-specific
 		},
 		{
 			"cloud with no password (created before that existed)",
-			&config.VM{Name: "old", Mode: "cloud", SSHPort: 2203, SSHUser: "stoat"},
+			&core.VM{Name: "old", Mode: "cloud", SSHPort: 2203, SSHUser: "stoat"},
 			[]string{"locked", "ssh only"},
 			nil,
 		},
 		{
 			"disk vm",
-			&config.VM{Name: "d", Mode: "disk", SSHPort: 2204},
+			&core.VM{Name: "d", Mode: "disk", SSHPort: 2204},
 			[]string{"set during install"},
 			nil,
 		},
@@ -67,7 +67,7 @@ func TestAccessBoxSaysHowToGetIn(t *testing.T) {
 // TestAccessBoxNeverWraps is the reported problem: a long key path wrapped
 // mid-token and read as two broken lines. Values are truncated instead.
 func TestAccessBoxNeverWraps(t *testing.T) {
-	v := &config.VM{Name: "u", Mode: "cloud", SSHPort: 65535, SSHUser: "stoat", ConsolePassword: "stoat"}
+	v := &core.VM{Name: "u", Mode: "cloud", SSHPort: 65535, SSHUser: "stoat", ConsolePassword: "stoat"}
 	out := accessBox(v, "running", newCloudInitProgress(), 200)
 
 	for _, line := range strings.Split(out, "\n") {

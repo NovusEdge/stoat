@@ -10,7 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/sshx"
@@ -34,7 +33,7 @@ const reachabilityProbe = 800 * time.Millisecond
 // password. It does bound the connection with timeouts so a guest that
 // never answers (no sshd yet, still booting) fails fast instead of hanging
 // the terminal forever.
-func sshInto(v *config.VM) tea.Cmd {
+func sshInto(v core.VM) tea.Cmd {
 	c := exec.Command("ssh", sshIntoArgs(v)...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
@@ -66,7 +65,7 @@ func sshInto(v *config.VM) tea.Cmd {
 // sshIntoArgs is the argv (excluding argv[0]) for the interactive ssh
 // process. Split out from sshInto so the target user can be asserted on
 // directly without driving a tea.ExecProcess.
-func sshIntoArgs(v *config.VM) []string {
+func sshIntoArgs(v core.VM) []string {
 	key := keys.PrivatePath()
 	args := []string{
 		"-p", fmt.Sprint(v.SSHPort),
@@ -80,15 +79,15 @@ func sshIntoArgs(v *config.VM) []string {
 	if _, err := os.Stat(key); err == nil {
 		args = append(args, "-i", key)
 	}
-	return append(args, sshx.User(v)+"@127.0.0.1")
+	return append(args, sshx.User(cfgVM(v))+"@127.0.0.1")
 }
 
 // unreachableMsg is what sshInto reports when ssh itself fails to connect
 // (exit 255) and the guest is not still booting. It names the actual
 // installer for v's OS (installerName, internal/tui/provision.go) instead
 // of hardcoding "setup-alpine", which was wrong on every non-Alpine guest.
-func unreachableMsg(v *config.VM) string {
+func unreachableMsg(v core.VM) string {
 	return fmt.Sprintf(
 		"ssh: couldn't reach %s@127.0.0.1:%d, a disk VM needs %s run at its console first, or the key isn't installed",
-		sshx.User(v), v.SSHPort, installerName(v))
+		sshx.User(cfgVM(v)), v.SSHPort, installerName(v.OS))
 }

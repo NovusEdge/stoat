@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
@@ -17,17 +17,15 @@ import (
 // broken ones (a directory whose vm.toml won't parse) because the cursor
 // ranges over them as one sequence. Modelling them as two lists would mean
 // reimplementing that interleaving on top of bubbles/list.
-type vmItem struct {
-	vm     *config.VM     // nil for a broken entry
-	broken *config.Broken // nil for a good VM
-}
+//
+// One field, not two: a broken VM is a core.VM with StateBroken, so the
+// "which of these two pointers is nil" pairing is gone and a row can no
+// longer be neither.
+type vmItem struct{ vm core.VM }
 
-func (i vmItem) name() string {
-	if i.vm != nil {
-		return i.vm.Name
-	}
-	return i.broken.Name
-}
+// name is the VM's DIRECTORY, since that is what core.VM.Name reports and
+// what every operation resolves by.
+func (i vmItem) name() string { return i.vm.Name }
 
 // FilterValue is what "/" searches. Name only: mode and state are volatile
 // (a VM stops, and a filter that matched it stops matching), and searching
@@ -56,11 +54,11 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		cursor = selStyle.Render(glyphCursor)
 	}
 
-	if it.broken != nil {
+	if it.vm.State == core.StateBroken {
 		// A broken vm.toml is an error, not an idle state: the glyph is red
 		// even when the row isn't selected, while the text stays muted so a
 		// whole line of red isn't shouting from the list.
-		plain := fmt.Sprintf("%-14s broken: %s", it.broken.Name, brokenReason(it.broken.Err))
+		plain := fmt.Sprintf("%-14s broken: %s", it.vm.Name, brokenReason(it.vm.Error))
 		// A long reason wraps inside the pane. paneAt wraps the whole rendered
 		// list as one blob and has no idea this line starts 4 columns in (the
 		// cursor, the glyph, and the space after it). Left to it, the
@@ -82,9 +80,13 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	v := it.vm
 	dot, dotStyle := glyphStopped, downStyle
 	state := dimStyle.Render("-")
-	if qemu.Running(v) {
+	// The row reports the state core.List computed, not one derived here: the
+	// same answer, from the one place that owns the question. The uptime still
+	// comes from qemu, which is the only thing that knows it, and reads the
+	// same pidfile core.List's qemu.Running just read.
+	if v.State == core.StateRunning {
 		dot, dotStyle = glyphRunning, upStyle
-		state = fmt.Sprintf("up %s  :%d", qemu.Uptime(v), v.SSHPort)
+		state = fmt.Sprintf("up %s  :%d", qemu.Uptime(cfgVM(v)), v.SSHPort)
 	}
 	// The dot and the state stay OUTSIDE the selection wrap: a styled
 	// substring ends in \x1b[0m, which resets the enclosing style too, so
@@ -149,15 +151,14 @@ func newVMList() list.Model {
 	return l
 }
 
-// vmItems flattens the model's VMs and broken directories into list items,
-// good ones first, matching the order the cursor used to walk.
-func vmItems(vms []*config.VM, broken []config.Broken) []list.Item {
-	items := make([]list.Item, 0, len(vms)+len(broken))
+// vmItems wraps core.List's answer as list items, in the order it returned
+// them: one slice sorted by name, with broken VMs in their alphabetical place
+// rather than appended after the good ones. The old two-slice shape is what
+// put them at the end.
+func vmItems(vms []core.VM) []list.Item {
+	items := make([]list.Item, 0, len(vms))
 	for _, v := range vms {
 		items = append(items, vmItem{vm: v})
-	}
-	for i := range broken {
-		items = append(items, vmItem{broken: &broken[i]})
 	}
 	return items
 }

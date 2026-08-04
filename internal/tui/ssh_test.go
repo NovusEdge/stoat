@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // TestSSHIntoArgsUsesConfiguredSSHUser: the live bug. A cloud VM's seeded
@@ -12,7 +12,7 @@ import (
 // internal/cloudinit/cloudinit.go's user block), so the interactive ssh
 // path must target it, not a hardcoded root@127.0.0.1.
 func TestSSHIntoArgsUsesConfiguredSSHUser(t *testing.T) {
-	v := &config.VM{Name: "x", SSHPort: 2201, SSHUser: "stoat"}
+	v := core.VM{Name: "x", SSHPort: 2201, SSHUser: "stoat"}
 	got := strings.Join(sshIntoArgs(v), " ")
 
 	if !strings.Contains(got, "stoat@127.0.0.1") {
@@ -26,7 +26,7 @@ func TestSSHIntoArgsUsesConfiguredSSHUser(t *testing.T) {
 // TestSSHIntoArgsFallsBackToRoot: no SSHUser recorded (apkovl/ssh-backend
 // VMs, both unlocked-root) must still target root.
 func TestSSHIntoArgsFallsBackToRoot(t *testing.T) {
-	v := &config.VM{Name: "x", SSHPort: 2201}
+	v := core.VM{Name: "x", SSHPort: 2201}
 	got := strings.Join(sshIntoArgs(v), " ")
 
 	if !strings.Contains(got, "root@127.0.0.1") {
@@ -37,7 +37,7 @@ func TestSSHIntoArgsFallsBackToRoot(t *testing.T) {
 // TestUnreachableMsgNamesRealInstaller: the failure text used to hardcode
 // "setup-alpine" regardless of guest OS. A non-Alpine VM must not see it.
 func TestUnreachableMsgNamesRealInstaller(t *testing.T) {
-	v := &config.VM{Name: "x", SSHPort: 2201, OS: "fedora"}
+	v := core.VM{Name: "x", SSHPort: 2201, OS: "fedora"}
 	got := unreachableMsg(v)
 
 	if strings.Contains(got, "setup-alpine") {
@@ -51,7 +51,7 @@ func TestUnreachableMsgNamesRealInstaller(t *testing.T) {
 // TestUnreachableMsgNamesAlpineInstaller: an Alpine VM keeps the specific,
 // correct name.
 func TestUnreachableMsgNamesAlpineInstaller(t *testing.T) {
-	v := &config.VM{Name: "x", SSHPort: 2201, OS: "alpine"}
+	v := core.VM{Name: "x", SSHPort: 2201, OS: "alpine"}
 	got := unreachableMsg(v)
 
 	if !strings.Contains(got, "setup-alpine") {
