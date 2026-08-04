@@ -105,6 +105,56 @@ sshport = 2201
 	}
 }
 
+// TestLoadPreexistingVMTomlAllowExecDefaultsTrue is the regression the
+// AllowExec field itself warns about: Go's zero value for a bool is false,
+// so a naive field addition would silently disable exec on every VM whose
+// vm.toml was written before "allow_exec" existed. Load must correct that.
+func TestLoadPreexistingVMTomlAllowExecDefaultsTrue(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	writeRawVMToml(t, "alpine-old", `name = "alpine-old"
+mode = "live"
+ram = 4096
+cpus = 4
+sshport = 2201
+`)
+
+	v, err := Load("alpine-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.AllowExec {
+		t.Errorf("pre-allow_exec VM should default AllowExec to true, got false")
+	}
+}
+
+// TestLoadAllowExecExplicitFalseIsHonoured makes sure the default-true
+// correction only fires for an ABSENT key, not for one deliberately set to
+// false.
+func TestLoadAllowExecExplicitFalseIsHonoured(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	writeRawVMToml(t, "locked-down", `name = "locked-down"
+mode = "live"
+ram = 4096
+cpus = 4
+sshport = 2201
+allow_exec = false
+`)
+
+	v, err := Load("locked-down")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.AllowExec {
+		t.Errorf("explicit allow_exec = false should be honoured, got true")
+	}
+}
+
 func TestListSorted(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := EnsureRoot(); err != nil {

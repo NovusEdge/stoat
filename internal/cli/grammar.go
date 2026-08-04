@@ -118,6 +118,13 @@ type createCmd struct {
 	Share           string   `help:"host directory to expose in the guest"`
 	ConsolePassword string   `help:"console password; \"random\" generates one"`
 	Recipes         []string `help:"recipe names to record on the VM"`
+	// default:"true" is load-bearing, not decoration: without it kong treats
+	// an absent --allow-exec the same as an explicit --allow-exec=false,
+	// since a bare bool flag's zero value is false. With it, the flag must
+	// be passed AND given =false to turn exec off; --allow-exec alone (no
+	// value) sets true, matching every other bool flag. Verified by running
+	// `stoat create --help` and `stoat create x --image y --allow-exec=false`.
+	AllowExec bool `default:"true" help:"allow exec/copy_to/copy_from on this VM (enforced by the MCP server, not stoat itself)"`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.
@@ -258,10 +265,15 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "create":
 		c := g.Create
 		a.VM = c.Name
+		// c.AllowExec is never ambiguous here: kong's default:"true" means
+		// the flag is always either true or false, never absent, so a fresh
+		// pointer to it is exactly the "explicitly given" value Spec wants.
+		allowExec := c.AllowExec
 		a.Spec = core.Spec{
 			Name: c.Name, Image: c.Image, OS: c.OS, Backend: c.Backend, Mode: c.Mode,
 			RAM: c.RAM, CPUs: c.CPUs, Disk: c.Disk, Share: c.Share,
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
+			AllowExec: &allowExec,
 		}
 
 	case "update":

@@ -74,6 +74,20 @@ type Spec struct {
 	// cloudinit backend only; see config.VM.ConsolePassword for why no
 	// other backend needs one.
 	ConsolePassword string
+
+	// AllowExec is a per-VM opt-out of exec/copy_to/copy_from, recorded in
+	// vm.toml so a user can say once, at create time, "an agent may never
+	// run code in this VM" rather than trusting every future caller to ask
+	// nicely. core.Exec does NOT enforce it: core is a library the TUI and
+	// CLI also call, and they already let a user run anything, so refusing
+	// here would break them. Enforcement belongs to whatever boundary an
+	// agent actually crosses (the MCP server).
+	//
+	// A pointer, not a bool, for the same reason config.Patch's fields are:
+	// nil means "not given", so plan() can default it to true without a
+	// caller that never mentions it (the TUI's form, today) ending up with
+	// an implicit false.
+	AllowExec *bool
 }
 
 // Create validates a Spec, writes vm.toml and allocates the disk. It does not
@@ -208,18 +222,27 @@ func plan(s Spec) (*config.VM, error) {
 		return nil, err
 	}
 
+	// Default true: an agent should be able to exec in a VM it just created
+	// unless the caller explicitly said otherwise. See Spec.AllowExec's doc
+	// comment for why this is a pointer rather than a plain bool.
+	allowExec := true
+	if s.AllowExec != nil {
+		allowExec = *s.AllowExec
+	}
+
 	v := &config.VM{
-		Name:    name,
-		Mode:    mode,
-		OS:      img.osName,
-		Backend: img.backend,
-		SSHUser: img.sshUser,
-		RAM:     ram,
-		CPUs:    cpus,
-		Disk:    disk,
-		Share:   strings.TrimSpace(s.Share),
-		SSHPort: port,
-		Recipes: s.Recipes,
+		Name:      name,
+		Mode:      mode,
+		OS:        img.osName,
+		Backend:   img.backend,
+		SSHUser:   img.sshUser,
+		RAM:       ram,
+		CPUs:      cpus,
+		Disk:      disk,
+		Share:     strings.TrimSpace(s.Share),
+		SSHPort:   port,
+		Recipes:   s.Recipes,
+		AllowExec: allowExec,
 	}
 
 	if img.backend == "cloudinit" {

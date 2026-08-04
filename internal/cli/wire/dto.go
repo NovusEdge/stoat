@@ -85,6 +85,7 @@ type VM struct {
 	SSHUser   string        `json:"ssh_user"`
 	Installed bool          `json:"installed"`
 	Forwards  []PortForward `json:"forwards"`
+	AllowExec bool          `json:"allow_exec"`
 	Error     string        `json:"error,omitempty"`
 }
 
@@ -104,6 +105,7 @@ func FromVM(v core.VM) VM {
 		SSHUser:   v.SSHUser,
 		Installed: v.Installed,
 		Forwards:  FromPortForwards(v.Forwards),
+		AllowExec: v.AllowExec,
 		Error:     v.Error,
 	}
 }

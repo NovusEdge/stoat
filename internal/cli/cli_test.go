@@ -128,6 +128,36 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestParseCreateAllowExecDefaultsTrue pins that an omitted --allow-exec
+// still produces Spec.AllowExec pointing at true, not a nil pointer (which
+// plan() would also read as true, but a nil pointer here would hide a kong
+// misconfiguration that made the flag look unset) and not false (Go's bool
+// zero value, which is exactly the regression AllowExec's default guards
+// against). Verified with `stoat create --help` that the flag itself is
+// `default:"true"`.
+func TestParseCreateAllowExecDefaultsTrue(t *testing.T) {
+	got, err := Parse([]string{"create", "work", "--image", "alpine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.AllowExec == nil || !*got.Spec.AllowExec {
+		t.Errorf("create with no --allow-exec: Spec.AllowExec = %v, want a pointer to true", got.Spec.AllowExec)
+	}
+}
+
+// TestParseCreateAllowExecFalse pins that --allow-exec=false is how a
+// caller turns it off; kong's bool default:"true" makes a bare --allow-exec
+// (no value) mean true, matching every other bool flag.
+func TestParseCreateAllowExecFalse(t *testing.T) {
+	got, err := Parse([]string{"create", "work", "--image", "alpine", "--allow-exec=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.AllowExec == nil || *got.Spec.AllowExec {
+		t.Errorf("create --allow-exec=false: Spec.AllowExec = %v, want a pointer to false", got.Spec.AllowExec)
+	}
+}
+
 // TestParsePure guards against Parse doing anything beyond interpreting
 // argv: it must never touch the filesystem, so calling it with a bogus
 // STOAT_HOME must not error or panic.

@@ -24,6 +24,7 @@ func sampleVM() core.VM {
 		ConsolePassword: "hunter2password",
 		Forwards:        []core.PortForward{{HostPort: 8080, GuestPort: 80}},
 		Installed:       false,
+		AllowExec:       true,
 		Paths: core.Paths{
 			Dir:           "/home/u/.stoat/work",
 			Disk:          "/home/u/.stoat/work/disk.qcow2",

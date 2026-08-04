@@ -133,6 +133,11 @@ type VM struct {
 
 	Installed bool
 
+	// AllowExec is vm.toml's own allow_exec, already resolved by
+	// config.Load so an absent key reads as true here too. See
+	// Spec.AllowExec's doc comment for who enforces it.
+	AllowExec bool
+
 	Paths Paths
 
 	// Error is populated only when State is StateBroken, and holds
@@ -202,6 +207,7 @@ func fromConfig(v *config.VM) VM {
 		ConsolePassword: v.ConsolePassword,
 		Forwards:        v.Forwards,
 		Installed:       v.Installed,
+		AllowExec:       v.AllowExec,
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),

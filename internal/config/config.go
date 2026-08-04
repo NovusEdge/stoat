@@ -68,6 +68,14 @@ type VM struct {
 	// live Alpine VM, whose root already logs in with no password.
 	ConsolePassword string `toml:"console_password"`
 
+	// AllowExec is a per-VM opt-out of exec/copy_to/copy_from, enforced by
+	// whatever boundary decides to enforce it (the MCP server, not this
+	// package or core.Exec: see core.Spec.AllowExec's doc comment). Absent
+	// from a vm.toml means true, not Go's zero value; Load is what makes
+	// that hold, since toml.Decode alone cannot distinguish "false" from
+	// "not written".
+	AllowExec bool `toml:"allow_exec"`
+
 	Dir string `toml:"-"` // absolute path to the VM directory
 }
 
@@ -171,8 +179,17 @@ func (v *VM) Save() error {
 func Load(name string) (*VM, error) {
 	dir := filepath.Join(Root(), name)
 	v := &VM{}
-	if _, err := toml.DecodeFile(filepath.Join(dir, "vm.toml"), v); err != nil {
+	meta, err := toml.DecodeFile(filepath.Join(dir, "vm.toml"), v)
+	if err != nil {
 		return nil, err
+	}
+	// A vm.toml written before AllowExec existed has no "allow_exec" key at
+	// all, and toml.Decode leaves that as Go's bool zero value: false. That
+	// would silently disable exec on every VM that predates the field, the
+	// opposite of the documented default, so an absent key is corrected to
+	// true here rather than trusted as a real false.
+	if !meta.IsDefined("allow_exec") {
+		v.AllowExec = true
 	}
 	v.Dir = dir
 	v.Share = Expand(v.Share)

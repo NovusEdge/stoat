@@ -174,6 +174,7 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "share":"/home/u/src","recipes":["xfce.alpine.sh"],
              "ssh_port":2200,"ssh_user":"stoat","installed":false,
              "forwards":[{"host_port":8080,"guest_port":80}],
+             "allow_exec":true,
              "error":"only on a broken VM"}
 
 Image       {"id":"alpine-virt","os":"alpine","variant":"virt",
@@ -201,6 +202,13 @@ broken VM.
 fields were recorded in `vm.toml`. The VM is otherwise usable, but nothing can
 answer what guest OS it runs, so treat an empty `os` as unknown rather than as
 a value.
+
+`allow_exec` is `true` for every VM that predates the field, not Go's zero
+value: an absent `allow_exec` key in `vm.toml` is read as true, so a caller
+does not need to special-case an old VM. It is a recorded fact, not an
+enforced one: `stoat exec`/`cp` do not check it, so a consumer that must
+refuse exec on a VM with `allow_exec:false` (the MCP server) has to check it
+itself before calling.
 
 `Snapshot.size_display` and `created_display` are named that way because they
 are qemu's own formatted table output. They are opaque. Do not parse them.

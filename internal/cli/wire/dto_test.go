@@ -12,7 +12,7 @@ import (
 
 func TestVMGolden(t *testing.T) {
 	got := marshal(t, FromVM(sampleVM()))
-	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce.alpine.sh"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}]}`
+	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce.alpine.sh"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -23,6 +23,18 @@ func TestVMBrokenCarriesError(t *testing.T) {
 	got := marshal(t, FromVM(v))
 	if !strings.Contains(got, `"error":"broken vm.toml: oldvm: toml: line 4: ..."`) {
 		t.Errorf("expected error field in %s", got)
+	}
+}
+
+// TestVMAllowExecCarriesFalse pins that the DTO does not just default the
+// field to true itself; it must relay whatever core.VM says, since the MCP
+// server's whole reason for reading it is to find the VMs where it's false.
+func TestVMAllowExecCarriesFalse(t *testing.T) {
+	v := sampleVM()
+	v.AllowExec = false
+	got := marshal(t, FromVM(v))
+	if !strings.Contains(got, `"allow_exec":false`) {
+		t.Errorf("expected allow_exec:false in %s", got)
 	}
 }
 
