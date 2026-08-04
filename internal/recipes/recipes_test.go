@@ -201,6 +201,7 @@ func TestEmbedContainsExactlyIntendedFiles(t *testing.T) {
 		"xfce.cloud.yaml":        true,
 		"xfce.fedora.cloud.yaml": true,
 		"xfce.alpine.cloud.yaml": true,
+		"xfce.debian.cloud.yaml": true,
 		"devtools.cloud.yaml":    true,
 	}
 	got := map[string]bool{}
@@ -297,7 +298,11 @@ func TestListFiltersByOSAndBackend(t *testing.T) {
 	// installs a group name apt has never heard of. Checked by content
 	// rather than exact length/order, since devtools.cloud.yaml is a second
 	// shared fragment now and a future one shouldn't need this test rewritten.
-	for _, os := range []string{"ubuntu", "debian", "arch"} {
+	// Debian is NOT in this list: it now has its own xfce.debian.cloud.yaml,
+	// because Debian's cloud kernel ships no DRM drivers at all and the shared
+	// fragment therefore produces a lightdm that can never start an X server.
+	// Its override is asserted separately below.
+	for _, os := range []string{"ubuntu", "arch"} {
 		names, err := List(os, "cloudinit")
 		if err != nil {
 			t.Fatalf("List(%q, \"cloudinit\"): %v", os, err)
@@ -674,5 +679,101 @@ func TestListOffersDebianXfceOverSSH(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("List(\"debian\", \"ssh\") = %v, want it to contain \"xfce.debian.sh\"", names)
+	}
+}
+
+// TestDebianGetsItsOwnCloudXfceFragment pins that Debian is offered
+// xfce.debian.cloud.yaml and NOT the shared xfce.cloud.yaml.
+//
+// Debian needs its own for a reason none of the other cloud images share, and
+// it is not package naming: debian-13-genericcloud ships
+// linux-image-cloud-amd64, whose module tree has no drivers/gpu/drm directory
+// at all. With no DRM there is no /dev/dri, logind's seat0 has no graphics
+// device, and lightdm waits forever for a seat that can never display.
+//
+// The shared fragment fails SILENTLY there — verified on a real boot:
+// cloud-init reports done with errors: [], 18 xfce4 packages install,
+// xserver-xorg is present, lightdm reports active, and /tmp/.X11-unix is
+// empty with no Xorg process. Offering both fragments, or the shared one
+// alone, would put that back.
+func TestDebianGetsItsOwnCloudXfceFragment(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	names, err := List("debian", "cloudinit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(names, "xfce.debian.cloud.yaml") {
+		t.Errorf("List(debian, cloudinit) = %v, want the debian override", names)
+	}
+	if contains(names, "xfce.cloud.yaml") {
+		t.Errorf("List(debian, cloudinit) = %v: the shared fragment must be suppressed by the override", names)
+	}
+}
+
+// The debian fragment is worthless if it does not install the full kernel and
+// get rid of the cloud one — installing linux-image-amd64 alongside it is not
+// enough, because GRUB_DEFAULT=0 still boots the cloud flavour (observed: the
+// VM came back up on the cloud kernel with both installed).
+func TestDebianCloudFragmentReplacesTheCloudKernel(t *testing.T) {
+	body, err := bundled.ReadFile("xfce.debian.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"linux-image-amd64", // the full flavour, with DRM
+		// BOTH names: linux-image-cloud-amd64 is only a META-package, and
+		// purging it alone frees 13.3 kB while leaving the real versioned
+		// kernel installed — which is how the first version of this fragment
+		// failed, with update-grub still finding two kernels and entry 0 still
+		// the cloud one.
+		`purge -y linux-image-cloud-amd64 "linux-image-$(uname -r)"`,
+		"update-grub",
+		"reboot", // the running cloud kernel can never load a DRM driver
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("xfce.debian.cloud.yaml is missing %q", want)
+		}
+	}
+}
+
+// The purge in that fragment cannot work unattended without these three lines,
+// and each one is here because dropping it produced an observed failure that
+// took a boot test to find. They are easy to mistake for defensive noise and
+// delete, so they are pinned.
+func TestDebianCloudFragmentSurvivesUnattendedRun(t *testing.T) {
+	body, err := bundled.ReadFile("xfce.debian.cloud.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ want, why string }{
+		{
+			`linux-base/removing-running-kernel boolean false`,
+			"purging the running kernel asks debconf \"Abort kernel removal?\" " +
+				"whose Default is true, so without preseeding false the purge " +
+				"either hangs on the dialog forever (observed: dpkg's prerm " +
+				"blocked for 17 minutes) or, with DEBIAN_FRONTEND=noninteractive " +
+				"alone, takes the default and aborts",
+		},
+		{
+			`grep -q '^install ok installed' || exit 0`,
+			"cloud-init runs runcmd even when its package step FAILED (observed, " +
+				"twice: once a transient apt DNS failure, once a dpkg ordering " +
+				"race). Without this guard the purge removes the only kernel on " +
+				"the system and leaves an unbootable VM",
+		},
+		{
+			`dpkg --configure -a`,
+			"plymouth's initramfs hook copies /etc/fonts/fonts.conf while " +
+				"fontconfig is still only unpacked, so the kernel postinst dies " +
+				"and linux-image-amd64 is left \"install ok unpacked\" (observed). " +
+				"Re-running the postinst once apt has settled fixes it",
+		},
+	} {
+		if !strings.Contains(string(body), tc.want) {
+			t.Errorf("xfce.debian.cloud.yaml is missing %q\nit is needed because %s", tc.want, tc.why)
+		}
 	}
 }
