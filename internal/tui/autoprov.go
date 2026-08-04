@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // After starting a VM that has recipes, stoat watches for sshd to come up and
-// then OFFERS to provision — it does not just do it. Running a shell script
+// then OFFERS to provision; it does not just do it. Running a shell script
 // inside a guest without being asked is the kind of helpfulness that is
 // indistinguishable from a bug the first time it surprises someone, and a
 // recipe can take minutes and pull hundreds of packages.
@@ -27,7 +28,10 @@ type sshReadyMsg struct{ name string }
 func awaitSSH(v *config.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
-		if err := sshx.Wait(v, sshx.WaitTimeout); err != nil {
+		// No cancellation source reaches here: this is a background watch
+		// started right after the VM boots, not tied to any in-flight
+		// caller request.
+		if err := sshx.Wait(context.Background(), v, sshx.WaitTimeout); err != nil {
 			return nil
 		}
 		return sshReadyMsg{name}
@@ -38,7 +42,7 @@ func awaitSSH(v *config.VM) tea.Cmd {
 // once it is reachable.
 //
 // The "already provisioned" question is answered differently per mode, and
-// the difference is not a preference — it is what the filesystem does:
+// the difference is not a preference: it is what the filesystem does:
 //
 //   - live: the root is a tmpfs overlay, so a previous run is GONE after the
 //     reboot. Offering every time is correct, not nagging.
@@ -54,7 +58,7 @@ func wantsAutoProvisionPrompt(v *config.VM) bool {
 		return false
 	}
 	// An uninstalled disk VM is running its installer, whose root is a tmpfs
-	// that the install replaces — sshd there may well answer, which is
+	// that the install replaces, and sshd there may well answer, which is
 	// exactly why this has to be checked rather than left to reachability.
 	// Once installed, only offer when the last run didn't already succeed.
 	if v.Mode == "disk" && !v.Installed {
@@ -84,19 +88,19 @@ func lastProvisionSucceeded(v *config.VM) bool {
 }
 
 // autoProvisionPrompt is the y/N line shown when a started VM becomes
-// reachable. It names the recipes so the answer is informed — "provision
+// reachable. It names the recipes so the answer is informed: "provision
 // work?" says nothing about what is about to run.
 func autoProvisionPrompt(v *config.VM) string {
 	names := make([]string, len(v.Recipes))
 	for i, r := range v.Recipes {
 		names[i] = recipeLabel(r)
 	}
-	return v.Name + " is up — run " + strings.Join(names, ", ") + " now? y/N"
+	return v.Name + " is up, run " + strings.Join(names, ", ") + " now? y/N"
 }
 
 // ensureNoStaleLog removes a provision log left by a previous boot of a LIVE
 // VM. Without it, lastProvisionSucceeded and the detail pane's tail both
-// describe a run whose effects were wiped by the reboot — the log is the only
+// describe a run whose effects were wiped by the reboot. The log is the only
 // thing that survived, because it lives on the host.
 func ensureNoStaleLog(v *config.VM) {
 	if v.Mode != "live" {

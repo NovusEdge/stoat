@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -27,7 +28,7 @@ const reachabilityProbe = 800 * time.Millisecond
 // strict checking would fail on every single start of a machine stoat built.
 //
 // This is the interactive path: a human is at the keyboard, so unlike
-// internal/sshx (the unattended path) it does NOT set BatchMode=yes — a
+// internal/sshx (the unattended path) it does NOT set BatchMode=yes, since a
 // disk-mode VM with no key installed may only be reachable by typing a
 // password. It does bound the connection with timeouts so a guest that
 // never answers (no sshd yet, still booting) fails fast instead of hanging
@@ -44,9 +45,11 @@ func sshInto(v *config.VM) tea.Cmd {
 				// tell a guest that's still booting apart from one that's
 				// genuinely unreachable (e.g. a disk VM with no key
 				// installed and no sshd ever going to answer).
-				if sshx.Wait(v, reachabilityProbe) != nil {
+				// No cancellation source reaches here: this runs after ssh
+				// has already exited, in a plain tea.ExecProcess callback.
+				if sshx.Wait(context.Background(), v, reachabilityProbe) != nil {
 					return errMsg(fmt.Sprintf(
-						"%s: still booting — sshd not reachable yet on port %d, try again shortly",
+						"%s: still booting, sshd not reachable yet on port %d, try again shortly",
 						v.Name, v.SSHPort))
 				}
 				return errMsg(unreachableMsg(v))
@@ -83,6 +86,6 @@ func sshIntoArgs(v *config.VM) []string {
 // of hardcoding "setup-alpine", which was wrong on every non-Alpine guest.
 func unreachableMsg(v *config.VM) string {
 	return fmt.Sprintf(
-		"ssh: couldn't reach %s@127.0.0.1:%d — a disk VM needs %s run at its console first, or the key isn't installed",
+		"ssh: couldn't reach %s@127.0.0.1:%d, a disk VM needs %s run at its console first, or the key isn't installed",
 		sshx.User(v), v.SSHPort, installerName(v))
 }

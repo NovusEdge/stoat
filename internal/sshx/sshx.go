@@ -27,13 +27,13 @@ const WaitTimeout = 90 * time.Second
 // image), otherwise "root".
 //
 // This deliberately does NOT consult guest.DefaultSSHUser as a second
-// fallback. An empty v.SSHUser is not "unknown" — for the cloudinit backend
+// fallback. An empty v.SSHUser is not "unknown": for the cloudinit backend
 // it seeds a real account, so it is only ever empty for the apkovl/ssh
 // backends, both of which are unlocked-root images (a live Alpine apkovl, or
 // a BYO disk image awaiting a manual install). Guessing an OS's registry
 // default there would be wrong: a BYO file can be labelled e.g. "ubuntu" via
 // iso.Infer or a form override while still going through the ssh backend
-// (no cloud-init, no seeded account), and that image has no "stoat" user —
+// (no cloud-init, no seeded account), and that image has no "stoat" user,
 // only whatever the installer itself created. See form.go's
 // resolvedSSHUser for the one place that decides the recorded value.
 func User(v *config.VM) string {
@@ -47,11 +47,11 @@ func User(v *config.VM) string {
 // with IDENTICAL syntax: host key checking, connect behaviour, and the
 // identity file. This is the one place they live, so a caller building an
 // scp invocation (core.CopyTo/CopyFrom) never has to re-decide
-// StrictHostKeyChecking or find the private key path a second time — the
-// exact kind of drift this package exists to prevent (see Args' comment).
+// StrictHostKeyChecking or find the private key path a second time, avoiding
+// the exact kind of drift this package exists to prevent (see Args' comment).
 //
 // The port flag is deliberately NOT here: ssh takes "-p" and scp takes "-P"
-// (capital — scp's lowercase -p means "preserve file times"), so it is the
+// (capital, since scp's lowercase -p means "preserve file times"), so it is the
 // one option each caller must supply itself. See CopyArgs.
 func connOptions() []string {
 	return []string{
@@ -74,13 +74,13 @@ func Args(v *config.VM, extra ...string) []string {
 }
 
 // CopyArgs returns the argv (excluding argv[0]) for scp between the host and
-// v's guest, sharing every connection setting Args does (see connOptions) —
-// only the port flag differs, because scp's is capital -P.
+// v's guest, sharing every connection setting Args does (see connOptions),
+// differing only in the port flag, because scp's is capital -P.
 //
 // toRemote picks the direction: true puts the guest spec ("user@127.0.0.1:
 // remotePath") on the right, as scp's destination (core.CopyTo); false puts
 // it on the left, as scp's source (core.CopyFrom). localPath is always a
-// bare host path — never quoted or otherwise rewritten, since it is scp's
+// bare host path: never quoted or otherwise rewritten, since it is scp's
 // own argv element, not something re-parsed by a shell.
 //
 // -q suppresses scp's interactive progress meter: this argv is built for
@@ -95,11 +95,28 @@ func CopyArgs(v *config.VM, localPath, remotePath string, toRemote bool) []strin
 	return append(a, remoteSpec, localPath)
 }
 
-// Wait blocks until the forwarded port accepts a connection, or timeout.
-func Wait(v *config.VM, timeout time.Duration) error {
+// Wait blocks until the forwarded port accepts a connection, ctx is done, or
+// timeout elapses, whichever comes first. timeout remains a real ceiling
+// even for a ctx with no deadline of its own, matching WaitTimeout's role in
+// Provision below.
+//
+// ctx is honoured at two points, not just between attempts: the dial itself
+// runs under DialContext, so a cancellation lands as soon as the connect
+// syscall returns rather than only being noticed after it, and the sleep
+// between attempts is a select against ctx.Done() rather than a bare
+// time.Sleep. internal/core/wait.go's waitReachable/sshBannerUp do the same
+// DialContext-based check for the same banner, independently of this one;
+// see that file's comment on why it is not just a call to this function
+// (core.Wait needs to keep going after ctx expires elsewhere, sshx.Wait
+// needs a caller-supplied timeout ceiling); duplicating the ~10-line dial
+// itself is cheaper than reconciling those two different contracts.
+func Wait(ctx context.Context, v *config.VM, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	addr := fmt.Sprintf("127.0.0.1:%d", v.SSHPort)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
@@ -108,12 +125,14 @@ func Wait(v *config.VM, timeout time.Duration) error {
 		if remaining < dialTimeout {
 			dialTimeout = remaining
 		}
-		c, err := net.DialTimeout("tcp", addr, dialTimeout)
+		c, err := dialCtx(ctx, addr, dialTimeout)
 		if err == nil {
 			if bannerReady(c, time.Until(deadline)) {
 				return nil
 			}
 			c.Close()
+		} else if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
 		remaining = time.Until(deadline)
@@ -124,9 +143,24 @@ func Wait(v *config.VM, timeout time.Duration) error {
 		if remaining < sleep {
 			sleep = remaining
 		}
-		time.Sleep(sleep)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(sleep):
+		}
 	}
 	return fmt.Errorf("%s: ssh not reachable on port %d after %s", v.Name, v.SSHPort, timeout)
+}
+
+// dialCtx dials addr, bounding the attempt by whichever of ctx or
+// perAttempt's own timeout fires first. A plain context.WithTimeout(ctx,
+// perAttempt) would do the same, but this avoids the extra cancel func at
+// every call site inside Wait's loop.
+func dialCtx(ctx context.Context, addr string, perAttempt time.Duration) (net.Conn, error) {
+	dctx, cancel := context.WithTimeout(ctx, perAttempt)
+	defer cancel()
+	var d net.Dialer
+	return d.DialContext(dctx, "tcp", addr)
 }
 
 // bannerDeadline is the per-attempt read deadline for the SSH identification
@@ -141,7 +175,7 @@ const bannerDeadline = 2 * time.Second
 // bannerReady reports whether c is a real sshd, not just an accepted TCP
 // connection. QEMU/libslirp's user-mode networking accepts the host-side
 // socket at device init and only later dials the guest, tearing the
-// connection down if nothing answers there yet — so a bare accept() does
+// connection down if nothing answers there yet, so a bare accept() does
 // not mean sshd is up. Requiring the "SSH-" identification banner does.
 //
 // budget caps the read deadline at the remaining overall timeout, so a
@@ -169,14 +203,10 @@ const recipeShutdownGrace = 5 * time.Second
 // last-provision.log. The detail view tails that file on a ticker, so there
 // is no channel plumbing between this and the UI.
 //
-// ctx cancels the in-flight ssh process, not just the caller's wait on it:
-// each recipe runs under exec.CommandContext, so a cancelled apply actually
-// kills ssh rather than leaving it running against the guest after Provision
-// has returned. The initial wait for sshd is different: Wait is a local dial
-// loop with no process to kill, so it is raced against ctx.Done() below
-// instead of being made to accept a ctx itself — cancelling there simply lets
-// Provision return early while that goroutine finishes on its own, bounded by
-// WaitTimeout regardless.
+// ctx cancels both phases: the initial wait for sshd (Wait is itself
+// ctx-aware, see its own comment) and each recipe's ssh process, which runs
+// under exec.CommandContext, so a cancelled apply actually kills ssh rather
+// than leaving it running against the guest after Provision has returned.
 func Provision(ctx context.Context, v *config.VM) (err error) {
 	logx.L().Info("provision start", "vm", v.Name, "recipes", strings.Join(v.Recipes, ","))
 	defer func() {
@@ -194,17 +224,13 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	defer log.Close()
 
 	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- Wait(v, WaitTimeout) }()
-	select {
-	case <-ctx.Done():
-		fmt.Fprintf(log, "CANCELLED: %v\n", ctx.Err())
-		return ctx.Err()
-	case err := <-waitDone:
-		if err != nil {
+	if err := Wait(ctx, v, WaitTimeout); err != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintf(log, "CANCELLED: %v\n", err)
+		} else {
 			fmt.Fprintf(log, "FAILED: %v\n", err)
-			return err
 		}
+		return err
 	}
 
 	for _, name := range v.Recipes {
@@ -233,7 +259,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			// ctx being the cause is reported honestly rather than as a plain
 			// recipe FAILED: waitApplied (internal/core/wait.go) only ever
 			// treats a final "done" line as success, so either wording leaves
-			// it correctly "not applied" — but a human reading the log, or a
+			// it correctly "not applied", but a human reading the log, or a
 			// caller sniffing Logs' text, must not read a cancellation as if
 			// the recipe itself had failed.
 			if ctxErr := ctx.Err(); ctxErr != nil {

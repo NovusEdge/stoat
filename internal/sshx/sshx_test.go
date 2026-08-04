@@ -51,8 +51,8 @@ func TestArgsUsesConfiguredSSHUser(t *testing.T) {
 }
 
 // TestCopyArgsUsesScpsPortFlagNotSSHs pins the regression this package
-// exists to prevent: scp takes -P (capital) for the port, not ssh's -p —
-// copy-pasting Args' argv into an scp invocation would either fail outright
+// exists to prevent: scp takes -P (capital) for the port, not ssh's -p,
+// since copy-pasting Args' argv into an scp invocation would either fail outright
 // or (worse) silently hit -p's OTHER meaning for scp, "preserve file times".
 func TestCopyArgsUsesScpsPortFlagNotSSHs(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
@@ -110,10 +110,10 @@ func TestCopyArgsDirection(t *testing.T) {
 // TestCopyArgsRemotePathIsNotShellQuoted pins the decision documented in
 // core/copy.go: unlike Exec, which sends its command through the GUEST'S
 // shell and must quote for it, scp (SFTP protocol, the default since OpenSSH
-// 9.0 — see `man scp`'s CAVEATS section, which says quoting is a concern
+// 9.0; see `man scp`'s CAVEATS section, which says quoting is a concern
 // only for the legacy -O protocol) never involves a remote shell at all. A
 // remote path is a literal string handed to the SFTP subsystem, so a space
-// in it must survive completely unescaped — wrapping it in quotes would
+// in it must survive completely unescaped, because wrapping it in quotes would
 // create a file literally named with quote characters in it.
 func TestCopyArgsRemotePathIsNotShellQuoted(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
@@ -177,7 +177,7 @@ func TestWaitTimesOutWhenAcceptedButNoBanner(t *testing.T) {
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
 	start := time.Now()
-	err := Wait(v, 500*time.Millisecond)
+	err := Wait(context.Background(), v, 500*time.Millisecond)
 	elapsed := time.Since(start)
 	t.Logf("accept-without-banner: Wait took %s", elapsed)
 	if err == nil {
@@ -193,7 +193,7 @@ func TestWaitSucceedsOnceBannerArrives(t *testing.T) {
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
 	start := time.Now()
-	err := Wait(v, 2*time.Second)
+	err := Wait(context.Background(), v, 2*time.Second)
 	elapsed := time.Since(start)
 	t.Logf("accept-with-banner: Wait took %s", elapsed)
 	if err != nil {
@@ -227,7 +227,7 @@ func TestWaitSucceedsOnSlowBanner(t *testing.T) {
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
 	start := time.Now()
-	err = Wait(v, 3*time.Second)
+	err = Wait(context.Background(), v, 3*time.Second)
 	elapsed := time.Since(start)
 	t.Logf("slow-banner (500ms): Wait took %s", elapsed)
 	if err != nil {
@@ -239,7 +239,7 @@ func TestWaitTimesOutOnClosedPort(t *testing.T) {
 	// Port 1 on loopback: reserved, nothing listens.
 	v := &config.VM{Name: "x", SSHPort: 1, Dir: t.TempDir()}
 	start := time.Now()
-	err := Wait(v, 300*time.Millisecond)
+	err := Wait(context.Background(), v, 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("Wait returned nil for a closed port")
 	}
@@ -248,6 +248,79 @@ func TestWaitTimesOutOnClosedPort(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "x") {
 		t.Errorf("error should name the vm, got %v", err)
+	}
+}
+
+// acceptAndClose starts a listener that accepts and immediately closes every
+// connection, with no banner. Unlike acceptOnly (which leaves the connection
+// open to model libslirp's early accept), this makes both the dial and
+// bannerReady's read return almost instantly on every attempt, so a caller
+// testing Wait's retry loop lands reliably inside the 500ms sleep BETWEEN
+// attempts rather than racing the dial or the banner read.
+func acceptAndClose(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// TestWaitCancelDuringRetrySleepReturnsPromptly proves ctx is raced against
+// the between-attempt sleep, not just checked once per loop iteration.
+// Falsified by reverting Wait's select to a bare time.Sleep(sleep): that
+// version takes close to the full 500ms sleep to notice cancellation,
+// failing this test's margin.
+func TestWaitCancelDuringRetrySleepReturnsPromptly(t *testing.T) {
+	port := acceptAndClose(t)
+	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	err := Wait(ctx, v, 10*time.Second)
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	// The retry sleep is 500ms; a version that only checks ctx between full
+	// loop iterations would take close to that after cancel fires. A margin
+	// well under it proves the sleep itself is interrupted, not just noticed
+	// on the next iteration.
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("Wait took %s to notice cancellation during the retry sleep, want well under 500ms", elapsed)
+	}
+}
+
+// TestWaitAlreadyCancelledReturnsImmediately covers the ctx-before-any-dial
+// case: nothing should be attempted at all.
+func TestWaitAlreadyCancelledReturnsImmediately(t *testing.T) {
+	v := &config.VM{Name: "x", SSHPort: 1, Dir: t.TempDir()} // nothing listens
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := Wait(ctx, v, 10*time.Second)
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("Wait took %s against an already-cancelled ctx, want near-instant", elapsed)
 	}
 }
 
@@ -287,8 +360,8 @@ func TestProvisionCancelDuringWaitReturnsPromptly(t *testing.T) {
 }
 
 // installFakeSSH puts a stand-in "ssh" on PATH ahead of the real one. It
-// records its own pid to pidFile, then execs into "sleep 30" — replacing its
-// own process image rather than forking a child — so the pid recorded is
+// records its own pid to pidFile, then execs into "sleep 30" (replacing its
+// own process image rather than forking a child), so the pid recorded is
 // the pid that Provision's cmd.Process actually signals, exactly as it would
 // be for a real ssh process. The rest of PATH is kept so the script's own
 // "sleep" can still be resolved.
@@ -320,7 +393,7 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) {
 	t.Fatalf("%s never appeared within %s", path, timeout)
 }
 
-// processAlive reports whether pid still exists, using signal 0 — the
+// processAlive reports whether pid still exists, using signal 0: the
 // standard liveness probe that delivers nothing but still fails against a
 // dead pid.
 func processAlive(pid int) bool {
