@@ -27,3 +27,4 @@ GEMINI.md
 
 # local cloud-init hardware-gate test
 /.cloudinit-test/
+.worktrees/
