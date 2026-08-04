@@ -174,7 +174,7 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "share":"/home/u/src","recipes":["xfce.alpine.sh"],
              "ssh_port":2200,"ssh_user":"stoat","installed":false,
              "forwards":[{"host_port":8080,"guest_port":80}],
-             "allow_exec":true,
+             "allow_exec":true,"display":"vnc",
              "error":"only on a broken VM"}
 
 Image       {"id":"alpine-virt","os":"alpine","variant":"virt",
@@ -220,11 +220,27 @@ absolute path. That is a guarantee, not an accident.
 `id`, because a structural rule a consumer has to re-derive is one a consumer
 will eventually re-derive wrong.
 
+`VM.display` is `"window"` or `"vnc"`, and `""` on a broken VM. It says which
+surface the VM's screen appears on: `"window"` for a real QEMU window, which
+only an uninstalled disk-mode VM gets, and `"vnc"` for every other VM, whose
+screen goes to a VNC server bound on a unix socket. It is emitted for the same
+reason as `Image.byo`: it is derivable from `mode` and `installed` today, and
+that is exactly the kind of rule a consumer re-derives and then keeps applying
+after stoat changes it.
+
+`display` names the surface and never its location. The socket path is not on
+the wire and neither is a rendered command for opening it; a command would
+just embed the same absolute host path behind a friendlier field name. An
+agent cannot run a GUI viewer anyway. A consumer that needs to tell a human
+where to look runs `stoat get <name>` without `--json`, which prints the
+socket and an attach command for a viewer installed on that machine.
+
 ### What is deliberately absent
 
 - **Host paths.** `core.VM` carries six absolute host paths (its disk, console
   log, monitor socket, and so on). None reach the wire. The DTO constructor
-  does not read that field at all, so no future JSON tag can leak it.
+  does not read that field at all, so no future JSON tag can leak it. This
+  includes the VNC socket: see `display` above.
 - **`console_password`.** A console password is useless unless shown to a
   human at a console, and it must never reach a wire format.
 - **`iso` and `base`.** `base` is an absolute host path. Both are omitted

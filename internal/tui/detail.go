@@ -281,8 +281,23 @@ func (m model) viewDetail() string {
 	// socket bound in that case (internal/qemu/args.go) is otherwise
 	// invisible anywhere in the UI, so surface it: it's the only way to
 	// get a display on a headless VM.
+	//
+	// "connect a VNC viewer here" was the whole hint and it was not enough:
+	// the reported failure is a disk VM whose window disappears the moment
+	// setup-alpine marks it installed, by a user who then has a path and no
+	// idea what opens it. So print the command, for a viewer that is actually
+	// on this host.
 	if !qemu.NeedsWindow(v) {
-		line("vnc", v.VNCPath()+dimStyle.Render("  connect a VNC viewer here for a display"))
+		line("vnc", v.VNCPath())
+		att := qemu.AttachVNC(v.VNCPath())
+		if att.Command == "" {
+			facts.row("", "", warnStyle.Render("no VNC viewer found: install "+strings.Join(att.Missing, " or ")))
+		} else {
+			facts.row("", "", dimStyle.Render(att.Command))
+			if att.Then != "" {
+				facts.row("", "", dimStyle.Render(att.Then))
+			}
+		}
 	}
 	// How to get in. The console line matters most for cloud images: they
 	// lock every account, so without a password the console shows a login

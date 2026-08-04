@@ -34,6 +34,10 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 		forwards[i] = fmt.Sprintf("%d:%d", f.HostPort, f.GuestPort)
 	}
 	fmt.Fprintf(stdout, "forwards: %s\n", strings.Join(forwards, ", "))
+	// The one line here that is not a vm.toml field: where the screen is. A
+	// user who has lost their window asks `get` before they ask anything
+	// else, and until now it was the one place that did not answer.
+	printDisplay(stdout, core.DisplayFor(v))
 	if v.State == core.StateBroken {
 		fmt.Fprintf(stdout, "error: %s\n", v.Error)
 	}
