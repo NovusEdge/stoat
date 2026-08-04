@@ -251,8 +251,9 @@ def doctor() -> dict[str, Any]:
         "Create a new VM from a catalog image, without starting it. Only "
         "catalog image ids are accepted (see list_images); a bring-your-own "
         "image path, a console password, or a host share cannot be set through "
-        "this tool. Reversible: the VM can be deleted with destroy. Mutating: "
-        "creates a new VM directory and disk under the stoat data root."
+        "this tool. Memory is 'ram_mb' and is in MEGABYTES; 'disk' is a size "
+        "string like '8G'. Reversible: the VM can be deleted with destroy. "
+        "Mutating: creates a new VM directory and disk under the stoat data root."
     ),
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )
@@ -456,9 +457,10 @@ def forward(vm: str, pairs: list[str] | None = None, clear: bool = False) -> dic
     description=(
         "Block until a VM reaches a state: reachable (sshd answering), applied "
         "(most recent recipe run finished), or stopped (qemu no longer "
-        "running). Fails immediately, rather than waiting out the timeout, for "
-        "a state the VM can never reach. Mutating only in that it blocks the "
-        "caller; it does not itself change the VM."
+        "running). The bound is 'timeout_seconds', a plain integer count of "
+        "seconds, not a duration string. Fails immediately, rather than waiting "
+        "out the timeout, for a state the VM can never reach. Mutating only in "
+        "that it blocks the caller; it does not itself change the VM."
     ),
     annotations={"readOnlyHint": False, "destructiveHint": False},
 )

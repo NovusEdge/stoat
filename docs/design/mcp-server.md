@@ -164,3 +164,40 @@ the table in §5.
 Stated so nobody builds them by accident: HTTP transport (stdio only),
 authentication, multi-user, and any tool that writes to the host outside
 `~/.stoat/shared/<vm>/`.
+
+## 8. Live gate: CLEARED (2026-08-04)
+
+Every claim below came from real VMs booted through the MCP tools, not from
+mocks. A throwaway `mcpgate` (alpine-cloud) and `mcplocked` were created,
+exercised and destroyed; the data root was left exactly as found.
+
+- **create, start, wait**: reachable in 13.4s.
+- **exec** returns real guest output, running as `uid=1001(stoat)`, the
+  cloud-init account rather than root.
+- **Quoting survives the whole chain**, which is the thing only a live test
+  proves: `exec(command=["touch", "/tmp/qt/my file"])` created ONE file. The
+  argv goes Python list to CLI argv to core's per-element shell quoting to
+  the guest's ash, and any layer dropping a word boundary shows up here.
+- **A nonzero guest status is DATA**: `sh -c 'exit 42'` returned
+  `exit_code: 42` with no exception raised, matching the contract's rule that
+  exec exits 0 whenever the command ran.
+- **copy_to** into the sandbox landed and the guest read the content back.
+  The path guard refused `/etc/passwd`, `~/.ssh/id_rsa`, and
+  `~/.stoat/shared/<vm>/../../id_stoat`.
+- **allow_exec=false is honoured on a real VM**: both `exec` and `copy_to`
+  refused, before either reached the binary.
+
+### The finding worth keeping: mapped-xattr works
+
+The guest ran `ln -sf /etc /mnt/work/escape` inside its own writable share.
+On the host, `os.path.islink()` on that entry is **False**: QEMU stored the
+link as an extended attribute instead of creating a real host symlink. That
+is the traversal defence §10.2 of core-api.md claimed, now demonstrated
+rather than assumed.
+
+It does not make `check_host_path`'s symlink resolution redundant. §10.2 also
+requires that `mapped-xattr` be DETECTED and degrade loudly rather than
+silently falling back to `security_model=none`. If that detection ever
+regresses, the guest's symlink becomes a real host symlink again and the
+guard is the only thing left standing between an agent and the host
+filesystem. Two independent mechanisms, neither relying on the other.
