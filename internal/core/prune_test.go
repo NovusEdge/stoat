@@ -41,7 +41,7 @@ func TestPruneNeverRemovesAHealthyVMsImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range removed {
-		if strings.Contains(r, "alpine-virt-3.24.1-x86_64.iso") {
+		if strings.Contains(r.Path, "alpine-virt-3.24.1-x86_64.iso") {
 			t.Fatalf("Prune removed a referenced image: %v", removed)
 		}
 	}
@@ -65,7 +65,7 @@ func TestPruneProtectsImageReferencedViaBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range removed {
-		if strings.Contains(r, "nocloud_alpine") {
+		if strings.Contains(r.Path, "nocloud_alpine") {
 			t.Fatalf("Prune removed a Base-referenced image: %v", removed)
 		}
 	}
@@ -108,8 +108,11 @@ func TestPruneBYOOutsideIsosDoesNotConfuseImages(t *testing.T) {
 	}
 	found := false
 	for _, r := range removed {
-		if strings.Contains(r, "orphan.iso") {
+		if strings.Contains(r.Path, "orphan.iso") {
 			found = true
+			if r.Class != classOrphanedImage {
+				t.Fatalf("orphan.iso reported with class %q, want %q", r.Class, classOrphanedImage)
+			}
 		}
 	}
 	if !found {
@@ -142,6 +145,24 @@ func TestPruneDryRunRemovesNothingFromDisk(t *testing.T) {
 	}
 	if len(removed) != 3 {
 		t.Fatalf("removed = %v, want 3 dry-run candidates (broken vm, part file, orphaned image)", removed)
+	}
+
+	// Each of the three classes must be produced by the item it actually
+	// describes, not just present in some order: pin class to path here so a
+	// mislabeled item (e.g. the orphaned image reported as a broken_vm) fails
+	// this test instead of silently passing the len(removed) == 3 check above.
+	byClass := map[string]string{}
+	for _, r := range removed {
+		byClass[r.Class] = r.Path
+	}
+	if got := byClass[classBrokenVM]; got != filepath.Join(dir, "busted") {
+		t.Errorf("classBrokenVM path = %q, want the busted VM dir", got)
+	}
+	if got := byClass[classPartialDownload]; got != part {
+		t.Errorf("classPartialDownload path = %q, want %q", got, part)
+	}
+	if got := byClass[classOrphanedImage]; got != filepath.Join(dir, "isos", "orphan.iso") {
+		t.Errorf("classOrphanedImage path = %q, want orphan.iso", got)
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "isos", "orphan.iso")); err != nil {
@@ -195,8 +216,8 @@ func TestPruneRemovesStalePartFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(removed) != 1 || !strings.Contains(removed[0], part) {
-		t.Fatalf("removed = %v, want the stale .part file", removed)
+	if len(removed) != 1 || removed[0].Path != part || removed[0].Class != classPartialDownload {
+		t.Fatalf("removed = %v, want the stale .part file as class %q", removed, classPartialDownload)
 	}
 	if _, err := os.Stat(part); !os.IsNotExist(err) {
 		t.Fatalf("stale .part file still on disk: %v", err)
@@ -230,8 +251,9 @@ func TestPruneRemovesBrokenVMWithOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(removed) != 1 || !strings.Contains(removed[0], filepath.Join(dir, "busted")) {
-		t.Fatalf("removed = %v, want the broken VM directory", removed)
+	wantPath := filepath.Join(dir, "busted")
+	if len(removed) != 1 || removed[0].Path != wantPath || removed[0].Class != classBrokenVM {
+		t.Fatalf("removed = %v, want %s as class %q", removed, wantPath, classBrokenVM)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "busted")); !os.IsNotExist(err) {
 		t.Fatalf("broken VM directory still on disk: %v", err)
@@ -273,7 +295,7 @@ func TestPruneBrokenVMWithReadableBaseFieldProtectsItsImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range removed {
-		if strings.Contains(r, "cloud-base.qcow2") {
+		if strings.Contains(r.Path, "cloud-base.qcow2") {
 			t.Fatalf("Prune removed an image referenced by a broken VM's base field: %v", removed)
 		}
 	}

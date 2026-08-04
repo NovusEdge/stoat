@@ -802,12 +802,29 @@ func runPrune(a *Args, stdout, stderr io.Writer) int {
 		return ExitOK
 	}
 	for _, r := range removed {
-		fmt.Fprintln(stdout, r)
+		fmt.Fprintln(stdout, prunePrefix(r.Class)+r.Path)
 	}
 	if a.Prune.DryRun {
 		fmt.Fprintln(stdout, "\n(dry run: nothing was deleted; re-run with --apply)")
 	}
 	return ExitOK
+}
+
+// prunePrefix renders a core.PruneItem.Class as the human-readable prefix
+// core.Prune used to hard-code into its return strings. core now returns the
+// class separately (docs/design/json-contract-draft.md §3.3's PruneItem), so
+// the CLI, the only human-facing renderer, owns this text.
+func prunePrefix(class string) string {
+	switch class {
+	case "broken_vm":
+		return "broken vm: "
+	case "partial_download":
+		return "partial download: "
+	case "orphaned_image":
+		return "orphaned image: "
+	default:
+		return class + ": "
+	}
 }
 
 // runSnapshot lists, saves, restores or deletes a snapshot. Restoring is the

@@ -49,6 +49,26 @@ var (
 	baseFieldLine = regexp.MustCompile(`(?m)^\s*base\s*=\s*"([^"]*)"\s*$`)
 )
 
+// PruneItem is one thing Prune removed, or would remove under DryRun. Class
+// is snake_case because it is also the wire value for the JSON contract's
+// "prune" command (docs/design/json-contract-draft.md §3.3); a caller that
+// wants prose renders it, rather than splitting a formatted string back
+// apart, which is the layering violation this type replaces.
+type PruneItem struct {
+	// Class is one of "broken_vm", "partial_download" or "orphaned_image",
+	// matching pruneBroken, prunePartialDownloads and pruneImages respectively.
+	Class string
+	// Path is the absolute path acted on (or that would have been, under
+	// DryRun).
+	Path string
+}
+
+const (
+	classBrokenVM        = "broken_vm"
+	classPartialDownload = "partial_download"
+	classOrphanedImage   = "orphaned_image"
+)
+
 // PruneOpts controls what Prune is willing to remove. Every class it can act
 // on defaults to off (see the Broken and Images doc comments) except the
 // partial-download sweep, which needs no flag; see prunePartialDownloads.
@@ -74,9 +94,9 @@ type PruneOpts struct {
 // Prune removes (or, with DryRun, only reports) disposable stoat state:
 // broken VMs, abandoned partial downloads, and unreferenced local images,
 // each gated as described on PruneOpts and on the three helper functions
-// below. It returns every path acted on (or that would have been), each
-// prefixed with which class it fell into, so a caller can render or log the
-// decision without re-deriving it.
+// below. It returns every item acted on (or that would have been), each
+// carrying which class it fell into, so a caller can render or log the
+// decision without re-deriving it from a formatted string.
 //
 // Every helper below is independently scoped to a directory it is safe to
 // touch (Root()/<broken-vm-dir>, Root()/isos/*.part, Root()/isos/*), so
@@ -84,7 +104,7 @@ type PruneOpts struct {
 // .manifest (all top-level files/dirs under Root() outside isos/), or a VM
 // directory outside Root() (config.VM.Delete's own guard, reused by
 // pruneBroken, refuses that). See docs/design/core-api.md §7 and §7.1 item 8.
-func Prune(opts PruneOpts) ([]string, error) {
+func Prune(opts PruneOpts) ([]PruneItem, error) {
 	// The same data-root lock Create, Clone and Destroy take. Pruning decides
 	// what is unreferenced by reading every vm.toml, and a VM being created
 	// concurrently does not exist in one yet: without the lock, an image
@@ -98,7 +118,7 @@ func Prune(opts PruneOpts) ([]string, error) {
 	}
 	defer unlock()
 
-	var removed []string
+	var removed []PruneItem
 
 	if opts.Broken {
 		r, err := pruneBroken(opts.DryRun)
@@ -122,7 +142,18 @@ func Prune(opts PruneOpts) ([]string, error) {
 		}
 	}
 
-	sort.Strings(removed)
+	// Sort by the same key the old []string return sorted on: the formatted
+	// "<prefix>: <path>" line. Reproduced here (rather than by class then
+	// path) only so the CLI's rendered output, ordering included, stays
+	// byte-identical to what it was before this type existed.
+	prefix := map[string]string{
+		classBrokenVM:        "broken vm: ",
+		classPartialDownload: "partial download: ",
+		classOrphanedImage:   "orphaned image: ",
+	}
+	sort.Slice(removed, func(i, j int) bool {
+		return prefix[removed[i].Class]+removed[i].Path < prefix[removed[j].Class]+removed[j].Path
+	})
 	return removed, nil
 }
 
@@ -139,12 +170,12 @@ func Prune(opts PruneOpts) ([]string, error) {
 // broke can tell them apart. core.Destroy already lets that human remove one
 // broken VM by name once they've decided; Prune's default must not make that
 // decision for them in bulk, silently, the first time they run it.
-func pruneBroken(dryRun bool) ([]string, error) {
+func pruneBroken(dryRun bool) ([]PruneItem, error) {
 	broken, err := config.ListBroken()
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []PruneItem
 	for _, b := range broken {
 		dir := filepath.Join(config.Root(), b.Name)
 		bv := &config.VM{Name: b.Name, Dir: dir}
@@ -160,7 +191,7 @@ func pruneBroken(dryRun bool) ([]string, error) {
 			continue
 		}
 
-		out = append(out, "broken vm: "+dir)
+		out = append(out, PruneItem{Class: classBrokenVM, Path: dir})
 		if !dryRun {
 			// config.VM.Delete refuses anything whose parent isn't Root(),
 			// which dir always satisfies here (b.Name is a bare directory
@@ -185,7 +216,7 @@ func pruneBroken(dryRun bool) ([]string, error) {
 // heuristic guess but a consequence of iso.Download's own stall-timeout
 // contract. There is nothing here for a human to weigh that Broken and
 // Images both require.
-func prunePartialDownloads(dryRun bool) ([]string, error) {
+func prunePartialDownloads(dryRun bool) ([]PruneItem, error) {
 	isosDir := filepath.Join(config.Root(), "isos")
 	entries, err := os.ReadDir(isosDir)
 	if err != nil {
@@ -195,7 +226,7 @@ func prunePartialDownloads(dryRun bool) ([]string, error) {
 		return nil, err
 	}
 
-	var out []string
+	var out []PruneItem
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".part") {
 			continue
@@ -213,7 +244,7 @@ func prunePartialDownloads(dryRun bool) ([]string, error) {
 		}
 
 		p := filepath.Join(isosDir, e.Name())
-		out = append(out, "partial download: "+p)
+		out = append(out, PruneItem{Class: classPartialDownload, Path: p})
 		if !dryRun {
 			if err := os.Remove(p); err != nil {
 				return out, err
@@ -298,13 +329,13 @@ func referencedImages() (map[string]bool, error) {
 // optimise for reclaiming disk space at the cost of occasionally forcing a
 // multi-minute re-download the user did nothing to deserve; defaulting it
 // off is what keeps that trade a choice instead of a surprise.
-func pruneImages(dryRun bool) ([]string, error) {
+func pruneImages(dryRun bool) ([]PruneItem, error) {
 	refs, err := referencedImages()
 	if err != nil {
 		return nil, err
 	}
 
-	var out []string
+	var out []PruneItem
 	for _, f := range LocalImages() {
 		abs, err := filepath.Abs(filepath.Join(config.Root(), "isos", f))
 		if err != nil {
@@ -314,7 +345,7 @@ func pruneImages(dryRun bool) ([]string, error) {
 			continue
 		}
 
-		out = append(out, "orphaned image: "+abs)
+		out = append(out, PruneItem{Class: classOrphanedImage, Path: abs})
 		if !dryRun {
 			if err := os.Remove(abs); err != nil {
 				return out, err
