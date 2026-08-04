@@ -64,8 +64,13 @@ func TestGetTellsAnInstalledDiskVMWhereItsScreenWent(t *testing.T) {
 
 // Before the install finishes there IS a window, and saying "no qemu window"
 // then would send a user hunting for a socket qemu never bound.
+//
+// The override is pinned rather than left to detection: this assertion is
+// about a host with a session, and the machine running the test may not be
+// one.
 func TestGetSaysAFreshDiskVMHasAWindow(t *testing.T) {
 	cliRoot(t)
+	t.Setenv(core.GraphicalEnv, "1")
 	saveVM(t, &config.VM{Name: "alpinedisk", OS: "alpine", Mode: "disk", Disk: "8G",
 		Installed: false, RAM: 2048, CPUs: 2, SSHPort: 2200})
 
@@ -75,6 +80,37 @@ func TestGetSaysAFreshDiskVMHasAWindow(t *testing.T) {
 	}
 	if strings.Contains(out, "vnc.sock") {
 		t.Errorf("a windowed VM must not be sent to a VNC socket:\n%s", out)
+	}
+}
+
+// The same VM on a host with no graphical session. qemu cannot open a window
+// there, so the install console is on VNC, and the output has to say that
+// before it says "no qemu window": mid-install, "no qemu window" on its own
+// reads as the thing that went wrong.
+func TestGetExplainsTheInstallConsoleOnAHeadlessHost(t *testing.T) {
+	root := cliRoot(t)
+	saveVM(t, &config.VM{Name: "alpinedisk", OS: "alpine", Mode: "disk", Disk: "8G",
+		Installed: false, RAM: 2048, CPUs: 2, SSHPort: 2200})
+	fakeViewers(t, "gvncviewer")
+	t.Setenv(core.GraphicalEnv, "0")
+
+	out := getText(t, "alpinedisk")
+	sock := filepath.Join(root, "alpinedisk", "vnc.sock")
+	for _, want := range []string{
+		"no usable graphical session on this host",
+		"console is on VNC instead",
+		"attach with: gvncviewer " + sock,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("get output missing %q:\n%s", want, out)
+		}
+	}
+	// An installed VM on the same host is on VNC for its own reasons and must
+	// not be given the host's excuse.
+	saveVM(t, &config.VM{Name: "done", OS: "alpine", Mode: "disk", Disk: "8G",
+		Installed: true, RAM: 2048, CPUs: 2, SSHPort: 2201})
+	if out := getText(t, "done"); strings.Contains(out, "graphical session") {
+		t.Errorf("an installed VM was never getting a window:\n%s", out)
 	}
 }
 
@@ -152,6 +188,7 @@ func TestJSONCarriesTheDisplayKindButNeverTheSocket(t *testing.T) {
 // a consumer is told about a surface the VM does not have.
 func TestJSONDisplayIsWindowBeforeTheInstallFinishes(t *testing.T) {
 	cliRoot(t)
+	t.Setenv(core.GraphicalEnv, "1")
 	saveVM(t, &config.VM{Name: "alpinedisk", OS: "alpine", Mode: "disk", Disk: "8G",
 		Installed: false, RAM: 2048, CPUs: 2, SSHPort: 2200})
 
@@ -162,5 +199,24 @@ func TestJSONDisplayIsWindowBeforeTheInstallFinishes(t *testing.T) {
 	vm, _ := dataOf(t, objs)["vm"].(map[string]any)
 	if vm["display"] != core.DisplayWindow {
 		t.Errorf("display = %v, want %q", vm["display"], core.DisplayWindow)
+	}
+}
+
+// Same VM, host with no session: the wire has to follow the argv. A consumer
+// told "window" would tell its human to look at a window that will never open,
+// on a machine that by definition has no screen to open it on.
+func TestJSONDisplayIsVNCOnAHeadlessHost(t *testing.T) {
+	cliRoot(t)
+	t.Setenv(core.GraphicalEnv, "0")
+	saveVM(t, &config.VM{Name: "alpinedisk", OS: "alpine", Mode: "disk", Disk: "8G",
+		Installed: false, RAM: 2048, CPUs: 2, SSHPort: 2200})
+
+	code, objs := runJSON(t, "get", "alpinedisk")
+	if code != ExitOK {
+		t.Fatalf("exit = %d: %v", code, objs)
+	}
+	vm, _ := dataOf(t, objs)["vm"].(map[string]any)
+	if vm["display"] != core.DisplayVNC {
+		t.Errorf("display = %v, want %q", vm["display"], core.DisplayVNC)
 	}
 }

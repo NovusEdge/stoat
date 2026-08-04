@@ -11,7 +11,7 @@ import (
 // --- golden-file style: marshal each DTO and pin the exact JSON shape. ---
 
 func TestVMGolden(t *testing.T) {
-	got := marshal(t, FromVM(sampleVM()))
+	got := marshal(t, FromVM(sampleVM(), true))
 	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"vnc"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
@@ -24,13 +24,13 @@ func TestVMGolden(t *testing.T) {
 func TestVMDisplayNamesTheSurfaceNotTheSocket(t *testing.T) {
 	fresh := core.VM{Name: "alpinedisk", Mode: "disk", Installed: false,
 		Paths: core.Paths{VNCSocket: "/home/u/.stoat/alpinedisk/vnc.sock"}}
-	got := marshal(t, FromVM(fresh))
+	got := marshal(t, FromVM(fresh, true))
 	if !strings.Contains(got, `"display":"window"`) {
 		t.Errorf("a VM mid-install has a real window: %s", got)
 	}
 	installed := fresh
 	installed.Installed = true
-	got = marshal(t, FromVM(installed))
+	got = marshal(t, FromVM(installed, true))
 	if !strings.Contains(got, `"display":"vnc"`) {
 		t.Errorf("an installed disk VM is headless: %s", got)
 	}
@@ -42,7 +42,7 @@ func TestVMDisplayNamesTheSurfaceNotTheSocket(t *testing.T) {
 // A broken vm.toml supplies neither mode nor installed, so there is no rule
 // to run and "vnc" would be a guess dressed as a fact.
 func TestVMBrokenHasNoDisplay(t *testing.T) {
-	got := marshal(t, FromVM(core.VM{Name: "wreck", State: core.StateBroken, Error: "bad"}))
+	got := marshal(t, FromVM(core.VM{Name: "wreck", State: core.StateBroken, Error: "bad"}, true))
 	if !strings.Contains(got, `"display":""`) {
 		t.Errorf("broken VM must not claim a display surface: %s", got)
 	}
@@ -50,7 +50,7 @@ func TestVMBrokenHasNoDisplay(t *testing.T) {
 
 func TestVMBrokenCarriesError(t *testing.T) {
 	v := core.VM{Name: "oldvm", State: core.StateBroken, Error: "broken vm.toml: oldvm: toml: line 4: ..."}
-	got := marshal(t, FromVM(v))
+	got := marshal(t, FromVM(v, true))
 	if !strings.Contains(got, `"error":"broken vm.toml: oldvm: toml: line 4: ..."`) {
 		t.Errorf("expected error field in %s", got)
 	}
@@ -62,7 +62,7 @@ func TestVMBrokenCarriesError(t *testing.T) {
 func TestVMAllowExecCarriesFalse(t *testing.T) {
 	v := sampleVM()
 	v.AllowExec = false
-	got := marshal(t, FromVM(v))
+	got := marshal(t, FromVM(v, true))
 	if !strings.Contains(got, `"allow_exec":false`) {
 		t.Errorf("expected allow_exec:false in %s", got)
 	}
@@ -136,7 +136,7 @@ func TestRecipeIssueGolden(t *testing.T) {
 // --- the three MUST-hold rules from the brief ---
 
 func TestVMNeverSerializesConsolePassword(t *testing.T) {
-	got := marshal(t, FromVM(sampleVM()))
+	got := marshal(t, FromVM(sampleVM(), true))
 	if strings.Contains(strings.ToLower(got), "password") {
 		t.Fatalf("VM DTO leaked a password-shaped field: %s", got)
 	}
@@ -146,7 +146,7 @@ func TestVMNeverSerializesConsolePassword(t *testing.T) {
 }
 
 func TestVMNeverSerializesHostPaths(t *testing.T) {
-	got := marshal(t, FromVM(sampleVM()))
+	got := marshal(t, FromVM(sampleVM(), true))
 	for _, p := range []string{
 		"/home/u/.stoat/work",
 		"disk.qcow2",
@@ -166,8 +166,8 @@ func TestEmptySlicesMarshalAsEmptyArrayNeverNull(t *testing.T) {
 		name string
 		got  string
 	}{
-		{"VM.forwards/recipes", marshal(t, FromVM(core.VM{Name: "bare"}))},
-		{"VMs list", marshal(t, FromVMs(nil))},
+		{"VM.forwards/recipes", marshal(t, FromVM(core.VM{Name: "bare"}, true))},
+		{"VMs list", marshal(t, FromVMs(nil, true))},
 		{"PortForwards", marshal(t, FromPortForwards(nil))},
 		{"CatalogImages", marshal(t, FromCatalogImages(nil))},
 		{"Snapshots", marshal(t, FromSnapshots(nil))},
@@ -186,7 +186,7 @@ func TestEmptySlicesMarshalAsEmptyArrayNeverNull(t *testing.T) {
 	}
 
 	// Direct, unambiguous checks for the two nil-slice-prone fields on VM.
-	vm := marshal(t, FromVM(core.VM{Name: "bare"}))
+	vm := marshal(t, FromVM(core.VM{Name: "bare"}, true))
 	if !strings.Contains(vm, `"recipes":[]`) {
 		t.Errorf("VM.recipes did not marshal as []: %s", vm)
 	}

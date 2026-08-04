@@ -153,7 +153,7 @@ display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
 
 ### Where the screen is
 
-Exactly one kind of VM gets a real QEMU window: a **disk-mode VM that is not yet installed**. Its OS installer draws to VGA and a human has to drive it, so `up` says so:
+Exactly one kind of VM gets a real QEMU window: a **disk-mode VM that is not yet installed**, on a host with a graphical session. Its OS installer draws to VGA and a human has to drive it, so `up` says so:
 
 ```
 display: a qemu window, for the OS installer's console
@@ -170,6 +170,22 @@ The attach command names a viewer that is actually installed on your machine:
 - If neither is installed, `up` says so and names them rather than printing a command that would fail.
 
 There is currently no way to ask for a QEMU window on an installed disk VM. `-display gtk` needs a graphical session on the host, so granting one by default would make `stoat up` fail outright over SSH or from a script rather than merely come up headless.
+
+### On a host with no graphical session
+
+`-display gtk` does not degrade when there is no display server: QEMU exits 1. So the install console goes to VNC there too, and `up` says why before it says where:
+
+```
+$ stoat up alpinedisk
+starting alpinedisk...
+alpinedisk started (ssh :2200)
+display: no usable graphical session on this host, so the OS installer's
+  console is on VNC instead; drive it from a machine with a screen
+display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
+  attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
+```
+
+The check looks at `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0` (GTK's own fallback when `WAYLAND_DISPLAY` is unset). `STOAT_GRAPHICAL=0` forces the VNC path and `STOAT_GRAPHICAL=1` forces the window, for every command and for the TUI. Use `0` when a host has a session QEMU cannot draw on, which surfaces as `OpenGL is not supported by display backend 'gtk'`; see [troubleshooting](../troubleshooting.md).
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded or fails to start (including a broken VM, which is refused before the `starting...` line is even printed).
 

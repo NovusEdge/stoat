@@ -97,12 +97,18 @@ type VM struct {
 	// from mode and installed, for the same reason Image.byo is: a structural
 	// rule a consumer has to re-derive is one a consumer will eventually
 	// re-derive wrong, and this particular rule is one stoat reserves the
-	// right to change.
+	// right to change. It has already changed once: it is no longer derivable
+	// from mode and installed at all, because a host with no graphical session
+	// puts an uninstalled disk VM on VNC too.
 	Display string `json:"display"`
 	Error   string `json:"error,omitempty"`
 }
 
-func FromVM(v core.VM) VM {
+// FromVM takes graphical (core.GraphicalSession) rather than calling it,
+// keeping this constructor pure: FromVMs would otherwise re-answer a
+// host-wide question once per VM in the list, and a test of this file would
+// answer it differently depending on the machine it ran on.
+func FromVM(v core.VM, graphical bool) VM {
 	return VM{
 		Name:      v.Name,
 		OS:        v.OS,
@@ -121,15 +127,15 @@ func FromVM(v core.VM) VM {
 		AllowExec: v.AllowExec,
 		// DisplayKind, not DisplayFor: this constructor must not go looking at
 		// PATH, which DisplayFor does once per VM it is handed.
-		Display: core.DisplayKind(v),
+		Display: core.DisplayKind(v, graphical),
 		Error:   v.Error,
 	}
 }
 
-func FromVMs(vs []core.VM) []VM {
+func FromVMs(vs []core.VM, graphical bool) []VM {
 	out := make([]VM, len(vs))
 	for i, v := range vs {
-		out[i] = FromVM(v)
+		out[i] = FromVM(v, graphical)
 	}
 	return nonNil(out)
 }

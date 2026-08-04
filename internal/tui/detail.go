@@ -288,7 +288,15 @@ func (m model) viewDetail() string {
 	// setup-alpine marks it installed, by a user who then has a path and no
 	// idea what opens it. So print the command, for a viewer that is actually
 	// on this host.
-	if !qemu.NeedsWindow(v) {
+	//
+	// The host is the second half of the rule: with no graphical session, even
+	// the install console lands on this socket, and that is the case where a
+	// user most needs to be told, since the alternative was a VM that refused
+	// to start at all.
+	if graphical := qemu.GraphicalSession(); !qemu.NeedsWindow(v, graphical) {
+		if !graphical && qemu.WantsWindow(v) {
+			facts.row("", "", warnStyle.Render("no usable graphical session on this host: the installer console is on vnc"))
+		}
 		line("vnc", v.VNCPath())
 		att := qemu.AttachVNC(v.VNCPath())
 		if att.Command == "" {

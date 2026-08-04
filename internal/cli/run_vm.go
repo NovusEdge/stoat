@@ -17,7 +17,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms)})
+		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
 	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
@@ -80,14 +80,14 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		if started, err := core.Get(a.VM); err == nil {
 			v = started
 		}
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
 	fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
 	// Re-read for the display line too: Start is what flips a disk VM to
 	// installed, and that flip is exactly what moves the screen off the qemu
 	// window. The pre-Start copy would announce a window that is not there.
 	if started, err := core.Get(a.VM); err == nil {
-		printDisplay(stdout, core.DisplayFor(started))
+		printDisplay(stdout, core.DisplayFor(started, core.GraphicalSession()))
 	}
 	return ExitOK
 }
@@ -104,6 +104,16 @@ func printDisplay(w io.Writer, d core.Display) {
 	case core.DisplayWindow:
 		fmt.Fprintln(w, "display: a qemu window, for the OS installer's console")
 	case core.DisplayVNC:
+		if d.NoSession {
+			// The install console, on a host that cannot open a window. Said
+			// before the socket line, because without it "no qemu window" for a
+			// VM that is mid-install reads as the thing that went wrong.
+			// "no usable session" rather than "no session": the same line
+			// prints when the user set STOAT_GRAPHICAL=0 on a host that plainly
+			// has one, because its GTK cannot draw on it.
+			fmt.Fprintln(w, "display: no usable graphical session on this host, so the OS installer's")
+			fmt.Fprintln(w, "  console is on VNC instead; drive it from a machine with a screen")
+		}
 		fmt.Fprintf(w, "display: no qemu window; the screen is on %s\n", d.Socket)
 		if d.Attach.Command == "" {
 			fmt.Fprintf(w, "  no VNC viewer found; install one of: %s\n", strings.Join(d.Attach.Missing, ", "))
@@ -147,7 +157,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		if stopped, err := core.Get(a.VM); err == nil {
 			v = stopped
 		}
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
 	fmt.Fprintf(stdout, "%s stopped\n", a.VM)
 	return ExitOK
@@ -211,7 +221,7 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 		return ExitFail
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
@@ -232,7 +242,7 @@ func runClone(a *Args, stdout, stderr io.Writer) int {
 		// forwards_copied is emitted rather than left for the consumer to
 		// notice: the dropped forwards are the surprise in this command.
 		return a.ok(stdout, map[string]any{
-			"vm":              wire.FromVM(v),
+			"vm":              wire.FromVM(v, core.GraphicalSession()),
 			"source":          a.VM,
 			"forwards_copied": false,
 		})

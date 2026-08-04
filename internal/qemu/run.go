@@ -126,7 +126,10 @@ func Start(v *config.VM) error {
 	if err := prepareShares(v); err != nil {
 		return err
 	}
-	cmd := exec.Command(Binary, Args(v)...)
+	// The one impure input Args refuses to look up for itself: whether this
+	// host has a display server at all. Resolved here, once, per start.
+	graphical := GraphicalSession()
+	cmd := exec.Command(Binary, Args(v, graphical)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -135,7 +138,7 @@ func Start(v *config.VM) error {
 			msg = err.Error()
 		}
 		logx.L().Error("start failed", "vm", v.Name, "err", msg)
-		return fmt.Errorf("qemu failed to start: %s", msg)
+		return fmt.Errorf("qemu failed to start: %s%s", msg, explainDisplayFailure(msg))
 	}
 	// Log how to get in, not just that it started. This is the line someone
 	// greps for when a VM is up but unreachable.
@@ -148,6 +151,29 @@ func Start(v *config.VM) error {
 		"ssh", fmt.Sprintf("%s@127.0.0.1:%d", user, v.SSHPort),
 		"console", consoleCredential(v, user))
 	return nil
+}
+
+// explainDisplayFailure returns the sentence to append to a qemu start failure
+// whose message is about the window, or "" for any other failure.
+//
+// Both strings are qemu's, measured on a host with no session: `-display
+// gtk,gl=on` reports "OpenGL is not supported by display backend 'gtk'" and
+// plain `-display gtk` reports "gtk initialization failed". The first one is
+// the reason this exists. It sends the reader to mesa and GPU drivers, when
+// what is actually true is that the window cannot be opened at all, and gl=on
+// is merely the option qemu rejected first.
+//
+// Reaching here means a window was asked for and refused, since GraphicalSession
+// saying no puts the VM on VNC and never asks. That is the third case: a real
+// session whose GTK build has no working GL. Nothing in the environment shows
+// it in advance, so it is named here, after the fact, along with the override
+// that works around it.
+func explainDisplayFailure(msg string) string {
+	if !strings.Contains(msg, "gtk") && !strings.Contains(msg, "OpenGL") {
+		return ""
+	}
+	return "\nthis is about the qemu window, not your GPU: qemu could not open one on this host." +
+		"\nrun with " + GraphicalEnv + "=0 to put the screen on this VM's VNC socket instead"
 }
 
 // consoleCredential describes how (or whether) a human can log in at the qemu

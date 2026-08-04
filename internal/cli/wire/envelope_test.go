@@ -10,7 +10,7 @@ import (
 func TestEmitterResultLine(t *testing.T) {
 	var buf bytes.Buffer
 	e := NewEmitter(&buf)
-	if err := e.ResultOK("up", FromVM(sampleVM())); err != nil {
+	if err := e.ResultOK("up", FromVM(sampleVM(), true)); err != nil {
 		t.Fatal(err)
 	}
 

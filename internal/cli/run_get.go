@@ -15,7 +15,7 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v)})
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
 	fmt.Fprintf(stdout, "name: %s\n", v.Name)
 	fmt.Fprintf(stdout, "os: %s\n", v.OS)
@@ -37,7 +37,7 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 	// The one line here that is not a vm.toml field: where the screen is. A
 	// user who has lost their window asks `get` before they ask anything
 	// else, and until now it was the one place that did not answer.
-	printDisplay(stdout, core.DisplayFor(v))
+	printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
 	if v.State == core.StateBroken {
 		fmt.Fprintf(stdout, "error: %s\n", v.Error)
 	}

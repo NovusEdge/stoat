@@ -18,7 +18,7 @@ func TestArgsLive(t *testing.T) {
 		RAM: 4096, CPUs: 4, Share: "/home/u/vms", SSHPort: 2201,
 		Dir: filepath.Join("/data", "live1"),
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 
 	for _, want := range []string{
 		"-enable-kvm", "-m 4096", "-smp 4",
@@ -53,7 +53,7 @@ func TestArgsDiskNotInstalled(t *testing.T) {
 		Share: "/home/u/vms", SSHPort: 2202,
 		Dir: filepath.Join("/data", "work"),
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 
 	if !strings.Contains(got, "-drive file=/data/work/disk.qcow2,if=virtio") {
 		t.Errorf("disk not attached:\n%s", got)
@@ -76,7 +76,7 @@ func TestArgsDiskNotInstalled(t *testing.T) {
 	// A BYO ISO's installer has no idea what an apkovl is; the overlay would
 	// only show up in its disk picker as a second, wrong target.
 	v.OS = "fedora"
-	if got := joined(Args(v)); strings.Contains(got, "fat:rw:") {
+	if got := joined(Args(v, true)); strings.Contains(got, "fat:rw:") {
 		t.Errorf("a non-alpine install was given an apkovl overlay:\n%s", got)
 	}
 }
@@ -89,7 +89,7 @@ func TestArgsDiskInstalled(t *testing.T) {
 		Share: "/home/u/vms", SSHPort: 2202,
 		Dir: filepath.Join("/data", "work"),
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 
 	if strings.Contains(got, "-cdrom") || strings.Contains(got, "-boot d") {
 		t.Errorf("installed disk VM must not boot the ISO:\n%s", got)
@@ -104,7 +104,7 @@ func TestArgsCloud(t *testing.T) {
 		RAM: 2048, CPUs: 2, Share: "/home/u/vms", SSHPort: 2204,
 		Dir: filepath.Join("/data", "cloudy"),
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 
 	if !strings.Contains(got, "-drive file=/data/cloudy/disk.qcow2,if=virtio") {
 		t.Errorf("qcow2 overlay not booted:\n%s", got)
@@ -132,7 +132,7 @@ func TestArgsCloud(t *testing.T) {
 func TestArgsAlwaysLogTheConsole(t *testing.T) {
 	for _, mode := range []string{"live", "disk", "cloud"} {
 		v := &config.VM{Name: "vm", Dir: t.TempDir(), Mode: mode, RAM: 1024, CPUs: 2, SSHPort: 2222}
-		got := strings.Join(Args(v), " ")
+		got := strings.Join(Args(v, true), " ")
 		if !strings.Contains(got, v.ConsoleLogPath()) {
 			t.Errorf("mode=%s does not log the console:\n%s", mode, got)
 		}
@@ -147,7 +147,7 @@ func TestArgsAlwaysLogTheConsole(t *testing.T) {
 // fix; plain "-serial file:" must never come back.
 func TestConsoleLogAppendsRatherThanTruncates(t *testing.T) {
 	v := &config.VM{Name: "vm", Dir: t.TempDir(), Mode: "cloud", RAM: 1024, CPUs: 2, SSHPort: 2222}
-	got := strings.Join(Args(v), " ")
+	got := strings.Join(Args(v, true), " ")
 
 	if strings.Contains(got, "-serial file:") {
 		t.Errorf("-serial file: truncates the console log on every start:\n%s", got)
@@ -180,7 +180,7 @@ func TestOnlyManualInstallsGetAWindow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			v := tc.vm
 			v.Name, v.Dir, v.RAM, v.CPUs, v.SSHPort = "vm", t.TempDir(), 1024, 2, 2222
-			got := strings.Join(Args(&v), " ")
+			got := strings.Join(Args(&v, true), " ")
 
 			// A bare Contains(got, "gtk") passes on a malformed display
 			// string too (e.g. a typo'd "-display gtk-broken,gl=on" or a
@@ -225,7 +225,7 @@ func TestArgsPortForwards(t *testing.T) {
 		},
 		Dir: "/data/web",
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 
 	want := "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2201-:22,hostfwd=tcp:127.0.0.1:8080-:80,hostfwd=tcp:127.0.0.1:8443-:443"
 	if !strings.Contains(got, want) {
@@ -247,7 +247,7 @@ func TestArgsNoForwardsUnchanged(t *testing.T) {
 		Name: "bare", Mode: "live", ISO: "isos/alpine.iso",
 		RAM: 1024, CPUs: 1, SSHPort: 2201, Dir: "/data/bare",
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 	want := "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2201-:22 "
 	if !strings.Contains(got, want) {
 		t.Errorf("want exact netdev arg %q in:\n%s", want, got)
@@ -263,7 +263,7 @@ func TestArgsNoShareStillGetsWork(t *testing.T) {
 		Name: "bare", Mode: "live", ISO: "isos/alpine.iso",
 		RAM: 1024, CPUs: 1, SSHPort: 2203, Dir: "/data/bare",
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 	want := "-virtfs local,path=/data/shared/bare,mount_tag=work,security_model=mapped-xattr"
 	if !strings.Contains(got, want) {
 		t.Errorf("want %q in:\n%s", want, got)
@@ -285,7 +285,7 @@ func TestArgsShareExportsAreAsymmetric(t *testing.T) {
 		RAM: 1024, CPUs: 1, SSHPort: 2203, Dir: "/data/shared-vm",
 		Share: "/home/u/vms",
 	}
-	got := joined(Args(v))
+	got := joined(Args(v, true))
 	for _, want := range []string{
 		"-virtfs local,path=/home/u/vms,mount_tag=host,security_model=mapped-xattr,readonly=on",
 		"-virtfs local,path=/data/shared/shared-vm,mount_tag=work,security_model=mapped-xattr",
