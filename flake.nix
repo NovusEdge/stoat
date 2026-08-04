@@ -37,11 +37,16 @@
 
             src = self;
 
-            # OUTSTANDING: nix is not available on the machine that authored
-            # this flake, so this hash could not be computed and is a
-            # placeholder. Run `nix build`, copy the "got: sha256-..." hash
-            # from the failure, and paste it in here.
-            vendorHash = pkgs.lib.fakeHash;
+            # Computed on 2026-08-04 with nix 2.35.1 against the committed
+            # tree, replacing the lib.fakeHash placeholder this shipped with.
+            #
+            # IT IS DERIVED FROM go.mod AND go.sum, so it goes stale the moment
+            # a dependency is added, removed or bumped — including a bare
+            # `go mod tidy` that only drops an unused indirect. When it does,
+            # `nix build` fails with a hash mismatch that PRINTS the correct
+            # value; paste the "got:" line in here. It is not something to
+            # guess at or work around.
+            vendorHash = "sha256-hyDEjT73s7rOJ/zRxYBF2ZUOADSqLmKCM1eJJJRF8Y4=";
 
             subPackages = [ "cmd/stoat" ];
 

@@ -101,17 +101,55 @@ install -Dm755 stoat ~/.local/bin/stoat
 The repo ships a `flake.nix` with a `packages.default` (built with `buildGoModule`, `subPackages = [ "cmd/stoat" ]`) and a `devShells.default` that provides `go`, `just`, `qemu`, and `openssh` — the same binaries `just doctor` checks for.
 
 ```sh
-nix build
+nix build          # ./result/bin/stoat
+nix run            # build and run in one step
+nix develop        # a dev shell with go, just, qemu and openssh
 ```
 
-**This is not turnkey yet.** The flake's `vendorHash` is currently a placeholder (`lib.fakeHash`), because the machine that wrote it couldn't run Nix to compute the real one. The first `nix build` will fail with a hash mismatch and print the real hash it expected, e.g.:
+The `vendorHash` is pinned and the build works as-is — no hash dance required.
+
+### If `nix build` fails before it starts building
+
+Two things trip people up, and neither is stoat-specific. Both produced a confusing error for us:
+
+**`error: experimental Nix feature 'nix-command' is disabled`** — flakes are still gated. Either pass the features per invocation:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' build
+```
+
+or enable them once, for your user only (no root needed):
+
+```sh
+mkdir -p ~/.config/nix
+echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+```
+
+**`error: creating directory "/nix/store": Permission denied`** — Nix is installed but its daemon has never run, so the store was never created. On a distro package (e.g. Arch's `nix`), finish the setup with:
+
+```sh
+sudo systemctl enable --now nix-daemon.socket
+```
+
+That is normally the only command needing root: the package already creates `/nix`, the `nixbld` build users and `build-users-group = nixbld` in `/etc/nix/nix.conf`, and the daemon socket has no group restriction, so you do not need to join a group. Check it took with `nix store info` — it should report `Store URL: daemon`.
+
+### When the hash goes stale
+
+`vendorHash` is derived from `go.mod` and `go.sum`, so **any** dependency change invalidates it — including a bare `go mod tidy` that only drops an unused indirect requirement. When that happens the build fails with a mismatch that prints the correct value:
 
 ```
 error: hash mismatch in fixed-output derivation ...
-         got:    sha256-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX=
+     specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        got:    sha256-hyDEjT73s7rOJ/zRxYBF2ZUOADSqLmKCM1eJJJRF8Y4=
 ```
 
-Copy that `got:` hash into `vendorHash` in `flake.nix`, then run `nix build` again.
+Paste the `got:` value into `vendorHash` in `flake.nix`. Do not guess at it.
+
+Note also that Nix builds from **git-tracked** content: untracked files are invisible to the build, and a dirty tree builds your uncommitted changes (with a "Git tree is dirty" warning). To build exactly what a clone would get, build the committed state explicitly:
+
+```sh
+nix build "git+file://$PWD"
+```
 
 Also note: the flake deliberately does **not** wrap the `stoat` binary to force nixpkgs' `qemu`/`openssh` onto its `PATH` — stoat shells out to whatever `qemu-system-x86_64`/`ssh` it finds, so you still need a QEMU build with GTK+OpenGL support on your `PATH` regardless of how you installed stoat itself. `nix develop` gives you a shell with matching versions for development.
 
