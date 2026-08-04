@@ -124,3 +124,54 @@ func TestDownloadImageHonoursAlreadyCancelledContext(t *testing.T) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
+
+// TestMatchLocalDistinguishesAlpineFlavours pins that alpine-standard and
+// alpine-virt are not interchangeable.
+//
+// iso.Infer reports only an OS and a backend, and the two entries share both,
+// so the Infer fallback matched whichever alpine .iso was on disk for BOTH.
+// `stoat images` reported alpine-virt as downloaded with only the standard ISO
+// present, and `create --image alpine-virt` silently built on the standard
+// image — a 352 MiB general-purpose kernel where the user asked for the 66 MiB
+// virtualised one, with no error to notice.
+func TestMatchLocalDistinguishesAlpineFlavours(t *testing.T) {
+	var std, virt iso.Entry
+	for _, e := range iso.Catalog() {
+		switch e.ID {
+		case "alpine-standard":
+			std = e
+		case "alpine-virt":
+			virt = e
+		}
+	}
+	if std.Flavor == "" || virt.Flavor == "" {
+		t.Fatal("expected both alpine entries to carry a Flavor")
+	}
+
+	// Only the STANDARD image is present.
+	files := []string{"alpine-standard-3.24.1-x86_64.iso"}
+	if got := MatchLocal(std, files); got != files[0] {
+		t.Errorf("alpine-standard did not match its own image: %q", got)
+	}
+	if got := MatchLocal(virt, files); got != "" {
+		t.Errorf("alpine-virt matched %q, which is the STANDARD image", got)
+	}
+
+	// Only the VIRT image is present: the mirror image of the same rule.
+	files = []string{"alpine-virt-3.24.1-x86_64.iso"}
+	if got := MatchLocal(virt, files); got != files[0] {
+		t.Errorf("alpine-virt did not match its own image: %q", got)
+	}
+	if got := MatchLocal(std, files); got != "" {
+		t.Errorf("alpine-standard matched %q, which is the VIRT image", got)
+	}
+
+	// Both present: each takes its own.
+	files = []string{"alpine-standard-3.24.1-x86_64.iso", "alpine-virt-3.24.1-x86_64.iso"}
+	if got := MatchLocal(std, files); got != files[0] {
+		t.Errorf("alpine-standard = %q", got)
+	}
+	if got := MatchLocal(virt, files); got != files[1] {
+		t.Errorf("alpine-virt = %q", got)
+	}
+}

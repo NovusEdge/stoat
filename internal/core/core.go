@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // Typed errors, because every caller branches on them and string matching is
@@ -30,6 +31,10 @@ var (
 	ErrNameTaken          = errors.New("name already taken")
 	ErrImageNotDownloaded = errors.New("image not downloaded")
 	ErrInvalidSpec        = errors.New("invalid spec")
+	// ErrRecipeNotApplicable: a recipe was named that this VM's OS and
+	// backend cannot run. Typed because a caller retrying with a corrected
+	// name needs to tell this apart from a malformed spec.
+	ErrRecipeNotApplicable = errors.New("recipe not applicable")
 )
 
 // Defaults a Spec's zero values fall back to. They are the same values the
@@ -164,13 +169,35 @@ func plan(s Spec) (*config.VM, error) {
 	// what was asked for. ParseSize refuses it; the edit path refuses it the
 	// same way through the same function.
 	disk := strings.TrimSpace(s.Disk)
-	if disk == "" && mode == "disk" {
+	// Every mode that HAS a disk gets a size, which is both of them that do.
+	//
+	// Cloud mode needs this as much as disk mode, for a reason that is not
+	// obvious: its qcow2 is a CoW overlay, and an overlay inherits its BASE
+	// image's virtual size. Cloud images are sized to boot and nothing more —
+	// Ubuntu 24.04's is 3.5G with a 2.4G root — so without a size the overlay
+	// is created and never resized (backend/cloudinit.go only resizes when
+	// Disk is set), installing a desktop fills the disk, apt exits 100, and
+	// cloud-init reports a bare "error" that reads as a broken recipe rather
+	// than a full disk. That failure was diagnosed and fixed once already.
+	//
+	// The TUI never hit it because its form pre-fills 8G on every mode, so a
+	// cloud VM built there always carried a size. Defaulting only disk mode
+	// here made the CLI produce a DIFFERENT VM from the TUI for the same
+	// request — precisely the divergence this package exists to remove.
+	//
+	// Live mode is excluded because it is genuinely diskless: an ISO booted
+	// into a tmpfs root, with no qcow2 to size.
+	if disk == "" && mode != "live" {
 		disk = DefaultDisk
 	}
 	if disk != "" {
 		if _, err := ParseSize(disk); err != nil {
 			return nil, fmt.Errorf("%w: disk size: %v", ErrInvalidSpec, err)
 		}
+	}
+
+	if err := checkRecipes(img.osName, img.backend, s.Recipes); err != nil {
+		return nil, err
 	}
 
 	port, err := config.FreePort()
@@ -276,4 +303,50 @@ func ParseSize(s string) (int64, error) {
 		return 0, fmt.Errorf("use a size like 8G or 512M")
 	}
 	return int64(n * float64(mult)), nil
+}
+
+// checkRecipes refuses a Spec naming a recipe this VM will not be able to run,
+// at CREATE time rather than at first start.
+//
+// recipes.List returns FULL FILENAMES ("xfce.cloud.yaml"), and that is what
+// recipes.Read expects, because the suffix is load-bearing: it separates
+// ssh-pushed shell recipes from cloud-init seed fragments, and a per-OS
+// fragment from the shared one. Nothing enforced that a Spec's names came from
+// that list, so `stoat create x --recipes xfce` was accepted, written to
+// vm.toml, and only failed on `stoat up` with "open .../recipes/xfce: no such
+// file or directory" — a create that succeeded and produced a VM that cannot
+// start.
+//
+// The error names what IS available, because the failure is nearly always a
+// name that is close but not exact, and a caller that cannot see the valid set
+// has to go read a directory to guess again. That matters most for the caller
+// who cannot read a directory: an agent.
+//
+// This is the cheap half of the design's CheckRecipes (docs/design/core-api.md
+// §4). It checks that a recipe EXISTS for this OS and backend; it does not yet
+// check a recipe's own declared requirements, which needs the recipe contract
+// in guest-subsystem.md §5 to exist first.
+func checkRecipes(osName, backend string, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	available, err := recipes.List(osName, backend)
+	if err != nil {
+		return err
+	}
+	ok := make(map[string]bool, len(available))
+	for _, a := range available {
+		ok[a] = true
+	}
+	for _, n := range names {
+		if !ok[n] {
+			if len(available) == 0 {
+				return fmt.Errorf("%w: recipe %q: no recipes are available for %s/%s",
+					ErrRecipeNotApplicable, n, osName, backend)
+			}
+			return fmt.Errorf("%w: recipe %q is not available for %s/%s; available: %s",
+				ErrRecipeNotApplicable, n, osName, backend, strings.Join(available, ", "))
+		}
+	}
+	return nil
 }

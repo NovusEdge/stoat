@@ -12,6 +12,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // root points the data root at a temp dir and returns it. Every test here
@@ -250,7 +251,12 @@ func TestCreateWritesVMToml(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
 
-	v, err := Create(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso", Recipes: []string{"devtools"}})
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+	// A real recipe name, as recipes.List returns it — plan now refuses names
+	// that are not actually available for the VM's OS and backend.
+	v, err := Create(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso", Recipes: []string{"devtools.alpine.sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +264,7 @@ func TestCreateWritesVMToml(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SSHPort != v.SSHPort || got.OS != "alpine" || strings.Join(got.Recipes, ",") != "devtools" {
+	if got.SSHPort != v.SSHPort || got.OS != "alpine" || strings.Join(got.Recipes, ",") != "devtools.alpine.sh" {
 		t.Errorf("reloaded %+v, want it to match %+v", got, v)
 	}
 }
@@ -324,5 +330,80 @@ func TestConcurrentCreatesGetDistinctPorts(t *testing.T) {
 			t.Fatalf("%s and %s both persisted ssh port %d", name, prev, v.SSHPort)
 		}
 		onDisk[v.SSHPort] = name
+	}
+}
+
+// TestCloudVMGetsADiskSize pins that a cloud VM created through core carries a
+// disk size, matching what the TUI form has always produced.
+//
+// A cloud VM's qcow2 is a CoW overlay and inherits its BASE image's virtual
+// size — Ubuntu 24.04's is 3.5G with a 2.4G root. backend/cloudinit.go only
+// resizes when Disk is set, so an empty size means the overlay is never grown,
+// installing a desktop fills it, apt exits 100, and cloud-init reports a bare
+// "error" that reads as a broken recipe. That was diagnosed and fixed once
+// before; defaulting only disk mode reintroduced it on the CLI path while the
+// TUI (whose form pre-fills 8G for every mode) stayed correct.
+func TestCloudVMGetsADiskSize(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "nocloud_alpine-3.24.1-x86_64-bios-tiny-r0.qcow2")
+
+	v, err := plan(Spec{Name: "cl", Image: "alpine-cloud"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Mode != "cloud" {
+		t.Fatalf("mode = %q, want cloud", v.Mode)
+	}
+	if v.Disk == "" {
+		t.Fatal("a cloud VM was planned with no disk size: its overlay would inherit the base image's, which cannot fit a desktop")
+	}
+
+	// An explicit size still wins over the default.
+	v, err = plan(Spec{Name: "cl2", Image: "alpine-cloud", Disk: "20G"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Disk != "20G" {
+		t.Errorf("Disk = %q, want the explicit 20G", v.Disk)
+	}
+}
+
+// TestCreateRejectsAnUnavailableRecipe pins that a recipe this VM cannot run
+// is refused at CREATE time.
+//
+// recipes.List returns full filenames ("xfce.cloud.yaml") and recipes.Read
+// expects the same, because the suffix separates ssh-pushed shell recipes from
+// cloud-init fragments. Nothing checked a Spec's names against that list, so
+// `--recipes xfce` was accepted, written to vm.toml, and failed only on
+// `stoat up` with "open .../recipes/xfce: no such file or directory" — a
+// create that succeeded and produced a VM that could not start. Hit for real
+// while boot-testing.
+func TestCreateRejectsAnUnavailableRecipe(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "nocloud_alpine-3.24.1-x86_64-bios-tiny-r0.qcow2")
+	// The recipes stoat ships, written into the temp root exactly as every
+	// TUI and CLI start does.
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := plan(Spec{Name: "cl", Image: "alpine-cloud", Recipes: []string{"xfce"}})
+	if !errors.Is(err, ErrRecipeNotApplicable) {
+		t.Fatalf("err = %v, want ErrRecipeNotApplicable for a bare name", err)
+	}
+	// The message must name what IS available: the failure is nearly always a
+	// close-but-wrong name, and a caller who cannot list a directory (an
+	// agent) otherwise has nothing to correct against.
+	if !strings.Contains(err.Error(), ".cloud.yaml") {
+		t.Errorf("error does not say what is available: %v", err)
+	}
+
+	// The full filename, as List returns it, is accepted.
+	if _, err := plan(Spec{Name: "cl", Image: "alpine-cloud", Recipes: []string{"xfce.alpine.cloud.yaml"}}); err != nil {
+		t.Fatalf("a recipe straight from recipes.List was rejected: %v", err)
+	}
+	// And no recipes at all stays valid.
+	if _, err := plan(Spec{Name: "cl", Image: "alpine-cloud"}); err != nil {
+		t.Fatalf("no recipes should be fine: %v", err)
 	}
 }

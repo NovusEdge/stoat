@@ -223,6 +223,34 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
 
+	case "images":
+		fs := newFlagSet(cmd)
+		var quiet bool
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rest); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("images: unexpected argument %q", fs.Arg(0)))
+		}
+		return &Args{Cmd: "images", Quiet: quiet}, nil
+
+	case "pull":
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("pull: missing image id (see `stoat images`)")
+		}
+		id, rem := rest[0], rest[1:]
+		fs := newFlagSet(cmd)
+		var quiet bool
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("pull: unexpected argument %q", fs.Arg(0)))
+		}
+		return &Args{Cmd: "pull", VM: id, Quiet: quiet}, nil
+
 	case "clone":
 		if len(rest) != 2 {
 			return nil, usageError("clone: need a source and a new name")
@@ -424,6 +452,8 @@ commands:
   up <name>            start a VM
   down <name>          stop a VM (graceful)
   ssh <name>           ssh into a VM, replacing this process
+  images               list catalog and local images
+  pull <image-id>      download a catalog image
   clone <vm> <newname>  copy a VM: overlay disk, fresh ssh port, no forwards
   prune [--apply] [--broken] [--images]
                        report (or with --apply, remove) stale partial
@@ -501,6 +531,10 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runLS(a, stdout, stderr)
 	case "create":
 		return runCreate(a, stdout, stderr)
+	case "images":
+		return runImages(a, stdout, stderr)
+	case "pull":
+		return runPull(a, stdout, stderr)
 	case "clone":
 		return runClone(a, stdout, stderr)
 	case "prune":
@@ -660,6 +694,76 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
 	}
 	return ExitOK
+}
+
+// runImages lists what stoat can build from: the catalog plus anything else
+// under isos/, with an exact size for what is downloaded and the catalog's
+// declared approximation for what is not — the distinction core.CatalogImage
+// carries, surfaced rather than flattened.
+func runImages(a *Args, stdout, stderr io.Writer) int {
+	imgs, err := core.Images()
+	if err != nil {
+		fmt.Fprintln(stderr, "stoat: images:", err)
+		return ExitFail
+	}
+	fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", "ID", "OS", "VARIANT", "SIZE", "STATE")
+	for _, i := range imgs {
+		size := humanSize(i.Bytes)
+		if !i.Exact {
+			size = "~" + size
+		}
+		state := "not downloaded"
+		if i.Downloaded {
+			state = "downloaded"
+		}
+		id := i.ID
+		if id == "" {
+			id = i.File // a byo file has no catalog id
+			state = "byo"
+		}
+		fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", id, i.OS, i.Variant, size, state)
+	}
+	return ExitOK
+}
+
+// runPull downloads a catalog image. ^C cancels it for real now — the ctx
+// reaches the HTTP body read, which is why iso.Download needed a stall timeout
+// before and why an abandoned download used to keep running.
+func runPull(a *Args, stdout, stderr io.Writer) int {
+	var lastPct int = -1
+	progress := func(done, total int64) {
+		if a.Quiet || total <= 0 {
+			return
+		}
+		if pct := int(done * 100 / total); pct != lastPct {
+			lastPct = pct
+			fmt.Fprintf(stdout, "\r%s  %3d%%  %s / %s", a.VM, pct, humanSize(done), humanSize(total))
+		}
+	}
+	if err := core.DownloadImage(context.Background(), a.VM, progress); err != nil {
+		fmt.Fprintln(stderr, "\nstoat: pull:", err)
+		return ExitFail
+	}
+	if !a.Quiet {
+		fmt.Fprintf(stdout, "\r%s downloaded%s\n", a.VM, strings.Repeat(" ", 30))
+	}
+	return ExitOK
+}
+
+// humanSize renders bytes for a listing. Deliberately tiny and local: the TUI
+// has its own renderer tuned to its column widths, and sharing one would mean
+// the CLI's format changing whenever the TUI's layout did.
+func humanSize(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%dB", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // runClone copies a VM. core.Clone refuses a running source, allocates a fresh

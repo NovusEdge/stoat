@@ -60,9 +60,28 @@ func MatchLocal(e iso.Entry, files []string) string {
 	}
 	for _, f := range files {
 		backend, osName := iso.Infer(f)
-		if backend == e.Backend && osName == e.OS {
-			return f
+		if backend != e.Backend || osName != e.OS {
+			continue
 		}
+		// A FLAVOURED entry must also match its flavour in the filename.
+		//
+		// iso.Infer only reports an OS and a backend, and alpine-standard and
+		// alpine-virt share both — so without this the first alpine .iso on
+		// disk satisfied BOTH entries. `stoat images` then reported alpine-virt
+		// as downloaded when only the standard ISO was present, and creating
+		// from alpine-virt silently built a VM on the standard image: a 352 MiB
+		// general-purpose kernel where the user asked for the 66 MiB
+		// virtualised one. Wrong image, no error, no way to notice.
+		//
+		// Alpine's published filenames begin with exactly the flavour string
+		// the catalog stores ("alpine-virt" -> alpine-virt-3.24.1-x86_64.iso),
+		// which is what makes this a reliable discriminator rather than a
+		// guess. Entries with no flavour are unaffected — they matched by exact
+		// basename above.
+		if e.Flavor != "" && !strings.Contains(f, e.Flavor) {
+			continue
+		}
+		return f
 	}
 	return ""
 }

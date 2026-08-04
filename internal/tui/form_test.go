@@ -16,6 +16,7 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // TestFormTabOrder is a regression test for a user-reported bug: tab focus
@@ -144,19 +145,27 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		f.inputs[fName].SetValue(name)
 		f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
 		f.imgIdx = 0
-		f.recipeNames = []string{"alpha", "beta", "gamma"}
+		// Real recipe names, as recipes.List returns them: core.Plan refuses a
+		// name that is not actually available for the VM's OS and backend, so
+		// synthetic "alpha"/"beta"/"gamma" no longer build. The property under
+		// test is unchanged — that the CHECKED subset is carried through in
+		// recipeNames order, not selection order.
+		if err := recipes.Install(); err != nil {
+			t.Fatal(err)
+		}
+		f.recipeNames = []string{"devtools.alpine.sh", "docker.alpine.sh", "xfce.alpine.sh"}
 		return f
 	}
 
 	t.Run("selected recipes carried through", func(t *testing.T) {
 		f := newBuildableForm(t, "withrecipes")
-		f.recipeSel = map[string]bool{"gamma": true, "alpha": true}
+		f.recipeSel = map[string]bool{"xfce.alpine.sh": true, "devtools.alpine.sh": true}
 
 		vm, err := f.build()
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
-		want := []string{"alpha", "gamma"} // recipeNames order, not selection order
+		want := []string{"devtools.alpine.sh", "xfce.alpine.sh"} // recipeNames order, not selection order
 		if !reflect.DeepEqual(vm.Recipes, want) {
 			t.Fatalf("Recipes = %v, want %v", vm.Recipes, want)
 		}
