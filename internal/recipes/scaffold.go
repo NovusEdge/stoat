@@ -47,11 +47,11 @@ esac
 // cloudTemplate is the cloud-init equivalent. Cloud images are always a real
 // disk install, so there is no live-vs-disk branch to be honest about.
 const cloudTemplate = `#cloud-config
-# %s — merged into the cloud-init seed and applied at first boot.
-#
-# Only packages: and runcmd: are read out of this file. Package names must be
-# spelled the same on every distro this is offered to (apt and pacman for the
-# shared fragment), or it needs to be a per-OS file: <name>.<os>.cloud.yaml.
+# %s — carried verbatim into the cloud-init seed's cloud-config-archive and
+# applied at first boot; cloud-init merges it in, so any key it understands
+# survives, not just packages:/runcmd:. Package names must be spelled the
+# same on every distro this is offered to (apt and pacman for the shared
+# fragment), or it needs to be a per-OS file: <name>.<os>.cloud.yaml.
 packages:
   # TODO: packages, by their exact name on the target distro.
 

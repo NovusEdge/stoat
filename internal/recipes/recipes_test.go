@@ -479,14 +479,10 @@ func TestCloudFragmentsParse(t *testing.T) {
 		if len(pkgs) == 0 {
 			t.Errorf("%s has no packages: list — the fragment installs nothing", name)
 		}
-		// mergeCloudRecipes only splices packages: and runcmd:. Anything else
-		// a fragment declares is dropped without a word, so the bundled ones
-		// must not declare anything else.
-		for k := range doc {
-			if k != "packages" && k != "runcmd" {
-				t.Errorf("%s has top-level key %q, which mergeCloudRecipes silently drops", name, k)
-			}
-		}
+		// mergeCloudRecipes is gone: fragments are handed to cloud-init
+		// verbatim inside a cloud-config-archive, so a top-level key besides
+		// packages/runcmd now survives rather than being silently dropped.
+		// Nothing here restricts which keys a fragment may declare any more.
 		// dbus-x11 is not a real Arch package, and lightdm-gtk-greeter is not
 		// a real Fedora one. Checked against the parsed list, so an
 		// explanatory mention in a comment is fine.
@@ -535,13 +531,9 @@ func TestAlpineCloudFragmentUsesOpenRCNotSystemd(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
 		t.Fatalf("xfce.alpine.cloud.yaml is not valid YAML: %v", err)
 	}
-	// mergeCloudRecipes only splices packages: and runcmd:; anything else is
-	// silently dropped, so the bundled fragment must not declare it.
-	for k := range doc {
-		if k != "packages" && k != "runcmd" {
-			t.Errorf("xfce.alpine.cloud.yaml has top-level key %q, which mergeCloudRecipes silently drops", k)
-		}
-	}
+	// mergeCloudRecipes is gone: fragments now ride verbatim in a
+	// cloud-config-archive, so a key besides packages/runcmd would survive
+	// rather than being silently dropped. Nothing here restricts the keys.
 	if _, ok := doc["packages"]; ok {
 		t.Error("xfce.alpine.cloud.yaml declares packages:, but cloud-init installs packages: before runcmd runs — too early to have enabled the community repo the desktop packages live in")
 	}
@@ -632,14 +624,9 @@ func TestDevtoolsCloudFragment(t *testing.T) {
 		t.Fatal("devtools.cloud.yaml has no packages: list — the fragment installs nothing")
 	}
 
-	// mergeCloudRecipes (internal/cloudinit) only splices packages: and
-	// runcmd: out of a fragment; any other top-level key is silently
-	// dropped, so a bundled fragment must not declare one.
-	for k := range doc {
-		if k != "packages" && k != "runcmd" {
-			t.Errorf("devtools.cloud.yaml has top-level key %q, which mergeCloudRecipes silently drops", k)
-		}
-	}
+	// mergeCloudRecipes is gone: fragments now ride verbatim in a
+	// cloud-config-archive, so nothing here restricts which top-level keys
+	// a fragment may declare any more.
 
 	want := []string{"git", "curl", "ca-certificates", "vim", "tmux", "less"}
 	got := map[string]bool{}

@@ -1,4 +1,8 @@
 #!/bin/sh
+# stoat:name        devtools
+# stoat:description git, a compiler, an editor and basic fetch tools
+# stoat:os          alpine
+# stoat:stages      install
 # The baseline you end up installing on every throwaway VM: version control, a
 # compiler, an editor, and the tools to fetch things. Runs as root over ssh on
 # a booted Alpine VM.
