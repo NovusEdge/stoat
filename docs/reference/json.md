@@ -10,7 +10,7 @@ This document is the contract. The human-facing CLI is documented in
 
 ```
 stoat --json ls
-{"v":1,"type":"result","cmd":"ls","ok":true,"data":{"vms":[...]}}
+{"v":2,"type":"result","cmd":"ls","ok":true,"data":{"vms":[...]}}
 ```
 
 ## The consumer contract, in one page
@@ -171,7 +171,7 @@ Repeated across commands. Every list-valued field is `[]` when empty, never
 ```json
 VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "state":"stopped","cpus":4,"ram_mb":4096,"disk":"8G",
-             "share":"/home/u/src","recipes":["xfce.alpine.sh"],
+             "share":"/home/u/src","recipes":["xfce"],
              "ssh_port":2200,"ssh_user":"stoat","installed":false,
              "forwards":[{"host_port":8080,"guest_port":80}],
              "allow_exec":true,"display":"vnc",
@@ -191,7 +191,7 @@ PruneItem   {"class":"orphaned_image","path":"/home/u/.stoat/isos/old.iso"}
 
 Recipe      {"name":"xfce","description":"XFCE desktop over SSH or at boot"}
 
-RecipeIssue {"name":"xfce.debian.sh","reason":"built for debian, not alpine"}
+RecipeIssue {"name":"docker","reason":"docker is not offered to debian/cloudinit"}
 ```
 
 `state` is one of `stopped`, `running`, `broken`. `error` appears only on a
@@ -285,11 +285,11 @@ so a leak fails the build rather than shipping.
 | `snapshot` (list) | `{"vm":"work","snapshots":[Snapshot,...]}` |
 | `snapshot` (act) | `{"vm":"work","tag":"clean","action":"restore"}` |
 | `prune` | `{"dry_run":true,"items":[PruneItem,...]}` |
-| `apply` | `{"vm":"work","applied":["xfce.alpine.sh"]}` |
+| `apply` | `{"vm":"work","applied":["xfce"]}` |
 | `provision` | `{"vm":"work","provisioned":true,"skipped_reason":""}` |
 | `recipes` | `{"recipes":[Recipe,...]}` |
 | `check-recipes` | `{"applicable":false,"issues":[RecipeIssue,...]}` |
-| `recipe list` | `{"dir":"...","recipes":["xfce.alpine.sh"]}`, see note below |
+| `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
 | `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
 
 Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`.
@@ -352,9 +352,9 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 `pull`, `apply` and `provision` emit non-terminal events before their result.
 
 ```
-{"v":1,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":41943040,"total":62914560,"percent":66}}
-{"v":1,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":62914560,"total":62914560,"percent":100}}
-{"v":1,"type":"result","cmd":"pull","ok":true,"data":{"id":"alpine-virt","downloaded":true,"verified":true,"checksum_available":true}}
+{"v":2,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":41943040,"total":62914560,"percent":66}}
+{"v":2,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":62914560,"total":62914560,"percent":100}}
+{"v":2,"type":"result","cmd":"pull","ok":true,"data":{"id":"alpine-virt","downloaded":true,"verified":true,"checksum_available":true}}
 ```
 
 `progress` fires only when the percentage changes, not per read.
@@ -363,8 +363,8 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 event, and emit a `stage` event at each recipe boundary:
 
 ```
-{"v":1,"type":"stage","cmd":"apply","data":{"recipe":"xfce.alpine.sh"}}
-{"v":1,"type":"log","cmd":"apply","data":{"line":"+ apk add xfce4"}}
+{"v":2,"type":"stage","cmd":"apply","data":{"recipe":"xfce"}}
+{"v":2,"type":"log","cmd":"apply","data":{"line":"+ apk add xfce4"}}
 ```
 
 The stage boundaries are real, read out of the markers the provisioner already

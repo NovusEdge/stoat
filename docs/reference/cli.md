@@ -83,7 +83,7 @@ disk: 8G
 share: /home/user/Projects
 ssh port: 2222
 ssh user: root
-recipes: xfce.alpine.sh
+recipes: xfce
 forwards: 8080:80
 display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
   attach with: gvncviewer /home/user/.stoat/work/vnc.sock
@@ -98,7 +98,7 @@ display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
 Creates a VM without starting it. `--image` is the only required flag; everything else has a sensible default or is inferred from the image.
 
 ```
-$ stoat create work --image alpine --recipes xfce.alpine.sh
+$ stoat create work --image alpine --recipes xfce
 created work (alpine, live, ssh port 2222)
 start it with: stoat up work
 ```
@@ -452,11 +452,12 @@ cloudvm is a cloud VM: recipes are applied automatically via cloud-init at first
 Lists recipes, optionally filtered to ones applicable to a guest OS and/or backend.
 
 ```
-$ stoat recipes
-NAME                           LABEL          TARGET OS  SHARED
-devtools.alpine.sh             devtools       alpine     no
-devtools.cloud.yaml            devtools                  yes
-docker.alpine.sh               docker         alpine     no
+$ stoat recipes --os alpine --backend apkovl
+NAME                           DESCRIPTION
+devtools                       git, a compiler, an editor and basic fetch tools
+docker                         Docker engine and the compose plugin
+tailscale                      Tailscale daemon, installed and started (join manually)
+xfce                           XFCE desktop with autologin startx on tty1
 ```
 
 `--os` alone means "what that OS gets" (its own backend is inferred); `--backend` alone means "every OS on that backend"; both together is the exact filter; neither is the full catalog.
@@ -468,9 +469,9 @@ docker.alpine.sh               docker         alpine     no
 Reports, for each named recipe, why it would **not** apply to the given OS/backend; an empty result means every one of them would.
 
 ```
-$ stoat check-recipes xfce.alpine.sh docker.alpine.sh --os ubuntu
-xfce.alpine.sh: targets alpine, not ubuntu
-$ stoat check-recipes xfce.alpine.sh --os alpine
+$ stoat check-recipes docker xfce --os debian --backend cloudinit
+docker: docker is not offered to debian/cloudinit
+$ stoat check-recipes xfce --os alpine --backend apkovl
 all applicable
 ```
 
@@ -485,9 +486,10 @@ Lists recipes installed under stoat's recipes directory and prints where that di
 ```
 $ stoat recipe list
 /home/user/.stoat/recipes
-  devtools.alpine.sh
-  docker.alpine.sh
-  xfce.alpine.sh
+  devtools
+  docker
+  tailscale
+  xfce
 ```
 
 **Exit codes:** 0 on success; 1 if the directory can't be read.
