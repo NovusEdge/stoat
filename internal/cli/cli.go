@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
@@ -89,6 +90,20 @@ type Args struct {
 	// place: the CLI is a flag parser over core, not a second definition of
 	// what a VM is.
 	Spec core.Spec
+
+	// Until and Timeout belong to "wait"; Which belongs to "logs"; Only
+	// belongs to "apply". All are core's own types where core has one.
+	Until   core.Until
+	Timeout time.Duration
+	Which   core.Which
+	Only    []string
+
+	// Patch belongs to "update", and Changed names the flags that were
+	// actually GIVEN. core.Patch is all pointers so "not set" differs from
+	// "set to the zero value", and the two must not be conflated: comparing
+	// against zero would make `update work --ram 8192` silently clear share.
+	Patch   core.Patch
+	Changed []string
 }
 
 // usageError marks a Parse failure as an exit-2 condition. Every Parse
@@ -146,6 +161,20 @@ func (a *Args) failMsg(stdout, stderr io.Writer, sentinel error, msg string) int
 	}
 	fmt.Fprintf(stderr, "stoat: %s: %s\n", a.Cmd, msg)
 	return ExitFail
+}
+
+// splitList reads a comma-separated flag value, dropping blanks so a trailing
+// comma or a lone "" yields nothing rather than an empty-named entry. It
+// returns nil for an empty value: a caller that needs to distinguish "cleared"
+// from "not given" checks the flag was set, not the length of this.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Parse turns argv (excluding the "stoat" program name) into an Args, or a
@@ -249,11 +278,7 @@ func Parse(args []string) (*Args, error) {
 		if s.Image == "" {
 			return nil, usageError("create: --image is required")
 		}
-		for _, r := range strings.Split(*recipeList, ",") {
-			if r = strings.TrimSpace(r); r != "" {
-				s.Recipes = append(s.Recipes, r)
-			}
-		}
+		s.Recipes = splitList(*recipeList)
 		return &Args{Cmd: "create", VM: name, Spec: s, Quiet: quiet}, nil
 
 	case "images":
@@ -454,18 +479,189 @@ func Parse(args []string) (*Args, error) {
 		}
 		return &Args{Cmd: "recipe", Sub: sub, VM: name, OS: *osName, Backend: *backend, Quiet: quiet}, nil
 
-	case "logs":
+	case "get", "ssh-command":
 		fs := newFlagSet(cmd)
 		var quiet bool
-		n := fs.Int("n", 50, "number of lines to tail")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rest); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() < 1 {
+			return nil, usageError(fmt.Sprintf("%s: missing vm name", cmd))
+		}
+		if fs.NArg() > 1 {
+			return nil, usageError(fmt.Sprintf("%s: too many arguments", cmd))
+		}
+		return &Args{Cmd: cmd, VM: fs.Arg(0), Quiet: quiet}, nil
+
+	case "wait":
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("wait: missing vm name")
+		}
+		name, rem := rest[0], rest[1:]
+
+		fs := newFlagSet(cmd)
+		var quiet bool
+		until := fs.String("until", string(core.UntilReachable), "reachable, applied or stopped")
+		timeout := fs.Duration("timeout", 2*time.Minute, "give up after this long")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("wait: unexpected argument %q", fs.Arg(0)))
+		}
+		switch core.Until(*until) {
+		case core.UntilReachable, core.UntilApplied, core.UntilStopped:
+		default:
+			return nil, usageError(fmt.Sprintf("wait: unknown --until %q (want reachable, applied or stopped)", *until))
+		}
+		if *timeout <= 0 {
+			return nil, usageError("wait: --timeout must be positive")
+		}
+		return &Args{Cmd: "wait", VM: name, Until: core.Until(*until), Timeout: *timeout, Quiet: quiet}, nil
+
+	case "apply":
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("apply: missing vm name")
+		}
+		name, rem := rest[0], rest[1:]
+
+		fs := newFlagSet(cmd)
+		var quiet bool
+		only := fs.String("only", "", "comma-separated subset of the VM's own recipes")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("apply: unexpected argument %q", fs.Arg(0)))
+		}
+		return &Args{Cmd: "apply", VM: name, Only: splitList(*only), Quiet: quiet}, nil
+
+	case "recipes":
+		fs := newFlagSet(cmd)
+		var quiet bool
+		osName := fs.String("os", "", "only recipes applicable to this guest OS")
+		backend := fs.String("backend", "", "only recipes applicable to this backend")
 		addQuiet(fs, &quiet)
 		if err := fs.Parse(rest); err != nil {
 			return nil, usageError(err.Error())
 		}
 		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("recipes: unexpected argument %q", fs.Arg(0)))
+		}
+		return &Args{Cmd: "recipes", OS: *osName, Backend: *backend, Quiet: quiet}, nil
+
+	case "check-recipes":
+		// The names are positional and come first, same rule as everywhere
+		// else here: Go's flag package stops at the first non-flag argument.
+		var names []string
+		rem := rest
+		for len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
+			names = append(names, splitList(rem[0])...)
+			rem = rem[1:]
+		}
+		fs := newFlagSet(cmd)
+		var quiet bool
+		osName := fs.String("os", "", "guest OS to check against")
+		backend := fs.String("backend", "", "backend to check against")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("check-recipes: unexpected argument %q", fs.Arg(0)))
+		}
+		if len(names) == 0 {
+			return nil, usageError("check-recipes: name at least one recipe")
+		}
+		if *osName == "" {
+			return nil, usageError("check-recipes: --os is required")
+		}
+		return &Args{Cmd: "check-recipes", Only: names, OS: *osName, Backend: *backend, Quiet: quiet}, nil
+
+	case "update":
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return nil, usageError("update: missing vm name")
+		}
+		name, rem := rest[0], rest[1:]
+
+		fs := newFlagSet(cmd)
+		var quiet bool
+		var ram, cpus, sshPort int
+		var disk, share, recipeList string
+		fs.IntVar(&ram, "ram", 0, "memory in MB")
+		fs.IntVar(&cpus, "cpus", 0, "vcpu count")
+		fs.IntVar(&sshPort, "ssh-port", 0, "host port forwarded to the guest's sshd")
+		fs.StringVar(&disk, "disk", "", "disk size, absolute only and grow-only (16G)")
+		fs.StringVar(&share, "share", "", "host directory to expose in the guest; empty clears it")
+		fs.StringVar(&recipeList, "recipes", "", "replace the recipe list; empty clears it")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
+			return nil, usageError(fmt.Sprintf("update: unexpected argument %q", fs.Arg(0)))
+		}
+
+		// fs.Visit walks only the flags actually GIVEN, which is the whole
+		// point: --share "" must clear the share, and an absent --share must
+		// leave it alone, and comparing against the zero value cannot tell
+		// those apart. Nothing here may read a flag variable outside this walk.
+		a := &Args{Cmd: "update", VM: name, Quiet: quiet}
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "ram":
+				a.Patch.RAM, a.Changed = &ram, append(a.Changed, "ram")
+			case "cpus":
+				a.Patch.CPUs, a.Changed = &cpus, append(a.Changed, "cpus")
+			case "ssh-port":
+				a.Patch.SSHPort, a.Changed = &sshPort, append(a.Changed, "ssh_port")
+			case "disk":
+				a.Patch.Disk, a.Changed = &disk, append(a.Changed, "disk")
+			case "share":
+				a.Patch.Share, a.Changed = &share, append(a.Changed, "share")
+			case "recipes":
+				list := splitList(recipeList)
+				if list == nil {
+					list = []string{} // non-nil: "clear the list", not "untouched"
+				}
+				a.Patch.Recipes, a.Changed = &list, append(a.Changed, "recipes")
+			}
+		})
+		if len(a.Changed) == 0 {
+			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes")
+		}
+		return a, nil
+
+	case "logs":
+		// A VM name is optional: with one, this is that VM's console or apply
+		// log; without one it stays what it has always been, a tail of stoat's
+		// own log. The collision is deliberate (the alternative was a second
+		// subcommand named only to dodge it) and documented in usage().
+		rem := rest
+		var name string
+		if len(rem) > 0 && !strings.HasPrefix(rem[0], "-") {
+			name, rem = rem[0], rem[1:]
+		}
+		fs := newFlagSet(cmd)
+		var quiet bool
+		n := fs.Int("n", 50, "number of lines to tail")
+		which := fs.String("which", string(core.WhichConsole), "console or apply (with a vm name)")
+		addQuiet(fs, &quiet)
+		if err := fs.Parse(rem); err != nil {
+			return nil, usageError(err.Error())
+		}
+		if fs.NArg() != 0 {
 			return nil, usageError(fmt.Sprintf("logs: unexpected argument %q", fs.Arg(0)))
 		}
-		return &Args{Cmd: "logs", Quiet: quiet, N: *n}, nil
+		switch core.Which(*which) {
+		case core.WhichConsole, core.WhichApply:
+		default:
+			return nil, usageError(fmt.Sprintf("logs: unknown --which %q (want console or apply)", *which))
+		}
+		return &Args{Cmd: "logs", VM: name, Which: core.Which(*which), Quiet: quiet, N: *n}, nil
 
 	default:
 		return nil, usageError(fmt.Sprintf("unknown subcommand %q", cmd))
@@ -482,8 +678,21 @@ commands:
                 [--os NAME] [--backend NAME] [--console-password random]
                        create a VM without starting it
 
+  get <name>           show one VM
+  update <name> [--ram MB] [--cpus N] [--disk 16G] [--share DIR]
+                [--ssh-port N] [--recipes a,b]
+                       change a stopped VM; only the flags you pass change
   up <name>            start a VM
   down <name>          stop a VM (graceful)
+  wait <name> [--until reachable|applied|stopped] [--timeout 2m]
+                       block until the VM reaches that state
+  apply <name> [--only a,b]
+                       run the VM's recipes, streaming output
+  recipes [--os NAME] [--backend NAME]
+                       list recipes, optionally only applicable ones
+  check-recipes a,b --os NAME [--backend NAME]
+                       report why a recipe would not apply, before creating
+  ssh-command <name>   print the ssh argv instead of running it
   ssh <name>           ssh into a VM, replacing this process
   images               list catalog and local images
   pull <image-id>      download a catalog image
@@ -500,7 +709,9 @@ commands:
                        Everything after <name> is the command, verbatim.
   provision <name>     run recipes, streaming output to stdout
   rm <name> [-y]       delete a VM; refuses while running, confirms unless -y
-  logs [-n N]          tail the stoat log (default 50 lines)
+  logs [<vm>] [-n N] [--which console|apply]
+                       with a vm name, tail that VM's log; without one,
+                       tail stoat's own log (default 50 lines)
   recipe list          list installed recipes and where they live
   recipe new <name> [--os alpine] [--backend cloudinit]
                        scaffold a recipe in the recipes directory
@@ -630,6 +841,20 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runRecipe(a, stdout, stderr)
 	case "logs":
 		return runLogs(a, stdout, stderr)
+	case "get":
+		return runGet(a, stdout, stderr)
+	case "ssh-command":
+		return runSSHCommand(a, stdout, stderr)
+	case "wait":
+		return runWait(a, stdout, stderr)
+	case "apply":
+		return runApply(a, stdout, stderr)
+	case "recipes":
+		return runRecipes(a, stdout, stderr)
+	case "check-recipes":
+		return runCheckRecipes(a, stdout, stderr)
+	case "update":
+		return runUpdate(a, stdout, stderr)
 	case "doctor":
 		return runDoctor(a, stdout, stderr)
 	default:

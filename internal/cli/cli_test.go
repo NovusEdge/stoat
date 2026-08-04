@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -94,9 +95,14 @@ func TestParse(t *testing.T) {
 		{"rm missing name", []string{"rm"}, nil, true},
 		{"rm quiet and yes", []string{"rm", "-q", "-y", "alpine"}, &Args{Cmd: "rm", VM: "alpine", Quiet: true, Yes: true}, false},
 
-		{"logs default", []string{"logs"}, &Args{Cmd: "logs", N: 50}, false},
-		{"logs -n", []string{"logs", "-n", "10"}, &Args{Cmd: "logs", N: 10}, false},
-		{"logs unexpected arg", []string{"logs", "extra"}, nil, true},
+		{"logs default", []string{"logs"}, &Args{Cmd: "logs", N: 50, Which: core.WhichConsole}, false},
+		{"logs -n", []string{"logs", "-n", "10"}, &Args{Cmd: "logs", N: 10, Which: core.WhichConsole}, false},
+		// A positional is a VM name now, not a stray argument: `logs <vm>`
+		// reads that VM's log. The no-name form is unchanged.
+		{"logs vm name", []string{"logs", "work"}, &Args{Cmd: "logs", VM: "work", N: 50, Which: core.WhichConsole}, false},
+		{"logs which apply", []string{"logs", "work", "--which", "apply"}, &Args{Cmd: "logs", VM: "work", N: 50, Which: core.WhichApply}, false},
+		{"logs bad which", []string{"logs", "work", "--which", "bogus"}, nil, true},
+		{"logs two names", []string{"logs", "work", "extra"}, nil, true},
 		{"logs bad -n", []string{"logs", "-n", "notanumber"}, nil, true},
 	}
 

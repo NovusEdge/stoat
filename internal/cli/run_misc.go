@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -51,6 +52,31 @@ func oneLine(s string) string {
 }
 
 func runLogs(a *Args, stdout, stderr io.Writer) int {
+	if a.VM != "" {
+		rc, err := core.Logs(a.VM, a.Which)
+		if err != nil {
+			return a.fail(stdout, stderr, err)
+		}
+		lines, err := tailReader(rc, a.N)
+		closeErr := rc.Close()
+		if err != nil {
+			return a.fail(stdout, stderr, err)
+		}
+		if closeErr != nil {
+			return a.fail(stdout, stderr, closeErr)
+		}
+		if a.JSON {
+			if lines == nil {
+				lines = []string{} // never null: a consumer iterates this
+			}
+			return a.ok(stdout, map[string]any{"vm": a.VM, "which": string(a.Which), "lines": lines})
+		}
+		for _, l := range lines {
+			fmt.Fprintln(stdout, l)
+		}
+		return ExitOK
+	}
+
 	if err := logx.Init(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
@@ -75,14 +101,28 @@ func tailLines(path string, n int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return splitTail(b, n), nil
+}
+
+// tailReader is tailLines for an already-open reader, the shape core.Logs
+// hands back rather than a path.
+func tailReader(r io.Reader, n int) ([]string, error) {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return splitTail(b, n), nil
+}
+
+func splitTail(b []byte, n int) []string {
 	if len(b) == 0 {
-		return nil, nil
+		return nil
 	}
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	if n > 0 && len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return lines, nil
+	return lines
 }
 
 // runRecipe implements "recipe list" and "recipe new". Authoring a recipe has
