@@ -12,6 +12,17 @@
 // docs/design/guest-subsystem.md for the incident that made this the rule.
 package guest
 
+// InitSystem identifies which init system a guest OS boots. It exists
+// because "requires systemd" in a recipe's front matter is a real fact
+// about the guest, not a proxy for something else (see the Init field doc
+// on OS).
+type InitSystem string
+
+const (
+	InitSystemd InitSystem = "systemd"
+	InitOpenRC  InitSystem = "openrc"
+)
+
 // OS is one guest operating system's facts, gathered from the sites that
 // used to decide them ad hoc (see docs/design/guest-subsystem.md §4 for the
 // full inventory of call sites this replaces).
@@ -36,6 +47,13 @@ type OS struct {
 	// the interface lives in internal/backend, one level up. See
 	// docs/design/guest-subsystem.md §3.2.
 	Backend string
+
+	// Init is the guest's init system. It is its own field rather than
+	// derived from Backend: apkovl and OpenRC both happen to mean Alpine
+	// today, but the two facts are independent (a BYO cloudinit image could
+	// run OpenRC, or a future apkovl-based distro could run systemd), and
+	// a recipe's "requires systemd" needs to ask the real question.
+	Init InitSystem
 
 	// Installer is the interactive install command named in UI hints.
 	// Empty means "the installer" generically.
@@ -78,6 +96,7 @@ var registry = []OS{
 		Shell:          "/bin/ash",
 		SeedPackages:   []string{"sudo"},
 		Backend:        "apkovl",
+		Init:           InitOpenRC, // Alpine has shipped OpenRC as its init since its first release; it has never carried systemd
 		Installer:      "setup-alpine",
 		DefaultSSHUser: "root",
 		PkgSetup: "# -c enables the community repository (docker, tailscale and most of what\n" +
@@ -92,6 +111,7 @@ var registry = []OS{
 		Shell:          "/bin/bash",
 		SeedPackages:   nil,
 		Backend:        "cloudinit",
+		Init:           InitSystemd, // Ubuntu switched from Upstart to systemd in 15.04 (2015); every supported release since is systemd
 		Installer:      "",
 		DefaultSSHUser: "stoat",
 		PkgSetup:       "export DEBIAN_FRONTEND=noninteractive\napt-get update\n",
@@ -104,6 +124,7 @@ var registry = []OS{
 		Shell:          "/bin/bash",
 		SeedPackages:   nil,
 		Backend:        "cloudinit",
+		Init:           InitSystemd, // Debian made systemd the default init in Debian 8 "jessie" (2015)
 		Installer:      "",
 		DefaultSSHUser: "stoat",
 		PkgSetup:       "export DEBIAN_FRONTEND=noninteractive\napt-get update\n",
@@ -116,6 +137,7 @@ var registry = []OS{
 		Shell:          "/bin/bash",
 		SeedPackages:   nil,
 		Backend:        "cloudinit",
+		Init:           InitSystemd, // Fedora was systemd's original adopter, default since Fedora 15 (2011)
 		Installer:      "",
 		DefaultSSHUser: "stoat",
 		PkgSetup:       "",
@@ -128,6 +150,7 @@ var registry = []OS{
 		Shell:          "/bin/bash",
 		SeedPackages:   nil,
 		Backend:        "cloudinit",
+		Init:           InitSystemd, // Arch replaced its own initscripts with systemd as the default in 2012
 		Installer:      "",
 		DefaultSSHUser: "stoat",
 		PkgSetup:       "pacman -Sy --noconfirm\n",

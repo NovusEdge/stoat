@@ -134,6 +134,42 @@ func TestUnsupportedReasonRequiresSystemd(t *testing.T) {
 	}
 }
 
+// TestUnsupportedReasonSystemdPerOS covers every registry OS against the
+// systemd capability: only alpine (OpenRC) must be rejected.
+func TestUnsupportedReasonSystemdPerOS(t *testing.T) {
+	m := Metadata{Requires: []string{"systemd"}}
+	for _, tc := range []struct {
+		os      string
+		rejects bool
+	}{
+		{"alpine", true},
+		{"ubuntu", false},
+		{"debian", false},
+		{"fedora", false},
+		{"arch", false},
+	} {
+		r := UnsupportedReason(tc.os, m)
+		if tc.rejects && r == "" {
+			t.Errorf("%s: want a reason, has no systemd", tc.os)
+		}
+		if !tc.rejects && r != "" {
+			t.Errorf("%s: want no reason, got %q", tc.os, r)
+		}
+	}
+}
+
+func TestUnsupportedReasonUnknownOS(t *testing.T) {
+	// A BYO image whose OS string isn't in the registry: a "requires"
+	// capability can't be verified, so it's rejected rather than assumed.
+	if r := UnsupportedReason("plan9", Metadata{Requires: []string{"systemd"}}); r == "" {
+		t.Error("want a reason, plan9 is not a recognised OS")
+	}
+	// No requires at all: nothing to verify, so an unknown OS is not blocked.
+	if r := UnsupportedReason("plan9", Metadata{}); r != "" {
+		t.Errorf("want no reason with no requires, got %q", r)
+	}
+}
+
 func TestUnsupportedReasonUnknownCapability(t *testing.T) {
 	m := Metadata{Requires: []string{"warp-drive"}}
 	if r := UnsupportedReason("ubuntu", m); !strings.Contains(r, `unknown capability "warp-drive"`) {

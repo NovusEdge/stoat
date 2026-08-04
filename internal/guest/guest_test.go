@@ -34,6 +34,30 @@ func TestRegistryFactsThatFailSilently(t *testing.T) {
 	}
 }
 
+// Init must resolve to the OS's actual init system, not a Backend proxy:
+// Alpine is the only OpenRC entry, but that must not be the reason every
+// other OS reports systemd.
+func TestInitPerOS(t *testing.T) {
+	for _, tc := range []struct {
+		os   string
+		init InitSystem
+	}{
+		{"alpine", InitOpenRC},
+		{"ubuntu", InitSystemd},
+		{"debian", InitSystemd},
+		{"fedora", InitSystemd},
+		{"arch", InitSystemd},
+	} {
+		got, ok := Lookup(tc.os)
+		if !ok {
+			t.Fatalf("%s is not in the registry", tc.os)
+		}
+		if got.Init != tc.init {
+			t.Errorf("%s Init = %q, want %q", tc.os, got.Init, tc.init)
+		}
+	}
+}
+
 // An unknown OS must be reported as unknown, not silently defaulted by the
 // registry. Callers decide what to do with that; the registry does not guess.
 func TestLookupReportsUnknown(t *testing.T) {
@@ -58,6 +82,9 @@ func TestEveryDeclarationIsComplete(t *testing.T) {
 		}
 		if o.Backend == "" {
 			t.Errorf("%s has no Backend", o.Name)
+		}
+		if o.Init == "" {
+			t.Errorf("%s has no Init", o.Name)
 		}
 		if o.DefaultSSHUser == "" {
 			t.Errorf("%s has no DefaultSSHUser", o.Name)

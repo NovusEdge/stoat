@@ -138,22 +138,8 @@ func ReadMetadata(name string) (Metadata, error) {
 // name, and how each resolves against a guest.OS. Kept to exactly what a
 // bundled recipe declares (see the annotated .sh files); add an entry here
 // when a recipe actually needs a new one.
-//
-// "systemd" is derived from OS.Backend rather than a dedicated field: today
-// the apkovl backend is Alpine, and Alpine alone in the registry is OpenRC,
-// so "not apkovl" and "has systemd" happen to coincide exactly. That is a
-// real limitation, not a general init-system model; see the package
-// report for what a future OS with a different combination would need.
 var capabilities = map[string]func(guest.OS) bool{
-	"systemd": func(g guest.OS) bool { return g.Backend != "apkovl" },
-}
-
-// initSystem names osName's init system for a "requires" mismatch message.
-func initSystem(g guest.OS) string {
-	if g.Backend == "apkovl" {
-		return "openrc"
-	}
-	return "systemd"
+	"systemd": func(g guest.OS) bool { return g.Init == guest.InitSystemd },
 }
 
 // UnsupportedReason explains why osName cannot run a recipe declaring m, or
@@ -189,7 +175,7 @@ func UnsupportedReason(osName string, m Metadata) string {
 		if !check(g) {
 			switch cap {
 			case "systemd":
-				return fmt.Sprintf("requires systemd, %s uses %s", g.Name, initSystem(g))
+				return fmt.Sprintf("requires systemd, %s uses %s", g.Name, g.Init)
 			default:
 				return fmt.Sprintf("requires %s, %s does not have it", cap, g.Name)
 			}
