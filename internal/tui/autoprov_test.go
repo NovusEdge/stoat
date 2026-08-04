@@ -6,20 +6,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
-func autoVM(t *testing.T, mode string, recipes []string, log string) *config.VM {
+func autoVM(t *testing.T, mode string, recipes []string, log string) core.VM {
 	t.Helper()
 	dir := t.TempDir()
+	applyLog := filepath.Join(dir, "last-provision.log")
 	if log != "" {
-		if err := os.WriteFile(filepath.Join(dir, "last-provision.log"), []byte(log), 0o644); err != nil {
+		if err := os.WriteFile(applyLog, []byte(log), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return &config.VM{
+	return core.VM{
 		Name: "vm", Mode: mode, OS: "alpine", Installed: true,
-		SSHPort: 2200, Dir: dir, Recipes: recipes,
+		SSHPort: 2200, Recipes: recipes,
+		State: core.StateRunning,
+		Paths: core.Paths{Dir: dir, ApplyLog: applyLog},
 	}
 }
 
@@ -34,7 +37,7 @@ func TestWantsAutoProvisionPrompt(t *testing.T) {
 
 	cases := []struct {
 		name string
-		vm   *config.VM
+		vm   core.VM
 		want bool
 	}{
 		{"live, never provisioned", autoVM(t, "live", recipes, ""), true},
@@ -105,7 +108,7 @@ func TestDeclinedOfferDoesNotOpenTheNewVMForm(t *testing.T) {
 	v := autoVM(t, "live", []string{"xfce.alpine.sh"}, "")
 	for _, key := range []string{"n", "N", "esc", "q"} {
 		m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
-			provisioning: map[string]provState{}, pendingProvision: v}
+			provisioning: map[string]provState{}, pendingProvision: &v}
 
 		out, _ := m.updateList(keyMsg(key))
 		after := out.(model)
@@ -129,7 +132,7 @@ func TestDeclinedOfferDoesNotOpenTheNewVMForm(t *testing.T) {
 func TestAcceptedOfferProvisions(t *testing.T) {
 	v := autoVM(t, "live", []string{"xfce.alpine.sh"}, "")
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
-		provisioning: map[string]provState{}, pendingProvision: v}
+		provisioning: map[string]provState{}, pendingProvision: &v}
 
 	out, cmd := m.updateList(keyMsg("y"))
 	after := out.(model)
@@ -151,8 +154,8 @@ func TestAcceptedOfferProvisions(t *testing.T) {
 func TestOfferNeverPreemptsADeletePrompt(t *testing.T) {
 	v := autoVM(t, "live", []string{"xfce.alpine.sh"}, "")
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
-		provisioning: map[string]provState{}, vms: []*config.VM{v},
-		pendingDelete: v, status: "delete vm? y/N"}
+		provisioning: map[string]provState{}, vms: []core.VM{v},
+		pendingDelete: &v, status: "delete vm? y/N"}
 
 	out, _ := m.Update(sshReadyMsg{name: v.Name})
 	after := out.(model)

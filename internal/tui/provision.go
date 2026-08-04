@@ -8,10 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/novusedge/stoat/internal/backend"
-	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
 var errNotRunning = errors.New("not running: start it first")
@@ -19,8 +17,12 @@ var errNotRunning = errors.New("not running: start it first")
 // installerName is what the user actually types at the guest console. Only
 // Alpine has setup-alpine; a BYO Fedora/Debian/unknown ISO has its own, so
 // naming the wrong one is worse than staying general.
-func installerName(v *config.VM) string {
-	if os, ok := guest.Lookup(v.OS); ok && os.Installer != "" {
+//
+// Takes the OS string rather than a VM: its two kinds of caller now hold
+// different VM types (the list a core.VM, the detail screen a config.VM), and
+// one field is all it ever read.
+func installerName(osName string) string {
+	if os, ok := guest.Lookup(osName); ok && os.Installer != "" {
 		return os.Installer
 	}
 	return "the installer"
@@ -34,9 +36,12 @@ type provisionDoneMsg struct {
 // provision runs a VM's recipes over ssh via core.Apply. Output still goes to
 // last-provision.log (core.Apply calls sshx.Provision unchanged), which the
 // detail view tails, so nothing is streamed through the model.
-func provision(v *config.VM) tea.Cmd {
+func provision(v core.VM) tea.Cmd {
 	return func() tea.Msg {
-		if !qemu.Running(v) {
+		// The state the user was looking at when they pressed the key. If it
+		// has gone stale since, core.Apply refuses with its own ErrNotRunning
+		// rather than acting on the stale answer.
+		if v.State != core.StateRunning {
 			return provisionDoneMsg{v.Name, errNotRunning}
 		}
 		// No cancellation source reaches here yet: the TUI has no "abort
@@ -60,8 +65,8 @@ func provision(v *config.VM) tea.Cmd {
 // here, before m.provisioning is even touched, so it neither lies about
 // what happened nor blocks a second real provision from starting right
 // after.
-func (m *model) startProvision(v *config.VM) tea.Cmd {
-	if backend.For(v).Name() == "cloudinit" {
+func (m *model) startProvision(v core.VM) tea.Cmd {
+	if backend.For(cfgVM(v)).Name() == "cloudinit" {
 		// Keyed on the BACKEND, not v.Mode == "cloud": the edit screen's mode
 		// switch can produce mode="disk" with backend="cloudinit" (D9a), a
 		// state this refusal must still catch. cloud-init's packages: list is
@@ -79,7 +84,7 @@ func (m *model) startProvision(v *config.VM) tea.Cmd {
 	// away. Without this the user waits the full 90s ssh timeout and gets
 	// "ssh not reachable", which says nothing about the real cause.
 	if v.Mode == "disk" && !v.Installed {
-		return m.showToast(v.Name+": not installed yet, run "+installerName(v)+
+		return m.showToast(v.Name+": not installed yet, run "+installerName(v.OS)+
 			" in the qemu window, then stop and start it (stoat notices the install itself)", true)
 	}
 	if len(v.Recipes) == 0 {

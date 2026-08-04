@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,39 +8,40 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// The list shows good VMs followed by broken ones (a directory whose vm.toml
-// won't parse) as one sequence. current and currentBroken split the selected
-// row back apart: exactly one of them returns non-nil for any valid
-// selection. Both read through the list component, so they honour an active
-// search filter: indexing the raw slices would select the wrong VM whenever
-// a filter is applied.
-func (m model) current() *config.VM {
+// The list shows every VM in one sequence, broken ones (a directory whose
+// vm.toml won't parse) among them. current and currentBroken split the
+// selected row by state: exactly one of them returns non-nil for any valid
+// selection, so a caller cannot forget that a row might be broken. Both read
+// through the list component, so they honour an active search filter:
+// indexing m.vms directly would select the wrong VM whenever one is applied.
+func (m model) current() *core.VM {
 	it, ok := m.selectedItem()
-	if !ok {
+	if !ok || it.vm.State == core.StateBroken {
 		return nil
 	}
-	return it.vm
+	v := it.vm
+	return &v
 }
 
-func (m model) currentBroken() *config.Broken {
+func (m model) currentBroken() *core.VM {
 	it, ok := m.selectedItem()
-	if !ok {
+	if !ok || it.vm.State != core.StateBroken {
 		return nil
 	}
-	return it.broken
+	v := it.vm
+	return &v
 }
 
-func startVM(v *config.VM) tea.Cmd {
+func startVM(v core.VM) tea.Cmd {
 	return func() tea.Msg {
 		// A live VM's root is wiped by the boot about to happen, so a log from
 		// its previous life describes work that no longer exists.
 		ensureNoStaleLog(v)
-		// core.Start resolves by DIRECTORY, not the vm.toml name field; see the
-		// identity note on core.VM.Name.
-		if err := core.Start(filepath.Base(v.Dir)); err != nil {
+		// v.Name is the DIRECTORY, not the vm.toml name field; see the identity
+		// note on core.VM.Name.
+		if err := core.Start(v.Name); err != nil {
 			return errMsg(err.Error())
 		}
 		return vmStartedMsg{v}
@@ -50,11 +50,11 @@ func startVM(v *config.VM) tea.Cmd {
 
 // vmStartedMsg reports a successful start, carrying the VM so the model can
 // decide whether to watch for ssh and offer to provision.
-type vmStartedMsg struct{ vm *config.VM }
+type vmStartedMsg struct{ vm core.VM }
 
-func stopVM(v *config.VM) tea.Cmd {
+func stopVM(v core.VM) tea.Cmd {
 	return func() tea.Msg {
-		if err := core.Stop(filepath.Base(v.Dir)); err != nil {
+		if err := core.Stop(v.Name); err != nil {
 			return errMsg(err.Error())
 		}
 		return statusMsg(v.Name + " stopped")
@@ -79,7 +79,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// reason the delete prompt below does: "n" is bound to new-VM, so a
 	// plain key switch would open the form on a decline.
 	if m.pendingProvision != nil {
-		v := m.pendingProvision
+		v := *m.pendingProvision
 		m.pendingProvision = nil
 		if key.String() == "y" {
 			return m, m.startProvision(v)
@@ -91,21 +91,14 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The delete confirmation prompt owns all keys while pending: "y"
 	// confirms, anything else cancels. This must run before the normal
 	// switch below because "n" is otherwise bound to "new VM".
-	if m.pendingDelete != nil || m.pendingDeleteBroken != "" {
+	if m.pendingDelete != nil {
 		if key.String() == "y" {
-			if m.pendingDelete != nil {
-				v := m.pendingDelete
-				m.pendingDelete = nil
-				m.status = ""
-				return m, tea.Sequence(deleteVM(v), loadVMs)
-			}
-			name := m.pendingDeleteBroken
-			m.pendingDeleteBroken = ""
+			v := *m.pendingDelete
+			m.pendingDelete = nil
 			m.status = ""
-			return m, tea.Sequence(deleteBrokenVM(name), loadVMs)
+			return m, tea.Sequence(deleteVM(v), loadVMs)
 		}
 		m.pendingDelete = nil
-		m.pendingDeleteBroken = ""
 		m.status = ""
 		return m, nil
 	}
@@ -136,7 +129,6 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		m.pendingDelete = nil
-		m.pendingDeleteBroken = ""
 		m.status = ""
 		return m, nil
 	case "enter":
@@ -148,12 +140,12 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.status = ""
-		if qemu.Running(v) {
-			return m, tea.Sequence(stopVM(v), loadVMs)
+		if v.State == core.StateRunning {
+			return m, tea.Sequence(stopVM(*v), loadVMs)
 		}
 		// No loadVMs here: startVM's vmStartedMsg handler issues one itself,
 		// alongside the ssh watch, so sequencing another would refresh twice.
-		return m, startVM(v)
+		return m, startVM(*v)
 	case "r":
 		return m, openRecipesDir()
 	case "n":
@@ -169,7 +161,16 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showHelp = false
 	case "right", "l":
 		if v != nil {
-			m.detail = newDetail(v)
+			// The detail and edit screens render and WRITE the on-disk record
+			// (Applied timestamps, vm.toml itself), which a core.VM is not, so
+			// this is where the list's point-in-time view is exchanged for it.
+			// v.Name is the directory, which is the key config.Load takes.
+			cv, err := config.Load(v.Name)
+			if err != nil {
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
+			}
+			m.detail = newDetail(cv)
 			m.screen = screenDetail
 			m.detailGen++
 			m.showHelp = false
@@ -180,67 +181,61 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case "s":
-		if v != nil && qemu.Running(v) {
-			return m, sshInto(v)
+		if v != nil && v.State == core.StateRunning {
+			return m, sshInto(*v)
 		}
 		cmd := m.showToast("not running", true)
 		return m, cmd
 	case "p":
 		if v != nil {
-			return m, m.startProvision(v)
+			return m, m.startProvision(*v)
 		}
 	case "d":
-		if v != nil {
-			if qemu.Running(v) {
+		// One prompt for both kinds of row: core.Destroy takes a directory
+		// name and handles a broken VM the same as a good one, including the
+		// still-running check a broken row used to skip.
+		switch {
+		case v != nil:
+			if v.State == core.StateRunning {
 				cmd := m.showToast("stop "+v.Name+" first", true)
 				return m, cmd
 			}
 			m.status = "delete " + v.Name + "? y/N"
 			m.screen = screenList
 			m.pendingDelete = v
-		} else if broken != nil {
+		case broken != nil:
 			m.status = "delete " + broken.Name + "? y/N"
 			m.screen = screenList
-			m.pendingDeleteBroken = broken.Name
+			m.pendingDelete = broken
 		}
 	}
 	return m, nil
 }
 
-func deleteVM(v *config.VM) tea.Cmd {
+// deleteVM removes a VM's directory through core.Destroy. It takes broken VMs
+// too: Destroy accepts one the same as a good one and, unlike the separate
+// broken-row path this replaces, checks first whether a qemu process is still
+// running against that directory. That old path reimplemented the data-root
+// containment check by hand and skipped the running check entirely, so
+// deleting a broken row could rip the directory, pidfile, monitor socket and
+// disk out from under a live qemu; see core.Destroy's comment for the
+// incident.
+//
+// v.Name is the DIRECTORY, which is the identity core.Destroy acts on, never
+// the vm.toml name field that can diverge from it; see core.VM's identity
+// note. TestDeleteTargetsDirectoryNotName pins this.
+func deleteVM(v core.VM) tea.Cmd {
 	return func() tea.Msg {
-		// The DIRECTORY is the identity core.Destroy acts on, not v.Name (the
-		// vm.toml field, which can diverge from it); see core.VM's identity
-		// note. TestDeleteTargetsDirectoryNotName pins this.
-		name := filepath.Base(v.Dir)
-		if err := core.Destroy(name); err != nil {
+		if err := core.Destroy(v.Name); err != nil {
 			return errMsg(err.Error())
 		}
-		return statusMsg(name + " deleted")
-	}
-}
-
-// deleteBrokenVM removes a broken VM's directory by name, through
-// core.Destroy. There is no *config.VM to hand it, but Destroy accepts a
-// broken VM the same as a good one, and unlike this function's old body it
-// checks first whether a qemu process is still running against that
-// directory. The old body reimplemented the data-root containment check by
-// hand and skipped that check entirely, which meant deleting a broken row
-// could rip the directory, pidfile, monitor socket and disk out from under a
-// live qemu; see core.Destroy's comment for the incident this describes.
-func deleteBrokenVM(name string) tea.Cmd {
-	return func() tea.Msg {
-		if err := core.Destroy(name); err != nil {
-			return errMsg(err.Error())
-		}
-		return statusMsg(name + " deleted")
+		return statusMsg(v.Name + " deleted")
 	}
 }
 
 // brokenReason returns a short, single-line reason string for a broken
 // vm.toml's parse error, suitable for a list row.
-func brokenReason(err error) string {
-	s := err.Error()
+func brokenReason(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
@@ -323,7 +318,7 @@ func (m model) viewList() string {
 		parts = append(parts, warnStyle.Render(m.status))
 	}
 	v := m.current()
-	sshAvailable := v != nil && qemu.Running(v)
+	sshAvailable := v != nil && v.State == core.StateRunning
 	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
 	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }

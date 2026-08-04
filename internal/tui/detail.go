@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -27,6 +28,20 @@ type detailModel struct {
 }
 
 func newDetail(v *config.VM) detailModel { return detailModel{vm: v} }
+
+// name is the VM's identity: its DIRECTORY, never the vm.toml `name` field,
+// which the "E" key lets a user edit into something else entirely. See
+// core.VM.Name's comment for the bug that rule exists to prevent.
+func (d detailModel) name() string { return filepath.Base(d.vm.Dir) }
+
+// coreVM re-asks core for the current view of the VM this screen is showing.
+// The detail screen holds the on-disk record, because it renders Applied and
+// writes vm.toml, neither of which a core.VM carries; the shared "s" and "p"
+// handlers are on core.VM, which is what the list holds. Rather than keep a
+// second copy here that drifts every time this pane reloads, this asks by
+// directory name, which is also what makes State fresh at the moment the key
+// was pressed.
+func (d detailModel) coreVM() (core.VM, error) { return core.Get(d.name()) }
 
 // tickMsg carries the generation of the detail-screen visit that scheduled
 // it. updateDetail only re-arms the chain when gen still matches
@@ -113,7 +128,11 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			c := exec.Command(editor, filepath.Join(m.detail.vm.Dir, "vm.toml"))
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
-				v, lerr := config.Load(m.detail.vm.Name)
+				// By directory. This used to reload m.detail.vm.Name, the
+				// vm.toml field, which is the one thing the editor session
+				// that just ran is able to change: renaming a VM in the file
+				// made the reload miss, or hit a different VM entirely.
+				v, lerr := config.Load(m.detail.name())
 				if lerr != nil {
 					return errMsg(lerr.Error())
 				}
@@ -138,15 +157,25 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.showToast(fmt.Sprintf("%s installed=%v", v.Name, v.Installed), false)
 			return m, tea.Batch(loadVMs, cmd)
 		case "s":
-			if qemu.Running(m.detail.vm) {
-				return m, sshInto(m.detail.vm)
+			v, err := m.detail.coreVM()
+			if err != nil {
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
+			}
+			if v.State == core.StateRunning {
+				return m, sshInto(v)
 			}
 			cmd := m.showToast("not running", true)
 			return m, cmd
 		case "p":
-			return m, m.startProvision(m.detail.vm)
+			v, err := m.detail.coreVM()
+			if err != nil {
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
+			}
+			return m, m.startProvision(v)
 		case "L":
-			return m, openLogPager(m.detail.vm.Name)
+			return m, openLogPager(m.detail.name())
 		case "t":
 			v := m.detail.vm
 			if !consolePasswordAvailable(v) {
@@ -244,7 +273,7 @@ func (m model) viewDetail() string {
 		// the same instruction rather than timing out on ssh. The next start
 		// sets it automatically once the install has written to the disk; "i"
 		// is the override for when that guess is wrong either way.
-		installed := warnStyle.Render("no: run " + installerName(v) + " in the qemu window, then restart")
+		installed := warnStyle.Render("no: run " + installerName(v.OS) + " in the qemu window, then restart")
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}

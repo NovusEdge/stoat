@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -40,7 +40,7 @@ const paneBorderAndPadding = 3
 
 // accessBox renders the access panel for v, or "" if there is nothing useful
 // to say (no VM selected).
-func accessBox(v *config.VM, cloudInit string, ciProg progress.Model, width int) string {
+func accessBox(v *core.VM, cloudInit string, ciProg progress.Model, width int) string {
 	if v == nil {
 		return ""
 	}
@@ -52,7 +52,7 @@ func accessBox(v *config.VM, cloudInit string, ciProg progress.Model, width int)
 		line(k, ansi.Truncate(val, accessValueWidth, "…"))
 	}
 
-	user := sshx.User(v)
+	user := sshx.User(cfgVM(*v))
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", user, v.SSHPort))
 	truncated("key", shortenPath(keys.PrivatePath()))
 

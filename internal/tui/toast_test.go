@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // The overlay must not change the shape of what it is drawn over: the screen
@@ -16,7 +16,7 @@ func TestToastOverlayKeepsScreenShape(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, cloudInit: map[string]string{},
 		ciProg: newCloudInitProgress(), list: newVMList(), spin: newSpinner(),
 		width: 100, height: 30}
-	m.list.SetItems(vmItems([]*config.VM{{Name: "vm1", Mode: "live", RAM: 1024, CPUs: 2, SSHPort: 2200}}, nil))
+	m.list.SetItems(vmItems([]core.VM{{Name: "vm1", Mode: "live", RAM: 1024, CPUs: 2, SSHPort: 2200}}))
 
 	plain := m.View().Content
 	m.showToast("vm1 stopped", false)

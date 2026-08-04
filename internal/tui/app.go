@@ -13,7 +13,6 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -28,10 +27,14 @@ const (
 
 type model struct {
 	screen screen
-	vms    []*config.VM
-	broken []config.Broken // VMs whose vm.toml exists but fails to parse
-	list   list.Model      // owns the VM list's cursor, scrolling and "/" filter
-	status string          // a prompt awaiting an answer, shown under the list
+	// vms is the last core.List answer: every VM in the data root, good and
+	// broken, in one sorted slice. core.List merges them (a broken VM comes
+	// back as StateBroken) precisely so a caller cannot hold the good ones and
+	// forget the broken ones, which is how broken VMs have been dropped from
+	// this listing before.
+	vms    []core.VM
+	list   list.Model // owns the VM list's cursor, scrolling and "/" filter
+	status string     // a prompt awaiting an answer, shown under the list
 
 	// toast reports a finished action and expires on its own. Anything that
 	// needs an answer stays in status instead; see toast.go.
@@ -43,15 +46,19 @@ type model struct {
 	// modal.
 	modal *imageModal
 
-	preflight           string // non-empty when qemu or /dev/kvm is unusable
-	width               int
-	height              int
-	pendingDelete       *config.VM // VM awaiting delete confirmation
-	pendingProvision    *config.VM // VM that just became reachable, awaiting a y/N to provision
-	pendingDeleteBroken string     // name of a broken VM dir awaiting delete confirmation; mutually exclusive with pendingDelete
+	preflight string // non-empty when qemu or /dev/kvm is unusable
+	width     int
+	height    int
+	// pendingDelete is the VM awaiting delete confirmation. One field covers
+	// broken VMs too: core.Destroy takes a directory name and handles both, so
+	// there is no longer a second "which kind of row is this" state to keep
+	// mutually exclusive with this one.
+	pendingDelete    *core.VM
+	pendingProvision *core.VM // VM that just became reachable, awaiting a y/N to provision
 
-	// provisioning tracks VMs with a provision run in flight, keyed by name,
-	// so a second "p" press on the same VM can't start a second ssh session
+	// provisioning tracks VMs with a provision run in flight, keyed by the
+	// directory name core.VM.Name reports (as cloudInit below is), so a
+	// second "p" press on the same VM can't start a second ssh session
 	// writing into the same last-provision.log. The value carries what the
 	// spinner line shows: when it started and where it has got to.
 	provisioning map[string]provState
@@ -73,14 +80,12 @@ type model struct {
 	showHelp bool // "?" toggles the footer between short and full help
 }
 
-// vmsLoadedMsg carries a refreshed VM list, alongside any VM directories
-// whose vm.toml exists but failed to parse. config.List silently omits
-// those, so they're fetched separately and surfaced rather than made to
-// look deleted.
-type vmsLoadedMsg struct {
-	vms    []*config.VM
-	broken []config.Broken
-}
+// vmsLoadedMsg carries a refreshed VM list. One slice, not two: config.List
+// silently omits a directory whose vm.toml won't parse, and pairing it with a
+// separate config.ListBroken call left the UI with two sources of truth that
+// every new code path had to remember to consult. core.List does that merge
+// once and returns the broken ones as StateBroken.
+type vmsLoadedMsg struct{ vms []core.VM }
 
 // statusMsg reports that an action finished, errMsg that one failed. They are
 // two types rather than one with a flag because every producer already knows
@@ -91,14 +96,37 @@ type statusMsg string
 type errMsg string
 
 func loadVMs() tea.Msg {
-	vms, err := config.List()
+	vms, err := core.List()
 	if err != nil {
 		return errMsg("cannot read " + config.Root() + ": " + err.Error())
 	}
-	// A failure here just means broken VMs silently don't show up this
-	// refresh; it must never block loading the good ones.
-	broken, _ := config.ListBroken()
-	return vmsLoadedMsg{vms: vms, broken: broken}
+	return vmsLoadedMsg{vms: vms}
+}
+
+// cfgVM re-materialises the few config.VM fields that internal/qemu,
+// internal/sshx and internal/backend still read, for the four call sites that
+// reach into them: qemu.Uptime (the pidfile under Dir), sshx.User and
+// sshx.Args (the ssh identity), and backend.For (which backend runs recipes).
+// Those packages are not on core yet; moving them is a separate task, and
+// this is the one place the TUI crosses back rather than the model keeping a
+// second copy of every VM beside its core.VM.
+//
+// It carries ONLY what those four read. It is not a config.VM: Applied,
+// Forwards and everything the edit form writes are absent, and anything that
+// needs the real on-disk record loads it by directory name instead (see the
+// detail screen).
+func cfgVM(v core.VM) *config.VM {
+	return &config.VM{
+		// core.VM.Name is already the DIRECTORY, which is what Dir's base is
+		// and what qemu's pidfile and monitor socket hang off.
+		Name:    v.Name,
+		Dir:     v.Paths.Dir,
+		OS:      v.OS,
+		Mode:    v.Mode,
+		Backend: v.Backend,
+		SSHPort: v.SSHPort,
+		SSHUser: v.SSHUser,
+	}
 }
 
 func Run() error {
@@ -230,11 +258,10 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case vmsLoadedMsg:
 		m.vms = msg.vms
-		m.broken = msg.broken
 		// SetItems returns a Cmd that re-applies an active filter to the new
 		// items; dropping it would leave a filtered list showing the old
 		// matches after a refresh.
-		cmd := m.list.SetItems(vmItems(msg.vms, msg.broken))
+		cmd := m.list.SetItems(vmItems(msg.vms))
 		// SetItems does not clamp the cursor, and the SetHeight below remaps
 		// an out-of-range index to the TOP rather than the bottom. Without
 		// this, deleting the last VM in the list moves the cursor to the
@@ -271,14 +298,14 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		for name, st := range m.provisioning {
 			if v := m.vmByName(name); v != nil {
-				st.step, st.last = readProvStep(v)
+				st.step, st.last = readProvStep(*v)
 				m.provisioning[name] = st
 			}
 		}
 		return m, cmd
 	case cloudInitTickMsg:
-		if v := m.vmByName(msg.name); v != nil && qemu.Running(v) {
-			return m, checkCloudInit(v)
+		if v := m.vmByName(msg.name); v != nil && v.State == core.StateRunning {
+			return m, checkCloudInit(*v)
 		}
 		return m, nil
 	case cloudInitMsg:
@@ -286,8 +313,8 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cloudInitDone(msg.status) {
 			return m, nil
 		}
-		if v := m.vmByName(msg.name); v != nil && qemu.Running(v) {
-			return m, pollCloudInit(v)
+		if v := m.vmByName(msg.name); v != nil && v.State == core.StateRunning {
+			return m, pollCloudInit(*v)
 		}
 		return m, nil
 	case vmStartedMsg:
@@ -310,7 +337,7 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Re-check on arrival: up to 90 seconds have passed, in which the VM
 		// could have been stopped, deleted, edited to drop its recipes, or
 		// provisioned by hand.
-		if v == nil || !qemu.Running(v) || !wantsAutoProvisionPrompt(v) {
+		if v == nil || v.State != core.StateRunning || !wantsAutoProvisionPrompt(*v) {
 			return m, nil
 		}
 		if _, busy := m.provisioning[v.Name]; busy {
@@ -318,11 +345,11 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Never stack prompts: a pending delete is a more consequential
 		// question and the user is mid-answer.
-		if m.pendingDelete != nil || m.pendingDeleteBroken != "" {
+		if m.pendingDelete != nil {
 			return m, nil
 		}
 		m.pendingProvision = v
-		m.status = autoProvisionPrompt(v)
+		m.status = autoProvisionPrompt(*v)
 		return m, nil
 	case provisionDoneMsg:
 		delete(m.provisioning, msg.name)

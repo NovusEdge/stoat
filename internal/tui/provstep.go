@@ -10,7 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // provState is what the UI knows about one in-flight provision run. There is
@@ -62,8 +62,8 @@ const recipeMarker = "=== recipe "
 // readProvStep derives the current step from the tail of a VM's provision log.
 // Returns the step (which recipe, or the phase before one starts) and the most
 // recent line of real output.
-func readProvStep(v *config.VM) (step, last string) {
-	b := tailBytes(v.ProvisionLogPath(), provTailBytes)
+func readProvStep(v core.VM) (step, last string) {
+	b := tailBytes(v.Paths.ApplyLog, provTailBytes)
 	if len(b) == 0 {
 		return "starting", ""
 	}
@@ -154,12 +154,16 @@ func newSpinner() spinner.Model {
 }
 
 // vmByName finds a loaded VM by name. Provision runs are keyed by name (the
-// VM pointer can be replaced by a refresh mid-run), so the log path has to be
+// row is replaced wholesale by a refresh mid-run), so the log path has to be
 // resolved back through the current list.
-func (m model) vmByName(name string) *config.VM {
-	for _, v := range m.vms {
-		if v.Name == name {
-			return v
+//
+// The key is the DIRECTORY, since that is what core.VM.Name reports and what
+// every caller here already keys its maps by. A vm.toml whose own name field
+// has drifted from its directory no longer splits those maps in two.
+func (m model) vmByName(name string) *core.VM {
+	for i := range m.vms {
+		if m.vms[i].Name == name {
+			return &m.vms[i]
 		}
 	}
 	return nil

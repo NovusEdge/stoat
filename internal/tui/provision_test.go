@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // TestInstallerName: a known OS with an Installer in the registry gets named
@@ -20,7 +20,7 @@ func TestInstallerName(t *testing.T) {
 		{"", "the installer"},
 	}
 	for _, c := range cases {
-		got := installerName(&config.VM{OS: c.os})
+		got := installerName(c.os)
 		if got != c.want {
 			t.Errorf("installerName(OS=%q) = %q, want %q", c.os, got, c.want)
 		}
@@ -34,9 +34,10 @@ func TestInstallerName(t *testing.T) {
 // cloud-init fragment be piped into `sh -s` over ssh as a shell script.
 func TestStartProvisionRefusesByBackendNotMode(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
-	v := &config.VM{
+	v := core.VM{
 		Name: "mode-switched", Mode: "disk", Backend: "cloudinit", Installed: true,
-		SSHPort: 2203, Dir: t.TempDir(), Recipes: []string{"xfce.alpine.cloud.yaml"},
+		SSHPort: 2203, Recipes: []string{"xfce.alpine.cloud.yaml"},
+		Paths: core.Paths{Dir: t.TempDir()},
 	}
 
 	m.startProvision(v)
@@ -55,9 +56,10 @@ func TestStartProvisionRefusesByBackendNotMode(t *testing.T) {
 // core.Apply is ever reached.
 func TestStartProvisionRefusesZeroRecipes(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
-	v := &config.VM{
+	v := core.VM{
 		Name: "no-recipes", Mode: "live", OS: "alpine", Installed: true,
-		SSHPort: 2204, Dir: t.TempDir(), Recipes: nil,
+		SSHPort: 2204, Recipes: nil,
+		Paths: core.Paths{Dir: t.TempDir()},
 	}
 
 	m.startProvision(v)
