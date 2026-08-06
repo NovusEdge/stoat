@@ -93,10 +93,15 @@ func decodeCloudInitStatus(out []byte) string {
 // (see ssh(1)) and otherwise passes the remote command's exit code through,
 // so that code is what separates "never got there" from "got there, ran,
 // exited unhappy".
+//
+// Output(), not CombinedOutput(): a login banner or stray warning on stderr
+// would land ahead of the JSON in a combined stream and break the decoder.
+// Output() hands the decoder stdout alone and still returns an
+// *exec.ExitError on a non-zero exit, so the 255 check below is unaffected.
 func checkCloudInit(v core.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
-		out, err := exec.Command("ssh", sshx.Args(cfgVM(v), "cloud-init", "status", "--format", "json")...).CombinedOutput()
+		out, err := exec.Command("ssh", sshx.Args(cfgVM(v), "cloud-init", "status", "--format", "json")...).Output()
 		if exitErr, ok := err.(*exec.ExitError); err != nil && (!ok || exitErr.ExitCode() == 255) {
 			// Not reachable yet is the normal case for the first ~30 seconds
 			// of a boot, so it is a state, not an error.

@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
 
 // Shapes below are trimmed from real `cloud-init status --format json`
 // output; only the keys decodeCloudInitStatus reads are kept plus enough of
@@ -92,5 +95,24 @@ func TestDecodeCloudInitStatus(t *testing.T) {
 				t.Errorf("decodeCloudInitStatus(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestOutputIgnoresStderrNoise exercises the actual mechanism checkCloudInit
+// relies on: Cmd.Output(), not Cmd.CombinedOutput(), so a login banner or
+// stray warning a real ssh session writes to stderr never reaches the
+// decoder. A ssh MOTD ahead of the JSON in a combined stream would break
+// json.Unmarshal; this proves the two streams stay separate.
+func TestOutputIgnoresStderrNoise(t *testing.T) {
+	script := `echo "Welcome to Alpine Linux, this line is not JSON" >&2
+echo '{"status": "done", "extended_status": "done", "errors": []}'
+`
+	out, err := exec.Command("sh", "-c", script).Output()
+	if err != nil {
+		t.Fatalf("running test script: %v", err)
+	}
+	got := decodeCloudInitStatus(out)
+	if got != "done" {
+		t.Errorf("decodeCloudInitStatus(stdout-only output) = %q, want %q (stderr noise: %q)", got, "done", out)
 	}
 }
