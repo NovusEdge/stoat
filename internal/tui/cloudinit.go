@@ -1,8 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
 	"os/exec"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/progress"
@@ -39,25 +39,75 @@ func cloudInitDone(status string) bool {
 	return false
 }
 
+// cloudInitJSON is the shape of `cloud-init status --format json` that this
+// package reads. cloud-init emits more keys than this (datasource,
+// boot_status_code, recoverable_errors, ...); the rest decode into nothing
+// and are dropped, which is fine since only these three drive a state.
+type cloudInitJSON struct {
+	Status         string   `json:"status"`
+	ExtendedStatus string   `json:"extended_status"`
+	Errors         []string `json:"errors"`
+}
+
+// decodeCloudInitStatus turns the JSON `cloud-init status --format json`
+// prints into this file's state vocabulary. It gates readiness on the
+// errors list, never on the status or extended_status string: Alpine's
+// cloud-init always reports extended_status "degraded" because
+// keys_to_console looks for a helper binary Alpine's aport does not ship,
+// which surfaces as a recoverable_errors warning with errors left empty.
+// Reading extended_status directly would call that VM broken when it is
+// fine. Undecodable input (an older cloud-init that rejects the --format
+// flag, or anything else that is not this shape) maps to "unknown" rather
+// than a guess.
+func decodeCloudInitStatus(out []byte) string {
+	var s cloudInitJSON
+	if err := json.Unmarshal(out, &s); err != nil {
+		return "unknown"
+	}
+	if len(s.Errors) > 0 {
+		return "error"
+	}
+	switch s.Status {
+	case "running":
+		return "running"
+	case "done":
+		return "done"
+	case "error":
+		return "error"
+	case "disabled":
+		return "disabled"
+	case "not run":
+		return "not-run"
+	}
+	return "unknown"
+}
+
 // checkCloudInit asks a running cloud VM how far cloud-init has got. It runs
 // over the same ssh path everything else uses, so it inherits BatchMode and
 // the short connect timeout: a guest that is not up yet fails fast and is
 // reported as "waiting" rather than hanging the poll.
+//
+// cloud-init status exits non-zero for its own error/degraded states even
+// though it printed valid JSON, so a non-zero exit is not by itself
+// "unreachable". ssh reserves exit code 255 for its own connection failures
+// (see ssh(1)) and otherwise passes the remote command's exit code through,
+// so that code is what separates "never got there" from "got there, ran,
+// exited unhappy".
+//
+// Output(), not CombinedOutput(): a login banner or stray warning on stderr
+// would land ahead of the JSON in a combined stream and break the decoder.
+// Output() hands the decoder stdout alone and still returns an
+// *exec.ExitError on a non-zero exit, so the 255 check below is unaffected.
 func checkCloudInit(v core.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
-		out, err := exec.Command("ssh", sshx.Args(cfgVM(v), "cloud-init", "status")...).CombinedOutput()
-		if err != nil {
+		out, err := exec.Command("ssh", sshx.Args(cfgVM(v), "cloud-init", "status", "--format", "json")...).Output()
+		if exitErr, ok := err.(*exec.ExitError); err != nil && (!ok || exitErr.ExitCode() == 255) {
 			// Not reachable yet is the normal case for the first ~30 seconds
 			// of a boot, so it is a state, not an error.
 			return cloudInitMsg{name: name, status: "waiting"}
 		}
-		for _, l := range strings.Split(string(out), "\n") {
-			if s, ok := strings.CutPrefix(strings.TrimSpace(l), "status:"); ok {
-				return cloudInitMsg{name: name, status: strings.TrimSpace(s)}
-			}
-		}
-		return cloudInitMsg{name: name, status: "unknown"}
+		return cloudInitMsg{name: name, status: decodeCloudInitStatus(out)}
 	}
 }
 
