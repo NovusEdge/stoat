@@ -219,9 +219,10 @@ func Update(name string, p Patch) (VM, error) {
 // supplied exactly one port and has no idea it was turned into a synthetic
 // forward under the hood, would be actively misleading. Every other
 // message validateForwards can produce ("host port N out of range", "needs
-// root to bind", "already used by another VM") already reads correctly
-// as-is for a port that happens to be an ssh port, so those are passed
-// through, wrapped only with an "ssh port:" prefix for context.
+// root to bind", "already used by vm %q's ssh port/declared forward")
+// already reads correctly as-is for a port that happens to be an ssh
+// port, so those are passed through, wrapped only with an "ssh port:"
+// prefix for context.
 func validateSSHPort(v *config.VM, candidate int) error {
 	for _, f := range v.Forwards {
 		if f.HostPort == candidate {

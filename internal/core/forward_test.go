@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -161,6 +162,12 @@ func TestForwardRejectsCollisionWithAnotherVMsSSHPort(t *testing.T) {
 	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("want ErrInvalidSpec for a forward colliding with another VM's ssh port, got %v", err)
 	}
+	if !strings.Contains(err.Error(), `"other"`) {
+		t.Errorf("error does not name the colliding VM: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh port") {
+		t.Errorf("error does not say the collision is with an ssh port: %v", err)
+	}
 }
 
 func TestForwardRejectsCollisionWithAnotherVMsForward(t *testing.T) {
@@ -180,6 +187,37 @@ func TestForwardRejectsCollisionWithAnotherVMsForward(t *testing.T) {
 	_, err := Forward("web", []PortForward{{HostPort: 8080, GuestPort: 443}})
 	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("want ErrInvalidSpec for a forward colliding with another VM's forward, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"other"`) {
+		t.Errorf("error does not name the colliding VM: %v", err)
+	}
+	if !strings.Contains(err.Error(), "declared forward") {
+		t.Errorf("error does not say the collision is with a declared forward: %v", err)
+	}
+}
+
+// A broken VM (vm.toml exists but fails to parse) still claims its ssh port
+// via config.BrokenSSHPort, and the refusal must still name it: an agent or
+// user asking "which VM" cannot be told to go inspect a VM that config.List
+// cannot even enumerate as healthy.
+func TestForwardRejectsCollisionWithBrokenVMsSSHPort(t *testing.T) {
+	dir := root(t)
+	writeBroken(t, dir, "hosed", "sshport = 2201")
+
+	v := &config.VM{Name: "web", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Forward("web", []PortForward{{HostPort: 2201, GuestPort: 80}})
+	if !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("want ErrInvalidSpec for a forward colliding with a broken VM's ssh port, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"hosed"`) {
+		t.Errorf("error does not name the colliding broken VM: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh port") {
+		t.Errorf("error does not say the collision is with an ssh port: %v", err)
 	}
 }
 
