@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/testutil"
@@ -358,6 +359,86 @@ func TestGetDoesNotModifyVMTomlOnDisk(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatalf("vm.toml changed after Get/List:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
+// TestStartedAtRunningVsStopped pins that a running VM's StartedAt comes
+// from the pidfile qemu.Running just read, and a stopped one gets the zero
+// time, not some stale value left over from a previous run.
+func TestStartedAtRunningVsStopped(t *testing.T) {
+	dir := root(t)
+	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.StartedAt.IsZero() {
+		t.Errorf("stopped VM: StartedAt = %v, want the zero time", v.StartedAt)
+	}
+
+	cv := &config.VM{Name: "work", Dir: filepath.Join(dir, "work")}
+	stop := fakeRunning(t, cv)
+	defer stop()
+
+	v, err = Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.StartedAt.IsZero() {
+		t.Error("running VM: StartedAt is the zero time, want the pidfile's mtime")
+	}
+}
+
+// TestAppliedRoundTrips pins that a vm.toml's [applied] table survives onto
+// core.VM as core's own AppliedRecipe, not config's.
+func TestAppliedRoundTrips(t *testing.T) {
+	root(t)
+	writeRawVMToml(t, "work", `name = "work"
+mode = "live"
+ram = 1024
+cpus = 1
+sshport = 2200
+
+[applied.xfce]
+version = "1.0.0"
+at = 2026-01-15T10:00:00Z
+`)
+
+	v, err := Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := v.Applied["xfce"]
+	if !ok {
+		t.Fatalf("Applied = %+v, want an entry for xfce", v.Applied)
+	}
+	if got.Version != "1.0.0" {
+		t.Errorf("Applied[xfce].Version = %q, want 1.0.0", got.Version)
+	}
+	want := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	if !got.At.Equal(want) {
+		t.Errorf("Applied[xfce].At = %v, want %v", got.At, want)
+	}
+}
+
+// TestAppliedNilWhenNoRecipesApplied pins that a VM with no [applied] table
+// gets a nil map, which the brief calls out explicitly since it still reads
+// fine with len() and range.
+func TestAppliedNilWhenNoRecipesApplied(t *testing.T) {
+	root(t)
+	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Applied != nil {
+		t.Errorf("Applied = %+v, want nil", v.Applied)
 	}
 }
 

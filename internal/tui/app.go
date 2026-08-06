@@ -103,26 +103,20 @@ func loadVMs() tea.Msg {
 	return vmsLoadedMsg{vms: vms}
 }
 
-// cfgVM re-materialises the few config.VM fields that internal/qemu,
-// internal/sshx and internal/backend still read, for the four call sites that
-// reach into them: qemu.Uptime (the pidfile under Dir), sshx.User and
-// sshx.Args (the ssh identity), and backend.For (which backend runs recipes).
-// Those packages are not on core yet; moving them is a separate task, and
-// this is the one place the TUI crosses back rather than the model keeping a
-// second copy of every VM beside its core.VM.
+// cfgVM re-materialises the few config.VM fields that internal/sshx and
+// internal/backend still read, for the three call sites that reach into
+// them: sshx.User and sshx.Args (the ssh identity), and backend.For (which
+// backend runs recipes). Those packages are not on core yet; moving them is
+// a separate task, and this is the one place the TUI crosses back rather
+// than the model keeping a second copy of every VM beside its core.VM.
 //
-// It carries ONLY what those four read. It is not a config.VM: Applied,
+// It carries ONLY what those three read. It is not a config.VM: Applied,
 // Forwards and everything the edit form writes are absent, and anything that
 // needs the real on-disk record loads it by directory name instead (see the
 // detail screen).
 func cfgVM(v core.VM) *config.VM {
 	return &config.VM{
-		// core.VM.Name is already the DIRECTORY, which is what Dir's base is
-		// and what qemu's pidfile and monitor socket hang off.
-		Name:    v.Name,
-		Dir:     v.Paths.Dir,
 		OS:      v.OS,
-		Mode:    v.Mode,
 		Backend: v.Backend,
 		SSHPort: v.SSHPort,
 		SSHUser: v.SSHUser,

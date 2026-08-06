@@ -69,16 +69,19 @@ func Running(v *config.VM) bool {
 	return true
 }
 
-// Uptime returns how long the VM has been running, or 0 if it is stopped.
-func Uptime(v *config.VM) time.Duration {
+// StartedAt returns when the VM's QEMU process started (the pidfile's
+// mtime), or the zero time if it is stopped. -daemonize rewrites the
+// pidfile at the moment QEMU forks into the background, so its mtime is a
+// start time and not a stale value from an earlier boot.
+func StartedAt(v *config.VM) time.Time {
 	if !Running(v) {
-		return 0
+		return time.Time{}
 	}
 	fi, err := os.Stat(v.PidPath())
 	if err != nil {
-		return 0
+		return time.Time{}
 	}
-	return time.Since(fi.ModTime()).Truncate(time.Second)
+	return fi.ModTime()
 }
 
 // installedBytes is how much has to be written into a disk VM's qcow2 before

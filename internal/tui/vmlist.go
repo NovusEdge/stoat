@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/core"
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // vmItem is one row of the VM list. A single type covers both good VMs and
@@ -81,12 +81,13 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	dot, dotStyle := glyphStopped, downStyle
 	state := dimStyle.Render("-")
 	// The row reports the state core.List computed, not one derived here: the
-	// same answer, from the one place that owns the question. The uptime still
-	// comes from qemu, which is the only thing that knows it, and reads the
-	// same pidfile core.List's qemu.Running just read.
+	// same answer, from the one place that owns the question. Uptime is
+	// recomputed from v.StartedAt on every render rather than carried as a
+	// duration: core.List is a snapshot and the TUI has no periodic refresh,
+	// so a duration would freeze the row's uptime until the next reload.
 	if v.State == core.StateRunning {
 		dot, dotStyle = glyphRunning, upStyle
-		state = fmt.Sprintf("up %s  :%d", qemu.Uptime(cfgVM(v)), v.SSHPort)
+		state = fmt.Sprintf("up %s  :%d", time.Since(v.StartedAt).Truncate(time.Second), v.SSHPort)
 	}
 	// The dot and the state stay OUTSIDE the selection wrap: a styled
 	// substring ends in \x1b[0m, which resets the enclosing style too, so

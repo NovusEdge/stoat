@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/iso"
@@ -76,6 +77,15 @@ type Paths struct {
 	MonitorSocket string
 }
 
+// AppliedRecipe mirrors config.AppliedRecipe: which version of a recipe ran
+// against a VM, and when. Defined here rather than re-exported from config,
+// because core is the headless layer the CLI, the TUI and the MCP server all
+// depend on, and a type alias would leak config as part of that contract.
+type AppliedRecipe struct {
+	Version string
+	At      time.Time
+}
+
 // VM is the answer to "what is this VM doing right now", not the on-disk
 // record. It is a deliberately separate type from config.VM rather than the
 // same struct with a State bolted on:
@@ -100,6 +110,13 @@ type VM struct {
 	Mode    string // live | disk | cloud
 	Backend string // apkovl | cloudinit | ssh
 	State   State
+
+	// StartedAt is the running QEMU process's start time (its pidfile's
+	// mtime), zero when State is not StateRunning. A duration would freeze at
+	// whatever it was when List ran: List is a snapshot and the TUI has no
+	// periodic refresh, so a caller wanting "up 5m32s" recomputes it from
+	// this with time.Since, which keeps ticking between reloads.
+	StartedAt time.Time
 
 	RAM     int
 	CPUs    int
@@ -131,6 +148,11 @@ type VM struct {
 	// cannot end up reasoning about forwards that are a round trip out of date
 	// with the State next to them.
 	Forwards []PortForward
+
+	// Applied tracks which recipes have already run on this VM, keyed by
+	// recipe name, mirroring config.VM.Applied. A VM with none gets a nil
+	// map, which reads fine with len() and range.
+	Applied map[string]AppliedRecipe
 
 	Installed bool
 
@@ -197,11 +219,13 @@ func fromConfig(v *config.VM) VM {
 		Mode:            v.Mode,
 		Backend:         backend,
 		State:           state,
+		StartedAt:       qemu.StartedAt(v),
 		RAM:             v.RAM,
 		CPUs:            v.CPUs,
 		Disk:            v.Disk,
 		Share:           v.Share,
 		Recipes:         v.Recipes,
+		Applied:         applied(v.Applied),
 		SSHPort:         v.SSHPort,
 		SSHUser:         v.SSHUser,
 		ISO:             v.ISO,
@@ -219,6 +243,21 @@ func fromConfig(v *config.VM) VM {
 			MonitorSocket: v.MonitorPath(),
 		},
 	}
+}
+
+// applied converts config.VM.Applied to core's own AppliedRecipe, so core.VM
+// never carries a config type (see AppliedRecipe's doc comment). A nil input
+// returns nil rather than an empty map, matching config.VM.Applied's own
+// zero value for a vm.toml with no [applied] table.
+func applied(m map[string]config.AppliedRecipe) map[string]AppliedRecipe {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]AppliedRecipe, len(m))
+	for k, v := range m {
+		out[k] = AppliedRecipe{Version: v.Version, At: v.At}
+	}
+	return out
 }
 
 // inferMissing fills v.OS and v.Backend from v.ISO's filename, in memory
