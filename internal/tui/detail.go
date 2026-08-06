@@ -26,6 +26,10 @@ type detailModel struct {
 	// takes over the detail screen's keyboard and body; see updateDetail and
 	// viewDetail.
 	pager *logPager
+	// snapshots is non-nil only while the snapshots modal (key S) is open. It
+	// takes over the detail screen's keyboard and body the same way pager
+	// does; see snapshots.go.
+	snapshots *snapshotsModal
 }
 
 func newDetail(v core.VM) detailModel { return detailModel{vm: v} }
@@ -95,9 +99,29 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// The snapshots modal owns the keyboard while it's open, exactly like
+	// the pager above: every message goes to it first, and it reports
+	// whether it should close rather than reacting to a bare esc here, since
+	// esc means different things inside it (cancel a sub-prompt vs. close
+	// outright; see snapshotsModal.update).
+	if m.detail.snapshots != nil {
+		cmd, closed := m.detail.snapshots.update(msg)
+		if closed {
+			m.detail.snapshots = nil
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case logOpenedMsg:
 		m.detail.pager = msg.pager
+		return m, nil
+	case snapshotsOpenedMsg:
+		if msg.err != nil {
+			cmd := m.showToast(msg.err.Error(), true)
+			return m, cmd
+		}
+		m.detail.snapshots = newSnapshotsModal(msg.name, msg.snaps)
 		return m, nil
 	case tickMsg:
 		if msg.gen != m.detailGen {
@@ -200,6 +224,8 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startProvision(v)
 		case "L":
 			return m, openLogPager(m.detail.name())
+		case "S":
+			return m, openSnapshots(m.detail.name())
 		case "t":
 			v := m.detail.vm
 			if !consolePasswordAvailable(v) {
@@ -277,6 +303,11 @@ func (m model) viewDetail() string {
 	if m.detail.pager != nil {
 		m.detail.pager.resize(m.width, m.height)
 		return lipgloss.JoinVertical(lipgloss.Center, m.detail.pager.view(m.width))
+	}
+
+	if m.detail.snapshots != nil {
+		m.detail.snapshots.resize(m.width, m.height)
+		return lipgloss.JoinVertical(lipgloss.Center, m.detail.snapshots.view(m.width))
 	}
 
 	state := downStyle.Render("stopped")

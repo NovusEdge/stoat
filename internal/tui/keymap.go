@@ -140,6 +140,7 @@ func (h detailHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"i"}, "i", "installed"),
 		h.ssh(),
 		plainKey([]string{"p"}, "p", "provision"),
+		plainKey([]string{"S"}, "S", "snapshots"),
 	}
 	if h.consolePassword {
 		keys = append(keys,
@@ -158,6 +159,7 @@ func (h detailHelp) FullHelp() [][]key.Binding {
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
 		{plainKey([]string{"i"}, "i", "installed"), h.ssh()},
 		{plainKey([]string{"p"}, "p", "provision"), plainKey([]string{"L"}, "L", "console log")},
+		{plainKey([]string{"S"}, "S", "snapshots")},
 	}
 	if h.consolePassword {
 		rows = append(rows, []key.Binding{
