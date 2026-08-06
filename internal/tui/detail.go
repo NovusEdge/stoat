@@ -59,12 +59,12 @@ func tick(gen int) tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{t: t, gen: gen} })
 }
 
-// tailLog reads the last n lines of the most recent provision run, through
-// core.Logs rather than opening ProvisionLogPath directly: Logs already
-// resolves name to the right file (and hands back an empty reader instead of
-// an error for a VM that has never had recipes applied, or one whose
-// vm.toml is broken), so this keeps doing exactly the tail-N-lines work it
-// always did, just fed from core instead of a *config.VM.
+// tailLog reads the last n lines of the most recent recipe-apply run,
+// through core.Logs rather than opening ProvisionLogPath directly: Logs
+// already resolves name to the right file (and hands back an empty reader
+// instead of an error for a VM that has never had recipes applied, or one
+// whose vm.toml is broken), so this keeps doing exactly the tail-N-lines
+// work it always did, just fed from core instead of a *config.VM.
 func tailLog(name string, n int) string {
 	r, err := core.Logs(name, core.WhichApply)
 	if err != nil {
