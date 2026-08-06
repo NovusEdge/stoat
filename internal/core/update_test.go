@@ -240,6 +240,9 @@ func TestUpdateSSHPortRejectsCollisionWithBrokenVMsSSHPort(t *testing.T) {
 	if !strings.Contains(err.Error(), `"hosed"`) {
 		t.Errorf("error does not name the colliding broken VM: %v", err)
 	}
+	if !strings.Contains(err.Error(), "ssh port") {
+		t.Errorf("error does not say the collision is with an ssh port: %v", err)
+	}
 }
 
 // The synthetic-forward reuse trick in validateSSHPort must not leak
