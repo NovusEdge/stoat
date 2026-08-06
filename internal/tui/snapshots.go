@@ -39,10 +39,17 @@ type snapshotsModal struct {
 	// second "is this open" flag alongside it.
 	taking *textinput.Model
 
-	// pendingDelete is the snapshot awaiting a y/N answer, the same
-	// "y confirms, anything else cancels" rule list.go's pendingDelete and
-	// app.go's pendingProvision already use for exactly this kind of prompt.
-	pendingDelete *core.Snapshot
+	// pendingDelete and pendingRestore are the snapshot awaiting a y/N
+	// answer, the same "y confirms, anything else cancels" rule list.go's
+	// pendingDelete and app.go's pendingProvision already use for exactly
+	// this kind of prompt. Restore gets the same gate as delete: it discards
+	// everything since the snapshot was taken with no way back, which is as
+	// destructive as delete even though it doesn't remove the snapshot
+	// itself. Two fields rather than one, mirroring app.go's own
+	// pendingDelete/pendingProvision split, since only one is ever armed at
+	// a time and a shared field would need a second "which one" tag anyway.
+	pendingDelete  *core.Snapshot
+	pendingRestore *core.Snapshot
 
 	err string // set on a refused action; cleared the next time one succeeds
 }
@@ -136,10 +143,10 @@ func (sm *snapshotsModal) selected() (core.Snapshot, bool) {
 // updateDetail) treat this modal exactly like the log pager already sitting
 // beside it.
 func (sm *snapshotsModal) update(msg tea.Msg) (tea.Cmd, bool) {
-	// A mutation's result reaches here regardless of sub-mode: taking and
-	// pendingDelete both clear themselves before issuing the Cmd that
-	// produces this, so by the time it arrives the modal is always back at
-	// the plain list.
+	// A mutation's result reaches here regardless of sub-mode: taking,
+	// pendingDelete and pendingRestore all clear themselves before issuing
+	// the Cmd that produces this, so by the time it arrives the modal is
+	// always back at the plain list.
 	if r, ok := msg.(snapshotsRefreshedMsg); ok {
 		if r.err != nil {
 			sm.err = r.err.Error()
@@ -155,6 +162,9 @@ func (sm *snapshotsModal) update(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	if sm.pendingDelete != nil {
 		return sm.updatePendingDelete(msg)
+	}
+	if sm.pendingRestore != nil {
+		return sm.updatePendingRestore(msg)
 	}
 
 	key, ok := msg.(tea.KeyPressMsg)
@@ -179,8 +189,9 @@ func (sm *snapshotsModal) update(msg tea.Msg) (tea.Cmd, bool) {
 		if !ok {
 			return nil, false
 		}
-		tag := s.Tag
-		return snapshotAction(sm.vmName, func() error { return core.Restore(sm.vmName, tag) }), false
+		sm.pendingRestore = &s
+		sm.err = ""
+		return nil, false
 	case "d":
 		s, ok := sm.selected()
 		if !ok {
@@ -234,6 +245,23 @@ func (sm *snapshotsModal) updatePendingDelete(msg tea.Msg) (tea.Cmd, bool) {
 	return snapshotAction(sm.vmName, func() error { return core.DeleteSnapshot(sm.vmName, tag) }), false
 }
 
+// updatePendingRestore owns the keyboard while a restore awaits
+// confirmation: "y" confirms, any other key cancels, exactly like
+// updatePendingDelete above. Restore discards everything the guest has done
+// since the snapshot was taken, with no way back, so it gets the same gate.
+func (sm *snapshotsModal) updatePendingRestore(msg tea.Msg) (tea.Cmd, bool) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return nil, false
+	}
+	tag := sm.pendingRestore.Tag
+	sm.pendingRestore = nil
+	if key.String() != "y" {
+		return nil, false
+	}
+	return snapshotAction(sm.vmName, func() error { return core.Restore(sm.vmName, tag) }), false
+}
+
 // resize fits the modal to the terminal, the same fixed-chrome-minus-margin
 // shape logPager.resize uses (and for the same reason: this file cannot add
 // a message route in app.go, so it is called every render from viewDetail
@@ -260,8 +288,9 @@ func (sm *snapshotsModal) resize(termWidth, termHeight int) {
 
 // snapshotsChrome is the vertical space the pane spends on everything that
 // isn't list rows: border, padding, title, the hint line, and the one status
-// line (the tag prompt, the delete confirmation, or an error) above it.
-// Mirrors modalHeightChrome/logPagerChrome's role for the other two panels.
+// line (the tag prompt, a delete/restore confirmation, or an error) above
+// it. Mirrors modalHeightChrome/logPagerChrome's role for the other two
+// panels.
 const snapshotsChrome = 8
 
 // snapshotsMargin keeps the pane off the terminal's edges, the same call
@@ -282,6 +311,9 @@ func (sm *snapshotsModal) view(width int) string {
 	case sm.pendingDelete != nil:
 		hint = dimStyle.Render("y confirm · any other key cancels")
 		status = warnStyle.Render("delete "+sm.pendingDelete.Tag+"? y/N") + "\n"
+	case sm.pendingRestore != nil:
+		hint = dimStyle.Render("y confirm · any other key cancels")
+		status = warnStyle.Render("restore "+sm.pendingRestore.Tag+"? y/N") + "\n"
 	case sm.err != "":
 		status = errStyle.Render(sm.err) + "\n"
 	}

@@ -94,54 +94,73 @@ func TestSnapshotsModalEscTakesPriorityOverDetailBindings(t *testing.T) {
 	}
 }
 
-// TestSnapshotsDeleteRequiresConfirmation proves "d" arms a y/N prompt rather
-// than deleting outright, that any key other than "y" cancels it without
-// issuing a delete, and that "y" is what actually triggers one. Mirrors the
-// "y confirms, anything else cancels" idiom list.go's own delete prompt uses.
-func TestSnapshotsDeleteRequiresConfirmation(t *testing.T) {
-	sm := newSnapshotsModal("snap-vm-3", []core.Snapshot{
-		{Tag: "clean", Size: "1.0 MiB", Created: "2026-01-01 00:00:00"},
-	})
-
-	// "d" arms the prompt: no deletion Cmd yet, and the modal now shows the
-	// y/N line.
-	cmd, closed := sm.update(keyMsg("d"))
-	if closed {
-		t.Fatalf("arming a delete confirmation must not close the modal")
-	}
-	if cmd != nil {
-		t.Fatalf("\"d\" alone must not delete anything; a Cmd fired before confirmation")
-	}
-	if sm.pendingDelete == nil || sm.pendingDelete.Tag != "clean" {
-		t.Fatalf("expected pendingDelete armed for tag %q, got %+v", "clean", sm.pendingDelete)
-	}
-	out := ansi.Strip(sm.view(100))
-	if !strings.Contains(out, "delete clean? y/N") {
-		t.Fatalf("modal view missing the y/N confirmation line:\n%s", out)
+// TestSnapshotsDestructiveActionsRequireConfirmation proves both "d"
+// (delete) and "r" (restore) arm a y/N prompt rather than acting outright,
+// that any key other than "y" cancels the prompt without issuing the
+// action, and that "y" is what actually triggers it. Restore gets the same
+// gate as delete because it discards everything since the snapshot was
+// taken with no way back, which the user (via the team lead) confirmed is
+// as destructive as delete even though it leaves the snapshot itself in
+// place. Mirrors the "y confirms, anything else cancels" idiom list.go's
+// own delete prompt uses.
+func TestSnapshotsDestructiveActionsRequireConfirmation(t *testing.T) {
+	cases := []struct {
+		key      string // the key that arms the prompt
+		wantLine string // the confirmation line the view must show
+		pending  func(*snapshotsModal) *core.Snapshot
+	}{
+		{"d", "delete clean? y/N", func(sm *snapshotsModal) *core.Snapshot { return sm.pendingDelete }},
+		{"r", "restore clean? y/N", func(sm *snapshotsModal) *core.Snapshot { return sm.pendingRestore }},
 	}
 
-	// Anything other than "y" cancels: no Cmd, prompt cleared.
-	cmd, closed = sm.update(keyMsg("n"))
-	if closed {
-		t.Fatalf("cancelling a delete confirmation must not close the modal")
-	}
-	if cmd != nil {
-		t.Fatalf("declining the confirmation must not issue a delete Cmd")
-	}
-	if sm.pendingDelete != nil {
-		t.Fatalf("declining the confirmation must clear pendingDelete")
-	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			sm := newSnapshotsModal("snap-vm-3", []core.Snapshot{
+				{Tag: "clean", Size: "1.0 MiB", Created: "2026-01-01 00:00:00"},
+			})
 
-	// Re-arm, then confirm: "y" is what actually produces the delete Cmd.
-	sm.update(keyMsg("d"))
-	cmd, closed = sm.update(keyMsg("y"))
-	if closed {
-		t.Fatalf("confirming a delete must not close the modal itself (it stays open showing the refreshed list)")
-	}
-	if cmd == nil {
-		t.Fatalf("\"y\" must issue the delete Cmd")
-	}
-	if sm.pendingDelete != nil {
-		t.Fatalf("confirming must clear pendingDelete")
+			// The key arms the prompt: no Cmd yet, and the modal now shows
+			// the y/N line.
+			cmd, closed := sm.update(keyMsg(tc.key))
+			if closed {
+				t.Fatalf("arming a %q confirmation must not close the modal", tc.key)
+			}
+			if cmd != nil {
+				t.Fatalf("%q alone must not act; a Cmd fired before confirmation", tc.key)
+			}
+			pending := tc.pending(sm)
+			if pending == nil || pending.Tag != "clean" {
+				t.Fatalf("expected a pending confirmation armed for tag %q, got %+v", "clean", pending)
+			}
+			out := ansi.Strip(sm.view(100))
+			if !strings.Contains(out, tc.wantLine) {
+				t.Fatalf("modal view missing the y/N confirmation line %q:\n%s", tc.wantLine, out)
+			}
+
+			// Anything other than "y" cancels: no Cmd, prompt cleared.
+			cmd, closed = sm.update(keyMsg("x"))
+			if closed {
+				t.Fatalf("cancelling a %q confirmation must not close the modal", tc.key)
+			}
+			if cmd != nil {
+				t.Fatalf("declining the confirmation must not issue a Cmd")
+			}
+			if tc.pending(sm) != nil {
+				t.Fatalf("declining the confirmation must clear the pending state")
+			}
+
+			// Re-arm, then confirm: "y" is what actually produces the Cmd.
+			sm.update(keyMsg(tc.key))
+			cmd, closed = sm.update(keyMsg("y"))
+			if closed {
+				t.Fatalf("confirming must not close the modal itself (it stays open showing the refreshed list)")
+			}
+			if cmd == nil {
+				t.Fatalf("\"y\" must issue the Cmd")
+			}
+			if tc.pending(sm) != nil {
+				t.Fatalf("confirming must clear the pending state")
+			}
+		})
 	}
 }
