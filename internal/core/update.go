@@ -73,6 +73,16 @@ type Patch struct {
 	// touch" rule; there is no other way to tell "clear the list" and
 	// "didn't mention it" apart with a bare []string.
 	Recipes *[]string
+
+	// Installed is only meaningful for a disk-mode VM: it tracks whether the
+	// OS has been installed to disk.qcow2 yet (see checkImmutable's comment
+	// on why nothing can infer this automatically for every mode). Unlike
+	// Name/OS/Backend/Mode it is not immutable: a disk VM's install state can
+	// legitimately be corrected by hand (qemu.Start already flips it true
+	// once disk.qcow2 looks written, and this is the escape hatch for when
+	// that guess is wrong), so it is a plain mutable field, the same shape as
+	// RAM or CPUs.
+	Installed *bool
 }
 
 // checkImmutable reports ErrImmutableField, naming the field, for any of
@@ -158,6 +168,9 @@ func Update(name string, p Patch) (VM, error) {
 	}
 	if p.Recipes != nil {
 		v.Recipes = *p.Recipes
+	}
+	if p.Installed != nil {
+		v.Installed = *p.Installed
 	}
 
 	if p.SSHPort != nil && *p.SSHPort != v.SSHPort {
