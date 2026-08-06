@@ -161,10 +161,14 @@ func (sm *snapshotsModal) update(msg tea.Msg) (tea.Cmd, bool) {
 		return sm.updateTaking(msg)
 	}
 	if sm.pendingDelete != nil {
-		return sm.updatePendingDelete(msg)
+		return sm.updatePendingConfirm(msg, &sm.pendingDelete, func(tag string) error {
+			return core.DeleteSnapshot(sm.vmName, tag)
+		})
 	}
 	if sm.pendingRestore != nil {
-		return sm.updatePendingRestore(msg)
+		return sm.updatePendingConfirm(msg, &sm.pendingRestore, func(tag string) error {
+			return core.Restore(sm.vmName, tag)
+		})
 	}
 
 	key, ok := msg.(tea.KeyPressMsg)
@@ -229,37 +233,28 @@ func (sm *snapshotsModal) updateTaking(msg tea.Msg) (tea.Cmd, bool) {
 	return cmd, false
 }
 
-// updatePendingDelete owns the keyboard while a delete awaits confirmation:
-// "y" confirms, any other key cancels, the same rule list.go's own delete
-// prompt uses.
-func (sm *snapshotsModal) updatePendingDelete(msg tea.Msg) (tea.Cmd, bool) {
+// updatePendingConfirm owns the keyboard while either destructive action
+// awaits confirmation: "y" confirms, any other key cancels, the same rule
+// list.go's own delete prompt uses. Shared by pendingDelete and
+// pendingRestore (delete and restore had identical confirmation logic, tag
+// aside, as two separate functions) so a future change to the confirm/cancel
+// rule can't be made to one leg and forgotten on the other.
+//
+// pending is a pointer to the modal's own pendingDelete/pendingRestore
+// field, not a copy, so clearing *pending here is what actually disarms the
+// prompt on the modal. act is the core call to make with the confirmed
+// snapshot's tag.
+func (sm *snapshotsModal) updatePendingConfirm(msg tea.Msg, pending **core.Snapshot, act func(tag string) error) (tea.Cmd, bool) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return nil, false
 	}
-	tag := sm.pendingDelete.Tag
-	sm.pendingDelete = nil
+	tag := (*pending).Tag
+	*pending = nil
 	if key.String() != "y" {
 		return nil, false
 	}
-	return snapshotAction(sm.vmName, func() error { return core.DeleteSnapshot(sm.vmName, tag) }), false
-}
-
-// updatePendingRestore owns the keyboard while a restore awaits
-// confirmation: "y" confirms, any other key cancels, exactly like
-// updatePendingDelete above. Restore discards everything the guest has done
-// since the snapshot was taken, with no way back, so it gets the same gate.
-func (sm *snapshotsModal) updatePendingRestore(msg tea.Msg) (tea.Cmd, bool) {
-	key, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return nil, false
-	}
-	tag := sm.pendingRestore.Tag
-	sm.pendingRestore = nil
-	if key.String() != "y" {
-		return nil, false
-	}
-	return snapshotAction(sm.vmName, func() error { return core.Restore(sm.vmName, tag) }), false
+	return snapshotAction(sm.vmName, func() error { return act(tag) }), false
 }
 
 // resize fits the modal to the terminal, the same fixed-chrome-minus-margin

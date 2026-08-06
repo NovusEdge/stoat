@@ -63,6 +63,24 @@ func TestSnapshotsModalOpensAndEscCloses(t *testing.T) {
 		t.Fatalf("a VM with no snapshots must show an empty-state line, not a blank box:\n%s", out)
 	}
 
+	// A VM with nothing to select must not let "d"/"r" arm a confirmation
+	// for a snapshot that doesn't exist: selected() returns false on an
+	// empty list, and both handlers must no-op rather than reach into a
+	// zero-value core.Snapshot.
+	sm := got.detail.snapshots
+	if cmd, closed := sm.update(keyMsg("d")); cmd != nil || closed {
+		t.Fatalf("\"d\" on an empty snapshot list must be a no-op, got cmd=%v closed=%v", cmd, closed)
+	}
+	if sm.pendingDelete != nil {
+		t.Fatalf("\"d\" on an empty snapshot list must not arm pendingDelete, got %+v", sm.pendingDelete)
+	}
+	if cmd, closed := sm.update(keyMsg("r")); cmd != nil || closed {
+		t.Fatalf("\"r\" on an empty snapshot list must be a no-op, got cmd=%v closed=%v", cmd, closed)
+	}
+	if sm.pendingRestore != nil {
+		t.Fatalf("\"r\" on an empty snapshot list must not arm pendingRestore, got %+v", sm.pendingRestore)
+	}
+
 	newM, _ = got.updateDetail(keyMsg("esc"))
 	got = newM.(model)
 	if got.detail.snapshots != nil {
