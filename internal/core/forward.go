@@ -112,7 +112,16 @@ func validateForwards(v *config.VM, fwds []PortForward) error {
 	// (List, for parseable VMs; ListBroken+BrokenSSHPort, for VMs whose
 	// vm.toml exists but a port is still committed to their disk) rather
 	// than re-deriving "every port any VM has claimed" a second time.
-	claimed := map[int]bool{}
+	// claimant records who holds a port and how, so the refusal below can
+	// name the colliding VM and say whether the collision is with that VM's
+	// ssh port or one of its declared forwards. The fix differs (move THIS
+	// port vs. change the OTHER vm's forward), so the message has to say
+	// which.
+	type claimant struct {
+		vm   string
+		kind string // "ssh port" or "declared forward"
+	}
+	claimed := map[int]claimant{}
 	if vms, err := config.List(); err == nil {
 		for _, other := range vms {
 			// Identity is the directory, never the `name` field inside
@@ -122,9 +131,10 @@ func validateForwards(v *config.VM, fwds []PortForward) error {
 			if filepath.Base(other.Dir) == filepath.Base(v.Dir) {
 				continue // this VM; its own port was already checked above
 			}
-			claimed[other.SSHPort] = true
+			name := filepath.Base(other.Dir)
+			claimed[other.SSHPort] = claimant{name, "ssh port"}
 			for _, f := range other.Forwards {
-				claimed[f.HostPort] = true
+				claimed[f.HostPort] = claimant{name, "declared forward"}
 			}
 		}
 	}
@@ -139,13 +149,13 @@ func validateForwards(v *config.VM, fwds []PortForward) error {
 				continue
 			}
 			if p, err := config.BrokenSSHPort(b.Name); err == nil {
-				claimed[p] = true
+				claimed[p] = claimant{b.Name, "ssh port"}
 			}
 		}
 	}
 	for _, f := range fwds {
-		if claimed[f.HostPort] {
-			return fmt.Errorf("%w: host port %d is already used by another VM", ErrInvalidSpec, f.HostPort)
+		if c, ok := claimed[f.HostPort]; ok {
+			return fmt.Errorf("%w: host port %d is already used by vm %q's %s", ErrInvalidSpec, f.HostPort, c.vm, c.kind)
 		}
 	}
 	return nil

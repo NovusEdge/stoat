@@ -189,8 +189,12 @@ func TestUpdateSSHPortRejectsCollisionWithAnotherVMsSSHPort(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update("work", Patch{SSHPort: ptr(2201)}); !errors.Is(err, ErrInvalidSpec) {
+	_, err := Update("work", Patch{SSHPort: ptr(2201)})
+	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("err = %v, want ErrInvalidSpec for collision with another VM's ssh port", err)
+	}
+	if !strings.Contains(err.Error(), `"other"`) {
+		t.Errorf("error does not name the colliding VM: %v", err)
 	}
 }
 
@@ -207,8 +211,34 @@ func TestUpdateSSHPortRejectsCollisionWithAnotherVMsForward(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update("work", Patch{SSHPort: ptr(8080)}); !errors.Is(err, ErrInvalidSpec) {
+	_, err := Update("work", Patch{SSHPort: ptr(8080)})
+	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("err = %v, want ErrInvalidSpec for collision with another VM's forward", err)
+	}
+	if !strings.Contains(err.Error(), `"other"`) {
+		t.Errorf("error does not name the colliding VM: %v", err)
+	}
+	if !strings.Contains(err.Error(), "declared forward") {
+		t.Errorf("error does not say the collision is with a declared forward: %v", err)
+	}
+}
+
+// A broken VM (vm.toml exists but fails to parse) still claims its ssh port
+// via config.BrokenSSHPort, and the refusal must still name it.
+func TestUpdateSSHPortRejectsCollisionWithBrokenVMsSSHPort(t *testing.T) {
+	dir := root(t)
+	writeBroken(t, dir, "hosed", "sshport = 2201")
+
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Update("work", Patch{SSHPort: ptr(2201)})
+	if !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("err = %v, want ErrInvalidSpec for collision with a broken VM's ssh port", err)
+	}
+	if !strings.Contains(err.Error(), `"hosed"`) {
+		t.Errorf("error does not name the colliding broken VM: %v", err)
 	}
 }
 
