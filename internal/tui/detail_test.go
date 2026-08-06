@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/qemu"
-	"github.com/novusedge/stoat/internal/testutil"
 )
 
 // TestTickGenerationOnlyReArmsCurrentChain proves the fix for the ticker
@@ -22,7 +22,7 @@ import (
 // which visit to the detail screen scheduled it, so every esc->right cycle
 // left an extra self-perpetuating chain running forever.
 func TestTickGenerationOnlyReArmsCurrentChain(t *testing.T) {
-	v := &config.VM{Name: "gen-test", Mode: "live", Dir: t.TempDir()}
+	v := core.VM{Name: "gen-test", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 
 	cases := []struct {
 		name      string
@@ -60,7 +60,7 @@ func TestTickGenerationOnlyReArmsCurrentChain(t *testing.T) {
 // carrying the final generation re-arms; every earlier chain is stale by
 // construction and dies on arrival.
 func TestRapidReentryLeavesOneLiveGeneration(t *testing.T) {
-	v := &config.VM{Name: "gen-test", Mode: "live", Dir: t.TempDir()}
+	v := core.VM{Name: "gen-test", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, detail: detailModel{vm: v}}
 
 	var scheduled []int
@@ -85,33 +85,34 @@ func TestRapidReentryLeavesOneLiveGeneration(t *testing.T) {
 }
 
 // TestToggleInstalledFailedSaveLeavesMemoryUnchanged proves the fix for the
-// "i" toggle: on a Save failure, the in-memory VM's Installed field must
+// "i" toggle: on a write failure, the in-memory VM's Installed field must
 // stay exactly as it was on disk, not flip and stick despite the write
-// never landing. Forces the failure by making vm.toml read-only, which a
-// non-root user cannot write to regardless of directory permissions.
+// never landing. Also proves the "i" key now goes through core.Update (which
+// takes the data-root lock) rather than the second, unlocked Save() it used
+// to call straight on vm.toml. Forces the failure by making vm.toml
+// read-only, which a non-root user cannot write to regardless of directory
+// permissions.
 func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission bits are not enforced, cannot force a Save failure this way")
 	}
+	t.Setenv("STOAT_HOME", t.TempDir())
 
-	dir := t.TempDir()
-	v := &config.VM{
-		Name:      "readonly-test",
-		Mode:      "disk",
-		Disk:      "8G",
-		Installed: false,
-		Dir:       dir,
-	}
-	if err := v.Save(); err != nil {
+	cv := &config.VM{Name: "readonly-test", Mode: "disk", Disk: "8G", Installed: false}
+	if err := cv.Save(); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	tomlPath := filepath.Join(dir, "vm.toml")
+	tomlPath := filepath.Join(cv.Dir, "vm.toml")
 	if err := os.Chmod(tomlPath, 0o444); err != nil {
 		t.Fatalf("chmod vm.toml: %v", err)
 	}
 	t.Cleanup(func() { os.Chmod(tomlPath, 0o644) }) // let TempDir cleanup remove it
 
+	v, err := core.Get(cv.Name)
+	if err != nil {
+		t.Fatalf("core.Get: %v", err)
+	}
 	m := model{
 		screen:    screenDetail,
 		detailGen: 1,
@@ -121,11 +122,11 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	newM, _ := m.updateDetail(keyMsg("i"))
 	got := newM.(model)
 
-	if v.Installed != false {
-		t.Fatalf("v.Installed changed to %v in memory despite Save failing; want unchanged (false)", v.Installed)
+	if got.detail.vm.Installed != false {
+		t.Fatalf("detail.vm.Installed changed to %v in memory despite the write failing; want unchanged (false)", got.detail.vm.Installed)
 	}
 	if got.toast.text == "" || !got.toast.err {
-		t.Fatalf("expected an error toast reporting the Save failure, got %+v", got.toast)
+		t.Fatalf("expected an error toast reporting the write failure, got %+v", got.toast)
 	}
 
 	// Confirm the toggle truly never touched disk.
@@ -145,11 +146,11 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 func TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
 	cases := []struct {
 		name  string
-		vm    *config.VM
+		vm    core.VM
 		shows bool
 	}{
-		{"stopped, has password", &config.VM{Name: "a", Mode: "cloud", ConsolePassword: "stoat", Dir: t.TempDir()}, false},
-		{"running (fake), no password", &config.VM{Name: "b", Mode: "cloud", Dir: t.TempDir()}, false},
+		{"stopped, has password", core.VM{Name: "a", Mode: "cloud", ConsolePassword: "stoat", State: core.StateStopped}, false},
+		{"running, no password", core.VM{Name: "b", Mode: "cloud", State: core.StateRunning}, false},
 	}
 	for _, c := range cases {
 		m := model{screen: screenDetail, width: 100, height: 40, showHelp: true}
@@ -167,7 +168,7 @@ func TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
 // socket that cannot exist) when the VM is stopped or has no console
 // password.
 func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
-	v := &config.VM{Name: "stopped-vm", Mode: "cloud", ConsolePassword: "stoat", Dir: t.TempDir()}
+	v := core.VM{Name: "stopped-vm", Mode: "cloud", ConsolePassword: "stoat", State: core.StateStopped}
 	m := model{screen: screenDetail, detail: detailModel{vm: v}}
 
 	newM, cmd := m.updateDetail(keyMsg("t"))
@@ -186,7 +187,9 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 // cloudinit backend, which is always cloud mode). See IMPORTANT 3 in the
 // final review.
 func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
-	v := &config.VM{Name: "cloudy", Mode: "cloud", ConsolePassword: "stoat", Dir: t.TempDir()}
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "vnc.sock")
+	v := core.VM{Name: "cloudy", Mode: "cloud", ConsolePassword: "stoat", Paths: core.Paths{Dir: dir, VNCSocket: sock}}
 	m := model{screen: screenDetail, width: 100, height: 40}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
@@ -194,8 +197,8 @@ func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
 	if !strings.Contains(out, "vnc") {
 		t.Fatalf("headless VM's detail screen must show a vnc row:\n%s", out)
 	}
-	if !strings.Contains(out, v.VNCPath()) {
-		t.Fatalf("vnc row must show the actual socket path %q:\n%s", v.VNCPath(), out)
+	if !strings.Contains(out, sock) {
+		t.Fatalf("vnc row must show the actual socket path %q:\n%s", sock, out)
 	}
 	if strings.Contains(out, "qemu window only") {
 		t.Errorf("cloud VMs never get a qemu window; the console row must not claim one:\n%s", out)
@@ -209,7 +212,7 @@ func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
 // so the override is pinned rather than left to whatever host runs the test.
 func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
 	t.Setenv(qemu.GraphicalEnv, "1")
-	v := &config.VM{Name: "installing", Mode: "disk", Installed: false, Dir: t.TempDir()}
+	v := core.VM{Name: "installing", Mode: "disk", Installed: false, Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 100, height: 40}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
@@ -225,12 +228,14 @@ func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
 func TestDetailExplainsTheVNCFallbackOnAHeadlessHost(t *testing.T) {
 	t.Setenv(qemu.GraphicalEnv, "0")
 	fakeViewerPath(t, "gvncviewer")
-	v := &config.VM{Name: "installing", Mode: "disk", Installed: false, Dir: t.TempDir()}
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "vnc.sock")
+	v := core.VM{Name: "installing", Mode: "disk", Installed: false, Paths: core.Paths{Dir: dir, VNCSocket: sock}}
 	m := model{screen: screenDetail, width: 120, height: 40}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
 
-	if !strings.Contains(out, v.VNCPath()) {
+	if !strings.Contains(out, sock) {
 		t.Errorf("the install console is on the socket now; the detail screen must show it:\n%s", out)
 	}
 	if !strings.Contains(out, "no usable graphical session on this host") {
@@ -244,7 +249,7 @@ func TestDetailExplainsTheVNCFallbackOnAHeadlessHost(t *testing.T) {
 // that is actually on this host.
 func TestDetailShowsHowToAttachToTheVNCSocket(t *testing.T) {
 	fakeViewerPath(t, "gvncviewer")
-	v := &config.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Dir: t.TempDir()}
+	v := core.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 120, height: 40}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
@@ -258,7 +263,7 @@ func TestDetailShowsHowToAttachToTheVNCSocket(t *testing.T) {
 // as an instruction and fails as one.
 func TestDetailSaysWhatToInstallWhenNoViewerExists(t *testing.T) {
 	fakeViewerPath(t)
-	v := &config.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Dir: t.TempDir()}
+	v := core.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 120, height: 40}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
@@ -285,7 +290,7 @@ func fakeViewerPath(t *testing.T, names ...string) {
 // the footer must not advertise "c" (copy to clipboard) for a VM that has no
 // console password to copy.
 func TestCopyConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
-	v := &config.VM{Name: "b", Mode: "cloud", Dir: t.TempDir()}
+	v := core.VM{Name: "b", Mode: "cloud", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 100, height: 40, showHelp: true}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
@@ -298,7 +303,7 @@ func TestCopyConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
 // toast, and issues no clipboard command, when there is no console password
 // to copy.
 func TestCopyConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
-	v := &config.VM{Name: "stopped-vm", Mode: "cloud", Dir: t.TempDir()}
+	v := core.VM{Name: "stopped-vm", Mode: "cloud", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, detail: detailModel{vm: v}}
 
 	newM, _ := m.updateDetail(keyMsg("c"))
@@ -318,9 +323,9 @@ func TestCopyConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 // able to assign a VM's ssh port to a host port another VM had already
 // forwarded without anyone noticing.
 func TestDetailShowsForwards(t *testing.T) {
-	v := &config.VM{
-		Name: "fwd-vm", Mode: "live", Dir: t.TempDir(),
-		Forwards: []config.PortForward{{HostPort: 8080, GuestPort: 80}},
+	v := core.VM{
+		Name: "fwd-vm", Mode: "live", Paths: core.Paths{Dir: t.TempDir()},
+		Forwards: []core.PortForward{{HostPort: 8080, GuestPort: 80}},
 	}
 	m := model{screen: screenDetail, width: 100, height: 40}
 	m.detail = newDetail(v)
@@ -336,7 +341,7 @@ func TestDetailShowsForwards(t *testing.T) {
 // same convention every other optional row on this screen (iso, share,
 // recipes, …) already follows.
 func TestDetailOmitsForwardsRowWhenNone(t *testing.T) {
-	v := &config.VM{Name: "no-fwd", Mode: "live", Dir: t.TempDir()}
+	v := core.VM{Name: "no-fwd", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 100, height: 40}
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
@@ -358,12 +363,12 @@ func TestDetailOmitsForwardsRowWhenNone(t *testing.T) {
 // v.Applied whose recipe was since removed from v.Recipes.
 func TestDetailShowsRecipeStatus(t *testing.T) {
 	appliedAt := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-	v := &config.VM{
+	v := core.VM{
 		Name:    "recipe-vm",
 		Mode:    "live",
-		Dir:     t.TempDir(),
+		Paths:   core.Paths{Dir: t.TempDir()},
 		Recipes: []string{"xfce.alpine.sh", "docker.alpine.sh"},
-		Applied: map[string]config.AppliedRecipe{
+		Applied: map[string]core.AppliedRecipe{
 			"xfce.alpine.sh":    {Version: "1", At: appliedAt},
 			"removed.alpine.sh": {Version: "1", At: appliedAt},
 		},
@@ -387,20 +392,19 @@ func TestDetailShowsRecipeStatus(t *testing.T) {
 // collapses "in effect" and "applies at next start" into the same text: a
 // running VM's forwards must read differently from a stopped VM's, because
 // qemu cannot hot-add a hostfwd rule to a live process (docs/design/core-
-// api.md §8 decision 5). Running is faked the same way the rest of this
-// package's tests do: qemu.Running keys off the pidfile at v.Dir, not a
-// live process, so writing one is enough.
+// api.md §8 decision 5). Running is set directly on core.VM.State rather
+// than faked via a pidfile: core.Get already resolved that question once
+// (via qemu.Running) by the time a caller has a core.VM, and viewDetail
+// reads that resolved State instead of re-deriving it from the filesystem.
 func TestDetailForwardsDistinguishRunningFromStopped(t *testing.T) {
-	fwds := []config.PortForward{{HostPort: 8080, GuestPort: 80}}
+	fwds := []core.PortForward{{HostPort: 8080, GuestPort: 80}}
 
-	stopped := &config.VM{Name: "stopped-fwd", Mode: "live", Dir: t.TempDir(), Forwards: fwds}
+	stopped := core.VM{Name: "stopped-fwd", Mode: "live", State: core.StateStopped, Forwards: fwds}
 	mStopped := model{screen: screenDetail, width: 100, height: 40}
 	mStopped.detail = newDetail(stopped)
 	outStopped := ansi.Strip(mStopped.viewDetail())
 
-	running := &config.VM{Name: "running-fwd", Mode: "live", Dir: t.TempDir(), Forwards: fwds}
-	stop := testutil.FakeRunning(t, running.Dir)
-	defer stop()
+	running := core.VM{Name: "running-fwd", Mode: "live", State: core.StateRunning, Forwards: fwds}
 	mRunning := model{screen: screenDetail, width: 100, height: 40}
 	mRunning.detail = newDetail(running)
 	outRunning := ansi.Strip(mRunning.viewDetail())
@@ -429,12 +433,16 @@ func TestLogPagerOpensAndEscCloses(t *testing.T) {
 	// t.TempDir() VM with no matching config.Root() entry is "not found" to
 	// it regardless of what v.Dir points at.
 	t.Setenv("STOAT_HOME", t.TempDir())
-	v := &config.VM{Name: "pager-vm", Mode: "live"}
-	if err := v.Save(); err != nil {
+	cv := &config.VM{Name: "pager-vm", Mode: "live"}
+	if err := cv.Save(); err != nil {
 		t.Fatalf("saving fixture vm.toml: %v", err)
 	}
-	if err := os.WriteFile(v.ConsoleLogPath(), []byte("boot line one\nboot line two\n"), 0o644); err != nil {
+	if err := os.WriteFile(cv.ConsoleLogPath(), []byte("boot line one\nboot line two\n"), 0o644); err != nil {
 		t.Fatalf("writing console.log: %v", err)
+	}
+	v, err := core.Get(cv.Name)
+	if err != nil {
+		t.Fatalf("core.Get: %v", err)
 	}
 
 	m := model{screen: screenDetail, width: 100, height: 40}
@@ -485,7 +493,7 @@ func TestLogPagerOpensAndEscCloses(t *testing.T) {
 // own esc/back binding, which would otherwise leave the pager's viewport
 // state dangling on a screen the user has already left.
 func TestLogPagerEscTakesPriorityOverDetailBindings(t *testing.T) {
-	v := &config.VM{Name: "pager-vm-2", Mode: "live", Dir: t.TempDir()}
+	v := core.VM{Name: "pager-vm-2", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 100, height: 40}
 	m.detail = newDetail(v)
 	m.detail.pager = &logPager{}
@@ -525,8 +533,8 @@ func TestInstallerHintMatchesOS(t *testing.T) {
 	}
 	for _, c := range cases {
 		m := model{screen: screenDetail, width: 100, height: 40}
-		m.detail = newDetail(&config.VM{
-			Name: "d", Mode: "disk", OS: c.os, Dir: t.TempDir(), Disk: "disk.qcow2",
+		m.detail = newDetail(core.VM{
+			Name: "d", Mode: "disk", OS: c.os, Paths: core.Paths{Dir: t.TempDir()}, Disk: "disk.qcow2",
 		})
 		out := m.viewDetail()
 		if !strings.Contains(out, c.want) {

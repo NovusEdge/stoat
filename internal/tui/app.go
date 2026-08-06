@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -356,7 +357,15 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case vmSavedMsg:
 		// Adopt the saved VM only now: saveEdit returns a statusMsg instead
 		// on failure, so the panes never show state that wasn't persisted.
-		m.detail.vm = msg.vm
+		// detail.vm is a core.VM now (Task 2), not the *config.VM msg.vm
+		// carries, so re-derive it by directory rather than assign the
+		// pointer directly.
+		cv, err := core.Get(filepath.Base(msg.vm.Dir))
+		if err != nil {
+			cmd := m.showToast(err.Error(), true)
+			return m, cmd
+		}
+		m.detail.vm = cv
 		m.edit.vm = msg.vm
 		m.screen = screenDetail
 		// Re-arm the detail ticker for the same reason as the edit form's

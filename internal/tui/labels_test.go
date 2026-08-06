@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // TestRecipeLabel covers the display-only rename. VM.Recipes still stores the
@@ -61,9 +61,9 @@ func TestDiskModeHintExplainsTheInstallStep(t *testing.T) {
 
 	// And the detail pane repeats it for a VM that already exists.
 	m := model{screen: screenDetail, width: 100, height: 40}
-	m.detail = newDetail(&config.VM{
+	m.detail = newDetail(core.VM{
 		Name: "d", Mode: "disk", OS: "alpine", ISO: "isos/a.iso",
-		RAM: 1024, CPUs: 1, Disk: "8G", SSHPort: 2200, Dir: t.TempDir(),
+		RAM: 1024, CPUs: 1, Disk: "8G", SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()},
 	})
 	if !strings.Contains(m.viewDetail(), h) {
 		t.Error("the detail pane doesn't show the mode hint")

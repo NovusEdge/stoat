@@ -446,6 +446,49 @@ func TestUpdateDoesNotChangeUnrelatedFields(t *testing.T) {
 	}
 }
 
+// Installed is a plain mutable field, not checked by checkImmutable: this is
+// the direct replacement for the TUI's "i" key, which used to flip it via a
+// second, unlocked Save() straight onto vm.toml instead of going through
+// Update (and its config.Lock()) like every other mutation.
+func TestUpdateInstalledFlips(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Disk: "1G", Installed: false}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Update("work", Patch{Installed: ptr(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Installed {
+		t.Fatalf("Installed = %v, want true", got.Installed)
+	}
+	reloaded, err := config.Load("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.Installed {
+		t.Fatalf("not persisted: %+v", reloaded)
+	}
+}
+
+// A nil Installed must leave the field alone, matching every other Patch
+// field's "nil means don't touch" rule.
+func TestUpdateInstalledNilLeavesUnchanged(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Disk: "1G", Installed: true}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Update("work", Patch{RAM: ptr(2048)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Installed {
+		t.Fatalf("Installed = %v, want unchanged (true)", got.Installed)
+	}
+}
+
 // Sanity check that Patch's int-pointer fields really do distinguish
 // "not set" from "set to zero": CPUs: ptr(0) must be REJECTED (cpus must
 // be at least 1), not silently ignored as if nil.

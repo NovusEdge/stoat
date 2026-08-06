@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 )
 
@@ -161,11 +160,12 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showHelp = false
 	case "right", "l":
 		if v != nil {
-			// The detail and edit screens render and WRITE the on-disk record
-			// (Applied timestamps, vm.toml itself), which a core.VM is not, so
-			// this is where the list's point-in-time view is exchanged for it.
-			// v.Name is the directory, which is the key config.Load takes.
-			cv, err := config.Load(v.Name)
+			// Re-fetch rather than reuse the list's row: *v is a
+			// point-in-time snapshot from the last loadVMs, and detail's
+			// State/Applied must be current the moment the user opens this
+			// VM, not whenever the list last refreshed. v.Name is the
+			// directory, which is the key core.Get takes.
+			cv, err := core.Get(v.Name)
 			if err != nil {
 				cmd := m.showToast(err.Error(), true)
 				return m, cmd

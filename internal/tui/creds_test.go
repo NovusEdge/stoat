@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
 )
 
@@ -14,9 +15,9 @@ import (
 // (lock_passwd defaults to true) and the seed sets ssh_pwauth: false, so
 // without a password there is no valid answer to that prompt at all.
 func TestDetailShowsConsoleCredentials(t *testing.T) {
-	withPassword := &config.VM{
+	withPassword := core.VM{
 		Name: "ubuntu-1", Mode: "cloud", OS: "ubuntu", Backend: "cloudinit",
-		RAM: 4096, CPUs: 4, SSHPort: 2202, Dir: t.TempDir(),
+		RAM: 4096, CPUs: 4, SSHPort: 2202, Paths: core.Paths{Dir: t.TempDir()},
 		Base: "/tmp/b.qcow2", SSHUser: "stoat", ConsolePassword: "stoat",
 	}
 	m := model{screen: screenDetail, width: 100, height: 40}
@@ -43,10 +44,10 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 
 	// A cloud VM without one (created before this existed) must say so
 	// rather than leaving the user to discover it at a login prompt.
-	noPassword := *withPassword
+	noPassword := withPassword
 	noPassword.ConsolePassword = ""
 	m2 := model{screen: screenDetail, width: 100, height: 40}
-	m2.detail = newDetail(&noPassword)
+	m2.detail = newDetail(noPassword)
 	out2 := m2.viewDetail()
 	if !strings.Contains(out2, "not possible") {
 		t.Errorf("a cloud VM with no console password does not warn:\n%s", out2)
@@ -58,9 +59,9 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 // the row should stay out of the way.
 func TestLiveVMNeedsNoConsolePassword(t *testing.T) {
 	m := model{screen: screenDetail, width: 100, height: 40}
-	m.detail = newDetail(&config.VM{
+	m.detail = newDetail(core.VM{
 		Name: "live1", Mode: "live", OS: "alpine", ISO: "isos/alpine.iso",
-		RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir(),
+		RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()},
 	})
 	out := m.viewDetail()
 	if strings.Contains(out, "not possible") {
