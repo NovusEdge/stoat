@@ -10,18 +10,17 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 )
 
-// TestShellJoinAgainstARealShell runs shellJoin's output through an ACTUAL
-// shell and asserts the words that come back out are the words that went in.
+// TestShellJoinAgainstARealShell runs shellJoin's output through an actual
+// shell and checks the words that come back are the words that went in.
 //
-// This is the only way to test quoting that means anything. Checking
-// shellJoin against a hand-written unquoter would be a tautology: it could
-// only ever be as correct as the author's understanding of shell quoting,
-// which is the thing under test. internal/installer/paths_shell_test.go
-// established this approach in this repo for the same reason, and skips
-// shells that are not installed so a missing host tool never reddens CI.
+// A hand-written unquoter would only be as correct as the author's
+// understanding of shell quoting, the thing under test. That makes it a
+// tautology. internal/installer/paths_shell_test.go uses the same
+// approach for the same reason and skips shells that are not installed,
+// so a missing host tool never reddens CI.
 //
-// The guest shell is /bin/sh or /bin/ash (Alpine), so POSIX sh is the right
-// target; see guest.OS.Shell.
+// The guest shell is /bin/sh or /bin/ash on Alpine, so POSIX sh is the
+// right target; see guest.OS.Shell.
 func TestShellJoinAgainstARealShell(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
@@ -46,15 +45,14 @@ func TestShellJoinAgainstARealShell(t *testing.T) {
 	}
 
 	for _, argv := range cases {
-		// Arguments are separated by NUL, not newline, so the shell tells us
-		// exactly how many words it parsed and what each one was. A newline
-		// delimiter CANNOT express an argument that itself contains a newline:
-		// the first version of this test used one and reported a spurious
-		// failure on {"echo", "new\nline"}, where the quoting was correct and
-		// the harness could not represent the answer. NUL is the only byte
-		// that cannot appear inside an argument, which is why xargs -0 and
-		// find -print0 exist. printf with a repeated format consumes every
-		// remaining argument.
+		// Arguments are separated by NUL, not newline, so the shell reports
+		// exactly how many words it parsed and what each one was. A
+		// newline delimiter cannot express an argument that itself
+		// contains a newline. An earlier version of this test used one and
+		// reported a spurious failure on {"echo", "new\nline"}. NUL is the
+		// only byte that cannot appear inside an argument; that is why
+		// xargs -0 and find -print0 use it. printf with a repeated format
+		// consumes every remaining argument.
 		script := `printf '%s\0' ` + shellJoin(argv[1:])
 		out, err := exec.Command(sh, "-c", script).Output()
 		if err != nil {
@@ -78,10 +76,10 @@ func TestShellJoinAgainstARealShell(t *testing.T) {
 	}
 }
 
-// TestShellJoinNeverLeavesAnArgumentBare is a cheap structural guard on top of
-// the behavioural test above: every argument must be quoted, including ones
+// TestShellJoinNeverLeavesAnArgumentBare is a structural guard on top of
+// the behavioral test above. Every argument must be quoted, including ones
 // that look harmless today. A "no special characters, skip the quotes"
-// optimisation is exactly how this kind of bug gets reintroduced.
+// optimization is how this bug gets reintroduced.
 func TestShellJoinNeverLeavesAnArgumentBare(t *testing.T) {
 	got := shellJoin([]string{"ls", "-la", "/tmp"})
 	if got != `'ls' '-la' '/tmp'` {
@@ -106,7 +104,7 @@ func TestExecUnknownVM(t *testing.T) {
 	}
 }
 
-// A stopped VM must be refused before ssh is ever dialled: otherwise the
+// A stopped VM must be refused before ssh is ever dialled. Otherwise the
 // caller waits out ConnectTimeout only to get a bare 255 with "connection
 // refused" buried in stderr, which says nothing about the actual problem.
 func TestExecStoppedVMIsNotRunningNotATransportError(t *testing.T) {

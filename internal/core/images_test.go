@@ -56,10 +56,10 @@ func TestImagesListsCatalogAndBYO(t *testing.T) {
 	}
 }
 
-// TestImagesUndownloadedEntryReportsDeclaredSize covers a catalog entry with
-// no matching local file: File must stay empty and the size must be the
-// catalog's declared approximation (Exact == false), never treated as if it
-// were measured.
+// TestImagesUndownloadedEntryReportsDeclaredSize covers a catalog entry
+// with no matching local file. File must stay empty. The size must be the
+// catalog's declared approximation (Exact == false), never treated as
+// measured.
 func TestImagesUndownloadedEntryReportsDeclaredSize(t *testing.T) {
 	root(t)
 
@@ -103,15 +103,11 @@ func TestDownloadImageUnknownID(t *testing.T) {
 	}
 }
 
-// TestDownloadImageHonoursAlreadyCancelledContext covers the one form of
-// cancellation DownloadImage can test without a network: ctx checked and
-// honoured BEFORE iso.Resolve/iso.Download are ever called. A context that
-// is already cancelled when DownloadImage is entered must return that error
-// immediately rather than dialing out; this is the only guarantee this
-// function's doc comment makes about cancellation being complete; anything
-// mid-flight is honestly documented there as returning control, not
-// stopping the work, and is not testable here for exactly that reason (it
-// would require a live download to interrupt).
+// TestDownloadImageHonoursAlreadyCancelledContext covers the one
+// cancellation path testable without a network: ctx is checked before
+// iso.Resolve or iso.Download run. A ctx already cancelled on entry must
+// return that error immediately, not dial out. Cancellation mid-download
+// is not tested here; it would require a live transfer to interrupt.
 func TestDownloadImageHonoursAlreadyCancelledContext(t *testing.T) {
 	root(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,12 +152,12 @@ func TestDownloadResultNoChecksumAvailable(t *testing.T) {
 // TestMatchLocalDistinguishesAlpineFlavours pins that alpine-standard and
 // alpine-virt are not interchangeable.
 //
-// iso.Infer reports only an OS and a backend, and the two entries share both,
-// so the Infer fallback matched whichever alpine .iso was on disk for BOTH.
-// `stoat images` reported alpine-virt as downloaded with only the standard ISO
-// present, and `create --image alpine-virt` silently built on the standard
-// image, a 352 MiB general-purpose kernel where the user asked for the 66 MiB
-// virtualised one, with no error to notice.
+// iso.Infer reports only an OS and a backend, and the two entries share
+// both. The Infer fallback matched whichever alpine .iso was on disk for
+// either entry. `stoat images` reported alpine-virt as downloaded with only
+// the standard ISO present, and `create --image alpine-virt` silently
+// built a VM on the standard image: a 352 MiB general-purpose kernel
+// instead of the 66 MiB virtualised one, with no error.
 func TestMatchLocalDistinguishesAlpineFlavours(t *testing.T) {
 	var std, virt iso.Entry
 	for _, e := range iso.Catalog() {

@@ -10,11 +10,11 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 )
 
-// TestSnapshotsModalOpensAndEscCloses mirrors
-// TestLogPagerOpensAndEscCloses: "S" opens the modal via its
-// snapshotsOpenedMsg round trip (the core.Snapshots read happens in a Cmd off
-// the UI goroutine, never synchronously), and esc closes it again, handing
-// the detail screen's normal body back.
+// TestSnapshotsModalOpensAndEscCloses mirrors TestLogPagerOpensAndEscCloses.
+// "S" opens the modal through its snapshotsOpenedMsg round trip: the
+// core.Snapshots read runs in a Cmd off the UI goroutine, never
+// synchronously. esc closes the modal and hands back the detail screen's
+// normal body.
 func TestSnapshotsModalOpensAndEscCloses(t *testing.T) {
 	// core.Snapshots (which openSnapshots calls) resolves the VM by name
 	// under config.Root(), not by v.Dir, so the fixture has to live there;
@@ -113,14 +113,12 @@ func TestSnapshotsModalEscTakesPriorityOverDetailBindings(t *testing.T) {
 }
 
 // TestSnapshotsDestructiveActionsRequireConfirmation proves both "d"
-// (delete) and "r" (restore) arm a y/N prompt rather than acting outright,
-// that any key other than "y" cancels the prompt without issuing the
-// action, and that "y" is what actually triggers it. Restore gets the same
-// gate as delete because it discards everything since the snapshot was
-// taken with no way back, which the user (via the team lead) confirmed is
-// as destructive as delete even though it leaves the snapshot itself in
-// place. Mirrors the "y confirms, anything else cancels" idiom list.go's
-// own delete prompt uses.
+// (delete) and "r" (restore) arm a y/N prompt instead of acting outright.
+// Any key other than "y" cancels the prompt without issuing the action, and
+// "y" is what triggers it. Restore gets the same gate as delete: it
+// discards everything since the snapshot was taken, with no way back, even
+// though it leaves the snapshot itself in place. This mirrors the "y
+// confirms, anything else cancels" idiom list.go's own delete prompt uses.
 func TestSnapshotsDestructiveActionsRequireConfirmation(t *testing.T) {
 	cases := []struct {
 		key      string // the key that arms the prompt

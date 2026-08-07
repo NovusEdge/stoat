@@ -14,12 +14,12 @@ import (
 )
 
 // vmItem is one row of the VM list. A single type covers both good VMs and
-// broken ones (a directory whose vm.toml won't parse) because the cursor
+// broken ones (a directory whose vm.toml fails to parse), since the cursor
 // ranges over them as one sequence. Modelling them as two lists would mean
 // reimplementing that interleaving on top of bubbles/list.
 //
-// One field, not two: a broken VM is a core.VM with StateBroken, so the
-// "which of these two pointers is nil" pairing is gone and a row can no
+// One field, not two. A broken VM is a core.VM with StateBroken, so there
+// is no "which of these two pointers is nil" pairing, and a row can no
 // longer be neither.
 type vmItem struct{ vm core.VM }
 
@@ -59,13 +59,14 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		// even when the row isn't selected, while the text stays muted so a
 		// whole line of red isn't shouting from the list.
 		plain := fmt.Sprintf("%-14s broken: %s", it.vm.Name, brokenReason(it.vm.Error))
-		// A long reason wraps inside the pane. paneAt wraps the whole rendered
-		// list as one blob and has no idea this line starts 4 columns in (the
-		// cursor, the glyph, and the space after it). Left to it, the
-		// continuation lands flush against the pane's padding, under the
-		// cursor instead of under the text. Wrapping here first, with a
-		// hanging indent matching that prefix, means every physical line
-		// already fits listWidth and paneAt has nothing left to rewrap.
+		// A long reason wraps inside the pane. paneAt wraps the whole
+		// rendered list as one blob and has no idea this line starts 4
+		// columns in: the cursor, the glyph, and the space after it. Left
+		// to paneAt, the continuation lands flush against the pane's
+		// padding, under the cursor instead of under the text. Wrapping
+		// here first, with a hanging indent matching that prefix, makes
+		// every physical line already fit listWidth, so paneAt has
+		// nothing left to rewrap.
 		prefixWidth := lipgloss.Width(cursor) + lipgloss.Width(glyphBroken) + 1 // +1 for the space after the glyph
 		plain = strings.ReplaceAll(lipgloss.Wrap(plain, listWidth-prefixWidth, ""), "\n", "\n"+strings.Repeat(" ", prefixWidth))
 		if selected {
@@ -80,20 +81,21 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	v := it.vm
 	dot, dotStyle := glyphStopped, downStyle
 	state := dimStyle.Render("-")
-	// The row reports the state core.List computed, not one derived here: the
-	// same answer, from the one place that owns the question. Uptime is
+	// The row reports the state core.List computed, not one derived here:
+	// the same answer, from the one place that owns the question. Uptime is
 	// recomputed from v.StartedAt on every render rather than carried as a
-	// duration: core.List is a snapshot and the TUI has no periodic refresh,
-	// so a duration would freeze the row's uptime until the next reload.
+	// duration. core.List is a snapshot, and the TUI has no periodic
+	// refresh, so a stored duration would freeze the row's uptime until the
+	// next reload.
 	if v.State == core.StateRunning {
 		dot, dotStyle = glyphRunning, upStyle
 		state = fmt.Sprintf("up %s  :%d", time.Since(v.StartedAt).Truncate(time.Second), v.SSHPort)
 	}
-	// The dot and the state stay OUTSIDE the selection wrap: a styled
-	// substring ends in \x1b[0m, which resets the enclosing style too, so
-	// wrapping a row that starts with a coloured dot leaves everything after
-	// it unhighlighted, and a trailing dim "-" would render unbolded inside
-	// an otherwise highlighted row.
+	// The dot and the state stay OUTSIDE the selection wrap. A styled
+	// substring ends in \x1b[0m, which resets the enclosing style too.
+	// Wrapping a row that starts with a coloured dot would leave everything
+	// after it unhighlighted, and a trailing dim "-" would render unbolded
+	// inside an otherwise highlighted row.
 	label := fmt.Sprintf("%-14s %-5s %5dM %2dc  ", v.Name, v.Mode, v.RAM, v.CPUs)
 	if selected {
 		label = selStyle.Render(label)
@@ -105,14 +107,14 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 // from the terminal so the pane doesn't resize as VMs come and go; the row
 // budget is what bubbles/list paginates against.
 const (
-	// Wide enough for the widest row the format can produce with values that
-	// are actually reachable: a 14-char name, 5-digit RAM, 2-digit cpus, an
-	// uptime just under 1000 hours and a 5-digit port (the edit form allows
-	// up to 65535). Sized off the RUNNING row on purpose, since a stopped one is
-	// only 38 cells, which is why an undersized value looks fine in every
-	// test render and then wraps the port onto its own line the moment
+	// Wide enough for the widest row the format can produce with reachable
+	// values: a 14-char name, 5-digit RAM, 2-digit cpus, an uptime just
+	// under 1000 hours, and a 5-digit port (the edit form allows up to
+	// 65535). Sized off the RUNNING row on purpose. A stopped row is only
+	// 38 cells, which is why an undersized value looks fine in every test
+	// render and then wraps the port onto its own line the moment
 	// something is actually up. A terminal narrower than this still clamps
-	// (paneAt bounds to the window), which is unavoidable at that size.
+	// (paneAt bounds to the window); that is unavoidable at that size.
 	listWidth        = 60
 	listVisibleRows  = 6
 	listMinRows      = 2
@@ -172,9 +174,9 @@ func (m model) selectedItem() (vmItem, bool) {
 }
 
 // listHeight sizes the list to whichever is smaller: the rows that fit the
-// terminal, or the rows there actually are. bubbles/list pads its viewport to
-// whatever height it is given, so sizing it to the terminal alone left a tall
-// column of blank lines under three VMs.
+// terminal, or the rows there actually are. bubbles/list pads its viewport
+// to whatever height it is given, so sizing it to the terminal alone left a
+// tall column of blank lines under three VMs.
 func listHeight(items, termHeight int, paginated bool) int {
 	n := listRows(termHeight)
 	if items < n {
@@ -184,17 +186,18 @@ func listHeight(items, termHeight int, paginated bool) int {
 		n = 1
 	}
 	// Each row costs a line plus the delegate's spacer. The component
-	// computes items-per-page as height/(itemHeight+spacing), so shaving the
-	// last row's spacer here would round the division down and strand a VM on
-	// page two; viewList trims the resulting trailing blank instead.
+	// computes items-per-page as height/(itemHeight+spacing), so shaving
+	// the last row's spacer here would round the division down and strand
+	// a VM on page two. viewList trims the resulting trailing blank
+	// instead.
 	h := n * 2
 	if paginated {
 		// The pagination line is drawn inside the height the component is
-		// given, so it needs room or the last VM is pushed to page two. It
-		// costs exactly one line: bubbles only adds a top margin to it when
-		// the delegate's spacing is 0, and ours is 1. Budgeting two made the
-		// pane a line taller than the terminal, which flipped View() to
-		// top-align and cut the footer off the bottom.
+		// given, so it needs room, or the last VM is pushed to page two.
+		// It costs exactly one line: bubbles only adds a top margin to it
+		// when the delegate's spacing is 0, and ours is 1. Budgeting two
+		// made the pane a line taller than the terminal, which flipped
+		// View() to top-align and cut the footer off the bottom.
 		h++
 	}
 	return h
@@ -218,11 +221,11 @@ func listRows(height int) int {
 	return n
 }
 
-// syncListHeight resizes the list to the rows actually visible right now, so
-// the pane shrinks with an applied filter instead of leaving a column of
-// blank lines where the filtered-out VMs used to be. Called after every
-// list update, since filtering resolves asynchronously through a Cmd and the
-// visible count is only correct once that lands.
+// syncListHeight resizes the list to the rows actually visible right now,
+// so the pane shrinks with an applied filter instead of leaving a column of
+// blank lines where the filtered-out VMs used to be. It is called after
+// every list update, since filtering resolves asynchronously through a
+// Cmd, and the visible count is only correct once that lands.
 func (m *model) syncListHeight() {
 	n := len(m.list.VisibleItems())
 	if n == 0 && len(m.list.Items()) > 0 {

@@ -17,63 +17,51 @@ import (
 )
 
 // ErrAppliedAtBoot is returned by Apply for a VM whose backend already ran
-// its recipes at first boot and has no post-boot apply step at all: the
-// cloudinit backend, whose recipes are merged into the cloud-init seed and
-// consumed by the guest's own cloud-init service before sshd is even
-// reachable from stoat's side (internal/backend/cloudinit.go's Prepare;
-// there is no matching Provision). Calling sshx.Provision on such a VM would
-// not be a harmless no-op: v.Recipes holds "*.cloud.yaml" fragment names,
-// and Provision pipes whatever it's given to `sh -s` over ssh, so a cloud
-// fragment would be executed as a shell script. Refusing up front, rather
-// than discovering that the hard way, is the whole reason this error is
-// typed instead of left to whatever sh made of the YAML.
+// its recipes at first boot: the cloudinit backend. Its recipes merge into
+// the cloud-init seed and run through the guest's own cloud-init service,
+// before sshd is even reachable (internal/backend/cloudinit.go's Prepare has
+// no matching Provision). Calling sshx.Provision on such a VM is not a
+// harmless no-op: v.Recipes holds "*.cloud.yaml" fragment names, and
+// Provision pipes whatever it's given to `sh -s` over ssh, so a cloud
+// fragment would run as a shell script. Apply refuses up front instead.
 var ErrAppliedAtBoot = errors.New("recipes for this backend already ran at first boot")
 
 // ApplyOpts controls one Apply call.
 type ApplyOpts struct {
 	// Only restricts the run to a subset of the VM's OWN recipe list,
 	// naming entries exactly as they appear in VM.Recipes (full filenames,
-	// e.g. "xfce.alpine.sh", the same identifiers Recipes and CheckRecipes
-	// use). Empty means "every recipe the VM has".
+	// e.g. "xfce.alpine.sh", the identifiers Recipes and CheckRecipes use).
+	// Empty means every recipe the VM has.
 	//
-	// Only does NOT let a caller run a recipe the VM was not created with:
-	// that would bypass the applicability check Create already made
-	// (core.go's checkRecipes) for a name nobody vetted against this VM's
-	// OS/backend. A caller that wants a recipe added first goes through
-	// Update(name, Patch{Recipes: ...}), which is the one place that
-	// decision belongs.
+	// Only cannot name a recipe the VM was not created with. That would
+	// bypass the applicability check Create already made (core.go's
+	// checkRecipes) for a name nobody vetted against this VM's OS/backend.
+	// A caller that wants a recipe added first calls
+	// Update(name, Patch{Recipes: ...}).
 	Only []string
 }
 
 // Apply runs VM name's recipes over ssh and blocks until they finish.
 //
-// It is deliberately NEVER implicit (docs/design/core-api.md §6): the only
-// way recipes run is this call, made by a caller that already decided to
-// make it. Nothing elsewhere in this package invokes it as a side effect of
-// Create or Start.
+// Apply never runs implicitly (docs/design/core-api.md §6). Recipes run
+// only through this call. Nothing else in this package invokes it as a side
+// effect of Create or Start.
 //
-// The actual run is sshx.Provision, unchanged, not reimplemented. Apply's
-// job is entirely the caller-facing decisions Provision itself has no way to
-// make: which VM, which backend, and which subset. Progress is NOT a new
-// channel: Provision writes "=== recipe NAME ===" markers to
-// v.ProvisionLogPath() exactly as it does when the TUI's autoprov path
-// drives it, and internal/tui/provstep.go already knows how to tail that
-// file. A caller here gets the identical log through Logs(name, WhichApply)
-// or Wait(ctx, name, UntilApplied), both already exist and both already
-// read that same file, so nothing here invents a second progress path.
+// The run itself is sshx.Provision, unchanged. Apply only makes the
+// caller-facing decisions Provision cannot: which VM, which backend, which
+// subset. Progress uses no new channel: Provision writes "=== recipe NAME
+// ===" markers to v.ProvisionLogPath(), the same file the TUI's autoprov
+// path and internal/tui/provstep.go already tail. A caller here reads the
+// same log through Logs(name, WhichApply) or Wait(ctx, name, UntilApplied).
 //
-// ctx: Apply is the second operation in this package (after Exec) with a
-// real reason for one: a desktop recipe can take minutes. sshx.Provision now
-// takes ctx itself and runs each recipe under exec.CommandContext, so
-// cancelling ctx here kills the in-flight ssh process (SIGTERM, then a grace
-// period; see sshx.recipeShutdownGrace) rather than merely stopping this
-// call from waiting on it. Provision also checks ctx.Err() between recipes,
-// so a cancellation landing in the gap between two doesn't start one more
-// ssh process only to kill it immediately. Apply passes ctx straight through
-// rather than adding a second layer of cancellation on top: an earlier
-// version raced its own goroutine against ctx.Done() because Provision could
-// not be cancelled at all, which is no longer true and would now just be a
-// redundant, less complete copy of what Provision itself does.
+// ctx matters here because a desktop recipe can take minutes. sshx.Provision
+// takes ctx and runs each recipe under exec.CommandContext, so cancelling
+// ctx kills the in-flight ssh process (SIGTERM, then a grace period; see
+// sshx.recipeShutdownGrace) instead of only stopping this call from
+// waiting. Provision also checks ctx.Err() between recipes, so a
+// cancellation in the gap between two recipes does not start one more ssh
+// process just to kill it. Apply passes ctx straight through and adds no
+// second cancellation layer of its own.
 func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	v, err := load(name)
 	if err != nil {
@@ -100,20 +88,19 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 		targets = opts.Only
 	}
 	if len(targets) == 0 {
-		// Nothing to run is not an error: an explicit Apply on a VM with no
-		// recipes configured (or Only naming none) is a no-op, matching
-		// Create's own "no recipes at all stays valid" rule rather than
-		// punishing a caller for asking anyway.
+		// Nothing to run is not an error. An explicit Apply on a VM with no
+		// recipes configured, or Only naming none, is a no-op, matching
+		// Create's own "no recipes at all stays valid" rule.
 		return nil
 	}
 
 	// v2 recipes (docs/recipe-spec-v2.md) declare a run mode in their own
-	// recipe.toml; a v1 flat-file recipe has no manifest at all and keeps
-	// the old "always run it" behaviour untouched. explicit is which names
-	// the caller asked for BY NAME (a non-empty Only): that is what tells a
-	// "manual"-run recipe apart from one merely inherited via v.Recipes, the
-	// distinction docs/recipe-spec-v2.md's Decisions §4 draws between
-	// "stoat apply" and "stoat apply --recipe <name>".
+	// recipe.toml. A v1 flat-file recipe has no manifest and keeps the old
+	// "always run it" behavior. explicit holds the names the caller asked
+	// for BY NAME, a non-empty Only. It tells a "manual"-run recipe apart
+	// from one merely inherited via v.Recipes, the distinction
+	// docs/recipe-spec-v2.md's Decisions §4 draws between "stoat apply" and
+	// "stoat apply --recipe <name>".
 	explicit := make(map[string]bool, len(opts.Only))
 	for _, o := range opts.Only {
 		explicit[o] = true
@@ -123,22 +110,21 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 		return err
 	}
 	if len(runTargets) == 0 {
-		// Every target was skipped by its own run mode (an "once" recipe
+		// Every target was skipped by its own run mode: an "once" recipe
 		// already applied at its current version, or a "manual" recipe
-		// nobody named explicitly). That is not a failure: it is the run
-		// mode doing exactly what it declared, so this stays a no-op like
-		// the "nothing to run at all" case above rather than erroring.
+		// nobody named explicitly. This is not a failure. It is the run
+		// mode doing what it declared, so this stays a no-op like the
+		// "nothing to run at all" case above.
 		return nil
 	}
 
 	// run is v with Recipes narrowed to runTargets. config.VM is a plain
-	// value struct (see internal/config/config.go), no mutex, no owned
-	// resource, so copying it and pointing sshx.Provision at the copy is
-	// exactly as safe as calling it on v directly, and it is what lets Only
-	// (and now run-mode filtering) reuse Provision as-is instead of it
-	// needing a subset parameter added to a file this change may not touch.
-	// Dir (and so ProvisionLogPath) is unchanged, which is what keeps this
-	// on the SAME log every other reader of this VM already tails.
+	// value struct (internal/config/config.go) with no mutex and no owned
+	// resource, so copying it and pointing sshx.Provision at the copy is as
+	// safe as calling it on v directly. This lets Only and run-mode
+	// filtering reuse Provision as-is, with no subset parameter added to
+	// it. Dir (and so ProvisionLogPath) is unchanged, so this stays on the
+	// same log every other reader of this VM already tails.
 	run := *v
 	run.Recipes = runTargets
 
@@ -147,10 +133,10 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	}
 
 	// Provision runs runTargets in order and stops at the first failure, so
-	// reaching here means every one of them succeeded; each v2 recipe among
-	// them (the ones ManifestFor actually found a manifest for) gets its
-	// applied state recorded. A v1 recipe has no version to record and is
-	// left out of Applied exactly as it always has been.
+	// reaching here means every one succeeded. Each v2 recipe among them
+	// (one ManifestFor found a manifest for) gets its applied state
+	// recorded. A v1 recipe has no version to record and stays out of
+	// Applied, as it always has.
 	var changed bool
 	for _, name := range runTargets {
 		m, ok := manifests[name]
@@ -171,20 +157,19 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 
 // filterByRunMode narrows targets to the recipes that should actually run,
 // given each recipe's declared run mode (recipes.Manifest.Run) and what v
-// has already recorded in Applied:
+// has already recorded in Applied.
 //
-//   - "manual" never runs implicitly; it only runs when explicit[name] is
-//     true, i.e. the caller named it directly via ApplyOpts.Only.
-//   - "once" is skipped when v.Applied already has an entry for name AT THE
-//     SAME VERSION the manifest declares now; a version bump makes it run
-//     again, which is the whole point of recording Version alongside At.
-//   - "always" is never skipped.
+// "manual" never runs implicitly. It runs only when explicit[name] is true,
+// meaning the caller named it directly via ApplyOpts.Only. "once" is
+// skipped when v.Applied already has an entry for name at the same version
+// the manifest declares now; a version bump makes it run again, the reason
+// Version is recorded alongside At. "always" is never skipped.
 //
-// A target with no recipe.toml at all (ManifestFor's ok=false) is a v1
-// flat-file recipe: it has no run-mode concept, so it always stays in the
-// result, matching Apply's behaviour before v2 recipes existed. The returned
-// map holds the manifest for every v2 recipe kept, so the caller does not
-// have to re-resolve it after the run succeeds.
+// A target with no recipe.toml (ManifestFor's ok=false) is a v1 flat-file
+// recipe. It has no run-mode concept and always stays in the result,
+// matching Apply's behavior before v2 recipes existed. The returned map
+// holds the manifest for every v2 recipe kept, so the caller does not have
+// to re-resolve it after the run succeeds.
 func filterByRunMode(v *config.VM, targets []string, explicit map[string]bool) ([]string, map[string]recipes.Manifest, error) {
 	kept := make([]string, 0, len(targets))
 	manifests := make(map[string]recipes.Manifest, len(targets))
@@ -258,26 +243,24 @@ type RecipeIssue struct {
 
 // CheckRecipes validates names against osName/backendName the same way
 // Create's own checkRecipes does internally (core.go), but as a standalone
-// call a caller can make BEFORE building a Spec at all, and it explains each
+// call a caller can make before building a Spec, and it explains each
 // failure instead of only naming what else is available.
 //
-// Only entries that are NOT applicable come back: a name that resolves
-// fine has nothing to report, so a caller checking "will these work" reads
-// an empty result as a clean answer rather than having to filter out an "OK"
-// entry per name.
+// Only entries that are NOT applicable come back. A name that resolves fine
+// reports nothing, so a caller checking "will these work" reads an empty
+// result as a clean answer.
 //
 // The reasons below prefer a recipe's own declared front matter
 // (internal/recipes.ParseMetadata/UnsupportedReason) when it has any: "xfce
-// requires systemd, alpine uses openrc", the exact example in
-// docs/design/core-api.md §4, is real now. Where a recipe declares no
-// metadata (every *.cloud.yaml fragment today, by design; see
-// recipeIssueReason) the reason falls back to one derived structurally:
-// from the requested file's own name, from guest.Lookup(osName), and from
-// what else exists on disk (an OS-specific override suppressing a shared
-// fragment; see recipes.List's own doc comment on "overridden"). So
-// "xfce.cloud.yaml is not offered to alpine because alpine has its own
-// xfce.alpine.cloud.yaml" is still a real, true structural reason this can
-// give, for exactly the recipes that have no better one to give instead.
+// requires systemd, alpine uses openrc" is docs/design/core-api.md §4's
+// example. Where a recipe declares no metadata (every *.cloud.yaml fragment
+// today, by design; see recipeIssueReason) the reason falls back to a
+// structural one, derived from the requested file's name, from
+// guest.Lookup(osName), and from what else exists on disk (an OS-specific
+// override suppressing a shared fragment; see recipes.List's doc comment on
+// "overridden"). That still gives a true reason like "xfce.cloud.yaml is
+// not offered to alpine because alpine has its own xfce.alpine.cloud.yaml"
+// for recipes with no better reason to give.
 func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, error) {
 	available, err := recipes.List(osName, backendName)
 	if err != nil {
@@ -300,11 +283,10 @@ func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, er
 
 // recipeIssueReason explains why name is not offered to osName/backendName.
 // It prefers a capability-based reason drawn from the recipe's own declared
-// front matter (internal/recipes.ParseMetadata/UnsupportedReason), and falls
-// back to one derived structurally, from the filename, guest.Lookup, and
-// whether other files exist on disk, when the recipe declares no metadata;
-// see CheckRecipes' doc comment for why a structural fallback still exists
-// at all.
+// front matter (internal/recipes.ParseMetadata/UnsupportedReason). When the
+// recipe declares no metadata, it falls back to one derived structurally,
+// from the filename, guest.Lookup, and whether other files exist on disk;
+// see CheckRecipes' doc comment for why that fallback exists.
 func recipeIssueReason(name, osName, backendName string) string {
 	if _, err := os.Stat(recipes.Path(name)); err != nil {
 		return fmt.Sprintf("no such recipe %q", name)
@@ -313,12 +295,11 @@ func recipeIssueReason(name, osName, backendName string) string {
 	isCloudFragment := strings.HasSuffix(name, ".cloud.yaml")
 	isShellRecipe := strings.HasSuffix(name, ".sh") && !isCloudFragment
 
-	// The backend mismatches below (a shell recipe pushed to a cloudinit VM,
-	// or a cloud fragment offered to a backend with no cloud-init seed to
-	// merge it into) are checked before metadata and win outright: they are
-	// about HOW a recipe gets applied, which no front-matter tag declares,
-	// so there is nothing for UnsupportedReason to say that would improve on
-	// this.
+	// The backend mismatches below are checked before metadata and win
+	// outright: a shell recipe pushed to a cloudinit VM, or a cloud
+	// fragment offered to a backend with no cloud-init seed to merge it
+	// into. Both are about HOW a recipe gets applied, which no front-matter
+	// tag declares, so UnsupportedReason has nothing better to say.
 	switch {
 	case isCloudFragment && backendName != "cloudinit":
 		return fmt.Sprintf("%s is a cloud-init fragment; the %s backend applies recipes over ssh after boot, not from a cloud-init seed", name, backendName)
@@ -326,14 +307,14 @@ func recipeIssueReason(name, osName, backendName string) string {
 		return fmt.Sprintf("%s is a shell recipe pushed over ssh; the cloudinit backend applies its recipes from the seed at first boot instead", name)
 	}
 
-	// Backend is applicable; whether name is a match for osName is what a
-	// recipe's own declared front matter, when present, can now answer with
-	// a real reason ("requires systemd, alpine uses openrc") instead of one
-	// guessed from the filename, and that reason wins when both exist. A
-	// parse error or a recipe with no "# stoat:" block at all (every
-	// *.cloud.yaml fragment today; see docs/design/guest-subsystem.md §5's
-	// phase split) leaves m at its zero value, UnsupportedReason then
-	// returns "", and the structural switch below is what actually answers.
+	// Backend is applicable. Whether name matches osName is answered by the
+	// recipe's own declared front matter, when present, with a real reason
+	// ("requires systemd, alpine uses openrc") instead of one guessed from
+	// the filename; that reason wins when both exist. A parse error or a
+	// recipe with no "# stoat:" block (every *.cloud.yaml fragment today;
+	// see docs/design/guest-subsystem.md §5's phase split) leaves m at its
+	// zero value. UnsupportedReason then returns "", and the structural
+	// switch below answers instead.
 	if m, err := recipes.ReadMetadata(name); err == nil {
 		if reason := recipes.UnsupportedReason(osName, m); reason != "" {
 			return fmt.Sprintf("%s: %s", name, reason)

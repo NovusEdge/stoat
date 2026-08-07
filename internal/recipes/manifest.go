@@ -67,12 +67,12 @@ func ParseManifest(path string) (Manifest, error) {
 // identifier VM.Recipes/ApplyOpts.Only use) to its recipe.toml manifest, v2's
 // replacement for the old flat "<name>.<os>.sh" files (docs/recipe-spec-v2.md).
 //
-// ok is false with a nil error when name has no recipe.toml at all: that is
-// not a failure, it means name is a v1 flat-file recipe (or an unrelated,
-// nonexistent name CheckRecipes/List already reject elsewhere), and a caller
-// uses ok to fall back to the old "always run it, no version tracking"
-// behaviour rather than treating absence as broken. A recipe.toml that
-// exists but fails to parse is a real problem and comes back as err instead.
+// ok is false with a nil error when name has no recipe.toml at all. That is
+// not a failure: name is a v1 flat-file recipe, or an unrelated, nonexistent
+// name that CheckRecipes/List already reject elsewhere. A caller uses ok to
+// fall back to the old "always run it, no version tracking" behaviour,
+// instead of treating absence as broken. A recipe.toml that exists but
+// fails to parse is a real problem, and comes back as err instead.
 func ManifestFor(name string) (m Manifest, ok bool, err error) {
 	path := filepath.Join(dir(), name, "recipe.toml")
 	if _, statErr := os.Stat(path); statErr != nil {

@@ -224,10 +224,10 @@ func TestImageRowsFitTheValueColumn(t *testing.T) {
 	}
 }
 
-// A BYO image used to be offered no recipes at all, ever: iso.Infer names an
-// OS only for *alpine*.iso, so every qcow2/img arrives with osName "", and
-// both branches of recipes.List compare against a real OS name parsed off a
-// recipe filename. The fOS row is what lets the user say what the file is.
+// A BYO image used to offer no recipes at all. iso.Infer names an OS only
+// for *alpine*.iso, so every qcow2 or img file arrives with osName "".
+// Both branches of recipes.List compare against a real OS name parsed off
+// a recipe filename. The fOS row lets the user declare what the file is.
 func TestBYOOSOverrideDrivesResolvedOS(t *testing.T) {
 	f := formModel{images: []imageOption{{file: "mystery.qcow2", backend: "cloudinit", osName: ""}}}
 
@@ -306,10 +306,10 @@ func TestOSRowIsBYOOnly(t *testing.T) {
 	}
 }
 
-// The outcome the whole row exists for: declaring the OS turns an empty
-// recipe list into a real one. Goes through refreshRecipes and the installed
-// recipe directory rather than asserting on resolvedOS, so it proves what the
-// user actually gets.
+// This is the outcome the row exists for: declaring the OS turns an empty
+// recipe list into a real one. The test goes through refreshRecipes and
+// the installed recipe directory, instead of asserting on resolvedOS, to
+// prove what the user actually gets.
 func TestDeclaringTheOSMakesRecipesAppear(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := recipes.Install(); err != nil {
@@ -338,11 +338,11 @@ func TestDeclaringTheOSMakesRecipesAppear(t *testing.T) {
 	}
 }
 
-// The size column is right-aligned, and humanBytes keeps a decimal below 100
-// ("66.0 MiB"), so the widest value is "~66.0 MiB", nine cells, not the eight
-// you would guess from the largest image. Undersized, the status column shifts
-// on exactly the small-image rows, which is alpine-virt, the row the sizes
-// exist to make comparable.
+// The size column is right-aligned. humanBytes keeps a decimal below 100
+// ("66.0 MiB"), so the widest value is "~66.0 MiB", nine cells, not the
+// eight cells the largest image would suggest. Undersized, the status
+// column shifts on exactly the small-image rows, alpine-virt, the row the
+// sizes exist to make comparable.
 func TestSizeColumnFitsTheWidestLabel(t *testing.T) {
 	cases := []imageOption{
 		{bytes: 66 * 1024 * 1024},               // ~66.0 MiB, the widest
@@ -394,11 +394,11 @@ func TestSingleVariantGroupCarriesItsImage(t *testing.T) {
 	}
 }
 
-// The second column holds a catalog variant OR a BYO backend, and every value
-// must fit it. One that does not overflows by a cell and shifts the size
-// column on that row alone, which is what "13 (trixie)" did against a
-// 10-cell column, and which no width test catches, because the ROW still fits
-// the pane. Only the alignment breaks.
+// The second column holds a catalog variant or a BYO backend, and every
+// value must fit it. A value that does not overflows by a cell and shifts
+// the size column on that row alone. "13 (trixie)" did exactly this
+// against a 10-cell column. No width test catches it, because the row
+// still fits the pane. Only the alignment breaks.
 func TestImageMetaColumnFitsEveryValue(t *testing.T) {
 	for _, e := range iso.Catalog() {
 		if w := lipgloss.Width(e.Variant); w > imageMetaWidth {
@@ -430,11 +430,11 @@ func byoVariants(t *testing.T, mo *imageModal) {
 	}
 }
 
-// choose an image… must be reachable via the normal drill-in even though
-// testImages gives the byo group exactly one real file, and the single-variant
-// shortcut that resolves other one-image groups straight from the OS level
-// would otherwise make the entry unreachable whenever there's only one BYO
-// file (or none at all).
+// choose an image… must be reachable via the normal drill-in, even though
+// testImages gives the byo group exactly one real file. The single-variant
+// shortcut, which resolves other one-image groups straight from the OS
+// level, would otherwise make the entry unreachable whenever there is only
+// one BYO file, or none at all.
 func TestChooseImageLeafReachableWithASingleBYOFile(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
 	byoVariants(t, mo)
@@ -515,11 +515,11 @@ func TestFinderMatchesFuzzilyNotJustSubstrings(t *testing.T) {
 	}
 }
 
-// A typed ~ must expand before it filters. Scanned paths are absolute, so a
-// raw "~/Downloads" matches nothing in "/home/u/Downloads/alpine.iso"
-// character-for-character (fuzzy matching still requires every rune to
-// appear, in order), so the most natural way to type a home-relative
-// location made the screen look like it had found nothing at all.
+// A typed ~ must expand before it filters. Scanned paths are absolute, so
+// a raw "~/Downloads" matches nothing in "/home/u/Downloads/alpine.iso"
+// character-for-character. Fuzzy matching still requires every rune to
+// appear in order. Without expansion, the most natural way to type a
+// home-relative location made the screen look like it had found nothing.
 func TestByoFilterExpandsATildeQuery(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -605,10 +605,10 @@ func TestByoEscGoesBackToTheVariantList(t *testing.T) {
 	}
 }
 
-// Re-entering the finder must start clean: leaving it (esc) does not cancel
-// the running scan by itself, and if the old scan's messages keep landing (see
-// TestReEnteringFinderDoesNotDoubleResults), every result would be appended
-// twice, adjacent, because the old list's items survive across openByo.
+// Re-entering the finder must start clean. Leaving it (esc) does not
+// cancel the running scan by itself. If the old scan's messages keep
+// landing, every result would be appended twice, adjacent, because the
+// old list's items survive across openByo.
 func TestReEnteringByoDoesNotDoubleResults(t *testing.T) {
 	imgs := testImages()
 	mo := newImageModal(imgs, 0)
@@ -656,10 +656,10 @@ func TestByoChoosingAppendsTheImage(t *testing.T) {
 	}
 }
 
-// The scan pumps itself: every batch message carries the command that fetches
-// the next one. A gate that drops non-key messages does not merely delay
-// results, it ENDS the chain, so drive it through the real app.Update, not
-// the modal in isolation.
+// The scan pumps itself: every batch message carries the command that
+// fetches the next one. A gate that drops non-key messages does not delay
+// results, it ends the chain. The test drives this through the real
+// app.Update, not the modal in isolation.
 func TestScanResultsReachTheByoScreenThroughTheApp(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	m := model{screen: screenList, list: newVMList(), provisioning: map[string]provState{}}
@@ -736,12 +736,12 @@ func TestChoosingByoDrawsAFocusedInput(t *testing.T) {
 }
 
 // TestByoScreenFitsTheSmallestTerminal is the geometry check for the byo
-// screen, mirroring TestModalFitsTheSmallestTerminal: a modal's failure mode
-// is that it renders fine at the developer's window and corrupts at someone
-// else's, and app.go still draws panes at 60x20. Covers every state that
-// differs in height: scanning, results present, empty-after-scan, and the
-// inline-error state, which is the tallest: a rejected path can be long
-// enough (a t.TempDir() directory) to wrap the error line to two.
+// screen, mirroring TestModalFitsTheSmallestTerminal. A modal's failure
+// mode is rendering fine at the developer's window and corrupting at
+// someone else's, and app.go still draws panes at 60x20. It covers every
+// state that differs in height: scanning, results present, empty after
+// scan, and inline error, the tallest state. A rejected path can be long
+// enough, a t.TempDir() directory, to wrap the error line to two.
 func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
 	dir := t.TempDir()
 
@@ -765,9 +765,9 @@ func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
 		}},
 		{"inline error", func(mo *imageModal) {
 			mo.openByo()
-			// A directory, not a nonexistent path: byoOptionFromPath's
-			// rejection embeds the full path, and a temp dir's is long
-			// enough to actually wrap inside modalContentWidth, the worst
+			// A directory, not a nonexistent path. byoOptionFromPath's
+			// rejection embeds the full path, and a temp dir's path is
+			// long enough to wrap inside modalContentWidth, the worst
 			// case for height, unlike a short hand-typed bad path.
 			mo.byoInput.SetValue(dir)
 			mo.update(keyMsg("enter"))
@@ -800,9 +800,9 @@ func TestByoScreenFitsTheSmallestTerminal(t *testing.T) {
 	}
 }
 
-// The actual user-visible point of a growing modal: a wide terminal gives
-// the directory column enough room that a real path renders whole, with no
-// "…" cutting it off. At the modal's old fixed width this directory (62
+// This is the user-visible point of a growing modal: a wide terminal gives
+// the directory column enough room to render a real path whole, with no
+// "…" cutting it off. At the modal's old fixed width, this directory (62
 // cells) would have been cut to 15.
 func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
@@ -828,13 +828,13 @@ func TestByoScreenShowsFullPathsOnAWideTerminal(t *testing.T) {
 	}
 }
 
-// The user's actual requirement, verbatim: "the BYO filepicker doesn't show
-// full filenames which is a shame, we need full file names for it to be
-// useful." A realistic filename must render whole, with no ellipsis inside it,
-// at the smallest supported terminal, an intermediate one, and a large
-// one alike. Growing the modal, eliding the directory and dropping the size
-// column all exist only in service of this; if the name itself ever gets
-// cut, everything else was pointless.
+// The user's requirement, verbatim: "the BYO filepicker doesn't show full
+// filenames which is a shame, we need full file names for it to be
+// useful." A realistic filename must render whole, with no ellipsis inside
+// it, at the smallest supported terminal, an intermediate one, and a large
+// one. Growing the modal, eliding the directory, and dropping the size
+// column all exist to serve this. If the name itself gets cut, everything
+// else was pointless.
 func TestByoScreenNeverTruncatesTheFileName(t *testing.T) {
 	const name = "alpine-standard-3.24.1-x86_64.iso" // 33 cells, a real catalog filename
 	path := "/home/novusedge/downloads/isos/nested/rather/deep/path/" + name
@@ -884,12 +884,12 @@ func grepLine(out, needle string) string {
 	return "(not found)"
 }
 
-// The only situation the name is allowed to lose characters: it alone
-// already reaches or exceeds the row's full width, even at the floor. It is
-// middle-elided rather than cut from the tail, keeping both ends: the
-// base name up front and the version/extension at the back, which is what
-// TestByoScreenNeverTruncatesTheFileName's 33-cell name never has to
-// exercise since it always fits.
+// The name loses characters only here: it alone already reaches or
+// exceeds the row's full width, even at the floor. It is middle-elided,
+// not cut from the tail, keeping both ends: the base name up front and
+// the version or extension at the back.
+// TestByoScreenNeverTruncatesTheFileName's 33-cell name never exercises
+// this path, since it always fits.
 func TestFoundRowMiddleElidesAPathologicallyLongName(t *testing.T) {
 	name := "an-extremely-long-hypothetical-disk-image-file-name-that-exceeds-the-floor-width-3.24.1-x86_64.iso"
 	if lipgloss.Width(name) <= modalContentWidth {
@@ -916,9 +916,9 @@ func TestFoundRowMiddleElidesAPathologicallyLongName(t *testing.T) {
 	}
 }
 
-// The box must also grow sanely at an ordinary "bigger than the floor but
-// nowhere near huge" terminal, centred, and never overflowing it, the
-// same invariant TestByoScreenFitsTheSmallestTerminal and
+// The box must also grow sanely at an ordinary terminal, bigger than the
+// floor but nowhere near huge, centred and never overflowing it. This is
+// the same invariant TestByoScreenFitsTheSmallestTerminal and
 // TestModalFitsTheSmallestTerminal check at the other end of the range.
 func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
 	mo := newImageModal(testImages(), 0)
@@ -927,10 +927,9 @@ func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
 	mo.setFound([]foundImage{{path: "/home/u/vms/alpine.iso", size: 1}})
 
 	m := model{width: 100, height: 30, modal: mo}
-	// Resize explicitly, the same way renderModal does every real frame:
-	// this test wants to observe growth, unlike the smallest-terminal tests,
-	// which deliberately never resize so they keep exercising the box's
-	// original fixed size.
+	// Resize explicitly, the same way renderModal does every real frame.
+	// This test wants to observe growth. The smallest-terminal tests never
+	// resize, so they keep exercising the box's original fixed size.
 	m.modal.resize(m.width, m.height)
 	box := m.modal.view()
 	if w := lipgloss.Width(box); w > m.width {
@@ -1180,10 +1179,10 @@ func TestEscWhileByoReturnsToVariantList(t *testing.T) {
 	}
 }
 
-// The non-key message gate in app.go must cover the byo screen, or neither
-// the scan's batches nor the field's cursor blink ever reach it, see
-// 81cbd92 for the shape of bug this guards against (a swallowed non-key
-// message that ended a chain rather than stalling it).
+// The non-key message gate in app.go must cover the byo screen. Otherwise
+// neither the scan's batches nor the field's cursor blink reach it. See
+// 81cbd92 for the bug this guards against: a swallowed non-key message
+// that ended a chain instead of stalling it.
 func TestByoReceivesNonKeyMessages(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	m := model{screen: screenForm, form: newForm()}

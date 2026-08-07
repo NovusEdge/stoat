@@ -28,13 +28,9 @@ const GraphicalEnv = "STOAT_GRAPHICAL"
 // display rule it feeds: DisplayKind and Args are pure and unit tested on that
 // basis, so the answer is resolved once, up here, and passed down.
 //
-// The X11 and Wayland variables are not the whole test, and believing they were
-// produced a wrong measurement. GTK falls back to $XDG_RUNTIME_DIR/wayland-0
-// when WAYLAND_DISPLAY is unset, so a "headless" shell with both variables
-// cleared still opens a window. Verified in both directions against qemu on a
-// Wayland host: with XDG_RUNTIME_DIR left intact and the other two unset,
-// `-display gtk,gl=on` starts; with it pointed at a directory holding no
-// wayland-0, the same command exits 1.
+// The X11 and Wayland variables are not the whole test. GTK falls back to
+// $XDG_RUNTIME_DIR/wayland-0 when WAYLAND_DISPLAY is unset, so a "headless"
+// shell with both variables cleared still opens a window.
 //
 // wayland-0 exactly, not a wayland-* glob: a compositor on wayland-1 is only
 // reachable through WAYLAND_DISPLAY, which is already checked above it, and

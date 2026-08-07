@@ -14,22 +14,17 @@ import (
 )
 
 // snapshotsModal is the "S" key's front end for core.Snapshot, core.Restore,
-// core.DeleteSnapshot and core.Snapshots (internal/core/snapshot.go). No
-// logic lives here that core does not already have: every action below is
-// one core call, off the UI goroutine, followed by a re-read of
-// core.Snapshots so the list reflects whatever actually happened.
+// core.DeleteSnapshot and core.Snapshots (internal/core/snapshot.go). Each
+// action is one core call. A successful action re-reads core.Snapshots so
+// the list matches reality.
 //
-// It follows logPager's shape, not imagemodal.go's: rendered inline by
-// viewDetail rather than composited over the screen, because app.go's
-// renderModal is wired specifically to *imageModal and this file has no
-// reason to touch app.go to get a second overlay kind. See logPager's own
-// comment for the precedent.
+// viewDetail renders this modal inline. app.go's renderModal only handles
+// *imageModal, so this file avoids app.go entirely.
 //
-// Rows never carry or key off a snapshot's ID: a running VM's `info
-// snapshots` prints "--" for it, and core.Snapshot has no ID field at all
-// (see parseSnapshots' comment in internal/core/snapshot.go). Every action
-// here is keyed by Tag instead, the same identity core.Restore,
-// core.DeleteSnapshot and core.TakeSnapshot themselves take.
+// Rows key off Tag, not ID. A running VM's `info snapshots` prints "--" for
+// ID, and core.Snapshot has no ID field (see parseSnapshots in
+// internal/core/snapshot.go). core.Restore, core.DeleteSnapshot and
+// core.TakeSnapshot all take Tag too.
 type snapshotsModal struct {
 	vmName string
 	list   list.Model
@@ -39,15 +34,16 @@ type snapshotsModal struct {
 	// second "is this open" flag alongside it.
 	taking *textinput.Model
 
-	// pendingDelete and pendingRestore are the snapshot awaiting a y/N
-	// answer, the same "y confirms, anything else cancels" rule list.go's
-	// pendingDelete and app.go's pendingProvision already use for exactly
-	// this kind of prompt. Restore gets the same gate as delete: it discards
-	// everything since the snapshot was taken with no way back, which is as
-	// destructive as delete even though it doesn't remove the snapshot
-	// itself. Two fields rather than one, mirroring app.go's own
-	// pendingDelete/pendingProvision split, since only one is ever armed at
-	// a time and a shared field would need a second "which one" tag anyway.
+	// pendingDelete and pendingRestore hold the snapshot awaiting a y/N
+	// answer. "y" confirms, any other key cancels, the same rule as
+	// list.go's pendingDelete and app.go's pendingProvision.
+	//
+	// Restore discards everything since the snapshot was taken, with no way
+	// back. That makes it as destructive as delete, so it gets the same gate.
+	//
+	// Two fields, not one shared field with a "which action" tag. Only one is
+	// ever armed at a time. Mirrors app.go's own pendingDelete/pendingProvision
+	// split.
 	pendingDelete  *core.Snapshot
 	pendingRestore *core.Snapshot
 
@@ -55,10 +51,12 @@ type snapshotsModal struct {
 }
 
 // snapshotsOpenedMsg carries the result of the "S" key's initial
-// core.Snapshots(name) read, done off the UI goroutine like every other
-// blocking core call in this package (openLogPager, typeConsolePassword).
-// err is core's own refusal, e.g. ErrNoDisk for a live-mode VM, surfaced
-// rather than pre-guessed which VMs snapshot at all.
+// core.Snapshots(name) read. The read runs off the UI goroutine, like every
+// other blocking core call in this package (openLogPager,
+// typeConsolePassword).
+//
+// err is core's own refusal, for example ErrNoDisk for a live-mode VM. This
+// package does not pre-guess which VMs can snapshot.
 type snapshotsOpenedMsg struct {
 	name  string
 	snaps []core.Snapshot
@@ -72,10 +70,10 @@ func openSnapshots(name string) tea.Cmd {
 	}
 }
 
-// snapshotsRefreshedMsg carries the result of a take/restore/delete: the
-// mutation, then a fresh core.Snapshots read on success, both in one Cmd. err
-// is whichever of the two failed; on a mutation failure the list is left
-// exactly as it was, since the re-read never ran.
+// snapshotsRefreshedMsg carries the result of a take/restore/delete Cmd: the
+// mutation runs, then on success a fresh core.Snapshots read runs too. err is
+// whichever step failed. On a mutation failure the re-read never runs, so the
+// list stays as it was.
 type snapshotsRefreshedMsg struct {
 	snaps []core.Snapshot
 	err   error
@@ -102,10 +100,10 @@ func newSnapshotsModal(name string, snaps []core.Snapshot) *snapshotsModal {
 }
 
 // newSnapshotList builds the modal's list component. Filtering is off, the
-// same call newImageList makes: this list is a handful of a VM's own
-// snapshots, not a catalog worth searching. SetStatusBarItemName is what
-// gives an empty VM a real "No snapshots." line (list.Model's own empty
-// state) instead of a hand-written one.
+// same as newImageList: a VM's own snapshots are a handful of rows, not a
+// catalog worth searching. SetStatusBarItemName gives an empty VM
+// list.Model's own "No snapshots." empty state, instead of a hand-written
+// one.
 func newSnapshotList() list.Model {
 	l := list.New(nil, snapshotDelegate{}, modalContentWidth, modalRows)
 	l.SetShowTitle(false)
@@ -137,16 +135,15 @@ func (sm *snapshotsModal) selected() (core.Snapshot, bool) {
 	return it.snap, true
 }
 
-// update handles one message while the modal is open, returning a Cmd and
-// whether the modal should close. Mirrors imageModal.update's (cmd, closed)
-// shape, which is what lets detail.go's own sub-mode intercept (see
-// updateDetail) treat this modal exactly like the log pager already sitting
-// beside it.
+// update handles one message while the modal is open. It returns a Cmd and
+// whether the modal should close. This mirrors imageModal.update's (cmd,
+// closed) shape, so detail.go's sub-mode intercept (see updateDetail) treats
+// this modal the same as the log pager beside it.
 func (sm *snapshotsModal) update(msg tea.Msg) (tea.Cmd, bool) {
-	// A mutation's result reaches here regardless of sub-mode: taking,
-	// pendingDelete and pendingRestore all clear themselves before issuing
-	// the Cmd that produces this, so by the time it arrives the modal is
-	// always back at the plain list.
+	// A mutation's result reaches here regardless of sub-mode. taking,
+	// pendingDelete and pendingRestore all clear before issuing the Cmd
+	// that produces this message. By the time it arrives, the modal is
+	// back at the plain list.
 	if r, ok := msg.(snapshotsRefreshedMsg); ok {
 		if r.err != nil {
 			sm.err = r.err.Error()
@@ -212,9 +209,9 @@ func (sm *snapshotsModal) update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 // updateTaking owns the keyboard while the tag prompt is open. enter takes
-// the snapshot with whatever was typed, letting core reject an empty or
-// whitespace tag (see core.snapshotTarget) rather than duplicating that
-// validation here; esc cancels back to the list without taking anything.
+// the snapshot with whatever was typed. core rejects an empty or whitespace
+// tag (see core.snapshotTarget); this function does not duplicate that
+// check. esc cancels back to the list without taking anything.
 func (sm *snapshotsModal) updateTaking(msg tea.Msg) (tea.Cmd, bool) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
@@ -234,16 +231,17 @@ func (sm *snapshotsModal) updateTaking(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 // updatePendingConfirm owns the keyboard while either destructive action
-// awaits confirmation: "y" confirms, any other key cancels, the same rule
-// list.go's own delete prompt uses. Shared by pendingDelete and
-// pendingRestore (delete and restore had identical confirmation logic, tag
-// aside, as two separate functions) so a future change to the confirm/cancel
-// rule can't be made to one leg and forgotten on the other.
+// awaits confirmation. "y" confirms, any other key cancels, the same rule
+// list.go's own delete prompt uses.
 //
-// pending is a pointer to the modal's own pendingDelete/pendingRestore
-// field, not a copy, so clearing *pending here is what actually disarms the
-// prompt on the modal. act is the core call to make with the confirmed
-// snapshot's tag.
+// pendingDelete and pendingRestore shared this logic before, as two
+// functions differing only in the tag. This one function keeps a future
+// change to the confirm/cancel rule from landing on one leg and not the
+// other.
+//
+// pending points at the modal's own pendingDelete or pendingRestore field,
+// not a copy. Clearing *pending here disarms the prompt on the modal. act is
+// the core call to make with the confirmed snapshot's tag.
 func (sm *snapshotsModal) updatePendingConfirm(msg tea.Msg, pending **core.Snapshot, act func(tag string) error) (tea.Cmd, bool) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
@@ -257,10 +255,10 @@ func (sm *snapshotsModal) updatePendingConfirm(msg tea.Msg, pending **core.Snaps
 	return snapshotAction(sm.vmName, func() error { return act(tag) }), false
 }
 
-// resize fits the modal to the terminal, the same fixed-chrome-minus-margin
-// shape logPager.resize uses (and for the same reason: this file cannot add
-// a message route in app.go, so it is called every render from viewDetail
-// rather than on tea.WindowSizeMsg).
+// resize fits the modal to the terminal: fixed chrome minus margin, the
+// same shape logPager.resize uses, for the same reason. This file cannot add
+// a message route in app.go, so viewDetail calls resize on every render
+// instead of on tea.WindowSizeMsg.
 func (sm *snapshotsModal) resize(termWidth, termHeight int) {
 	w := termWidth - paneFrame() - snapshotsMargin
 	if w < 1 {
@@ -281,11 +279,10 @@ func (sm *snapshotsModal) resize(termWidth, termHeight int) {
 	}
 }
 
-// snapshotsChrome is the vertical space the pane spends on everything that
-// isn't list rows: border, padding, title, the hint line, and the one status
-// line (the tag prompt, a delete/restore confirmation, or an error) above
-// it. Mirrors modalHeightChrome/logPagerChrome's role for the other two
-// panels.
+// snapshotsChrome is the vertical space the pane spends on everything but
+// list rows: border, padding, title, the hint line, and one status line
+// (tag prompt, delete/restore confirmation, or error) above it. Mirrors
+// modalHeightChrome and logPagerChrome for the other two panels.
 const snapshotsChrome = 8
 
 // snapshotsMargin keeps the pane off the terminal's edges, the same call
@@ -351,10 +348,10 @@ func (d snapshotDelegate) Render(w io.Writer, m list.Model, index int, item list
 	if index == m.Index() {
 		label = selStyle.Render(label)
 	}
-	// VMState distinguishes a snapshot taken while the guest was running
-	// (disk + RAM, resumes execution) from one taken while stopped (disk
-	// only, boots normally); see core.Snapshot's own doc. Both are useful
-	// and not interchangeable, so this is shown rather than left implicit.
+	// VMState distinguishes a snapshot taken while running (disk + RAM,
+	// resumes execution) from one taken while stopped (disk only, boots
+	// normally); see core.Snapshot's own doc. Both are useful, so the state
+	// is shown rather than left implicit.
 	state := dimStyle.Render("disk only")
 	if it.snap.VMState {
 		state = upStyle.Render("disk+ram")

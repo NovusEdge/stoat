@@ -43,10 +43,9 @@ func TestUpdateImmutableFields(t *testing.T) {
 	}
 }
 
-// Setting an immutable field to the value it already has is not a change
-// request and must not be refused: an MCP tool or CLI flag that round
-// trips a full VM through Patch shouldn't be punished for fields it never
-// meant to touch.
+// Setting an immutable field to its current value is not a change
+// request. An MCP tool or CLI flag that round-trips a full VM through
+// Patch must not be refused for fields it never meant to touch.
 func TestUpdateImmutableFieldsAllowedWhenUnchanged(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl", RAM: 1024, CPUs: 1, SSHPort: 2200}
@@ -245,11 +244,11 @@ func TestUpdateSSHPortRejectsCollisionWithBrokenVMsSSHPort(t *testing.T) {
 	}
 }
 
-// The synthetic-forward reuse trick in validateSSHPort must not leak
-// forward.go's "requested twice" wording, written for Forward's own
-// duplicate-in-request case, into an SSHPort error: a caller changing the
-// ssh port supplied exactly one value and has no idea a PortForward was
-// synthesized under the hood, so that message would be actively confusing.
+// validateSSHPort's synthetic-forward trick must not leak forward.go's
+// "requested twice" wording into an SSHPort error. That wording is
+// written for Forward's own duplicate-in-request case. A caller changing
+// the ssh port supplied one value and has no idea a PortForward was
+// synthesized underneath.
 func TestUpdateSSHPortCollisionWithOwnForwardHasClearMessage(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
@@ -449,10 +448,10 @@ func TestUpdateDoesNotChangeUnrelatedFields(t *testing.T) {
 	}
 }
 
-// Installed is a plain mutable field, not checked by checkImmutable: this is
-// the direct replacement for the TUI's "i" key, which used to flip it via a
-// second, unlocked Save() straight onto vm.toml instead of going through
-// Update (and its config.Lock()) like every other mutation.
+// Installed is a plain mutable field; checkImmutable does not check it.
+// This replaces the TUI's "i" key, which used to flip it via a second,
+// unlocked Save() straight onto vm.toml instead of going through Update
+// and its config.Lock().
 func TestUpdateInstalledFlips(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Disk: "1G", Installed: false}
@@ -492,9 +491,9 @@ func TestUpdateInstalledNilLeavesUnchanged(t *testing.T) {
 	}
 }
 
-// Sanity check that Patch's int-pointer fields really do distinguish
-// "not set" from "set to zero": CPUs: ptr(0) must be REJECTED (cpus must
-// be at least 1), not silently ignored as if nil.
+// Patch's int-pointer fields distinguish "not set" from "set to zero".
+// CPUs: ptr(0) must be REJECTED (cpus must be at least 1), not silently
+// ignored as if nil.
 func TestUpdatePatchZeroValueIsAReadValue(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}

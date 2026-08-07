@@ -41,20 +41,14 @@ const (
 // fmt.Errorf("%w: %s", wire.ErrConfirmationRequired, name).
 var ErrConfirmationRequired = errors.New("confirmation required; pass -y under --json")
 
-// codeTable is the ordered errors.Is chain (§2): first match wins, in this
-// one table, checked by MapError, the one function. Every core sentinel
-// below was verified present in internal/core as of this table's writing
-// (core.go, vm.go, update.go, wait.go, apply.go, access.go, snapshot.go);
-// none in the design doc's own table were missing, and core has no
-// additional sentinel the doc failed to name (14 typed errors in core,
-// 14 rows below plus this package's own ErrConfirmationRequired).
+// codeTable is the ordered errors.Is chain (§2): first match wins, checked
+// by MapError. It holds one row per typed error in internal/core, plus this
+// package's own ErrConfirmationRequired.
 //
 // Order does not currently break a tie: no core error wraps two of these
-// sentinels at once (update.go's disk-grow-while-running path wraps
-// ErrAlreadyRunning directly, never ErrDiskShrink, so there is nothing for
-// table order to arbitrate between for that case). The design doc calls
-// this out as the one place order would matter if that ever changed, so the
-// core-error rows are kept in the doc's own order rather than reshuffled.
+// sentinels at once. update.go's disk-grow-while-running path wraps
+// ErrAlreadyRunning directly, never ErrDiskShrink, so there is nothing to
+// arbitrate there. Rows keep the design doc's order in case that changes.
 var codeTable = []struct {
 	code string
 	err  error

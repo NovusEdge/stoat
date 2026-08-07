@@ -29,10 +29,10 @@ const (
 type model struct {
 	screen screen
 	// vms is the last core.List answer: every VM in the data root, good and
-	// broken, in one sorted slice. core.List merges them (a broken VM comes
-	// back as StateBroken) precisely so a caller cannot hold the good ones and
-	// forget the broken ones, which is how broken VMs have been dropped from
-	// this listing before.
+	// broken, in one sorted slice. core.List merges them so a caller cannot
+	// hold the good ones and forget the broken ones. A broken VM comes back
+	// as StateBroken. Dropping broken VMs from this listing has happened
+	// before.
 	vms    []core.VM
 	list   list.Model // owns the VM list's cursor, scrolling and "/" filter
 	status string     // a prompt awaiting an answer, shown under the list
@@ -57,19 +57,19 @@ type model struct {
 	pendingDelete    *core.VM
 	pendingProvision *core.VM // VM that just became reachable, awaiting a y/N to provision
 
-	// provisioning tracks VMs with a provision run in flight, keyed by the
-	// directory name core.VM.Name reports (as cloudInit below is), so a
-	// second "p" press on the same VM can't start a second ssh session
-	// writing into the same last-provision.log. The value carries what the
-	// spinner line shows: when it started and where it has got to.
+	// provisioning tracks VMs with a provision run in flight. It is keyed by
+	// the directory name core.VM.Name reports, like cloudInit below. This
+	// stops a second "p" press on the same VM from starting a second ssh
+	// session that writes into the same last-provision.log. The value
+	// carries what the spinner line shows: when the run started and how far
+	// it has got.
 	provisioning map[string]provState
 	spin         spinner.Model
 
 	// cloudInit holds each cloud VM's last polled cloud-init status. A cloud
-	// VM does most of its setup minutes into the boot, so without this
-	// "installing", "finished" and "failed" are indistinguishable from the
-	// outside: a VM rejects a correct password and then silently starts
-	// accepting it.
+	// VM does most of its setup minutes into the boot. Without this,
+	// "installing", "finished", and "failed" look the same from outside: a
+	// VM rejects a correct password, then silently starts accepting it.
 	cloudInit map[string]string
 	ciProg    progress.Model // the stage bar beside a cloud VM's setup line
 
@@ -104,17 +104,17 @@ func loadVMs() tea.Msg {
 	return vmsLoadedMsg{vms: vms}
 }
 
-// cfgVM re-materialises the few config.VM fields that internal/sshx and
-// internal/backend still read, for the three call sites that reach into
-// them: sshx.User and sshx.Args (the ssh identity), and backend.For (which
-// backend runs recipes). Those packages are not on core yet; moving them is
-// a separate task, and this is the one place the TUI crosses back rather
-// than the model keeping a second copy of every VM beside its core.VM.
+// cfgVM re-materializes the config.VM fields that internal/sshx and
+// internal/backend still read: sshx.User, sshx.Args (the ssh identity), and
+// backend.For (which backend runs recipes). Those packages do not use core
+// yet; moving them is a separate task. This is the one place the TUI crosses
+// back to config.VM, instead of the model keeping a second copy of every VM
+// beside its core.VM.
 //
-// It carries ONLY what those three read. It is not a config.VM: Applied,
-// Forwards and everything the edit form writes are absent, and anything that
-// needs the real on-disk record loads it by directory name instead (see the
-// detail screen).
+// It carries only what those three read. It is not a config.VM: Applied,
+// Forwards, and everything the edit form writes are absent. Anything that
+// needs the real on-disk record loads it by directory name instead; see the
+// detail screen.
 func cfgVM(v core.VM) *config.VM {
 	return &config.VM{
 		OS:      v.OS,
@@ -150,12 +150,12 @@ func Run() error {
 	return err
 }
 
-// preflightReport renders every failing host check as one block, one line
-// per check plus its fix command when there is one. qemu.Preflight (what
-// this replaces) only ever showed a single string for whichever binary or
-// device it happened to hit first; core.Doctor runs every probe and returns
-// a Fix for each failure, so showing all of them, with the command that
-// clears each one, is the entire reason to make this switch.
+// preflightReport renders every failing host check as one block: one line
+// per check, plus its fix command when there is one. qemu.Preflight, what
+// this replaces, showed only a single string for whichever binary or device
+// it hit first. core.Doctor runs every probe and returns a Fix for each
+// failure. Showing all of them, each with its fix command, is why this
+// switch was made.
 func preflightReport(checks []core.HostCheck) string {
 	var lines []string
 	for _, c := range checks {
@@ -176,13 +176,13 @@ func (m model) Init() tea.Cmd { return loadVMs }
 // Update feeds the open byo screen without consuming the message, then runs
 // the normal update.
 //
-// The byo screen runs on NON-key messages that have to reach the modal
-// somehow: a filesystem walk batch for the scan, and a cursor blink for the
-// focused textinput. But a diverted message must not be swallowed: a tick
-// chain only continues because its handler returns the next tick cmd, so
-// consuming one dlTickMsg here does not pause the download bar, it ends the
-// chain for good. (dlTickMsg's own case carries the same warning about
-// routing by screen, which broke this once already.) Copy, then carry on.
+// The byo screen needs non-key messages to reach the modal: a filesystem walk
+// batch for the scan, a cursor blink for the focused textinput. A diverted
+// message must not be swallowed. A tick chain continues only because its
+// handler returns the next tick cmd. Consuming one dlTickMsg here would not
+// pause the download bar, it would end the chain for good. dlTickMsg's own
+// case carries the same warning; routing by screen has broken this once
+// already. Copy the message, then carry on.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var browseCmd tea.Cmd
 	if m.modal != nil && m.modal.byo {
@@ -207,32 +207,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// ctrl+c must quit from every screen and every sub-mode (delete
-	// confirmation, full help, the form, ...). It's handled centrally, once,
-	// here, rather than duplicated per-screen, because that duplication is
-	// exactly how it has regressed before: a new screen or sub-mode gets
-	// added, and whoever writes its key switch doesn't think to repeat the
-	// ctrl+c case.
+	// ctrl+c must quit from every screen and every sub-mode: delete
+	// confirmation, full help, the form, and so on. This handles it
+	// centrally, once, instead of duplicating it per screen. That
+	// duplication has caused regressions before: a new screen or sub-mode
+	// gets added, and its key switch omits the ctrl+c case.
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
 
-	// The image picker takes the keyboard while it is open, before any screen
-	// gets a look. Only key messages are diverted: the download tick, the
-	// cloud-init poll and the spinner all keep running underneath, so opening
-	// the picker mid-download doesn't freeze its progress bar. An open byo
-	// screen still needs its non-key results (a scan batch, a cursor blink);
-	// Update handles that above by copying rather than consuming.
+	// The image picker takes the keyboard while it is open, before any
+	// screen sees the message. Only key messages are diverted. The download
+	// tick, the cloud-init poll, and the spinner keep running underneath, so
+	// opening the picker mid-download does not freeze its progress bar. An
+	// open byo screen still needs its non-key results, a scan batch or a
+	// cursor blink; Update handles that above by copying instead of
+	// consuming.
 	if m.modal != nil {
 		if _, isKey := msg.(tea.KeyPressMsg); isKey {
 			cmd, chosen, closed := m.modal.update(msg)
 			if chosen >= 0 {
-				// A browsed file isn't in m.form.images: it can live
-				// anywhere on disk, that's the point, so the modal appends
-				// it to its own copy and returns an index past the form's
-				// original bounds. Re-adopting mo.images first is a no-op
-				// whenever nothing was browsed, since it's otherwise the same
-				// slice the modal was opened with.
+				// A browsed file is not in m.form.images. It can live anywhere
+				// on disk; that is the point. The modal appends it to its own
+				// copy and returns an index past the form's original bounds.
+				// Re-adopting mo.images is a no-op when nothing was browsed,
+				// since it is otherwise the same slice the modal opened with.
 				m.form.images = m.modal.images
 				m.form.selectImage(chosen)
 			}
@@ -257,12 +256,12 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// items; dropping it would leave a filtered list showing the old
 		// matches after a refresh.
 		cmd := m.list.SetItems(vmItems(msg.vms))
-		// SetItems does not clamp the cursor, and the SetHeight below remaps
-		// an out-of-range index to the TOP rather than the bottom. Without
-		// this, deleting the last VM in the list moves the cursor to the
-		// first one, and the next "d" arms a delete on the wrong VM.
-		// Guarded on n > 0 because SetItems nils the filtered set for a
-		// moment, and clamping then would reset a filtered cursor.
+		// SetItems does not clamp the cursor. The SetHeight below remaps
+		// an out-of-range index to the top, not the bottom. Without this
+		// fix, deleting the last VM moves the cursor to the first one,
+		// and the next "d" arms a delete on the wrong VM. Guarded on
+		// n > 0: SetItems nils the filtered set for a moment, and
+		// clamping then would reset a filtered cursor.
 		if n := len(m.list.VisibleItems()); n > 0 && m.list.Index() >= n {
 			m.list.Select(n - 1)
 		}
@@ -282,9 +281,9 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case spinner.TickMsg:
-		// The chain is anchored to there being work in flight: when the last
-		// provision finishes it simply stops re-arming. Each tick also
-		// re-reads the tail of every running VM's log, which is where the
+		// The chain is anchored to work being in flight. When the last
+		// provision finishes, it stops re-arming. Each tick also re-reads
+		// the tail of every running VM's log. That log tail is where the
 		// step and last-output text come from.
 		if len(m.provisioning) == 0 {
 			return m, nil
@@ -355,11 +354,11 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.showToast(msg.name+" provisioned", false)
 		return m, cmd
 	case vmSavedMsg:
-		// Adopt the saved VM only now: saveEdit returns a statusMsg instead
-		// on failure, so the panes never show state that wasn't persisted.
-		// detail.vm is a core.VM now (Task 2), not the *config.VM msg.vm
-		// carries, so re-derive it by directory rather than assign the
-		// pointer directly.
+		// Adopt the saved VM only now. saveEdit returns a statusMsg on
+		// failure instead, so the panes never show state that was not
+		// persisted. detail.vm is a core.VM, not the *config.VM msg.vm
+		// carries. It is re-derived by directory rather than assigned
+		// directly.
 		cv, err := core.Get(filepath.Base(msg.vm.Dir))
 		if err != nil {
 			cmd := m.showToast(err.Error(), true)
@@ -378,12 +377,12 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.showHelp = false
 		return m, nil
 	case dlTickMsg, imageFetchedMsg, imageFetchErrMsg:
-		// A download outlives the form: "esc" returns to the list while the
-		// fetch goroutine keeps running, and there is no way to cancel it.
+		// A download outlives the form. "esc" returns to the list while the
+		// fetch goroutine keeps running; there is no way to cancel it.
 		// Routing its messages by screen would strand them: the tick chain
-		// would die, and a checksum failure would be swallowed with the user
-		// never told. They go to the form's handler wherever we are, exactly
-		// as provisionDoneMsg is handled centrally above.
+		// would die, and a checksum failure would go unreported. They go
+		// to the form's handler regardless of the current screen, like
+		// provisionDoneMsg above.
 		return m.updateForm(msg)
 	}
 
@@ -430,12 +429,12 @@ func (m model) View() tea.View {
 		body = m.viewList()
 	}
 
-	// JoinVertical(Center, ...) centers each block as a whole rather than
-	// padding every line to a shared width first. That's the fix for the
-	// justified-text look a hand-rolled version of this used to produce.
-	// The list screen's banner sits above the body as a heading; every
-	// other screen's body already carries its own pane title, so it has no
-	// separate banner to join.
+	// JoinVertical(Center, ...) centers each block as a whole instead of
+	// padding every line to a shared width first. A hand-rolled version of
+	// this used to produce a justified-text look; this is the fix. The list
+	// screen's banner sits above the body as a heading. Every other screen's
+	// body already carries its own pane title, so it needs no separate
+	// banner.
 	s := body
 	if m.screen == screenList {
 		s = lipgloss.JoinVertical(lipgloss.Center, banner(), "", body)

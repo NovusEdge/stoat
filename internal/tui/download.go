@@ -10,21 +10,23 @@ import (
 )
 
 // dlProgress carries byte counts from the download goroutine (iso.Download's
-// callback runs there) to the UI goroutine. It is a shared cell polled on a
-// ticker rather than a channel because a tea.Cmd may only ever deliver one
-// message. The detail screen already tails last-provision.log the same way,
-// so this is the idiom already in the codebase rather than a new one.
+// callback runs there) to the UI goroutine.
 //
-// ponytail: one global cell, not a per-download map. Exactly one download can
-// be in flight: the form refuses to start a second while fetching, and
-// list.go refuses to hand out a fresh form that would clear that flag, so
-// there is never more than one writer. If concurrent downloads ever land, key
-// this by entry ID.
+// A tea.Cmd delivers only one message, so a channel cannot drive a repeating
+// poll. The shared cell uses a ticker instead. The detail screen already
+// tails last-provision.log the same way.
 //
-// done and total are written in that order, so a poll landing between them
-// sees the new done against a total of 0 for a single frame at the very
-// start; total is constant thereafter, so ratio() never sees done > total
-// from tearing. start is written before the goroutine launches.
+// ponytail: one global cell, not a per-download map.
+//
+// Only one download runs at a time. The form refuses to start a second
+// while fetching. list.go refuses to hand out a fresh form that would clear
+// that flag. If concurrent downloads ever land, key this by entry ID.
+//
+// done and total are written in that order. A poll landing between the two
+// writes sees the new done against a total of 0, for one frame, only at the
+// very start. total stays constant after that, so ratio() never sees
+// done > total from a torn read.
+// start is written before the goroutine launches.
 var dlProgress struct {
 	done  atomic.Int64
 	total atomic.Int64 // 0 when the server sent no Content-Length
@@ -90,10 +92,11 @@ func (s dlStats) ratio() float64 {
 	return float64(s.done) / float64(s.total)
 }
 
-// speed is bytes/sec averaged over the whole download, or 0 when there is not
-// yet enough of a sample to divide by. A whole-run average rather than a
-// sliding window: it is steadier to read, and the only consumer is a
-// human deciding whether to keep waiting.
+// speed is bytes/sec averaged over the whole download, or 0 before there is
+// enough of a sample to divide by.
+//
+// A whole-run average, not a sliding window, reads steadier. The only
+// consumer is a human deciding whether to keep waiting.
 func (s dlStats) speed() float64 {
 	if s.elapsed < 500*time.Millisecond || s.done <= 0 {
 		return 0
@@ -108,9 +111,9 @@ func (s dlStats) eta() time.Duration {
 	if s.total <= 0 || sp <= 0 || s.done >= s.total {
 		return -1
 	}
-	// A slow first second yields an absurd estimate ("582h32m left"), and at
-	// the extreme the float exceeds int64 nanoseconds, where the conversion
-	// is implementation-defined. Report no estimate rather than a wrong one.
+	// A slow first second yields an absurd estimate ("582h32m left"). At the
+	// extreme the float exceeds int64 nanoseconds, where the conversion is
+	// implementation-defined. Report no estimate instead of a wrong one.
 	secs := float64(s.total-s.done) / sp
 	if secs > 99*3600 {
 		return -1
@@ -170,21 +173,23 @@ func humanDuration(d time.Duration) string {
 	}
 }
 
-// dlBarWidth is the bar's cell count. Fixed rather than derived from the
-// terminal width: it sits inside the form pane next to fixed-width label
-// columns, so a bar that grew with the window would be the only element that
-// did and would look untethered.
+// dlBarWidth is the bar's cell count, fixed rather than derived from the
+// terminal width.
+//
+// The bar sits inside the form pane next to fixed-width label columns. A
+// bar that grew with the window would be the only element that did, and
+// would look untethered.
 const dlBarWidth = 32
 
-// dlBar is the component both progress bars are drawn with. ViewAs is fed a
-// ratio computed from real byte counts, so none of its spring animation runs;
-// it is used for its gradient and width handling, not its motion.
+// dlBar is the component both progress bars are drawn with. ViewAs takes a
+// ratio computed from real byte counts, so no spring animation runs. It
+// gives the gradient and width handling, not the motion.
 // fullBlockBar is the progress bar every bar in stoat is built from.
 //
-// bubbles v2 changed the default fill character from a full block to a HALF
-// block (DefaultFullCharHalfBlock, '▌'), which renders as a dotted-looking
-// row of gaps rather than a solid bar. v2 still exports the full block for
-// exactly this reason, so the bars keep the look they had.
+// bubbles v2 changed the default fill character from a full block to a half
+// block (DefaultFullCharHalfBlock, '▌'). A half block renders as a dotted
+// row of gaps, not a solid bar. v2 still exports the full block, so the bars
+// keep their old look.
 func fullBlockBar() progress.Model {
 	p := progress.New(progress.WithDefaultBlend(), progress.WithoutPercentage())
 	p.Full = progress.DefaultFullCharFullBlock
@@ -207,11 +212,12 @@ func bar(ratio float64, width int) string {
 }
 
 // dlView renders the download block as form rows: a "download <os>" label
-// row, then the bar, then the stats. Label-less rows land in the same value
-// column as the fields above, so the block reads as part of the form rather
-// than something bolted underneath it. When the server gave no
-// Content-Length there is no bar and no percentage: a fabricated one would
-// be worse than none.
+// row, then the bar, then the stats.
+//
+// Label-less rows share the value column with the fields above. The block
+// reads as part of the form, not something added below it.
+// When the server gave no Content-Length, there is no bar and no
+// percentage. A fabricated one is worse than none.
 func dlView(osName string, s dlStats) string {
 	// The block renders inside the form pane, so it wraps to the form's width.
 	f := fields{width: formContentWidth}

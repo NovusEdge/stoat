@@ -107,8 +107,8 @@ func TestSaveLoadRoundtripApplied(t *testing.T) {
 
 // TestLoadPreexistingVMTomlHasNoNewFields simulates a vm.toml written before
 // this phase: no os/backend/base/sshuser keys at all. It must still load
-// cleanly, leaving Backend empty (dispatch elsewhere keys off Mode, not
-// this field) and SSHUser empty (defaults to root elsewhere).
+// cleanly. Backend stays empty (dispatch elsewhere keys off Mode, not this
+// field). SSHUser stays empty (defaults to root elsewhere).
 func TestLoadPreexistingVMTomlHasNoNewFields(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := EnsureRoot(); err != nil {
@@ -137,10 +137,10 @@ sshport = 2201
 	}
 }
 
-// TestLoadPreexistingVMTomlAllowExecDefaultsTrue is the regression the
-// AllowExec field itself warns about: Go's zero value for a bool is false,
-// so a naive field addition would silently disable exec on every VM whose
-// vm.toml was written before "allow_exec" existed. Load must correct that.
+// TestLoadPreexistingVMTomlAllowExecDefaultsTrue pins the regression the
+// AllowExec field itself warns about. Go's zero value for a bool is false.
+// A naive field addition would silently disable exec on every VM whose
+// vm.toml predates "allow_exec". Load must correct that.
 func TestLoadPreexistingVMTomlAllowExecDefaultsTrue(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if err := EnsureRoot(); err != nil {
@@ -357,12 +357,11 @@ func TestFreePortFreshInstallNoVMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// FreePort probes the host by binding, so a VM (or anything else) already
-	// listening on 2200 legitimately pushes the answer up. Asserting exactly
-	// 2200 made this test fail whenever the developer had a VM running,
-	// which says nothing about FreePort and everything about the machine.
-	// What actually matters is that a fresh install gets a usable port in
-	// range, and that the port it names is genuinely bindable.
+	// FreePort probes the host by binding, so anything already listening
+	// on 2200 legitimately pushes the answer up. Asserting exactly 2200
+	// would fail whenever the developer already had a VM running, which
+	// says nothing about FreePort. What matters: a fresh install gets a
+	// usable port in range, and that port is genuinely bindable.
 	if p < 2200 || p >= 2300 {
 		t.Errorf("free port %d is outside the 2200-2299 range", p)
 	}

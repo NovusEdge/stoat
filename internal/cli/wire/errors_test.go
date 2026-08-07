@@ -65,10 +65,9 @@ func TestMapErrorNilIsNil(t *testing.T) {
 }
 
 // TestUpdateDiskGrowWhileRunningReportsAlreadyRunning pins the one ordering
-// case the design doc calls out (§2): Update's disk-grow refusal on a
-// running VM wraps ErrAlreadyRunning directly (never ErrDiskShrink), so the
-// wire code must be already_running, the truthful "stop it first", not a
-// disk-specific code.
+// case §2 calls out: Update's disk-grow refusal on a running VM wraps
+// ErrAlreadyRunning directly, never ErrDiskShrink. The wire code must be
+// already_running: "stop it first", not a disk-specific code.
 func TestUpdateDiskGrowWhileRunningReportsAlreadyRunning(t *testing.T) {
 	err := fmt.Errorf("%w: disk: stop work before resizing its disk", core.ErrAlreadyRunning)
 	got := MapError(err)

@@ -139,11 +139,10 @@ func TestArgsAlwaysLogTheConsole(t *testing.T) {
 	}
 }
 
-// -serial file:<path> TRUNCATES on every QEMU start (verified against real
-// QEMU: a pre-filled console.log became 0 bytes on next launch). The
-// realistic failure sequence is exactly the one this log exists for: a
-// headless VM fails to come up, the user restarts it, and the only evidence
-// is destroyed before anyone reads it. -chardev file,...,append=on is the
+// -serial file:<path> truncates the log on every QEMU start. The realistic
+// failure sequence is exactly the one this log exists for: a headless VM
+// fails to come up, the user restarts it, and the only evidence is
+// destroyed before anyone reads it. -chardev file,...,append=on is the
 // fix; plain "-serial file:" must never come back.
 func TestConsoleLogAppendsRatherThanTruncates(t *testing.T) {
 	v := &config.VM{Name: "vm", Dir: t.TempDir(), Mode: "cloud", RAM: 1024, CPUs: 2, SSHPort: 2222}
@@ -210,10 +209,9 @@ func TestOnlyManualInstallsGetAWindow(t *testing.T) {
 }
 
 // TestArgsPortForwards pins the exact hostfwd syntax additional forwards
-// must produce: additional comma-separated hostfwd= clauses on the SAME
-// -netdev as the SSH forward, never a second -netdev/-device pair. Verified
-// live against real qemu-system-x86_64 (see the comment in Args) that two
-// hostfwd= clauses on one -netdev each become an independent host listener.
+// must produce: additional comma-separated hostfwd= clauses on the same
+// -netdev as the SSH forward, never a second -netdev/-device pair (see the
+// comment in Args).
 func TestArgsPortForwards(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{

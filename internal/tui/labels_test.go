@@ -7,10 +7,10 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 )
 
-// TestRecipeLabel covers the display-only rename. VM.Recipes still stores the
-// filename, and recipes.Read opens it, so this must never be fed back into a
-// config; it exists because "xfce.alpine.sh" told the user about a per-OS
-// suffix the picker had already filtered on.
+// TestRecipeLabel covers the display-only rename. VM.Recipes still stores
+// the filename, and recipes.Read opens it, so a label must never be fed
+// back into a config. The label exists because "xfce.alpine.sh" showed the
+// user a per-OS suffix the picker had already filtered on.
 func TestRecipeLabel(t *testing.T) {
 	cases := []struct{ file, want string }{
 		{"xfce.alpine.sh", "xfce"},
@@ -50,9 +50,10 @@ func TestModeHintsFitThePane(t *testing.T) {
 	}
 }
 
-// TestDiskModeHintExplainsTheInstallStep is the reason this exists at all: a
-// user created an 8G disk VM, pressed p, and waited 90 seconds for "ssh not
-// reachable" because nothing said a disk VM needs its OS installed by hand.
+// TestDiskModeHintExplainsTheInstallStep pins the regression this hint
+// fixes. A user created an 8G disk VM, pressed p, and waited 90 seconds for
+// "ssh not reachable", because nothing said a disk VM needs its OS
+// installed by hand first.
 func TestDiskModeHintExplainsTheInstallStep(t *testing.T) {
 	h := modeHint("disk")
 	if !strings.Contains(h, "install") {
@@ -70,9 +71,10 @@ func TestDiskModeHintExplainsTheInstallStep(t *testing.T) {
 	}
 }
 
-// TestWrapItemsKeepsRowsInsideThePane covers the recipes row growing with the
-// catalog: at four entries the inline list ran past the pane and wrapped
-// mid-item, leaving a bare "xfce" on its own line under the label column.
+// TestWrapItemsKeepsRowsInsideThePane covers the recipes row growing with
+// the catalog. At four entries the inline list ran past the pane and
+// wrapped mid-item, leaving a bare "xfce" on its own line under the label
+// column.
 func TestWrapItemsKeepsRowsInsideThePane(t *testing.T) {
 	const width = formContentWidth - 11
 	indent := strings.Repeat(" ", 11)

@@ -9,12 +9,10 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// binChecks hardcodes "qemu-system-x86_64" as a literal rather than
-// importing internal/qemu.Binary: that package drags in cloudinit/config/
-// recipes, which checks.go has no business depending on for a string. The
-// test binary can afford the import that production code can't, so this is
-// the guard against the two names drifting apart if stoat ever renames the
-// binary it shells out to.
+// binChecks hardcodes "qemu-system-x86_64" as a literal instead of importing
+// internal/qemu.Binary: that package pulls in cloudinit/config/recipes,
+// which checks.go must not depend on for one string. The test binary can
+// afford the import. This test guards the two names against drifting apart.
 func TestFirstBinCheckMatchesQemuBinary(t *testing.T) {
 	if got := binChecks[0].name; got != qemu.Binary {
 		t.Errorf("binChecks[0].name = %q, want internal/qemu.Binary %q", got, qemu.Binary)
@@ -87,11 +85,10 @@ func TestRunChecksFindsBinary(t *testing.T) {
 	t.Fatal("no qemu-img check in the list")
 }
 
-// An unknown distro still reports the problem, and still names the packages
-// to install: it just invents no command to run. Iterating binChecks
-// directly (rather than trusting whatever RunChecks(DistroUnknown) returns)
-// is what makes this test able to fail: the previous version ranged over a
-// nil c.Fix and asserted nothing.
+// An unknown distro still reports the problem and still names the packages
+// to install. It invents no command to run. The test iterates binChecks
+// directly, not whatever RunChecks(DistroUnknown) returns, so a nil Fix
+// fails the test instead of being silently skipped.
 func TestRunChecksUnknownDistroHasNoCommand(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
@@ -160,9 +157,9 @@ func TestKVMCheckAt(t *testing.T) {
 	}
 }
 
-// TestKVMCheckAtOtherError drives kvmCheckAt's default branch: an error that
-// is neither fs.ErrNotExist nor fs.ErrPermission. A path whose parent is a
-// regular file rather than a directory reliably yields ENOTDIR.
+// TestKVMCheckAtOtherError drives kvmCheckAt's default branch: an error
+// that is neither fs.ErrNotExist nor fs.ErrPermission. A path whose parent
+// is a regular file, not a directory, reliably yields ENOTDIR.
 func TestKVMCheckAtOtherError(t *testing.T) {
 	dir := t.TempDir()
 

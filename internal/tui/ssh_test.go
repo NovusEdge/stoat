@@ -7,10 +7,10 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 )
 
-// TestSSHIntoArgsUsesConfiguredSSHUser: the live bug. A cloud VM's seeded
-// account is v.SSHUser (e.g. "stoat") and root is locked (see
-// internal/cloudinit/cloudinit.go's user block), so the interactive ssh
-// path must target it, not a hardcoded root@127.0.0.1.
+// TestSSHIntoArgsUsesConfiguredSSHUser covers a real bug: a cloud VM's
+// seeded account is v.SSHUser (e.g. "stoat"), and root is locked (see
+// internal/cloudinit/cloudinit.go's user block). The interactive ssh path
+// must target the seeded user, not a hardcoded root@127.0.0.1.
 func TestSSHIntoArgsUsesConfiguredSSHUser(t *testing.T) {
 	v := core.VM{Name: "x", SSHPort: 2201, SSHUser: "stoat"}
 	got := strings.Join(sshIntoArgs(v), " ")

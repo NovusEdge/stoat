@@ -12,23 +12,23 @@ import (
 )
 
 // resetSeq is the SGR reset sequence lipgloss emits at the end of a styled
-// substring. v1 wrote it as "\x1b[0m"; v2's ANSI writer omits the redundant
-// "0" parameter and writes "\x1b[m" instead. Both mean the same thing to a
-// terminal, but a literal string match has to pick one.
+// substring. v1 wrote it as "\x1b[0m". v2's ANSI writer omits the redundant
+// "0" parameter and writes "\x1b[m" instead. A terminal treats both the
+// same, but a literal string match must pick one.
 const resetSeq = "\x1b[m"
 
 // TestSelectedRowIsFullyHighlighted covers a highlight that was silently
-// dead: the row was built starting with the styled status dot, and a styled
+// dead. The row was built starting with the styled status dot. A styled
 // substring ends in \x1b[0m, which resets the ENCLOSING style too. Wrapping
 // that row in selStyle therefore left everything after the dot unstyled, so
 // the selected row was marked by the ❯ alone. The row's own colours make it
 // invisible in a plain string comparison, hence the escape-sequence check.
 func TestSelectedRowIsFullyHighlighted(t *testing.T) {
-	// v1 forced true-color output here because a Renderer could otherwise
-	// downsample styles for a "dumb" terminal (relevant in CI, where stdout
-	// isn't a tty). v2 removed the Renderer entirely: Style is a plain
-	// value type that always renders full ANSI escapes, so there is nothing
-	// left to force.
+	// v1 forced true-color output here, since a Renderer could otherwise
+	// downsample styles for a "dumb" terminal, relevant in CI where stdout
+	// is not a tty. v2 removed the Renderer entirely: Style is a plain
+	// value type that always renders full ANSI escapes, so there is
+	// nothing left to force.
 	vms := []core.VM{
 		{Name: "alpha", Mode: "live", RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()}},
 		{Name: "beta", Mode: "disk", RAM: 2048, CPUs: 2, SSHPort: 2201, Paths: core.Paths{Dir: t.TempDir()}},
@@ -68,17 +68,17 @@ func TestSelectedRowIsFullyHighlighted(t *testing.T) {
 }
 
 // TestDeleteTargetsDirectoryNotName proves the fix for the "d" handler
-// deleting the wrong VM: everything resolves by DIRECTORY, but a vm.toml's
-// "name" field can diverge from its directory (reachable through the "E" edit
-// path). Two VM directories are built here, "work" and "work2", where
-// work/vm.toml claims name="work2", exactly the reproduction from the review.
-// Deleting the row the cursor was actually on (work) must remove the work
-// directory and leave work2 untouched, regardless of what either vm.toml's
-// name field says.
+// deleting the wrong VM. Everything resolves by DIRECTORY, but a vm.toml's
+// "name" field can diverge from its directory, reachable through the "E"
+// edit path. Two VM directories are built here, "work" and "work2", where
+// work/vm.toml claims name="work2": the reproduction from the review.
+// Deleting the row the cursor sits on (work) must remove the work directory
+// and leave work2 untouched, regardless of what either vm.toml's name field
+// says.
 //
-// The rows come from core.List rather than being built by hand, because that
-// is now what the model holds and it is where the identity is decided: a
-// core.VM whose Name reported the vm.toml field instead of the directory
+// The rows come from core.List rather than being built by hand, since that
+// is what the model holds, and core.List is where the identity is decided.
+// A core.VM whose Name reported the vm.toml field instead of the directory
 // would delete work2 here.
 func TestDeleteTargetsDirectoryNotName(t *testing.T) {
 	root := t.TempDir()
@@ -124,14 +124,15 @@ func TestDeleteTargetsDirectoryNotName(t *testing.T) {
 	}
 }
 
-// TestDeleteBrokenVMRefusesWhileRunning pins the fix for the live D5 bug: the
-// broken-row delete used to reimplement Delete's data-root containment check
-// by hand and call os.RemoveAll directly, never checking whether a qemu
-// process was still running against the directory. "d" then "y" on a broken
-// row could delete the directory, pidfile, monitor socket and disk out from
-// under a live qemu. It now goes through core.Destroy, which checks first,
-// via the same deleteVM a good row uses: a broken VM is a core.VM with
-// StateBroken, not a separate kind of thing with a separate delete path.
+// TestDeleteBrokenVMRefusesWhileRunning pins the fix for the live D5 bug.
+// The broken-row delete used to reimplement Delete's data-root containment
+// check by hand and call os.RemoveAll directly, never checking whether a
+// qemu process was still running against the directory. "d" then "y" on a
+// broken row could delete the directory, pidfile, monitor socket, and disk
+// out from under a live qemu. It now goes through core.Destroy, which
+// checks first, via the same deleteVM a good row uses. A broken VM is a
+// core.VM with StateBroken, not a separate kind of thing with a separate
+// delete path.
 func TestDeleteBrokenVMRefusesWhileRunning(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)

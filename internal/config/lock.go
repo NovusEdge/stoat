@@ -15,39 +15,40 @@ const lockName = ".lock"
 // Lock takes an exclusive advisory lock on the data root and returns the
 // function that releases it. It BLOCKS until the lock is available.
 //
-// This exists because allocating a resource and committing it are two steps
-// with a gap in between, and everything stoat allocates is claimed by writing
-// it into a vm.toml LATER: FreePort reads every VM's port, picks one that is
-// free, and returns it; the caller writes it to disk some time after that.
-// Two callers interleaved in that gap both see the same free port and both
-// take it, producing two VMs that fight over one host socket, which surfaces
-// much later as a bare bind failure from qemu naming neither VM. The same
-// shape applies to the name-already-exists check in Create and Clone.
+// Allocating a resource and committing it are two separate steps, with a
+// gap in between. Everything stoat allocates gets claimed later, by writing
+// it into a vm.toml. FreePort reads every VM's port, picks a free one, and
+// returns it; the caller writes it to disk sometime after that. Two callers
+// interleaved in that gap can both see the same free port and both take it.
+// The result is two VMs fighting over one host socket, which surfaces much
+// later as a bare bind failure naming neither VM. The name-already-exists
+// check in Create and Clone has the same shape.
 //
-// IT IS A FILE LOCK, NOT A MUTEX, and that is the whole point: stoat is a CLI.
-// The realistic collision is two `stoat create` invocations, or an MCP server
-// and a human's terminal, which are separate PROCESSES: an in-process mutex
-// would serialise goroutines that were never the problem while doing nothing
-// at all about the case that is. flock is also released automatically by the
-// kernel when the holder exits, so a process killed mid-create cannot leave
-// the data root permanently locked, which a lock file containing a pid can.
+// IT IS A FILE LOCK, NOT A MUTEX, and that is the point: stoat is a CLI.
+// The realistic collision is two `stoat create` invocations, or an MCP
+// server racing a human's terminal: separate PROCESSES. An in-process
+// mutex would serialise goroutines that were never the problem, and do
+// nothing about the collision that is real. flock also releases
+// automatically when the holder process exits, so a process killed
+// mid-create cannot leave the data root locked forever, the way a lock
+// file holding a pid can.
 //
-// Advisory, so it binds only code that calls Lock. Nothing stops a user
-// hand-editing vm.toml; that is out of scope and always was.
+// The lock is advisory: it binds only code that calls Lock. Nothing stops
+// a user hand-editing vm.toml directly; that is out of scope.
 //
 // # THESE LOCKS DO NOT NEST
 //
-// flock associates a lock with an OPEN FILE DESCRIPTION, not with a process,
-// so taking the same lock twice from one process (via two separate opens)
+// flock associates a lock with an OPEN FILE DESCRIPTION, not a process.
+// Taking the same lock twice from one process, through two separate opens,
 // BLOCKS FOREVER against itself. It is not a reentrant mutex.
 //
-// This is not hypothetical: Clone holds Lock and then calls keys.Ensure, and
-// when keys.generate also took Lock the whole test suite deadlocked on any
-// data root without a key yet. That is why keys has its OWN lock file
-// (LockKeys) rather than sharing this one. Before calling Lock, check that
-// nothing downstream of you takes it; if two things genuinely need
-// serialising against each other, they must share ONE lock taken ONCE, not
-// take it at two levels.
+// This bit Clone: it holds Lock, then calls keys.Ensure. When
+// keys.generate also took Lock, any data root without a key yet
+// deadlocked. That is why keys has its own lock file (LockKeys) instead of
+// sharing this one. Before calling Lock, check that nothing downstream of
+// you takes it too. If two operations genuinely need to serialise against
+// each other, they must share ONE lock taken ONCE, never take it at two
+// levels.
 func Lock() (func(), error) { return lockFile(lockName) }
 
 // keysLockName is a SEPARATE lock file, so key generation can serialise

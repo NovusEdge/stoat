@@ -25,10 +25,11 @@ func provFixture(t *testing.T, log string) core.VM {
 	}
 }
 
-// TestReadProvStep covers what the spinner line actually reports, across the
-// stages a real run passes through. The step comes from the log the run
-// already writes, so there is no progress channel to keep in sync, and no
-// percentage, because nothing knows how many packages a recipe will install.
+// TestReadProvStep covers what the spinner line reports, across the stages a
+// real run passes through. The step comes from the log the run already
+// writes, so there is no progress channel to keep in sync. There is no
+// percentage either, because nothing knows how many packages a recipe will
+// install.
 func TestReadProvStep(t *testing.T) {
 	cases := []struct {
 		name, log, wantStep, wantLast string
@@ -73,9 +74,9 @@ func TestReadProvStep(t *testing.T) {
 	}
 }
 
-// TestReadProvStepReadsOnlyTheTail proves the log isn't re-read whole several
-// times a second: a desktop install writes hundreds of KB, and only the end of
-// it means "current".
+// TestReadProvStepReadsOnlyTheTail proves the log is not re-read whole
+// several times a second. A desktop install writes hundreds of KB, and only
+// the end of it means "current".
 func TestReadProvStepReadsOnlyTheTail(t *testing.T) {
 	big := strings.Repeat("(1/263) Installing something-or-other\n", 8000) // ~300KB
 	v := provFixture(t, "=== recipe xfce.alpine.sh ===\n"+big+"OK: done installing\n")
@@ -113,11 +114,11 @@ func TestProvElapsed(t *testing.T) {
 }
 
 // TestProvisionRefusedUntilInstalled is the regression test for a reported
-// failure: pressing "p" on a disk VM that had never had its OS installed sat
-// for the full 90s ssh timeout and then said "ssh not reachable", which says
-// nothing about the real cause. apkovl (which installs the key and enables
-// sshd) is built for LIVE mode only, so a disk VM has no ssh at all until the
-// guest OS is installed.
+// failure: pressing "p" on a disk VM whose OS had never been installed sat
+// for the full 90s ssh timeout, then said "ssh not reachable", which says
+// nothing about the real cause. apkovl installs the key and enables sshd,
+// and it is built for LIVE mode only. A disk VM has no ssh until the guest
+// OS is installed.
 func TestProvisionRefusedUntilInstalled(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
 	v := core.VM{

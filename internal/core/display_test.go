@@ -100,8 +100,8 @@ func TestDisplayForABrokenVMAnswersNothing(t *testing.T) {
 }
 
 // DisplayKind is what the JSON DTO calls, once per VM in a list. It must not
-// go near PATH or the environment: with PATH emptied and every display
-// variable cleared it must still answer from its arguments alone, so that the
+// go near PATH or the environment. With PATH emptied and every display
+// variable cleared, it must still answer from its arguments alone, so the
 // wire value cannot depend on the machine the test runs on.
 func TestDisplayKindIsPure(t *testing.T) {
 	t.Setenv("PATH", "")

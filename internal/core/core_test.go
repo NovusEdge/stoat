@@ -78,10 +78,10 @@ func TestPlanDiskModeGetsADefaultSize(t *testing.T) {
 	}
 }
 
-// A cloud image is dispatched by the backend its ENTRY declares, not by its
-// OS: alpine-cloud is OS alpine but backend cloudinit. Recording apkovl here
-// would hand it an apkovl drive it never boots from and no cloud-init seed at
-// all, and it would connect as root, which cloud images lock.
+// A cloud image is dispatched by the backend its entry declares, not by its
+// OS. alpine-cloud is OS alpine but backend cloudinit. Recording apkovl here
+// would give it an apkovl drive it never boots from, no cloud-init seed, and
+// a root login that cloud images lock.
 func TestPlanAlpineCloudIsCloudinitNotApkovl(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "nocloud_alpine-3.24.1-x86_64-bios-tiny-r0.qcow2")
@@ -104,9 +104,10 @@ func TestPlanAlpineCloudIsCloudinitNotApkovl(t *testing.T) {
 	}
 }
 
-// filepath.Join does not special-case an absolute second element, so joining
+// filepath.Join does not special-case an absolute second element. Joining
 // "isos/" onto a browsed path yields ".../isos/home/u/x.iso", a path that
-// does not exist. An image outside isos/ has to be recorded absolute.
+// does not exist. An image outside isos/ must be recorded as an absolute
+// path.
 func TestPlanBYOOutsideIsosRecordsAnAbsolutePath(t *testing.T) {
 	root(t)
 	outside := filepath.Join(t.TempDir(), "custom-linux.iso")
@@ -228,9 +229,10 @@ func TestModeFor(t *testing.T) {
 	}
 }
 
-// A failed qemu-img must leave no trace: v.Save() runs before it, so without
-// the cleanup a bad create leaves a phantom VM in the list with no disk.qcow2,
-// which can never boot. 9999999T parses as a size and is one qemu-img refuses.
+// A failed qemu-img must leave no trace. v.Save() runs before it, so
+// without cleanup a bad create leaves a phantom VM in the list with no
+// disk.qcow2, one that can never boot. 9999999T parses as a size but is one
+// qemu-img refuses.
 func TestCreateFailedDiskCreationLeavesNoTrace(t *testing.T) {
 	if _, err := exec.LookPath("qemu-img"); err != nil {
 		t.Skip("qemu-img not installed")
@@ -270,9 +272,9 @@ func TestCreateWritesVMToml(t *testing.T) {
 }
 
 // TestCreateAllowExecDefaultsTrue pins that a Spec built by a caller that
-// never mentions AllowExec (the TUI's form today) still creates a VM an
-// agent can run commands in, not one silently locked down by Go's bool zero
-// value. See Spec.AllowExec's doc comment for the pointer-vs-bool reasoning.
+// never mentions AllowExec, such as the TUI's form today, still creates a VM
+// an agent can run commands in. It must not be silently locked down by Go's
+// bool zero value. See Spec.AllowExec for the pointer-vs-bool reasoning.
 func TestCreateAllowExecDefaultsTrue(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
@@ -318,14 +320,14 @@ func TestCreateAllowExecFalseIsHonoured(t *testing.T) {
 }
 
 // TestConcurrentCreatesGetDistinctPorts is the regression test for the §11
-// concurrency gap: FreePort reads every VM's port, picks a free one and
-// returns it, but the caller only COMMITS that choice when it writes vm.toml
-// some time later. Two callers interleaved in that gap both saw the same free
-// port and both took it, producing two VMs that fight over one host socket,
-// which surfaces much later as a bind failure from qemu naming neither VM.
+// concurrency gap. FreePort reads every VM's port and picks a free one, but
+// the caller only commits that choice when it writes vm.toml later. Two
+// callers interleaved in that gap could both pick the same port, producing
+// two VMs that fight over one host socket. The failure then surfaces much
+// later, as a bind failure from qemu naming neither VM.
 //
-// The CLI could not hit this (one VM per invocation), but an MCP server
-// handling two tool calls, or simply two `stoat create` processes, can.
+// The CLI could not hit this: it creates one VM per invocation. An MCP
+// server handling two tool calls, or two `stoat create` processes, can.
 func TestConcurrentCreatesGetDistinctPorts(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
@@ -381,16 +383,16 @@ func TestConcurrentCreatesGetDistinctPorts(t *testing.T) {
 	}
 }
 
-// TestCloudVMGetsADiskSize pins that a cloud VM created through core carries a
-// disk size, matching what the TUI form has always produced.
+// TestCloudVMGetsADiskSize pins that a cloud VM created through core carries
+// a disk size, matching what the TUI form has always produced.
 //
-// A cloud VM's qcow2 is a CoW overlay and inherits its BASE image's virtual
-// size: Ubuntu 24.04's is 3.5G with a 2.4G root. backend/cloudinit.go only
-// resizes when Disk is set, so an empty size means the overlay is never grown,
-// installing a desktop fills it, apt exits 100, and cloud-init reports a bare
-// "error" that reads as a broken recipe. That was diagnosed and fixed once
-// before; defaulting only disk mode reintroduced it on the CLI path while the
-// TUI (whose form pre-fills 8G for every mode) stayed correct.
+// A cloud VM's qcow2 is a CoW overlay and inherits its base image's virtual
+// size. Ubuntu 24.04's is 3.5G with a 2.4G root. backend/cloudinit.go
+// resizes the overlay only when Disk is set. With no size, installing a
+// desktop fills the overlay, apt exits 100, and cloud-init reports a bare
+// "error" that reads as a broken recipe. Defaulting only disk mode
+// reintroduced this bug on the CLI path; the TUI's form, which pre-fills 8G
+// for every mode, stayed correct.
 func TestCloudVMGetsADiskSize(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "nocloud_alpine-3.24.1-x86_64-bios-tiny-r0.qcow2")
@@ -419,10 +421,11 @@ func TestCloudVMGetsADiskSize(t *testing.T) {
 // TestCreateRejectsAnUnavailableRecipe pins that a recipe this VM cannot run
 // is refused at CREATE time.
 //
-// recipes.List returns v2 recipe names ("xfce"), and nothing checked a
-// Spec's names against that list, so `--recipes nonexistent-recipe` would be
-// accepted, written to vm.toml, and fail only on `stoat up`, a create that
-// succeeded and produced a VM that could not start.
+// recipes.List returns v2 recipe names ("xfce"). Before this check, nothing
+// verified a Spec's names against that list, so `--recipes
+// nonexistent-recipe` was accepted, written to vm.toml, and failed only on
+// `stoat up`, a create that succeeded but produced a VM that could not
+// start.
 func TestCreateRejectsAnUnavailableRecipe(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "nocloud_alpine-3.24.1-x86_64-bios-tiny-r0.qcow2")
@@ -436,9 +439,9 @@ func TestCreateRejectsAnUnavailableRecipe(t *testing.T) {
 	if !errors.Is(err, ErrRecipeNotApplicable) {
 		t.Fatalf("err = %v, want ErrRecipeNotApplicable for an unknown name", err)
 	}
-	// The message must name what IS available: the failure is nearly always a
-	// close-but-wrong name, and a caller who cannot list a directory (an
-	// agent) otherwise has nothing to correct against.
+	// The message must name what is available. The failure is nearly always
+	// a close-but-wrong name, and a caller who cannot list a directory, an
+	// agent, has nothing else to correct against.
 	if !strings.Contains(err.Error(), "xfce") {
 		t.Errorf("error does not say what is available: %v", err)
 	}

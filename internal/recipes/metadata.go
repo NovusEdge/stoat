@@ -37,14 +37,14 @@ var metadataKeys = map[string]bool{
 // ParseMetadata reads the front-matter block from a recipe body: "# stoat:
 // key value" comment lines starting right after an optional shebang and
 // ending at the first line that is neither blank nor a comment. A
-// "# stoat:" tag past that point is not front matter: "front-matter means
-// front" is positional, not "anywhere in the file", so it is left as an
-// ordinary comment rather than honoured or reported.
+// "# stoat:" tag past that point is not front matter. Front matter means
+// front: it is positional, not "anywhere in the file". A late tag is left
+// as an ordinary comment, not honoured and not reported.
 //
 // Every other problem in the block is reported, not swallowed: an unknown
 // key, a key declared twice, a tag with no key at all, and a key with no
-// value are all parse errors, collected and returned together rather than
-// stopping at the first one.
+// value. These are all parse errors, collected and returned together rather
+// than stopping at the first one.
 func ParseMetadata(body string) (Metadata, error) {
 	var m Metadata
 	var errs []string

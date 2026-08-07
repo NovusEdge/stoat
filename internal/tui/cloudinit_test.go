@@ -98,11 +98,10 @@ func TestDecodeCloudInitStatus(t *testing.T) {
 	}
 }
 
-// TestOutputIgnoresStderrNoise exercises the actual mechanism checkCloudInit
-// relies on: Cmd.Output(), not Cmd.CombinedOutput(), so a login banner or
-// stray warning a real ssh session writes to stderr never reaches the
-// decoder. A ssh MOTD ahead of the JSON in a combined stream would break
-// json.Unmarshal; this proves the two streams stay separate.
+// TestOutputIgnoresStderrNoise exercises the mechanism checkCloudInit relies
+// on: Cmd.Output(), not Cmd.CombinedOutput(). A login banner or stray
+// warning an ssh session writes to stderr never reaches the decoder. An ssh
+// MOTD ahead of the JSON in a combined stream would break json.Unmarshal.
 func TestOutputIgnoresStderrNoise(t *testing.T) {
 	script := `echo "Welcome to Alpine Linux, this line is not JSON" >&2
 echo '{"status": "done", "extended_status": "done", "errors": []}'

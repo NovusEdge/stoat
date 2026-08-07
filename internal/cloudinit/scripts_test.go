@@ -70,10 +70,10 @@ func TestWrapScriptsSingleScript(t *testing.T) {
 	}
 }
 
-// TestWrapScriptsPreservesOrder pins that execution order is preserved: the
-// spec is explicit that provision-stage scripts run in selection order, so a
-// caller that hands WrapScripts a dependency-ordered list must get that same
-// order back in both write_files and runcmd.
+// TestWrapScriptsPreservesOrder pins that execution order survives. The spec
+// requires provision-stage scripts to run in selection order, so a caller
+// that hands WrapScripts a dependency-ordered list must get that same order
+// back in both write_files and runcmd.
 func TestWrapScriptsPreservesOrder(t *testing.T) {
 	body := WrapScripts([]Script{
 		{Name: "base", Content: "echo base\n"},
@@ -108,11 +108,11 @@ func TestWrapScriptsPreservesOrder(t *testing.T) {
 }
 
 // TestWrapScriptsMultilineContentSurvives guards the YAML block-scalar
-// indentation: a script with blank lines, indentation of its own, and no
+// indentation. A script with blank lines, its own indentation, and no
 // trailing newline must round-trip through the YAML parser unchanged
-// (module the single trailing newline every script gets), since a script
-// silently truncated or reflowed at write_files time would fail at
-// first-boot with no useful error.
+// (modulo the single trailing newline every script gets). A script silently
+// truncated or reflowed at write_files time would fail at first boot with
+// no useful error.
 func TestWrapScriptsMultilineContentSurvives(t *testing.T) {
 	script := "#!/bin/sh\nset -e\n\nif true; then\n  echo indented\nfi"
 	body := WrapScripts([]Script{{Name: "multi", Content: script}})
@@ -127,11 +127,11 @@ func TestWrapScriptsMultilineContentSurvives(t *testing.T) {
 	}
 }
 
-// TestWrapScriptsFragmentMergesIntoSeed is the integration case: WrapScripts'
-// output is meant to be passed to Seed exactly like any other recipe
-// fragment, so it must survive withMergeHow/buildArchive the same way
-// (see TestArchiveWriteFilesSurvives for the same contract on a hand-written
-// fragment).
+// TestWrapScriptsFragmentMergesIntoSeed is the integration case.
+// WrapScripts' output is meant to be passed to Seed exactly like any other
+// recipe fragment, so it must survive withMergeHow/buildArchive the same
+// way (see TestArchiveWriteFilesSurvives for the same contract on a
+// hand-written fragment).
 func TestWrapScriptsFragmentMergesIntoSeed(t *testing.T) {
 	fragment := WrapScripts([]Script{{Name: "xfce", Content: "echo hi\n"}})
 

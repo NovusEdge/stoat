@@ -1,11 +1,10 @@
 // Package core is stoat's operation surface: everything that can be done to a
-// VM, callable with no interactive input and returning structured data.
+// VM, callable with no interactive input, returning structured data.
 //
-// It exists because creating a VM used to be possible only by driving a
-// Bubbletea form: image resolution, OS inference, backend choice, port
-// allocation, vm.toml and the qcow2 all lived in internal/tui. The CLI had no
-// create command for exactly that reason, and an MCP server would have had to
-// reimplement it. The TUI, the CLI and an MCP server all sit on top of this.
+// Image resolution, OS inference, backend choice, port allocation, vm.toml
+// and the qcow2 used to live only in internal/tui's Bubbletea form. The CLI
+// had no create command for that reason. core replaces both call sites; the
+// TUI, the CLI and an MCP server all sit on top of it.
 //
 // See docs/design/core-api.md for the full intended surface. Only what has a
 // caller is built.
@@ -76,39 +75,34 @@ type Spec struct {
 	ConsolePassword string
 
 	// AllowExec is a per-VM opt-out of exec/copy_to/copy_from, recorded in
-	// vm.toml so a user can say once, at create time, "an agent may never
-	// run code in this VM" rather than trusting every future caller to ask
-	// nicely. core.Exec does NOT enforce it: core is a library the TUI and
-	// CLI also call, and they already let a user run anything, so refusing
-	// here would break them. Enforcement belongs to whatever boundary an
-	// agent actually crosses (the MCP server).
+	// vm.toml at create time. core.Exec does not enforce it: core is a
+	// library the TUI and CLI also call, and both already let a user run
+	// anything. Enforcement belongs to the boundary an agent crosses, the
+	// MCP server.
 	//
-	// A pointer, not a bool, for the same reason config.Patch's fields are:
-	// nil means "not given", so plan() can default it to true without a
-	// caller that never mentions it (the TUI's form, today) ending up with
-	// an implicit false.
+	// AllowExec is a pointer, like config.Patch's fields. Nil means "not
+	// given", so plan() can default it to true for a caller that never
+	// mentions it, such as the TUI's form today.
 	AllowExec *bool
 }
 
 // Create validates a Spec, writes vm.toml and allocates the disk. It does not
 // start the VM.
 //
-// A cloud VM's overlay (backed by Base) and its cloud-init seed are
-// deliberately NOT created here: qemu.Start's ensureCloudOverlay creates them
-// once, on first start, since, unlike a live VM's apkovl, rebuilt every start,
-// a cloud overlay holds real guest state that must never be discarded, and
-// creating it here would also mean creating it again for a VM that is never
-// started.
-// It returns the same VM view Get and List hand out, so a caller can act on
-// the result without re-reading it, and so Name is the DIRECTORY here too
-// rather than vm.toml's own name field.
+// Create does not build a cloud VM's overlay or cloud-init seed. A cloud
+// overlay holds real guest state, unlike a live VM's apkovl, which qemu.Start
+// rebuilds every start. qemu.Start's ensureCloudOverlay creates the overlay
+// once, on first start, so a VM that never starts never gets one.
+//
+// Create returns the same VM view Get and List hand out. Name here is the
+// VM's directory, not vm.toml's own name field.
 func Create(s Spec) (VM, error) {
-	// Held across plan AND Save. plan allocates an ssh port and checks the
-	// name is free; neither is committed until Save writes vm.toml, so two
-	// callers interleaved in that gap both pick the same port and both believe
-	// the name is theirs. Plan on its own is deliberately NOT locked: it is a
-	// dry run for callers that want to show an error early (the TUI form), and
-	// Create re-plans under the lock rather than trusting that result.
+	// The lock covers plan and Save together. plan allocates an ssh port and
+	// checks the name is free, but neither is committed until Save writes
+	// vm.toml. Two callers interleaved in that gap would pick the same port
+	// or claim the same name. Plan on its own holds no lock: it is a dry run
+	// for a caller that wants to show an error early, such as the TUI form.
+	// Create re-plans under the lock instead of trusting that result.
 	unlock, err := config.Lock()
 	if err != nil {
 		return VM{}, err
@@ -134,13 +128,12 @@ func Create(s Spec) (VM, error) {
 	return fromConfig(v), nil
 }
 
-// Plan is Create without any side effects: it validates a Spec and returns the
-// VM that Create would write. A caller with somewhere better to show an error
-// than Create's return value, a form that wants it inline, next to the field
-// that caused it, checks with Plan first.
+// Plan is Create without side effects: it validates a Spec and returns the
+// VM that Create would write. A caller that wants to show an error inline,
+// next to the field that caused it, such as a form, checks with Plan first.
 //
-// It is also the whole of validation and resolution, testable without writing
-// to the data root.
+// Plan holds all validation and resolution logic. Tests can exercise it
+// without writing to the data root.
 func Plan(s Spec) (*config.VM, error) { return plan(s) }
 
 func plan(s Spec) (*config.VM, error) {
@@ -181,29 +174,25 @@ func plan(s Spec) (*config.VM, error) {
 		return nil, fmt.Errorf("%w: cpus must be at least 1", ErrInvalidSpec)
 	}
 
-	// A relative size ("+8G") reads to qemu-img as "grow by", not "resize to",
-	// so `qemu-img create -f qcow2 disk.qcow2 +8G` silently allocates twice
-	// what was asked for. ParseSize refuses it; the edit path refuses it the
-	// same way through the same function.
+	// A relative size ("+8G") reads to qemu-img as "grow by", not "resize
+	// to". `qemu-img create -f qcow2 disk.qcow2 +8G` then silently allocates
+	// twice the requested size. ParseSize refuses a relative size; the edit
+	// path calls the same function and gets the same refusal.
 	disk := strings.TrimSpace(s.Disk)
-	// Every mode that HAS a disk gets a size, which is both of them that do.
+	// Disk mode and cloud mode both get a default size; live mode does not.
 	//
-	// Cloud mode needs this as much as disk mode, for a reason that is not
-	// obvious: its qcow2 is a CoW overlay, and an overlay inherits its BASE
-	// image's virtual size. Cloud images are sized to boot and nothing more:
-	// Ubuntu 24.04's is 3.5G with a 2.4G root, so without a size the overlay
-	// is created and never resized (backend/cloudinit.go only resizes when
-	// Disk is set), installing a desktop fills the disk, apt exits 100, and
-	// cloud-init reports a bare "error" that reads as a broken recipe rather
-	// than a full disk. That failure was diagnosed and fixed once already.
+	// A cloud VM's qcow2 is a CoW overlay. The overlay inherits the base
+	// image's virtual size. Ubuntu 24.04's cloud image is 3.5G with a 2.4G
+	// root. backend/cloudinit.go resizes the overlay only when Disk is set.
+	// With no size, installing a desktop fills the disk. apt then exits 100,
+	// and cloud-init reports a bare "error" that reads as a broken recipe,
+	// not a full disk.
 	//
-	// The TUI never hit it because its form pre-fills 8G on every mode, so a
-	// cloud VM built there always carried a size. Defaulting only disk mode
-	// here made the CLI produce a DIFFERENT VM from the TUI for the same
-	// request, precisely the divergence this package exists to remove.
+	// The TUI's form pre-fills 8G for every mode, so a cloud VM built there
+	// always carried a size. Defaulting only disk mode here made the CLI
+	// produce a different VM from the TUI for the same request.
 	//
-	// Live mode is excluded because it is genuinely diskless: an ISO booted
-	// into a tmpfs root, with no qcow2 to size.
+	// Live mode has no qcow2: it boots the ISO into a tmpfs root.
 	if disk == "" && mode != "live" {
 		disk = DefaultDisk
 	}
@@ -247,12 +236,12 @@ func plan(s Spec) (*config.VM, error) {
 
 	if img.backend == "cloudinit" {
 		v.Base = img.abs
-		// Only a cloud image needs this. cloud-init locks every account by
-		// default, so without a console password the VNC console (a cloud VM
-		// never gets a qemu window, qemu.NeedsWindow) shows a login prompt
-		// with no valid answer. A live Alpine VM already logs root in at the
-		// console with no password, and a disk VM's password is whatever the
-		// user sets during the guest's own installer.
+		// Only a cloud image needs a console password. cloud-init locks
+		// every account by default, so its VNC console (a cloud VM never
+		// gets a qemu window; see qemu.NeedsWindow) shows a login prompt
+		// with no valid answer otherwise. A live Alpine VM logs root in at
+		// the console with no password. A disk VM's password is whatever
+		// the user set in the guest's own installer.
 		pw := config.DefaultConsolePassword
 		switch s.ConsolePassword {
 		case "":
@@ -270,11 +259,11 @@ func plan(s Spec) (*config.VM, error) {
 	return v, nil
 }
 
-// modeFor decides boot media. cloudinit is always "cloud" (a cloud image boots
-// straight off its overlay, no install step); ssh is always "disk" (an
-// unrecognised image is assumed to need a real install, then ssh (the apkovl
-// live path only exists for Alpine.) apkovl keeps the caller's live/disk
-// choice.
+// modeFor decides boot media. cloudinit is always "cloud": a cloud image
+// boots straight off its overlay, with no install step. ssh is always
+// "disk": an unrecognised image is assumed to need a real install, then ssh.
+// The apkovl live path exists only for Alpine. apkovl keeps the caller's
+// live/disk choice.
 func modeFor(backend, want string) (string, error) {
 	switch backend {
 	case "cloudinit":
@@ -306,10 +295,10 @@ func ParseSize(s string) (int64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty")
 	}
-	// qemu-img also accepts relative sizes ("+8G"), and strconv.ParseFloat
-	// happily reads "+8" as 8, so "+8G" would pass a grow check as "8G" and
-	// then ADD 8G, leaving vm.toml recording "+8G" and disagreeing with the
-	// disk forever after. Refused rather than translated.
+	// qemu-img accepts relative sizes ("+8G"), and strconv.ParseFloat reads
+	// "+8" as 8. Unchecked, "+8G" would pass as "8G" then ADD 8G, leaving
+	// vm.toml recording "+8G" while the actual disk disagrees. ParseSize
+	// refuses a relative size instead of translating it.
 	if strings.HasPrefix(s, "+") || strings.HasPrefix(s, "-") {
 		return 0, fmt.Errorf("use an absolute size like 16G, not a relative one")
 	}
@@ -331,27 +320,24 @@ func ParseSize(s string) (int64, error) {
 	return int64(n * float64(mult)), nil
 }
 
-// checkRecipes refuses a Spec naming a recipe this VM will not be able to run,
-// at CREATE time rather than at first start.
+// checkRecipes refuses a Spec naming a recipe this VM cannot run, at CREATE
+// time rather than at first start.
 //
-// recipes.List returns FULL FILENAMES ("xfce.cloud.yaml"), and that is what
-// recipes.Read expects, because the suffix is load-bearing: it separates
-// ssh-pushed shell recipes from cloud-init seed fragments, and a per-OS
-// fragment from the shared one. Nothing enforced that a Spec's names came from
-// that list, so `stoat create x --recipes xfce` was accepted, written to
-// vm.toml, and only failed on `stoat up` with "open .../recipes/xfce: no such
-// file or directory", a create that succeeded and produced a VM that cannot
-// start.
+// recipes.List returns full filenames ("xfce.cloud.yaml"); recipes.Read
+// expects the same. The suffix separates ssh-pushed shell recipes from
+// cloud-init seed fragments, and a per-OS fragment from a shared one. Before
+// this check, `stoat create x --recipes xfce` was accepted and written to
+// vm.toml, then failed only on `stoat up` with "open .../recipes/xfce: no
+// such file or directory".
 //
-// The error names what IS available, because the failure is nearly always a
-// name that is close but not exact, and a caller that cannot see the valid set
-// has to go read a directory to guess again. That matters most for the caller
-// who cannot read a directory: an agent.
+// The error names the recipes that are available. The failure is usually a
+// name that is close but not exact, and a caller cannot always read the
+// recipes directory to guess again. An agent caller never can.
 //
-// This is the cheap half of the design's CheckRecipes (docs/design/core-api.md
-// §4). It checks that a recipe EXISTS for this OS and backend; it does not yet
-// check a recipe's own declared requirements, which needs the recipe contract
-// in guest-subsystem.md §5 to exist first.
+// This is the cheap half of design/core-api.md §4's CheckRecipes. It checks
+// that a recipe exists for this OS and backend. It does not check a recipe's
+// own declared requirements; that needs the recipe contract in
+// guest-subsystem.md §5.
 func checkRecipes(osName, backend string, names []string) error {
 	if len(names) == 0 {
 		return nil

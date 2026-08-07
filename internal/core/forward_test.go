@@ -56,10 +56,10 @@ func TestForwardOnRunningVMSavesButSignalsPending(t *testing.T) {
 		t.Error("active = true on a running VM; qemu cannot hot-add a hostfwd to a live netdev")
 	}
 
-	// The save still happened. "Takes effect at next start" is not a refusal,
-	// and the two must never look the same to a caller, which is exactly why
-	// this is a return value and not a sentinel error: a caller writing the
-	// ordinary `if err != nil` would otherwise report a failure for an
+	// The save still happened. "Takes effect at next start" is not a
+	// refusal; the two must never look the same to a caller. That is why
+	// active is a return value, not a sentinel error: a caller writing the
+	// ordinary `if err != nil` would otherwise report failure for an
 	// operation that wrote vm.toml.
 	got, err := Get("web")
 	if err != nil {

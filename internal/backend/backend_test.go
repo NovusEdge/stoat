@@ -71,12 +71,11 @@ func TestUbuntuDiskGetsNoSeedCdrom(t *testing.T) {
 	}
 }
 
-// The alpine-cloud catalog entry is OS "alpine" but Backend "cloudinit": it
-// is the one image whose backend contradicts its OS's registry default. It
-// is the entire reason For keys off v.Backend rather than v.OS, so pin it:
-// dispatching on OS would hand this VM an apkovl overlay it does not boot
-// from, and no seed at all, which is a VM that comes up unprovisioned with
-// nothing saying why.
+// The alpine-cloud catalog entry is OS "alpine" but Backend "cloudinit". It
+// is the one image whose backend contradicts its OS's registry default, and
+// the reason For keys off v.Backend rather than v.OS. Dispatching on OS
+// would hand this VM an apkovl overlay it does not boot from, and no seed
+// at all. The VM would come up unprovisioned with no clue why.
 func TestAlpineCloudUsesItsEntrysBackendNotItsOSDefault(t *testing.T) {
 	v := &config.VM{
 		Name: "alpcloud", Mode: "cloud", OS: "alpine", Backend: "cloudinit",

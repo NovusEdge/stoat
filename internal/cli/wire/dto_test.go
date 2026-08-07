@@ -133,7 +133,7 @@ func TestRecipeIssueGolden(t *testing.T) {
 	}
 }
 
-// --- the three MUST-hold rules from the brief ---
+// --- fields that must never reach the wire ---
 
 func TestVMNeverSerializesConsolePassword(t *testing.T) {
 	got := marshal(t, FromVM(sampleVM(), true))

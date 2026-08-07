@@ -1,13 +1,13 @@
 // Package logx provides file logging to <root>/logs/stoat.log.
 //
-// The log is an append-only history: unlike <vmdir>/last-provision.log,
-// which is truncated per run because it captures only the last run, this
-// file accumulates across the tool's lifetime.
+// The log is an append-only history. <vmdir>/last-provision.log is
+// truncated per run, since it captures only the last run; this file
+// accumulates across the tool's lifetime.
 //
-// ponytail: no rotation. A personal tool's log grows slowly; a rotation
-// dependency is unjustified until someone actually hits a size problem.
-// If that day comes, reach for lumberjack or a simple size-check-and-
-// truncate-on-Init before adding anything heavier.
+// ponytail: no rotation. A personal tool's log grows slowly, so a rotation
+// dependency is unjustified until someone hits a size problem. If that day
+// comes, reach for lumberjack or a simple size-check-and-truncate-on-Init
+// before adding anything heavier.
 package logx
 
 import (

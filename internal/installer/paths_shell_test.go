@@ -6,16 +6,16 @@ import (
 	"testing"
 )
 
-// TestWrapRCLineAgainstRealShells checks WrapRCLine's output the only way that
-// really settles it: by pasting it into actual shells and asking what PATH they
-// ended up with. TestWrapRCLineReassembles covers the same property with a
-// hand-written unquoter, which runs anywhere but can only ever be as right as
-// our own understanding of shell quoting; this one is ground truth.
+// TestWrapRCLineAgainstRealShells checks WrapRCLine's output by pasting it
+// into actual shells and reading back the resulting PATH. This is ground
+// truth. TestWrapRCLineReassembles checks the same property with a
+// hand-written unquoter: it runs anywhere, but is only as right as our own
+// understanding of shell quoting.
 //
-// The dirs below deliberately include a quote, a backslash, a multi-byte rune
-// and shell metacharacters, at widths that force breaks in different places:
-// a break that lands mid-escape, or that leaves dir's quoting open, shows up
-// here as a wrong PATH rather than as a plausible-looking string.
+// The dirs below include a quote, a backslash, a multi-byte rune, and shell
+// metacharacters, at widths that force breaks in different places. A break
+// that lands mid-escape, or that leaves dir's quoting open, shows up here as
+// a wrong PATH rather than a plausible-looking string.
 func TestWrapRCLineAgainstRealShells(t *testing.T) {
 	dirs := []string{
 		"/home/exampleuser/" + strings.Repeat("verylongsegment/", 9) + "bin",

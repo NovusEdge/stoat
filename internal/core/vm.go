@@ -13,29 +13,20 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// State is what List/Get answer at the moment they are called: never cached,
-// always re-derived from the process table and the filesystem, exactly like
-// runLS does today.
+// State is List/Get's answer at call time. It is never cached; it comes
+// fresh from the process table and the filesystem each time.
 //
 // The design doc (docs/design/core-api.md §1) lists six states. Only three
-// are knowable from what exists right now:
+// are knowable today. StateStopped and StateRunning come from qemu.Running,
+// which checks pid liveness and matches /proc/<pid>/cmdline, so a reused pid
+// never reads as running. StateBroken comes from a vm.toml that exists but
+// fails to parse (config.ListBroken's concept).
 //
-//   - StateStopped and StateRunning come straight from qemu.Running, which
-//     already does the hard part (pid liveness plus a /proc/<pid>/cmdline
-//     check, so a reused pid never reads as "running").
-//   - StateBroken comes from a vm.toml that exists but fails to parse,
-//     config.ListBroken's existing concept.
-//
-// StateStarting, StateApplying and StateFailed are NOT declared here. Each
-// needs progress tracking that nothing in the codebase produces yet: no code
-// path currently distinguishes "qemu process is up" from "guest is
-// reachable", nothing records that recipes are mid-apply, and nothing
-// records that the last operation on a VM failed. Declaring those constants
-// now would give List/Get a return type that claims six states while only
-// ever producing three: a caller that switches on State exhaustively would
-// have three cases that can never trigger, which is worse than an enum that
-// is honestly incomplete. Add them when Start/Apply gain the tracking to
-// back them, not before.
+// StateStarting, StateApplying and StateFailed are not declared here. No
+// code path yet distinguishes "qemu process is up" from "guest is
+// reachable", tracks a mid-apply recipe run, or records a failed operation.
+// A caller that switched on State exhaustively would get three dead cases.
+// Add these constants when Start/Apply gain the tracking to back them.
 type State string
 
 const (
@@ -45,14 +36,13 @@ const (
 )
 
 // ErrNotRunning is returned by Stop (and by Destroy, transitively) for a VM
-// that is not currently running: the honest answer, distinct from silently
-// succeeding. qemu.Stop itself treats "already stopped" as a no-op; Stop
-// checks first so the caller gets a typed signal instead of a silent nothing.
+// that is not running. qemu.Stop itself treats "already stopped" as a
+// no-op; Stop checks first so the caller gets a typed error instead.
 var ErrNotRunning = errors.New("not running")
 
 // ErrAlreadyRunning is returned by Start for a VM that is already running,
-// and reused by Destroy for a VM that is still running: both are the same
-// shape of refusal: "this operation needs the VM stopped, and it isn't".
+// and by Destroy for a VM that is still running. Both refuse for the same
+// reason: the operation needs the VM stopped.
 var ErrAlreadyRunning = errors.New("already running")
 
 // ErrBroken is returned by Start/Stop/Destroy for a VM whose vm.toml exists
@@ -86,21 +76,16 @@ type AppliedRecipe struct {
 	At      time.Time
 }
 
-// VM is the answer to "what is this VM doing right now", not the on-disk
-// record. It is a deliberately separate type from config.VM rather than the
-// same struct with a State bolted on:
+// VM answers "what is this VM doing right now". It is not the on-disk
+// record. config.VM is vm.toml: what was asked for, valid the instant it was
+// last saved. It says nothing about "is it running" on its own; that needs
+// qemu.Running too. core.VM combines both, computed together, so a caller
+// never has one without the other.
 //
-//   - config.VM is vm.toml: what was asked for, valid the instant it was
-//     last saved, and meaningless to compare against "is it running" without
-//     also calling qemu.Running.
-//   - core.VM is a point-in-time answer: vm.toml plus qemu.Running, computed
-//     together so a caller never has one without the other and never has to
-//     know that combining them is even a step.
-//
-// Fields present in the design doc's VM (§1) but not here: Progress (nothing
-// produces one yet, see State's comment) and Created (nothing records a
-// creation timestamp; vm.toml's mtime is not that, since Update or a
-// recipe-list edit would move it).
+// The design doc's VM (§1) also lists Progress and Created. Progress is
+// missing because nothing produces one yet; see State's comment. Created is
+// missing because nothing records a creation timestamp: vm.toml's mtime
+// moves on every Update or recipe-list edit, so it does not serve.
 type VM struct {
 	// Name is the VM's DIRECTORY under the data root, which is its identity;
 	// see the note above load(). It is NOT necessarily the `name` field in
@@ -111,11 +96,11 @@ type VM struct {
 	Backend string // apkovl | cloudinit | ssh
 	State   State
 
-	// StartedAt is the running QEMU process's start time (its pidfile's
-	// mtime), zero when State is not StateRunning. A duration would freeze at
-	// whatever it was when List ran: List is a snapshot and the TUI has no
-	// periodic refresh, so a caller wanting "up 5m32s" recomputes it from
-	// this with time.Since, which keeps ticking between reloads.
+	// StartedAt is the running QEMU process's start time, taken from its
+	// pidfile's mtime. It is zero when State is not StateRunning. This holds
+	// a timestamp, not a duration: List is a snapshot with no periodic
+	// refresh, so a caller wanting "up 5m32s" computes it with time.Since,
+	// which keeps ticking between reloads.
 	StartedAt time.Time
 
 	RAM     int
@@ -142,11 +127,10 @@ type VM struct {
 	// this type.
 	ConsolePassword string
 
-	// Forwards are the user-declared host->guest port forwards. Carried here
-	// rather than behind a separate accessor so there is exactly one way to
-	// read a VM's state: a caller that has called Get has everything, and
-	// cannot end up reasoning about forwards that are a round trip out of date
-	// with the State next to them.
+	// Forwards are the user-declared host->guest port forwards. This field,
+	// not a separate accessor, is the only way to read them: a caller that
+	// called Get already has everything, with no separate round trip that
+	// could go stale against the State next to it.
 	Forwards []PortForward
 
 	// Applied tracks which recipes have already run on this VM, keyed by
@@ -169,28 +153,26 @@ type VM struct {
 	Error string
 }
 
-// A VM's IDENTITY is its DIRECTORY under the data root, never the `name` field
-// inside its vm.toml. The two can diverge: editing a VM keeps its directory
-// and can leave a different name in the file, and everything that acts on a
-// VM is directory-anchored: config.Load builds Root()/<name>/vm.toml, qemu's
-// pidfile and monitor socket come off v.Dir, and config.VM.Delete removes
-// v.Dir. internal/tui's TestDeleteTargetsDirectoryNotName pins this for the
-// delete path specifically, after it was got wrong once.
+// A VM's IDENTITY is its DIRECTORY under the data root. It is never the
+// `name` field inside its vm.toml. The two can diverge: editing a VM keeps
+// its directory and can leave a different name in the file. Everything that
+// acts on a VM is directory-anchored: config.Load builds Root()/<name>/vm.toml,
+// qemu's pidfile and monitor socket come off v.Dir, and config.VM.Delete
+// removes v.Dir. internal/tui's TestDeleteTargetsDirectoryNotName pins the
+// same rule for the delete path.
 //
-// So every `name string` parameter in this package is a DIRECTORY name, and
-// VM.Name must report that same directory, otherwise List hands back an
-// identifier that Get and Destroy reject, or worse, one that resolves to a
-// different VM. That is not hypothetical: before this was fixed,
-// List()[0].Name on a directory "work" holding `name = "work2"` returned
-// "work2", and Get("work2") failed with ErrNotFound. Pinned by
-// TestIdentityFromListRoundTrips.
+// Every `name string` parameter in this package is a DIRECTORY name.
+// VM.Name must report that same directory. Otherwise List hands back an
+// identifier that Get and Destroy reject, or one that resolves to a
+// different VM: a directory "work" holding `name = "work2"` once made
+// List()[0].Name return "work2", and Get("work2") then failed with
+// ErrNotFound. Pinned by TestIdentityFromListRoundTrips.
 
-// load resolves a VM DIRECTORY name to its config.VM, distinguishing the two
-// ways that can fail: no such VM at all (ErrNotFound) versus a VM directory
-// whose vm.toml exists but won't parse (ErrBroken). config.Load alone
-// conflates these: both come back as a bare decode/stat error, which is
-// exactly the distinction Start/Stop/Destroy need in order to give a broken VM
-// a sensible error instead of a raw TOML parse message.
+// load resolves a VM DIRECTORY name to its config.VM. It separates two
+// failures config.Load conflates into one bare decode/stat error: no such VM
+// at all (ErrNotFound) versus a directory whose vm.toml exists but won't
+// parse (ErrBroken). Start/Stop/Destroy need that distinction to give a
+// broken VM a real error instead of a raw TOML parse message.
 func load(name string) (*config.VM, error) {
 	if _, err := os.Stat(filepath.Join(config.Root(), name, "vm.toml")); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
@@ -211,9 +193,9 @@ func fromConfig(v *config.VM) VM {
 	}
 	osName, backend := inferMissing(v)
 	return VM{
-		// The DIRECTORY, not v.Name; see the identity note above load(). This
-		// is the identifier every other operation in this package accepts, so
-		// it is the only one List may hand out.
+		// The DIRECTORY, not v.Name; see the identity note above load(). Every
+		// other operation in this package accepts this identifier, so it is
+		// the only one List may hand out.
 		Name:            filepath.Base(v.Dir),
 		OS:              osName,
 		Mode:            v.Mode,
@@ -261,36 +243,32 @@ func applied(m map[string]config.AppliedRecipe) map[string]AppliedRecipe {
 }
 
 // inferMissing fills v.OS and v.Backend from v.ISO's filename, in memory
-// only, for a vm.toml predating those two fields (see iso.Infer's own doc
-// comment; this is the same guess the form makes for a BYO image at create
-// time, just applied retroactively on load instead of never at all).
+// only. This covers a vm.toml written before those two fields existed; see
+// iso.Infer's own doc comment. It is the same guess the create form makes
+// for a BYO image, applied retroactively here.
 //
-// Only an EMPTY field is filled: v.toml is the user's stated intent, and a
-// filename guess never overrides it, even when they disagree. This never
-// writes v.toml back out, so List/Get stay read-only; a v.toml missing these
-// fields keeps missing them on disk forever, and gets the same guess again
-// on every future load.
+// It fills only an EMPTY field. vm.toml is the user's stated intent; a
+// filename guess never overrides it. The function never writes v.toml back
+// out, so List/Get stay read-only. A vm.toml missing these fields keeps
+// missing them on disk, and gets the same guess again on every load.
 //
-// Backend gets the same treatment as OS, not skipped: backend.For(v) falls
-// back to guest.Lookup(v.OS).Backend whenever v.Backend is empty, and that
-// fallback is WRONG for an entry like alpine-cloud, whose Backend
-// (cloudinit) overrides its OS's usual one (apkovl, alpine's guest.Registry
-// default). Filling OS but leaving Backend empty would make that fallback
-// fire and pick apkovl for a cloud-init image. iso.Infer decides Backend
-// from the filename's extension, the same signal the catalog entries
-// themselves are built from, so it lands on cloudinit for alpine-cloud
-// exactly like the guess Create would have made.
+// Backend needs the same fill as OS, not a skip. backend.For(v) falls back
+// to guest.Lookup(v.OS).Backend whenever v.Backend is empty, and that
+// fallback is wrong for an entry like alpine-cloud, whose Backend
+// (cloudinit) overrides its OS's default (apkovl). Filling OS but leaving
+// Backend empty would make that fallback pick apkovl for a cloud-init
+// image. iso.Infer reads Backend from the filename's extension, the same
+// signal the catalog entries are built from, so it lands on cloudinit for
+// alpine-cloud, matching the guess Create would have made.
 //
-// Unlike OS, iso.Infer's backend guess never comes back empty (an
-// unrecognised name still resolves to "ssh"). That is not "inventing a
-// default" here: "ssh" and "" both hit backend.For's noop default case, so
-// filling it in changes nothing observable, and doing so keeps this
-// function's two return values symmetric instead of special-casing one.
+// Unlike OS, iso.Infer's backend guess never comes back empty: an
+// unrecognised name still resolves to "ssh". "ssh" and "" both hit
+// backend.For's default case, so filling it changes nothing observable. It
+// keeps this function's two return values symmetric.
 //
-// Only v.ISO is consulted, not v.Base (the cloud-mode overlay source): the
-// pre-os-field vm.toml this exists for is the live/disk case in the bug
-// report, and a cloud VM missing OS/Backend is a real but separate gap left
-// for whoever hits it.
+// Only v.ISO is consulted, not v.Base, the cloud-mode overlay source. The
+// pre-os-field vm.toml this handles is a live/disk case. A cloud VM missing
+// OS/Backend is a separate, real gap, left for whoever hits it.
 func inferMissing(v *config.VM) (osName, backend string) {
 	osName, backend = v.OS, v.Backend
 	if v.ISO == "" || (osName != "" && backend != "") {
@@ -309,13 +287,11 @@ func inferMissing(v *config.VM) (osName, backend string) {
 // List returns every VM in the data root, sorted by name, including broken
 // ones as StateBroken rather than omitting them.
 //
-// This is the whole point of the operation, not an edge case bolted on:
-// today config.List() silently drops any directory whose vm.toml fails to
-// parse, and config.ListBroken() is a second, separate call a caller has to
-// know exists in order to not lose track of that VM. runLS (internal/cli)
-// already has to call both and merge them by hand; every future caller of
-// this package would have had to rediscover that same requirement or quietly
-// hide real VMs. List does the merge once, here.
+// config.List() silently drops any directory whose vm.toml fails to parse.
+// config.ListBroken() recovers those, but as a second call a caller has to
+// know to make. runLS (internal/cli) already merges both by hand. List does
+// that merge once, here, so no future caller has to rediscover it or quietly
+// drop real VMs.
 func List() ([]VM, error) {
 	cvms, err := config.List()
 	if err != nil {
@@ -331,10 +307,9 @@ func List() ([]VM, error) {
 		return nil, err
 	}
 	for _, b := range broken {
-		// A broken VM can supply none of config.VM's fields: there is no
-		// parsed struct to read them from, so it gets a name, StateBroken,
-		// and the parse error, and nothing else. Matches what runLS already
-		// renders as dashes.
+		// A broken VM has no parsed struct to read fields from. It gets a
+		// name, StateBroken, and the parse error, nothing else, matching
+		// what runLS already renders as dashes.
 		out = append(out, VM{Name: b.Name, State: StateBroken, Error: b.Err.Error()})
 	}
 
@@ -345,10 +320,9 @@ func List() ([]VM, error) {
 // Get returns the current view of one VM by name.
 //
 // A VM whose vm.toml is unparseable comes back as (VM{State: StateBroken},
-// nil), not an error, the same reasoning as List: a caller (in particular
-// Destroy, or a TUI wanting to offer "delete" on a broken entry) needs to be
-// able to see and act on a broken VM, and returning a bare error here would
-// make it indistinguishable from "no such VM".
+// nil), not an error, the same reasoning as List: Destroy, or a TUI offering
+// "delete" on a broken entry, needs to see and act on it. A bare error here
+// would make it indistinguishable from "no such VM".
 func Get(name string) (VM, error) {
 	v, err := load(name)
 	if errors.Is(err, ErrBroken) {
@@ -360,16 +334,14 @@ func Get(name string) (VM, error) {
 	return fromConfig(v), nil
 }
 
-// Start launches VM name. It is a thin wrapper over qemu.Start: the actual
-// work (pidfile, backend Prepare, marking a disk VM installed) all lives
-// there and is not duplicated here.
+// Start launches VM name. It wraps qemu.Start; the actual work (pidfile,
+// backend Prepare, marking a disk VM installed) lives there.
 //
 // qemu.Start already refuses to run twice, but with an untyped error
 // ("%s is already running") that a caller can only detect by string
-// matching. Checking qemu.Running first, before calling it, is what turns
-// that into ErrAlreadyRunning, not a second guard, just a typed one placed
-// ahead of the one qemu.Start already has (which then never fires, because
-// this function has already returned).
+// matching. Start checks qemu.Running first and returns typed
+// ErrAlreadyRunning instead; qemu.Start's own check never fires, because
+// this function has already returned.
 func Start(name string) error {
 	v, err := load(name)
 	if err != nil {
@@ -382,9 +354,9 @@ func Start(name string) error {
 }
 
 // Stop powers down VM name. qemu.Stop treats "already stopped" as a
-// successful no-op; Stop does not: the CLI's `down` already refuses a
-// stopped VM as a failure (internal/cli/cli.go's runDown), and that is the
-// behaviour this preserves rather than regresses to a silent success.
+// successful no-op; Stop does not. The CLI's `down` (internal/cli/cli.go's
+// runDown) already refuses a stopped VM as a failure, and Stop preserves
+// that behavior.
 func Stop(name string) error {
 	v, err := load(name)
 	if err != nil {
@@ -398,27 +370,22 @@ func Stop(name string) error {
 
 // Destroy removes VM name's directory and vm.toml.
 //
-// Decision: REFUSE while running, matching both existing callers exactly:
-// runRM (internal/cli/cli.go) errors with "stop it first", and the TUI's
-// delete key (internal/tui/list.go) shows a toast telling the user to stop
-// it rather than offering to delete at all. Stopping-first was the other
-// option the brief raised, but it would be a silent behaviour change: a
-// caller asking to delete a VM would, without saying so, also kill whatever
-// process was running inside it. Deleting is destructive enough already;
-// bundling an implicit kill into it is a second destructive action a caller
-// did not explicitly ask for. A caller that wants "stop it, then delete it"
-// can call Stop then Destroy, two words, and it cannot get the order wrong.
+// Destroy refuses while running, matching both existing callers: runRM
+// (internal/cli/cli.go) errors with "stop it first", and the TUI's delete
+// key (internal/tui/list.go) refuses to offer delete at all. Stopping the
+// VM first, as part of Destroy, would silently kill whatever process was
+// running inside it, a second destructive action the caller did not ask
+// for. A caller that wants that calls Stop then Destroy.
 //
 // config.VM.Delete already refuses to remove anything outside the data root
-// (it checks filepath.Dir(v.Dir) == config.Root()); that guard is untouched
-// here, so Destroy inherits it rather than re-implementing it.
+// (it checks filepath.Dir(v.Dir) == config.Root()); Destroy inherits that
+// guard rather than re-implementing it.
 func Destroy(name string) error {
 	// The same data-root lock Create and Clone take. Clone's overlay
-	// references its source's disk BY PATH and is created some time after
-	// Clone checks that source exists; without Destroy participating, a
-	// delete landing in that window produces a clone that is created
-	// successfully and then cannot open its backing file on first start. A
-	// lock only one side takes closes nothing.
+	// references its source's disk BY PATH, some time after Clone checks
+	// that the source exists. Without this lock, a delete landing in that
+	// window leaves the clone unable to open its backing file on first
+	// start.
 	unlock, err := config.Lock()
 	if err != nil {
 		return err
@@ -427,18 +394,16 @@ func Destroy(name string) error {
 
 	v, err := load(name)
 	if errors.Is(err, ErrBroken) {
-		// A broken VM's directory is still real and still deletable; that is
-		// precisely why Get/List surface broken VMs rather than hiding them,
-		// so they CAN be cleared instead of sitting forever unparseable.
+		// A broken VM's directory is still real and still deletable. This is
+		// why Get/List surface broken VMs instead of hiding them: they can
+		// be cleared instead of sitting forever unparseable.
 		//
-		// It is still checked for a running process first. An earlier version
-		// of this claimed Running() "would need a parsed config.VM it doesn't
-		// have" and skipped the check; that was simply wrong: Running reads
-		// v.Dir/qemu.pid and matches v.Dir against /proc/<pid>/cmdline, and
-		// Dir is exactly what is reconstructed here. The bug it caused was
-		// real: a vm.toml corrupted AFTER its VM was started made Destroy a
-		// quiet backdoor around the refusal below, deleting the directory,
-		// pidfile, monitor socket and disk, out from under a live qemu.
+		// The running check below still applies. qemu.Running only needs
+		// Dir, which is reconstructed here; it does not need a parsed
+		// config.VM. Skipping this check let a vm.toml corrupted after its
+		// VM was started bypass the running-VM refusal, deleting the
+		// directory, pidfile, monitor socket and disk out from under a live
+		// qemu process.
 		bv := &config.VM{Name: name, Dir: filepath.Join(config.Root(), name)}
 		if qemu.Running(bv) {
 			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)

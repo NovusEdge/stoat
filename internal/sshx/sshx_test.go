@@ -51,9 +51,9 @@ func TestArgsUsesConfiguredSSHUser(t *testing.T) {
 }
 
 // TestCopyArgsUsesScpsPortFlagNotSSHs pins the regression this package
-// exists to prevent: scp takes -P (capital) for the port, not ssh's -p,
-// since copy-pasting Args' argv into an scp invocation would either fail outright
-// or (worse) silently hit -p's OTHER meaning for scp, "preserve file times".
+// exists to prevent. scp takes -P (capital) for the port, not ssh's -p.
+// Copy-pasting Args' argv into an scp invocation would fail outright, or
+// worse, silently hit -p's other meaning for scp, "preserve file times".
 func TestCopyArgsUsesScpsPortFlagNotSSHs(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
@@ -108,13 +108,13 @@ func TestCopyArgsDirection(t *testing.T) {
 }
 
 // TestCopyArgsRemotePathIsNotShellQuoted pins the decision documented in
-// core/copy.go: unlike Exec, which sends its command through the GUEST'S
-// shell and must quote for it, scp (SFTP protocol, the default since OpenSSH
-// 9.0; see `man scp`'s CAVEATS section, which says quoting is a concern
-// only for the legacy -O protocol) never involves a remote shell at all. A
+// core/copy.go. Unlike Exec, which sends its command through the guest's
+// shell and must quote for it, scp never involves a remote shell at all: it
+// uses the SFTP protocol by default since OpenSSH 9.0 (see `man scp`'s
+// CAVEATS section; quoting is a concern only for the legacy -O protocol). A
 // remote path is a literal string handed to the SFTP subsystem, so a space
-// in it must survive completely unescaped, because wrapping it in quotes would
-// create a file literally named with quote characters in it.
+// in it must survive unescaped. Wrapping it in quotes would create a file
+// literally named with quote characters in it.
 func TestCopyArgsRemotePathIsNotShellQuoted(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
@@ -147,7 +147,7 @@ func containsPair(argv []string, flag, val string) bool {
 // acceptOnly starts a listener that accepts connections and, for each one,
 // writes body (if any) then leaves it open. This models QEMU's user-mode
 // networking: the host-side accept() happens immediately at device init,
-// well before the guest's sshd is actually reachable through it.
+// well before the guest's sshd is reachable through it.
 func acceptOnly(t *testing.T, body string) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -205,11 +205,11 @@ func TestWaitSucceedsOnceBannerArrives(t *testing.T) {
 }
 
 func TestWaitSucceedsOnSlowBanner(t *testing.T) {
-	// A guest sshd forking under load on a 1-vCPU VM mid-boot can plausibly
-	// take longer than a couple hundred milliseconds to emit its banner.
-	// This must succeed now that the per-attempt read deadline is ~2s;
-	// with the old 300ms deadline every retry's fresh connection would hit
-	// the same wall and this would time out no matter the overall budget.
+	// A guest sshd forking under load on a 1-vCPU VM mid-boot can take
+	// longer than a couple hundred milliseconds to emit its banner. This
+	// must succeed now that the per-attempt read deadline is ~2s. With the
+	// old 300ms deadline, every retry's fresh connection hit the same wall
+	// and this timed out no matter the overall budget.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -252,11 +252,11 @@ func TestWaitTimesOutOnClosedPort(t *testing.T) {
 }
 
 // acceptAndClose starts a listener that accepts and immediately closes every
-// connection, with no banner. Unlike acceptOnly (which leaves the connection
-// open to model libslirp's early accept), this makes both the dial and
-// bannerReady's read return almost instantly on every attempt, so a caller
-// testing Wait's retry loop lands reliably inside the 500ms sleep BETWEEN
-// attempts rather than racing the dial or the banner read.
+// connection, with no banner. Unlike acceptOnly, which leaves the connection
+// open to model libslirp's early accept, this makes both the dial and
+// bannerReady's read return almost instantly on every attempt. A caller
+// testing Wait's retry loop then lands reliably inside the 500ms sleep
+// between attempts, instead of racing the dial or the banner read.
 func acceptAndClose(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -279,8 +279,8 @@ func acceptAndClose(t *testing.T) int {
 // TestWaitCancelDuringRetrySleepReturnsPromptly proves ctx is raced against
 // the between-attempt sleep, not just checked once per loop iteration.
 // Falsified by reverting Wait's select to a bare time.Sleep(sleep): that
-// version takes close to the full 500ms sleep to notice cancellation,
-// failing this test's margin.
+// version takes close to the full 500ms to notice cancellation, failing
+// this test's margin.
 func TestWaitCancelDuringRetrySleepReturnsPromptly(t *testing.T) {
 	port := acceptAndClose(t)
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
@@ -297,7 +297,7 @@ func TestWaitCancelDuringRetrySleepReturnsPromptly(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	// The retry sleep is 500ms; a version that only checks ctx between full
+	// The retry sleep is 500ms. A version that only checks ctx between full
 	// loop iterations would take close to that after cancel fires. A margin
 	// well under it proves the sleep itself is interrupted, not just noticed
 	// on the next iteration.
@@ -326,8 +326,8 @@ func TestWaitAlreadyCancelledReturnsImmediately(t *testing.T) {
 
 // TestProvisionCancelDuringWaitReturnsPromptly covers the other half of
 // cancellation: a ctx already cancelled before sshd ever answers must not
-// leave Provision blocked in Wait for up to WaitTimeout (here, a port with
-// nothing listening, so Wait would otherwise run the full timeout).
+// leave Provision blocked in Wait for up to WaitTimeout. Here the port has
+// nothing listening, so Wait would otherwise run the full timeout.
 func TestProvisionCancelDuringWaitReturnsPromptly(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -360,10 +360,10 @@ func TestProvisionCancelDuringWaitReturnsPromptly(t *testing.T) {
 }
 
 // installFakeSSH puts a stand-in "ssh" on PATH ahead of the real one. It
-// records its own pid to pidFile, then execs into "sleep 30" (replacing its
-// own process image rather than forking a child), so the pid recorded is
-// the pid that Provision's cmd.Process actually signals, exactly as it would
-// be for a real ssh process. The rest of PATH is kept so the script's own
+// records its own pid to pidFile, then execs into "sleep 30", replacing its
+// own process image rather than forking a child. The recorded pid is
+// therefore the pid Provision's cmd.Process actually signals, exactly as
+// for a real ssh process. The rest of PATH is kept so the script's own
 // "sleep" can still be resolved.
 func installFakeSSH(t *testing.T, pidFile string) {
 	t.Helper()
@@ -405,11 +405,11 @@ func processAlive(pid int) bool {
 }
 
 // TestProvisionCancelKillsTheSSHProcess is the strong version of the
-// cancellation test: it does not just assert Provision unblocks, it asserts
+// cancellation test. It asserts not just that Provision unblocks, but that
 // the ssh process it started is actually gone afterwards. Falsified by
-// reverting Provision's exec.CommandContext to exec.Command, which makes
-// this test hang past its own deadline waiting for a process cancel never
-// touches.
+// reverting Provision's exec.CommandContext to exec.Command, which leaves
+// this test hanging past its own deadline, waiting for a process cancel
+// never touches.
 func TestProvisionCancelKillsTheSSHProcess(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -459,9 +459,9 @@ func TestProvisionCancelKillsTheSSHProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing pid: %v", err)
 	}
-	// The kill is not necessarily instantaneous (cmd.Cancel sends SIGTERM,
-	// with WaitDelay as the SIGKILL backstop), so give it a moment before
-	// declaring the process still alive.
+	// The kill is not instantaneous: cmd.Cancel sends SIGTERM, with
+	// WaitDelay as the SIGKILL backstop. Give it a moment before declaring
+	// the process still alive.
 	deadline := time.Now().Add(6 * time.Second)
 	for processAlive(pid) && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)

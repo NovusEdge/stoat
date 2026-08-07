@@ -7,22 +7,23 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// A toast reports something that already happened, e.g. "created X", "X stopped",
-// an error from a command that has finished. It expires on its own, so it
-// costs no permanent line and needs no key to dismiss.
+// A toast reports something that already happened: "created X", "X
+// stopped", an error from a command that has finished. It expires on its
+// own, so it costs no permanent line and needs no key to dismiss.
 //
-// Prompts are deliberately NOT toasts. "delete X? y/N" and the auto-provision
-// offer have to stay on screen until they are answered, and the key handlers
-// in updateList branch on them before their own key switch. A message that
-// vanished on a timer while the keyboard was still held hostage by it would
-// leave the user with no idea why "n" stopped opening the new-VM form. Those
-// keep using m.status.
+// Prompts are deliberately NOT toasts. "delete X? y/N" and the
+// auto-provision offer must stay on screen until answered, and the key
+// handlers in updateList branch on them before their own key switch. A
+// message that vanished on a timer while it still held the keyboard
+// hostage would leave the user with no idea why "n" stopped opening the
+// new-VM form. Those keep using m.status.
 //
 // ponytail: rolled here rather than taken from a library. bubbleup fits
 // otherwise, but its Update returns a fresh tick for ANY message it sees
-// while an alert is live, and stoat has a spinner, a cloud-init poll and the
-// detail tick all in flight, measured at 21 pending ticks after 20 unrelated
-// messages, i.e. ~210 full re-renders a second for as long as a toast shows.
+// while an alert is live. stoat has a spinner, a cloud-init poll, and the
+// detail tick all in flight: measured at 21 pending ticks after 20
+// unrelated messages, roughly 210 full re-renders a second for as long as
+// a toast shows.
 
 // toastLife is how long a toast stays up. Long enough to read a VM name and
 // a verb without looking for it, short enough that it is gone before it
@@ -39,10 +40,10 @@ type toast struct {
 	gen  int
 }
 
-// toastExpiredMsg retires the toast that gen identifies. Every new toast bumps
-// the generation, so the timer belonging to a toast that has already been
-// replaced dies here instead of clearing the newer one early. The same
-// pattern detailGen uses for the detail screen's tick chain.
+// toastExpiredMsg retires the toast that gen identifies. Every new toast
+// bumps the generation, so the timer belonging to an already-replaced toast
+// dies here instead of clearing the newer one early. detailGen uses the
+// same pattern for the detail screen's tick chain.
 type toastExpiredMsg struct{ gen int }
 
 // showToast puts text on screen and returns the Cmd that will take it down.
@@ -72,17 +73,17 @@ func toastStyle(isErr bool) lipgloss.Style {
 		Width(toastWidth)
 }
 
-// renderToast draws the active toast over the top-right of an already-composed
-// screen, replacing what is under it rather than pushing it aside. The screen
-// keeps its exact line count and width, so nothing below the toast moves while
-// it is up.
+// renderToast draws the active toast over the top-right of an
+// already-composed screen, replacing what is under it rather than pushing
+// it aside. The screen keeps its exact line count and width, so nothing
+// below the toast moves while it is up.
 //
-// This used to splice the lines by hand with the ANSI-aware cutters, because
+// This used to splice the lines by hand with ANSI-aware cutters, since
 // Lipgloss v1 had no way to put one rendered string on top of another. v2's
-// compositor does it natively and does the same careful cutting internally
-// (content carries styling, and cutting a styled line by byte offset slices an
-// escape sequence in half), so the hand-rolled version is gone, along with
-// its need to pad short lines out to the splice point by hand.
+// compositor does that natively, including the careful cutting: content
+// carries styling, and cutting a styled line by byte offset slices an
+// escape sequence in half. The hand-rolled version, and its need to pad
+// short lines out to the splice point by hand, is gone.
 func (m model) renderToast(screen string) string {
 	if m.toast.text == "" {
 		return screen

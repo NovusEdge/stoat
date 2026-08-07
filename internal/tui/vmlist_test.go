@@ -11,13 +11,13 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 )
 
-// drainCmds applies msg and then runs the commands it returns, because
-// bubbles/list resolves filtering asynchronously, so without this the filter
-// never actually applies and every assertion below would pass vacuously.
+// drainCmds applies msg and then runs the commands it returns. bubbles/list
+// resolves filtering asynchronously, so without this the filter never
+// actually applies, and every assertion below would pass vacuously.
 //
-// The bound is 2, not "until nil": the component also returns a spinner tick
-// whose command genuinely sleeps, so draining further would add seconds per
-// call. Two rounds is enough for the filter to resolve.
+// The bound is 2, not "until nil". The component also returns a spinner
+// tick whose command genuinely sleeps, so draining further would add
+// seconds per call. Two rounds are enough for the filter to resolve.
 func drainCmds(m model, msg tea.Msg) model {
 	mm, cmd := m.Update(msg)
 	m = mm.(model)
@@ -62,10 +62,10 @@ func typeSearch(m model, term string) model {
 }
 
 // TestFilteredSelectionActsOnTheVisibleRow is the one that really matters.
-// Every action key (enter/start, d/delete, p/provision) resolves the target
-// through m.current(). If that indexed the unfiltered slice while a filter
-// was applied, pressing d on the only visible row would delete a DIFFERENT
-// VM than the one under the cursor.
+// Every action key (enter/start, d/delete, p/provision) resolves the
+// target through m.current(). If that indexed the unfiltered slice while a
+// filter was applied, pressing d on the only visible row would delete a
+// DIFFERENT VM than the one under the cursor.
 func TestFilteredSelectionActsOnTheVisibleRow(t *testing.T) {
 	m := typeSearch(listFixture(t), "gam")
 	m = drainCmds(m, keyMsg("enter")) // apply the filter
@@ -177,12 +177,13 @@ func TestRefreshKeepsFilterApplied(t *testing.T) {
 	}
 }
 
-// TestCursorClampsWhenTheBottomVMDisappears covers a subtle one: SetItems does
-// not clamp the cursor, and the SetHeight that follows remaps an out-of-range
-// index to the TOP of the list rather than the bottom (it recomputes
-// page/cursor against a new, smaller PerPage). So deleting the last VM moved
-// the selection to the FIRST one, and the next "d" would arm a delete on the
-// wrong VM. This repo has shipped a delete-the-wrong-VM bug before.
+// TestCursorClampsWhenTheBottomVMDisappears covers a subtle case. SetItems
+// does not clamp the cursor. The SetHeight that follows remaps an
+// out-of-range index to the TOP of the list rather than the bottom, since
+// it recomputes page and cursor against a new, smaller PerPage. Deleting
+// the last VM therefore moved the selection to the FIRST one, and the next
+// "d" would arm a delete on the wrong VM. This repo has shipped a
+// delete-the-wrong-VM bug before.
 func TestCursorClampsWhenTheBottomVMDisappears(t *testing.T) {
 	m := listFixture(t) // alpha, beta, gamma
 	m = drainCmds(m, keyMsg("j"))
@@ -223,12 +224,12 @@ func TestFirstRunSaysHowToStart(t *testing.T) {
 
 // TestBrokenRowContinuationAlignsUnderText pins the wrap alignment on a
 // broken VM's parse error. vmDelegate.Render's plain row for a good VM is
-// sized to fit listWidth (TestListWidthFitsARunningRow guards that), but
+// sized to fit listWidth (TestListWidthFitsARunningRow guards that). But
 // brokenReason allows up to 60 characters of TOML error on top of a
 // "%-14s broken: " prefix, so a real parse error routinely needs a second
 // line. Left to paneAt's own word-wrap over the whole rendered list, the
 // continuation used to land flush against the pane's padding, under the
-// cursor rather than under the row's own text, and read as a second broken
+// cursor rather than under the row's own text. It read as a second broken
 // entry instead of a continuation of the first.
 func TestBrokenRowContinuationAlignsUnderText(t *testing.T) {
 	m := model{screen: screenList, width: 80, height: 30, list: newVMList(), provisioning: map[string]provState{}}

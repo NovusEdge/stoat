@@ -6,15 +6,13 @@ package main
 
 import "os"
 
-// main just dispatches to run, which is defined per platform:
-// main_linux.go builds and installs stoat, main_other.go prints the friendly
-// "Linux-only" message. Splitting it this way, rather than gating the
-// message with a runtime.GOOS check here, is what makes the message
-// reachable at all, since internal/installer imports kvm_linux.go's
-// KVMCheck unconditionally, so this package does not compile on a
-// non-Linux GOOS in the first place, and an import that never compiles can
-// never run its runtime check. See kvm_linux.go's comment: this is the
-// same platform-seam pattern stoat already uses.
+// main dispatches to run, defined per platform: main_linux.go builds and
+// installs stoat, main_other.go prints the Linux-only message.
+//
+// A runtime.GOOS check here cannot replace this split. internal/installer
+// imports kvm_linux.go's KVMCheck unconditionally, so this package refuses
+// to compile on a non-Linux GOOS. Code that never compiles never runs its
+// check. See kvm_linux.go's comment for the same platform-seam pattern.
 func main() {
 	os.Exit(run())
 }

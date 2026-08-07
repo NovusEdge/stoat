@@ -1,15 +1,15 @@
-// Package guest owns everything stoat knows about guest operating systems:
-// the login shell a seeded account needs, the packages a base seed assumes
-// but an image may not ship, which provisioning backend applies, the
-// interactive installer's name, the default ssh user, the package-manager
-// commands a scaffolded recipe uses, and the filename hints that recognise
-// the OS in a bring-your-own image.
+// Package guest owns every fact stoat knows about a guest operating system:
+// the login shell for a seeded account, packages the base seed assumes but
+// an image may not ship, the provisioning backend, the interactive
+// installer's name, the default ssh user, the package-manager commands a
+// scaffolded recipe uses, and the filename hints that recognise the OS in a
+// bring-your-own image.
 //
-// Adding an OS means adding one entry to registry below, and every field
-// must be filled: a missing field does not fail loudly, it fails silently,
-// as an unselectable catalog entry, an empty OS that hands cloud-init a shell
-// the image doesn't have, or a VM offered zero recipes. See
-// docs/design/guest-subsystem.md for the incident that made this the rule.
+// Adding an OS means adding one entry to registry below. Every field must
+// be filled. A missing field fails silently: an unselectable catalog entry,
+// an OS that hands cloud-init a shell the image lacks, or a VM offered zero
+// recipes. See docs/design/guest-subsystem.md for the incident that made
+// this the rule.
 package guest
 
 // InitSystem identifies which init system a guest OS boots. It exists
@@ -29,30 +29,29 @@ const (
 type OS struct {
 	Name string // canonical identity, matches vm.toml's os field
 
-	// Shell is the login shell for a seeded account. It MUST exist in the
-	// image: cloud-init's user module fails outright on a missing shell,
-	// leaving no account and no authorized_keys, and the only symptom is
-	// "Permission denied (publickey)" forever.
+	// Shell is the login shell for a seeded account. It must exist in the
+	// image. cloud-init's user module fails outright on a missing shell,
+	// leaving no account and no authorized_keys. The only symptom is
+	// "Permission denied (publickey)".
 	Shell string
 
-	// SeedPackages are packages the base seed ASSUMES are present but which
-	// this image does not ship. Alpine needs sudo: the users: sudo key
-	// writes a sudoers fragment, and the binary is absent (the cloud-init
-	// aport prefers doas).
+	// SeedPackages are packages the base seed assumes are present but the
+	// image does not ship. Alpine needs sudo: the users: sudo key writes a
+	// sudoers fragment, but Alpine's cloud-init aport ships doas, not sudo.
 	SeedPackages []string
 
-	// Backend names how this OS is provisioned: "apkovl" | "cloudinit" |
-	// "ssh". This stays a string here, not the Backend interface itself:
-	// package guest owns OS data only and must stay a zero-import leaf, so
-	// the interface lives in internal/backend, one level up. See
+	// Backend names how this OS is provisioned: "apkovl", "cloudinit", or
+	// "ssh". It stays a string here, not the Backend interface itself.
+	// Package guest holds OS data only and stays a zero-import leaf; the
+	// interface lives in internal/backend, one level up. See
 	// docs/design/guest-subsystem.md §3.2.
 	Backend string
 
-	// Init is the guest's init system. It is its own field rather than
-	// derived from Backend: apkovl and OpenRC both happen to mean Alpine
-	// today, but the two facts are independent (a BYO cloudinit image could
-	// run OpenRC, or a future apkovl-based distro could run systemd), and
-	// a recipe's "requires systemd" needs to ask the real question.
+	// Init is the guest's init system. It is a separate field, not derived
+	// from Backend. Today apkovl and OpenRC both mean Alpine, but the two
+	// facts are independent: a BYO cloudinit image could run OpenRC, or a
+	// future apkovl-based distro could run systemd. A recipe's "requires
+	// systemd" needs the real answer, not a Backend guess.
 	Init InitSystem
 
 	// Installer is the interactive install command named in UI hints.
@@ -72,17 +71,17 @@ type OS struct {
 	PkgInstall string
 
 	// FilenameHints recognise this OS in a BYO image filename. An empty OS
-	// on a BYO image is the dangerous case: it silently selects every
-	// default, which is how an Alpine image gets asked for /bin/bash.
+	// on a BYO image is dangerous: it silently selects every default, which
+	// is how an Alpine image ends up asked for /bin/bash.
 	FilenameHints []string
 
 	// CloudRecipes reports whether an OS is offered the shared
-	// "*.cloud.yaml" fragment set at all: true does not mean every shared
-	// fragment applies. cloud-init's packages: list has no per-distro
-	// syntax, so devtools.cloud.yaml's names happen to hold for Alpine's
-	// apk too, but xfce.cloud.yaml's systemd runcmd does not (Alpine is
-	// OpenRC): Alpine gets devtools.cloud.yaml from the shared set and its
-	// own xfce.alpine.cloud.yaml, exactly like Fedora gets its own
+	// "*.cloud.yaml" fragment set. True does not mean every shared fragment
+	// applies. cloud-init's packages: list has no per-distro syntax, so
+	// devtools.cloud.yaml's names work for Alpine's apk too, but
+	// xfce.cloud.yaml's systemd runcmd does not, since Alpine runs OpenRC.
+	// Alpine gets devtools.cloud.yaml from the shared set plus its own
+	// xfce.alpine.cloud.yaml, the same way Fedora gets its own
 	// xfce.fedora.cloud.yaml. See recipes/recipes.go's List doc comment for
 	// how a per-OS fragment and the shared set combine.
 	CloudRecipes bool

@@ -15,12 +15,11 @@ import (
 )
 
 // TestTickGenerationOnlyReArmsCurrentChain proves the fix for the ticker
-// chain leak: a tickMsg carrying a stale generation must not re-arm (it
-// falls through and its chain dies), while one carrying the current
-// generation does re-arm. Without the generation check, updateDetail
-// re-armed any tickMsg as long as m.screen == screenDetail, regardless of
-// which visit to the detail screen scheduled it, so every esc->right cycle
-// left an extra self-perpetuating chain running forever.
+// chain leak. A tickMsg carrying a stale generation must not re-arm; its
+// chain dies. One carrying the current generation must re-arm. Without the
+// generation check, updateDetail re-armed any tickMsg as long as
+// m.screen == screenDetail, regardless of which visit scheduled it. Every
+// esc-then-right cycle left an extra chain running forever.
 func TestTickGenerationOnlyReArmsCurrentChain(t *testing.T) {
 	v := core.VM{Name: "gen-test", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 
@@ -55,10 +54,10 @@ func TestTickGenerationOnlyReArmsCurrentChain(t *testing.T) {
 }
 
 // TestRapidReentryLeavesOneLiveGeneration simulates entering the detail
-// screen 5 times in rapid succession (as list.go's "right"/"l" case does:
-// bump detailGen, schedule tick(detailGen)) and confirms only the tick
-// carrying the final generation re-arms; every earlier chain is stale by
-// construction and dies on arrival.
+// screen 5 times in rapid succession, as list.go's "right"/"l" case does:
+// bump detailGen, schedule tick(detailGen). Only the tick carrying the final
+// generation must re-arm. Every earlier chain is stale by construction and
+// dies on arrival.
 func TestRapidReentryLeavesOneLiveGeneration(t *testing.T) {
 	v := core.VM{Name: "gen-test", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, detail: detailModel{vm: v}}
@@ -85,11 +84,11 @@ func TestRapidReentryLeavesOneLiveGeneration(t *testing.T) {
 }
 
 // TestToggleInstalledFailedSaveLeavesMemoryUnchanged proves the fix for the
-// "i" toggle: on a write failure, the in-memory VM's Installed field must
-// stay exactly as it was on disk, not flip and stick despite the write
-// never landing. Also proves the "i" key now goes through core.Update (which
-// takes the data-root lock) rather than the second, unlocked Save() it used
-// to call straight on vm.toml. Forces the failure by making vm.toml
+// "i" toggle. On a write failure, the in-memory VM's Installed field must
+// stay exactly as it was on disk. It must not flip and stick when the write
+// never lands. This also proves the "i" key goes through core.Update, which
+// takes the data-root lock, instead of the second unlocked Save() it used to
+// call straight on vm.toml. It forces the failure by making vm.toml
 // read-only, which a non-root user cannot write to regardless of directory
 // permissions.
 func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
@@ -139,10 +138,10 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	}
 }
 
-// TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable proves the footer only
-// advertises "t" (type console password into guest) when the VM actually has
-// one to send. A stopped VM or one with no console password set must not
-// show it, since pressing it then can never succeed.
+// TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable proves the footer
+// advertises "t" (type console password into guest) only when the VM has
+// one to send. A stopped VM, or one with no console password set, must not
+// show it. Pressing it then could never succeed.
 func TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -163,10 +162,10 @@ func TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable(t *testing.T) {
 	}
 }
 
-// TestTypeConsolePasswordKeyRefusesWhenUnavailable proves "t" reports a clear
-// toast instead of silently doing nothing (or attempting to dial a monitor
-// socket that cannot exist) when the VM is stopped or has no console
-// password.
+// TestTypeConsolePasswordKeyRefusesWhenUnavailable proves "t" reports a
+// clear toast instead of doing nothing silently. It also must not attempt to
+// dial a monitor socket that cannot exist, when the VM is stopped or has no
+// console password.
 func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	v := core.VM{Name: "stopped-vm", Mode: "cloud", ConsolePassword: "stoat", State: core.StateStopped}
 	m := model{screen: screenDetail, detail: detailModel{vm: v}}
@@ -181,11 +180,10 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 
 // A cloud VM never gets a qemu window (qemu.NeedsWindow), so the detail
 // screen must surface the VNC socket as the actual way to get a display.
-// Before this fix nothing anywhere told the user that socket exists, and
-// the console-password row claimed a "(qemu window only)" that never
-// appears for a VM this password is ever set on (it's only written for the
-// cloudinit backend, which is always cloud mode). See IMPORTANT 3 in the
-// final review.
+// Before this fix, nothing told the user that socket exists. The
+// console-password row also claimed a "(qemu window only)" that never
+// applies: the password is set only by the cloudinit backend, which is
+// always cloud mode.
 func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "vnc.sock")
@@ -205,11 +203,11 @@ func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
 	}
 }
 
-// The one case that DOES get a real qemu window is an uninstalled disk VM
-// (qemu.NeedsWindow). It should not additionally advertise a VNC row that
-// implies the display lives at a socket instead.
-// It gets that window only where there is a graphical session to open it on,
-// so the override is pinned rather than left to whatever host runs the test.
+// The one case that gets a real qemu window is an uninstalled disk VM
+// (qemu.NeedsWindow). It must not also advertise a VNC row that implies the
+// display lives at a socket. It gets that window only when a graphical
+// session exists to open it on, so the test pins the override instead of
+// relying on the host running it.
 func TestDetailOmitsVNCForAWindowedVM(t *testing.T) {
 	t.Setenv(qemu.GraphicalEnv, "1")
 	v := core.VM{Name: "installing", Mode: "disk", Installed: false, Paths: core.Paths{Dir: t.TempDir()}}
@@ -243,10 +241,10 @@ func TestDetailExplainsTheVNCFallbackOnAHeadlessHost(t *testing.T) {
 	}
 }
 
-// A socket path alone was not enough. The reported failure is a disk VM whose
-// window disappears the moment setup-alpine marks it installed, by a user left
-// holding a path and no idea what opens it, so the detail pane names a viewer
-// that is actually on this host.
+// A socket path alone was not enough. A disk VM's window disappears the
+// moment setup-alpine marks it installed, leaving the user with a path and
+// no way to open it. The detail pane instead names a viewer actually
+// installed on this host.
 func TestDetailShowsHowToAttachToTheVNCSocket(t *testing.T) {
 	fakeViewerPath(t, "gvncviewer")
 	v := core.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Paths: core.Paths{Dir: t.TempDir()}}
@@ -317,11 +315,10 @@ func TestCopyConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 }
 
-// TestDetailShowsForwards proves a VM's declared port forwards are rendered
-// on the detail screen. Before this, core.VM.Forwards had no reader anywhere
-// in the TUI (the migration plan's D1), which is how the edit screen was
-// able to assign a VM's ssh port to a host port another VM had already
-// forwarded without anyone noticing.
+// TestDetailShowsForwards proves a VM's declared port forwards render on the
+// detail screen. Before this, core.VM.Forwards had no reader anywhere in the
+// TUI (the migration plan's D1). That gap let the edit screen assign a VM's
+// ssh port to a host port another VM had already forwarded, unnoticed.
 func TestDetailShowsForwards(t *testing.T) {
 	v := core.VM{
 		Name: "fwd-vm", Mode: "live", Paths: core.Paths{Dir: t.TempDir()},
@@ -337,9 +334,9 @@ func TestDetailShowsForwards(t *testing.T) {
 }
 
 // TestDetailOmitsForwardsRowWhenNone proves a VM with no declared forwards
-// renders without a "forward" row at all, rather than an empty one: the
-// same convention every other optional row on this screen (iso, share,
-// recipes, …) already follows.
+// renders without a "forward" row at all, not an empty one. Every other
+// optional row on this screen (iso, share, recipes, …) follows the same
+// convention.
 func TestDetailOmitsForwardsRowWhenNone(t *testing.T) {
 	v := core.VM{Name: "no-fwd", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 100, height: 40}
@@ -349,18 +346,18 @@ func TestDetailOmitsForwardsRowWhenNone(t *testing.T) {
 	if strings.Contains(out, "forward") {
 		t.Fatalf("VM with no forwards must not render a forward row:\n%s", out)
 	}
-	// Also catches a stray active/next-start caption rendered on its own
-	// (facts.row with an empty label), which the "forward" check above
-	// would miss since that line never contains the word "forward" itself.
+	// This also catches a stray active/next-start caption rendered on its
+	// own (facts.row with an empty label). The "forward" check above would
+	// miss it: that line never contains the word "forward".
 	if strings.Contains(out, "in effect") || strings.Contains(out, "next start") {
 		t.Fatalf("VM with no forwards must not render an effect caption either:\n%s", out)
 	}
 }
 
 // TestDetailShowsRecipeStatus proves the recipes row reports each recipe's
-// applied state individually: pending for one never run, applied (with the
-// date) for one recorded in v.Applied, and stale for an entry left in
-// v.Applied whose recipe was since removed from v.Recipes.
+// applied state individually. A recipe never run shows pending. One
+// recorded in v.Applied shows applied, with the date. An entry in v.Applied
+// whose recipe was since removed from v.Recipes shows stale.
 func TestDetailShowsRecipeStatus(t *testing.T) {
 	appliedAt := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	v := core.VM{
@@ -389,13 +386,13 @@ func TestDetailShowsRecipeStatus(t *testing.T) {
 }
 
 // TestDetailForwardsDistinguishRunningFromStopped proves the rendering never
-// collapses "in effect" and "applies at next start" into the same text: a
-// running VM's forwards must read differently from a stopped VM's, because
-// qemu cannot hot-add a hostfwd rule to a live process (docs/design/core-
-// api.md §8 decision 5). Running is set directly on core.VM.State rather
-// than faked via a pidfile: core.Get already resolved that question once
-// (via qemu.Running) by the time a caller has a core.VM, and viewDetail
-// reads that resolved State instead of re-deriving it from the filesystem.
+// collapses "in effect" and "applies at next start" into the same text. A
+// running VM's forwards must read differently from a stopped VM's: qemu
+// cannot hot-add a hostfwd rule to a live process (docs/design/core-
+// api.md §8 decision 5). Running is set directly on core.VM.State, not
+// faked via a pidfile. core.Get already resolves that question, via
+// qemu.Running, by the time a caller has a core.VM. viewDetail reads that
+// resolved State instead of re-deriving it from the filesystem.
 func TestDetailForwardsDistinguishRunningFromStopped(t *testing.T) {
 	fwds := []core.PortForward{{HostPort: 8080, GuestPort: 80}}
 
@@ -423,15 +420,15 @@ func TestDetailForwardsDistinguishRunningFromStopped(t *testing.T) {
 	}
 }
 
-// TestLogPagerOpensAndEscCloses proves "L" opens the console log pager (via
-// its logOpenedMsg round trip, since the read happens in a Cmd off the UI
-// goroutine) and esc closes it again, handing the detail screen's normal
+// TestLogPagerOpensAndEscCloses proves "L" opens the console log pager. The
+// read happens in a Cmd off the UI goroutine, via the logOpenedMsg round
+// trip. esc closes the pager again and hands the detail screen's normal
 // body back.
 func TestLogPagerOpensAndEscCloses(t *testing.T) {
-	// core.Logs (which openLogPager calls) resolves the VM by name under
-	// config.Root(), not by v.Dir, so the fixture has to live there: a
+	// core.Logs, which openLogPager calls, resolves the VM by name under
+	// config.Root(), not by v.Dir. The fixture has to live there. A
 	// t.TempDir() VM with no matching config.Root() entry is "not found" to
-	// it regardless of what v.Dir points at.
+	// it, regardless of what v.Dir points at.
 	t.Setenv("STOAT_HOME", t.TempDir())
 	cv := &config.VM{Name: "pager-vm", Mode: "live"}
 	if err := cv.Save(); err != nil {
@@ -489,9 +486,9 @@ func TestLogPagerOpensAndEscCloses(t *testing.T) {
 }
 
 // TestLogPagerEscTakesPriorityOverDetailBindings proves that while the pager
-// is open, esc closes IT rather than falling through to the detail screen's
-// own esc/back binding, which would otherwise leave the pager's viewport
-// state dangling on a screen the user has already left.
+// is open, esc closes it. It must not fall through to the detail screen's
+// own esc/back binding. That fallthrough would leave the pager's viewport
+// state dangling on a screen the user already left.
 func TestLogPagerEscTakesPriorityOverDetailBindings(t *testing.T) {
 	v := core.VM{Name: "pager-vm-2", Mode: "live", Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 100, height: 40}

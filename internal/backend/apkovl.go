@@ -8,10 +8,10 @@ import (
 )
 
 // apkovlBackend is Alpine's provisioning mechanism: a *.apkovl.tar.gz served
-// to the guest by QEMU's vvfat, applied both to a genuine live boot and to
-// the installer environment of an uninstalled disk-mode VM (setup-disk in
+// to the guest by QEMU's vvfat. It applies to a genuine live boot, and to
+// the installer environment of an uninstalled disk-mode VM. setup-disk in
 // sys mode copies the running system, including stoat's key, onto the
-// target; without the overlay the installed guest is unreachable).
+// target. Without the overlay the installed guest is unreachable.
 type apkovlBackend struct{}
 
 func (apkovlBackend) Name() string { return "apkovl" }
@@ -23,12 +23,12 @@ func applies(v *config.VM) bool {
 	return v.Mode == "live" || (v.Mode == "disk" && !v.Installed)
 }
 
-// Prepare rebuilds the overlay on every start applies is true for. Unlike
-// the cloudinit backend, there is no staleness check: a live/installer VM is
-// disposable, so always rebuilding is simpler than tracking whether the
-// previous build is still good, and it costs nothing a live boot doesn't
-// already pay for. See docs/design/guest-subsystem.md §10 ("Risks") for why
-// this asymmetry with cloudinit's once-ever Prepare is intentional.
+// Prepare rebuilds the overlay on every start where applies is true.
+// Unlike the cloudinit backend, there is no staleness check: a live or
+// installer VM is disposable. Always rebuilding is simpler than tracking
+// whether the previous build is still good, and costs nothing a live boot
+// doesn't already pay for. See docs/design/guest-subsystem.md §10 ("Risks")
+// for why this asymmetry with cloudinit's once-ever Prepare is intentional.
 func (apkovlBackend) Prepare(v *config.VM) error {
 	if !applies(v) {
 		return nil

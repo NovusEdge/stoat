@@ -12,10 +12,10 @@ import (
 )
 
 // editFixture saves a real VM under a fresh STOAT_HOME and opens it for
-// editing. It has to be a real, saved VM rather than a bare struct: the form
-// now routes through core.Update, which loads by NAME under config.Root()
-// (see core.VM.Name's own comment on why identity is the directory), not
-// from whatever the caller happens to be holding in memory.
+// editing. It must be a real, saved VM, not a bare struct. The form routes
+// through core.Update, which loads by name under config.Root() (see
+// core.VM.Name's own comment on why identity is the directory), not from
+// whatever the caller holds in memory.
 func editFixture(t *testing.T) editModel {
 	t.Helper()
 	t.Setenv("STOAT_HOME", t.TempDir())
@@ -37,10 +37,9 @@ func TestParseSizeRejectsRelative(t *testing.T) {
 		}
 	}
 
-	// And it must be refused all the way through the edit form, not just by
-	// the parser: this is the exact string a past release wrote into a live
-	// VM's vm.toml (see core.ParseSize's own comment), so this is not a
-	// synthetic case.
+	// The edit form must refuse it too, not just the parser. A past release
+	// wrote this exact string into a live VM's vm.toml (see core.ParseSize's
+	// own comment).
 	e := editFixture(t)
 	e.inputs[eDisk].SetValue("+8G")
 	p, err := e.buildPatch()
@@ -95,14 +94,14 @@ func TestEditRefusesDiskShrink(t *testing.T) {
 	}
 }
 
-// TestEditRefusesDiskShrinkWithUnparseableCurrentSize is the regression test
-// for the data-destroying bug this migration fixes (D2): the old form parsed
-// the VM's CURRENT disk size, and when THAT parse failed, skipped the shrink
-// check entirely and resized anyway. "+8G" is not a hypothetical value; it is
-// the exact string core.ParseSize's own comment says a past release wrote
-// into vm.toml. Such a VM could be "shrunk" to 1G, which ran qemu-img resize
-// and truncated the image. core.validateDiskGrow refuses outright when the
-// current size won't parse, and this form must not be looser than core.
+// TestEditRefusesDiskShrinkWithUnparseableCurrentSize is a regression test.
+// The old form parsed the VM's current disk size, and when that parse
+// failed, skipped the shrink check entirely and resized anyway. "+8G" is
+// not a hypothetical value: core.ParseSize's own comment says a past
+// release wrote it into vm.toml. Such a VM could be "shrunk" to 1G, which
+// ran qemu-img resize and truncated the image. core.validateDiskGrow now
+// refuses outright when the current size does not parse, and this form
+// must not be looser than core.
 func TestEditRefusesDiskShrinkWithUnparseableCurrentSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{
@@ -124,11 +123,11 @@ func TestEditRefusesDiskShrinkWithUnparseableCurrentSize(t *testing.T) {
 	}
 }
 
-// TestEditRefusesPortCollisionWithForward is the regression test for D1: the
-// old form only checked a candidate ssh port against other VMs' SSHPort
-// field, never their declared Forwards. core.Update's validateSSHPort (via
-// validateForwards) also refuses a port matching ANY other VM's forward, so
-// this form must not be looser than that either.
+// TestEditRefusesPortCollisionWithForward is a regression test. The old form
+// checked a candidate ssh port only against other VMs' SSHPort field, never
+// their declared Forwards. core.Update's validateSSHPort, via
+// validateForwards, also refuses a port matching any other VM's forward.
+// This form must not be looser than that.
 func TestEditRefusesPortCollisionWithForward(t *testing.T) {
 	e := editFixture(t) // "work", ssh 2200
 	other := &config.VM{
@@ -277,9 +276,9 @@ func TestEditBuildPatchDoesNotMutateVM(t *testing.T) {
 }
 
 // TestEditTabOrderSkipsDiskInLiveMode mirrors the create form's rule: focus
-// must never land on a row viewEdit doesn't draw, or keystrokes silently edit
-// an invisible field. Mode is immutable now, so this reads e.vm.Mode
-// directly rather than a separately-tracked form field.
+// must never land on a row viewEdit does not draw. Otherwise keystrokes
+// silently edit an invisible field. Mode is immutable, so this test reads
+// e.vm.Mode directly, not a separately-tracked form field.
 func TestEditTabOrderSkipsDiskInLiveMode(t *testing.T) {
 	e := editFixture(t)
 	e.vm.Mode = "live"
@@ -301,10 +300,9 @@ func TestEditTabOrderSkipsDiskInLiveMode(t *testing.T) {
 	}
 }
 
-// TestEditCloudVMSavesWithoutADiskSize is the regression test for a reported
-// bug: a cloud VM boots a CoW overlay of its base image and carries no disk
-// size in vm.toml at all, so the field opens empty, and a blank field must
-// not be turned into a disk patch.
+// TestEditCloudVMSavesWithoutADiskSize is a regression test. A cloud VM
+// boots a CoW overlay of its base image and carries no disk size in vm.toml.
+// The field opens empty, and a blank field must not turn into a disk patch.
 func TestEditCloudVMSavesWithoutADiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	v := &config.VM{

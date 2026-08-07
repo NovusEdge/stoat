@@ -53,9 +53,8 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 }
 
 func runUp(a *Args, stdout, stderr io.Writer) int {
-	// core.Get first, exactly where config.Load used to sit: a caller must
-	// learn "no such VM" (or "broken") before any progress line prints, not
-	// after, the same reason it existed here originally.
+	// core.Get first: a caller must learn "no such VM" or "broken" before
+	// any progress line prints, not after.
 	v, err := core.Get(a.VM)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
@@ -143,11 +142,9 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "stopping %s...\n", a.VM)
 	}
 	if err := core.Stop(a.VM); err != nil {
-		// The State check above already catches the common case before any
-		// output prints; errors.Is here is the defensive/authoritative path
-		// (a VM stopped between the check and this call) rather than the
-		// primary one, and it's what actually produces today's exact message
-		// for that race.
+		// The State check above catches the common case before any output
+		// prints. This handles the race: a VM stopped between the check and
+		// this call.
 		if errors.Is(err, core.ErrNotRunning) {
 			return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
 		}
@@ -189,10 +186,9 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	if err := core.Destroy(a.VM); err != nil {
-		// Same belt-and-braces as runDown: the State check above already
-		// refuses a running VM before the confirmation prompt even shows,
-		// so this only fires on the started-after-the-check race, but it's
-		// what reproduces today's exact "stop it first" message for it.
+		// Same race as runDown: the State check above refuses a running VM
+		// before the confirmation prompt, so this only fires when the VM
+		// started between the check and this call.
 		if errors.Is(err, core.ErrAlreadyRunning) {
 			return a.failMsg(stdout, stderr, core.ErrAlreadyRunning, a.VM+" is running; stop it first")
 		}

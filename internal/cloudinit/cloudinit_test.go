@@ -54,11 +54,11 @@ func unpackArchive(t *testing.T, ud string) []archiveDoc {
 const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
 
 func TestSeedWritesUserDataAndMetaData(t *testing.T) {
-	// Seed() hard-errors without xorriso, on purpose: a silent fallback used
-	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
-	// start. That contract has its own test below; this one is about the
-	// seed's CONTENTS, so it skips rather than turning CI permanently red on
-	// a machine that simply hasn't got the tool.
+	// Seed() hard-errors without xorriso by design: a silent fallback used
+	// to leave a missing xorriso as a permanent "Could not open seed.iso"
+	// at qemu start. That contract has its own test below. This test only
+	// checks the seed's contents, so it skips instead of failing CI on a
+	// machine without the tool.
 	if !haveXorriso() {
 		t.Skip("xorriso not installed: skipping seed-content test")
 	}
@@ -152,12 +152,11 @@ func TestHaveCloudInit(t *testing.T) {
 	_ = haveCloudInit()
 }
 
-// TestValidateFragmentDegradesWithoutCloudInit is the guest-subsystem.md §10
-// requirement stated directly: cloud-init schema may be absent (Arch does
-// not install it by default), and that must show up as "not checked":
-// annotated == "" and err == nil, never as "assumed valid" (which would
-// need a non-nil, affirmatively-passing result) and never as a hard error
-// that would block recipe selection just because the host lacks the tool.
+// TestValidateFragmentDegradesWithoutCloudInit pins guest-subsystem.md §10:
+// cloud-init schema may be absent (Arch does not install it by default).
+// Absence must show up as "not checked": annotated == "" and err == nil.
+// It must never read as "assumed valid", and it must never block recipe
+// selection just because the host lacks the tool.
 func TestValidateFragmentDegradesWithoutCloudInit(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	annotated, err := ValidateFragment("#cloud-config\npackages:\n  - git\n")
@@ -169,18 +168,18 @@ func TestValidateFragmentDegradesWithoutCloudInit(t *testing.T) {
 	}
 }
 
-// TestSeedNoRecipesByteIdentical guards the hardware-proven baseline: a VM
+// TestSeedNoRecipesByteIdentical guards the hardware-proven baseline. A VM
 // with no cloud recipes must get exactly the same users:/ssh_pwauth: body
-// that was hand-verified against a real Ubuntu 24.04 boot (see
-// .cloudinit-test/seed/user-data), with nothing appended, now carried
-// as the sole document's content inside the cloud-config-archive, plus the
+// hand-verified against a real Ubuntu 24.04 boot (see
+// .cloudinit-test/seed/user-data), with nothing appended. That body is now
+// the sole document's content inside the cloud-config-archive, plus the
 // merge_how directive every document gets (see withMergeHow).
 func TestSeedNoRecipesByteIdentical(t *testing.T) {
-	// Seed() hard-errors without xorriso, on purpose: a silent fallback used
-	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
-	// start. That contract has its own test below; this one is about the
-	// seed's CONTENTS, so it skips rather than turning CI permanently red on
-	// a machine that simply hasn't got the tool.
+	// Seed() hard-errors without xorriso by design: a silent fallback used
+	// to leave a missing xorriso as a permanent "Could not open seed.iso"
+	// at qemu start. That contract has its own test below. This test only
+	// checks the seed's contents, so it skips instead of failing CI on a
+	// machine without the tool.
 	if !haveXorriso() {
 		t.Skip("xorriso not installed: skipping seed-content test")
 	}
@@ -211,17 +210,17 @@ func TestSeedNoRecipesByteIdentical(t *testing.T) {
 	}
 }
 
-// TestSeedMergesCloudRecipe is the C1 regression: a cloud VM with a recipe
+// TestSeedMergesCloudRecipe is the C1 regression. A cloud VM with a recipe
 // selected must produce a cloud-config-archive whose first document still
-// contains the proven users: block verbatim (plus the merge_how directive),
-// and whose second document is the recipe's fragment, byte-for-byte, plus
-// its own directive.
+// contains the proven users: block verbatim, plus the merge_how directive.
+// The second document is the recipe's fragment, byte-for-byte, plus its own
+// directive.
 func TestSeedMergesCloudRecipe(t *testing.T) {
-	// Seed() hard-errors without xorriso, on purpose: a silent fallback used
-	// to make a missing xorriso a permanent "Could not open seed.iso" at qemu
-	// start. That contract has its own test below; this one is about the
-	// seed's CONTENTS, so it skips rather than turning CI permanently red on
-	// a machine that simply hasn't got the tool.
+	// Seed() hard-errors without xorriso by design: a silent fallback used
+	// to leave a missing xorriso as a permanent "Could not open seed.iso"
+	// at qemu start. That contract has its own test below. This test only
+	// checks the seed's contents, so it skips instead of failing CI on a
+	// machine without the tool.
 	if !haveXorriso() {
 		t.Skip("xorriso not installed: skipping seed-content test")
 	}
@@ -265,11 +264,10 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 	}
 }
 
-// TestSeedArchiveHeaderIsFirstLine pins the exact requirement NoCloud checks
-// to recognise a cloud-config-archive: "#cloud-config-archive" must be the
-// very first line of the file, verbatim (see nocloud format-detection:
-// the same shape as the "#cloud-config" match this package already relied
-// on for the pre-archive format).
+// TestSeedArchiveHeaderIsFirstLine pins what NoCloud checks to recognise a
+// cloud-config-archive: "#cloud-config-archive" must be the first line of
+// the file, verbatim. Same shape as the "#cloud-config" match this package
+// already relied on for the pre-archive format.
 func TestSeedArchiveHeaderIsFirstLine(t *testing.T) {
 	ud, err := userData(&config.VM{Name: "vm"}, testPubkey, nil)
 	if err != nil {
@@ -281,17 +279,16 @@ func TestSeedArchiveHeaderIsFirstLine(t *testing.T) {
 	}
 }
 
-// TestArchiveBothPackagesFragmentsSurvive is the required regression for the
-// merge fix: two fragments that BOTH declare packages: must both survive as
-// distinct documents, each carrying the explicit merge_how directive that
-// makes cloud-init append rather than let the second one silently lose to
-// cloud-init's default no_replace=True (the "first wins" bug this change
-// fixes, see guest-subsystem.md §6). This package no longer parses
-// packages: out of fragments at all: proving survival here means proving
-// the fragment bodies are carried through unparsed AND each is tagged with
-// the directive that makes cloud-init's own merge keep both, rather than
-// asserting anything about what cloud-init would do (that needs a real
-// boot).
+// TestArchiveBothPackagesFragmentsSurvive is the regression for the merge
+// fix (guest-subsystem.md §6). Two fragments that both declare packages:
+// must survive as distinct documents, each carrying the merge_how directive
+// that makes cloud-init append instead of letting the second one silently
+// lose to cloud-init's default no_replace=True ("first wins").
+//
+// This package no longer parses packages: out of fragments. Proving
+// survival here means proving the fragment bodies pass through unparsed and
+// each is tagged with the append directive. It does not assert what
+// cloud-init itself would do; that needs a real boot.
 func TestArchiveBothPackagesFragmentsSurvive(t *testing.T) {
 	fragA := "#cloud-config\npackages:\n  - xfce4\n"
 	fragB := "#cloud-config\npackages:\n  - docker\n"
@@ -333,11 +330,10 @@ func TestArchiveBothPackagesFragmentsSurvive(t *testing.T) {
 	}
 }
 
-// TestArchiveWriteFilesSurvives is the write_files: regression this whole
-// change exists to fix: mergeCloudRecipes used to understand only
-// packages:/runcmd: and silently drop everything else (guest-subsystem.md
-// §1c). Since fragments are now handed to cloud-init verbatim, any key
-// survives.
+// TestArchiveWriteFilesSurvives is the write_files: regression this change
+// fixes: mergeCloudRecipes used to understand only packages:/runcmd: and
+// silently dropped everything else (guest-subsystem.md §1c). Fragments now
+// pass to cloud-init verbatim, so any key survives.
 func TestArchiveWriteFilesSurvives(t *testing.T) {
 	fragment := "#cloud-config\nwrite_files:\n  - path: /etc/motd\n    content: hello\n"
 
@@ -357,11 +353,11 @@ func TestArchiveWriteFilesSurvives(t *testing.T) {
 	}
 }
 
-// TestSeedErrorsWithoutXorriso is the I1 regression: Seed must hard-error,
-// never silently fall back to handing back the seed directory (that dead
-// vvfat fallback used to make a missing xorriso a permanent, silent
-// "Could not open seed.iso" failure at qemu start, since ensureCloudOverlay
-// discards Seed's return and never re-seeds once the overlay exists).
+// TestSeedErrorsWithoutXorriso is the I1 regression. Seed must hard-error,
+// never fall back silently to the seed directory. That dead vvfat fallback
+// used to turn a missing xorriso into a permanent, silent "Could not open
+// seed.iso" failure at qemu start: ensureCloudOverlay discards Seed's return
+// and never re-seeds once the overlay exists.
 func TestSeedErrorsWithoutXorriso(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -383,21 +379,21 @@ func TestSeedErrorsWithoutXorriso(t *testing.T) {
 }
 
 // TestSeedUserMatchesUser pins the exported User constant to the account the
-// template actually creates. They are two literals that must agree: the TUI
-// records User on the VM as its SSH user, and sshx defaults an empty one to
-// root, which cloud images lock. If they drift, every cloud VM connects as
-// an account that does not exist, and nothing else in the suite would notice.
+// template actually creates. The two literals must agree: the TUI records
+// User on the VM as its SSH user, and sshx defaults an empty user to root,
+// which cloud images lock. If they drift, every cloud VM connects as an
+// account that does not exist, and nothing else in the suite catches it.
 func TestSeedUserMatchesUser(t *testing.T) {
 	if !strings.Contains(userDataTemplate, "- name: "+User) {
 		t.Errorf("userDataTemplate does not create the account named by User (%q)", User)
 	}
 }
 
-// Alpine ships no bash. cloud-init's user module FAILS on a nonexistent
-// shell, so the account is never created and the key never lands: the
-// symptom is "Permission denied (publickey)" forever, not a fallback shell.
+// Alpine ships no bash. cloud-init's user module fails on a nonexistent
+// shell: the account is never created and the key never lands. The symptom
+// is "Permission denied (publickey)" forever, not a fallback shell.
 // Boot-tested against generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2:
-// /bin/bash refused every connection, /bin/ash connected first try.
+// /bin/bash refused every connection, /bin/ash connected on the first try.
 func TestSeedUsesTheGuestsOwnShell(t *testing.T) {
 	for _, tc := range []struct {
 		os, want, notWant string
@@ -463,14 +459,13 @@ func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
 	}
 }
 
-// Alpine's own extra-packages fragment (sudo) and a recipe's fragment
-// (git, tmux) both declare packages: they now live in separate archive
-// documents rather than being spliced into one packages: list by hand, and
-// each carries merge_how so cloud-init appends rather than lets the later
-// one win. This is the same regression TestArchiveBothPackagesFragmentsSurvive
-// covers generically; this one pins it specifically for the extraPackages
-// case, since that's a document this package builds itself, not one it was
-// merely handed.
+// Alpine's own extra-packages fragment (sudo) and a recipe's fragment (git,
+// tmux) both declare packages:. They live in separate archive documents
+// instead of being spliced into one packages: list by hand, and each
+// carries merge_how so cloud-init appends instead of letting the later one
+// win. TestArchiveBothPackagesFragmentsSurvive covers this regression
+// generically; this test pins it for extraPackages specifically, since that
+// document is one this package builds itself, not one it was handed.
 func TestSeedMergesAlpineSudoWithRecipePackages(t *testing.T) {
 	v := &config.VM{Name: "vm", OS: "alpine"}
 	fragment := "packages:\n  - git\n  - tmux\n\nruncmd:\n  - echo hi\n"

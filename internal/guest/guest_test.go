@@ -13,8 +13,8 @@ func TestRegistryFactsThatFailSilently(t *testing.T) {
 		pkgs      []string
 	}{
 		// Alpine ships no bash. cloud-init's user module fails outright on a
-		// missing shell, so no account is created and no key lands: the only
-		// symptom is "Permission denied (publickey)" forever. Boot-verified.
+		// missing shell: no account is created and no key lands. The only
+		// symptom is "Permission denied (publickey)".
 		{"alpine", "/bin/ash", []string{"sudo"}},
 		{"ubuntu", "/bin/bash", nil},
 		{"debian", "/bin/bash", nil},
@@ -34,9 +34,9 @@ func TestRegistryFactsThatFailSilently(t *testing.T) {
 	}
 }
 
-// Init must resolve to the OS's actual init system, not a Backend proxy:
-// Alpine is the only OpenRC entry, but that must not be the reason every
-// other OS reports systemd.
+// Init must resolve to the OS's actual init system, not a Backend proxy.
+// Alpine is the only OpenRC entry; that must not be the reason every other
+// OS reports systemd.
 func TestInitPerOS(t *testing.T) {
 	for _, tc := range []struct {
 		os   string

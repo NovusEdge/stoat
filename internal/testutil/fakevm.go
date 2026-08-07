@@ -18,30 +18,23 @@ import (
 // caller must defer.
 //
 // qemu.Running reads dir/qemu.pid and then requires dir+"/" to appear in
-// /proc/<pid>/cmdline (a pid alone is not enough: pids are reused, and a stale
-// pidfile would otherwise report a ghost). So the fake process has to be real,
-// alive, and carry the directory in its argv.
+// /proc/<pid>/cmdline. A pid alone is not enough: pids are reused, and a
+// stale pidfile would otherwise report a ghost. The fake process must be
+// real, alive, and carry the directory in its argv.
 //
-// THIS LIVES IN ONE PLACE ON PURPOSE. It previously existed as two
-// independently-maintained copies, in internal/core and internal/cli. Both
-// spawned `sleep 100 <dir>/marker`, which does not work because sleep sums
-// its arguments as durations and rejects a non-numeric one, so the process
-// exited about a millisecond in and the "running" VM was dead before anything
-// looked. When that was found, only one copy was fixed. The other went on
-// backing a test asserting that `rm` REFUSES to delete a running VM, and
-// failed roughly 40% of the time under concurrency while passing in isolation:
-// a test that intermittently proved the opposite of its name, over a
-// destructive operation.
+// This helper lives in one place, shared by internal/core and internal/cli,
+// so the two callers cannot drift apart on how the fake process is built.
 //
 // Two details are load-bearing:
 //
-//   - `sh -c "sleep 100; :"`, not `sh -c "sleep 100"`. A SIMPLE command makes
-//     sh exec it directly, replacing sh's own argv, and the directory, the
-//     entire point, vanishes from the cmdline. A compound command keeps sh
-//     alive as itself.
-//   - The returned stop func Waits after killing. Without it the child becomes
-//     a zombie, and a zombie's /proc/<pid>/cmdline reads back EMPTY, so a
-//     later check sees "not running" for a pid that still exists.
+//   - `sh -c "sleep 100; :"`, not `sh -c "sleep 100"`. A simple command
+//     makes sh exec it directly, replacing sh's own argv, so the directory,
+//     the entire point, vanishes from the cmdline. A compound command keeps
+//     sh alive as itself.
+//   - The returned stop func waits after killing. Without it the child
+//     becomes a zombie, and a zombie's /proc/<pid>/cmdline reads back
+//     empty, so a later check reports "not running" for a pid that still
+//     exists.
 func FakeRunning(t *testing.T, dir string) func() {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -56,18 +49,17 @@ func FakeRunning(t *testing.T, dir string) func() {
 		t.Fatal(err)
 	}
 
-	// WAIT FOR THE EXEC TO LAND before publishing the pidfile.
+	// Waits for the exec to land before publishing the pidfile.
 	//
 	// cmd.Start returns once the fork is under way, not once the child has
-	// exec'd. In that window /proc/<pid>/cmdline still reports the PARENT's
-	// argv (the go test binary), which does not contain dir. A check landing
+	// exec'd. In that window /proc/<pid>/cmdline still reports the parent's
+	// argv, the go test binary, which does not contain dir. A check landing
 	// there sees a pid whose cmdline does not match and concludes the VM is
-	// not running, and qemu.Running does not merely return false: it DELETES
-	// the pidfile it just read, so the VM stays "not running" forever after.
+	// not running. qemu.Running does not just return false: it deletes the
+	// pidfile it just read, so the VM stays "not running" forever after.
 	//
-	// Locally the exec wins that race essentially always, which is why this
-	// passed here and failed on a loaded CI runner. Publishing the pidfile
-	// only once the cmdline actually matches removes the window entirely.
+	// Publishing the pidfile only once the cmdline actually matches removes
+	// this race.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", cmd.Process.Pid))

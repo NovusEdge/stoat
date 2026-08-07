@@ -9,21 +9,21 @@ import (
 	"github.com/novusedge/stoat/internal/iso"
 )
 
-// TestFetchImageRespectsCancelledContext is fetchImage's own proof that
-// cancellation is real, not just a model flag: core.DownloadImage checks
-// ctx.Err() before it does anything network-shaped (images.go), so a
-// pre-cancelled ctx makes this deterministic and network-free while still
-// exercising the exact path esc now drives (fetchImage -> core.DownloadImage
-// -> the caller's ctx), rather than a fake standing in for it.
+// TestFetchImageRespectsCancelledContext proves cancellation is real, not
+// just a model flag.
+//
+// core.DownloadImage checks ctx.Err() before anything network-shaped
+// (images.go). A pre-cancelled ctx keeps this test deterministic and
+// network-free, while it still exercises the real path: fetchImage ->
+// core.DownloadImage -> the caller's ctx.
 func TestFetchImageRespectsCancelledContext(t *testing.T) {
 	entry := iso.Catalog()[0]
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	// dlStart/dlProgress is the same shared cell fetchImage's hardcoded
-	// dlRecord callback writes to; resetting it first means a nonzero done
-	// afterwards can only mean the callback fired, i.e. a network stage was
-	// reached despite the cancelled ctx.
+	// dlStart resets the same shared cell fetchImage's dlRecord callback
+	// writes to. A nonzero done afterward can only mean the callback fired,
+	// which means a network stage ran despite the cancelled ctx.
 	dlStart()
 
 	msg := fetchImage(ctx, entry.ID, 7)()
@@ -38,9 +38,9 @@ func TestFetchImageRespectsCancelledContext(t *testing.T) {
 		t.Errorf("err = %q, want it to report the cancellation", got.err)
 	}
 	// The real assertion: a cancelled fetch never reaches the network stage
-	// at all (core.DownloadImage checks ctx.Err() before iso.Resolve), which
-	// is exactly what makes this test fast and deterministic rather than a
-	// race against a real transfer. No progress callback should have fired.
+	// (core.DownloadImage checks ctx.Err() before iso.Resolve). That keeps
+	// this test fast and deterministic instead of racing a real transfer.
+	// No progress callback should have fired.
 	if s := dlSnapshot(time.Now()); s.done != 0 {
 		t.Errorf("progress reported %d bytes done against a pre-cancelled ctx", s.done)
 	}
@@ -227,9 +227,10 @@ func TestDLRecordNormalisesUnknownTotal(t *testing.T) {
 	}
 }
 
-// TestETAIsOmittedWhenAbsurd covers the guard on a slow first sample: at
-// 1 KiB/s against a 2 GiB image the honest estimate is ~582 hours, and at the
-// extreme the float exceeds int64 nanoseconds, where the conversion is
+// TestETAIsOmittedWhenAbsurd covers the guard on a slow first sample.
+//
+// At 1 KiB/s against a 2 GiB image, the honest estimate is ~582 hours. At
+// the extreme, the float exceeds int64 nanoseconds, where the conversion is
 // implementation-defined. No estimate beats a wrong one.
 func TestETAIsOmittedWhenAbsurd(t *testing.T) {
 	slow := dlStats{done: 1024, total: 2 << 30, elapsed: time.Second}

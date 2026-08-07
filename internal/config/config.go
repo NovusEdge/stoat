@@ -45,14 +45,14 @@ type VM struct {
 	SSHPort   int      `toml:"sshport"`
 	Recipes   []string `toml:"recipes"`
 
-	// Forwards are user-declared TCP ports forwarded from the host into the
-	// guest, additional to the SSHPort forward that always exists. Rendered
-	// into qemu's -netdev hostfwd= clauses by internal/qemu.Args. Applied at
-	// next start only. qemu has no way to hot-add a hostfwd rule to a
-	// running user-mode netdev, so editing this field while the VM is
-	// running changes vm.toml immediately but has no effect on the live
-	// process. See core.Forward and core.ErrAppliesAtNextStart, which exist
-	// specifically so a caller can't mistake "saved" for "live".
+	// Forwards are user-declared TCP ports forwarded from host to guest, in
+	// addition to the SSHPort forward that always exists. internal/qemu.Args
+	// renders them into qemu's -netdev hostfwd= clauses. Changes apply at
+	// the next start only: qemu cannot hot-add a hostfwd rule to a running
+	// user-mode netdev. Editing this field while the VM runs changes
+	// vm.toml immediately but has no effect on the live process. See
+	// core.Forward and core.ErrAppliesAtNextStart, which exist so a caller
+	// cannot mistake "saved" for "live".
 	Forwards []PortForward `toml:"forwards"`
 
 	// Backend is the provisioning backend: "apkovl" | "cloudinit" | "ssh".
@@ -68,19 +68,18 @@ type VM struct {
 	SSHUser string `toml:"sshuser"`
 
 	// ConsolePassword is the password for SSHUser at the VM's graphical
-	// console (VNC), not over ssh. Only ever written for the cloudinit
-	// backend: cloud images lock every account by default and stoat's seed
-	// sets ssh_pwauth: false, so without this the console login is
-	// unanswerable. Empty means no console login, which is correct for a
-	// live Alpine VM, whose root already logs in with no password.
+	// console (VNC), not over ssh. Only the cloudinit backend writes it:
+	// cloud images lock every account by default, and stoat's seed sets
+	// ssh_pwauth: false, so without this the console login is unanswerable.
+	// Empty means no console login. That is correct for a live Alpine VM,
+	// whose root already logs in with no password.
 	ConsolePassword string `toml:"console_password"`
 
-	// AllowExec is a per-VM opt-out of exec/copy_to/copy_from, enforced by
-	// whatever boundary decides to enforce it (the MCP server, not this
-	// package or core.Exec: see core.Spec.AllowExec's doc comment). Absent
-	// from a vm.toml means true, not Go's zero value; Load is what makes
-	// that hold, since toml.Decode alone cannot distinguish "false" from
-	// "not written".
+	// AllowExec is a per-VM opt-out of exec/copy_to/copy_from. The MCP
+	// server enforces it, not this package or core.Exec; see
+	// core.Spec.AllowExec's doc comment. Absent from a vm.toml, it means
+	// true, not Go's zero value. Load makes that hold: toml.Decode alone
+	// cannot tell "false" from "not written".
 	AllowExec bool `toml:"allow_exec"`
 
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
@@ -193,11 +192,11 @@ func Load(name string) (*VM, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A vm.toml written before AllowExec existed has no "allow_exec" key at
-	// all, and toml.Decode leaves that as Go's bool zero value: false. That
-	// would silently disable exec on every VM that predates the field, the
-	// opposite of the documented default, so an absent key is corrected to
-	// true here rather than trusted as a real false.
+	// A vm.toml written before AllowExec existed has no "allow_exec" key.
+	// toml.Decode leaves that as Go's bool zero value: false. That would
+	// silently disable exec on every VM that predates the field, the
+	// opposite of the documented default. An absent key is corrected to
+	// true here instead of trusted as a real false.
 	if !meta.IsDefined("allow_exec") {
 		v.AllowExec = true
 	}
@@ -236,9 +235,9 @@ type Broken struct {
 
 // ListBroken returns every VM directory whose vm.toml exists but fails to
 // parse, sorted by name. It is the counterpart to List: List silently omits
-// these directories (a broken vm.toml cannot yield a usable *VM), so callers
-// that want to tell the user "this VM is broken" rather than making it look
-// deleted must call ListBroken separately.
+// these directories, since a broken vm.toml cannot yield a usable *VM. A
+// caller that wants to tell the user "this VM is broken", rather than
+// making it look deleted, must call ListBroken separately.
 func ListBroken() ([]Broken, error) {
 	entries, err := os.ReadDir(Root())
 	if err != nil {

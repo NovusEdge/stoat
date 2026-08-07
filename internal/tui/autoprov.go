@@ -11,24 +11,24 @@ import (
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
-// After starting a VM that has recipes, stoat watches for sshd to come up and
-// then OFFERS to provision; it does not just do it. Running a shell script
-// inside a guest without being asked is the kind of helpfulness that is
-// indistinguishable from a bug the first time it surprises someone, and a
-// recipe can take minutes and pull hundreds of packages.
+// After a VM with recipes starts, stoat watches for sshd. It then offers to
+// provision the VM. It does not provision without asking.
+//
+// An unasked shell script inside a guest looks like a bug the first time it
+// runs. A recipe can take minutes and install hundreds of packages.
 
 // sshReadyMsg says a VM that was just started is now accepting ssh.
 type sshReadyMsg struct{ name string }
 
-// awaitSSH waits for sshd on a freshly started VM. A failure is silent on
-// purpose: the user did not ask for this, so a VM that never becomes
-// reachable (a disk VM with no OS, a guest that fails to boot) should leave
-// the UI exactly as it was rather than raising an error about a thing nobody
-// requested. Pressing "p" still reports properly.
+// awaitSSH waits for sshd on a freshly started VM.
 //
-// core.Wait(UntilReachable) replaces the old direct sshx.Wait call; the ctx
-// carries the same WaitTimeout ceiling sshx.Provision itself waits under, so
-// a VM that never comes up gives up on the same schedule either path takes.
+// A failure stays silent. The user did not ask for this watch. A VM that
+// never becomes reachable (a disk VM with no OS, a guest that fails to
+// boot) leaves the UI unchanged instead of raising an unrequested error.
+// Pressing "p" still reports the real status.
+//
+// ctx carries the same WaitTimeout ceiling sshx.Provision waits under, so a
+// VM that never comes up gives up on the same schedule.
 func awaitSSH(v core.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
@@ -47,13 +47,12 @@ func awaitSSH(v core.VM) tea.Cmd {
 // wantsAutoProvisionPrompt reports whether stoat should offer to provision v
 // once it is reachable.
 //
-// The "already provisioned" question is answered differently per mode, and
-// the difference is not a preference: it is what the filesystem does:
+// The answer differs by mode because the filesystem differs by mode:
 //
-//   - live: the root is a tmpfs overlay, so a previous run is GONE after the
-//     reboot. Offering every time is correct, not nagging.
-//   - disk/cloud: packages persist, so offering again after a successful run
-//     would be asking the user to redo work that is still there.
+//   - live: the root is a tmpfs overlay. A previous run is gone after
+//     reboot, so stoat offers every time.
+//   - disk/cloud: packages persist. Stoat offers again only after a failed
+//     run, not a successful one.
 func wantsAutoProvisionPrompt(v core.VM) bool {
 	if len(v.Recipes) == 0 {
 		return false
@@ -63,10 +62,10 @@ func wantsAutoProvisionPrompt(v core.VM) bool {
 	if v.Mode == "cloud" {
 		return false
 	}
-	// An uninstalled disk VM is running its installer, whose root is a tmpfs
-	// that the install replaces, and sshd there may well answer, which is
-	// exactly why this has to be checked rather than left to reachability.
-	// Once installed, only offer when the last run didn't already succeed.
+	// An uninstalled disk VM runs its own installer on a tmpfs root that the
+	// install later replaces. Its sshd may already answer, so this check
+	// cannot rely on reachability alone.
+	// Once installed, stoat offers only when the last run did not succeed.
 	if v.Mode == "disk" && !v.Installed {
 		return false
 	}
@@ -104,10 +103,12 @@ func autoProvisionPrompt(v core.VM) string {
 	return v.Name + " is up, run " + strings.Join(names, ", ") + " now? y/N"
 }
 
-// ensureNoStaleLog removes a provision log left by a previous boot of a LIVE
-// VM. Without it, lastProvisionSucceeded and the detail pane's tail both
-// describe a run whose effects were wiped by the reboot. The log is the only
-// thing that survived, because it lives on the host.
+// ensureNoStaleLog removes a provision log left by a previous boot of a live
+// VM.
+//
+// The log lives on the host and survives the reboot; nothing else does.
+// Without removing it, lastProvisionSucceeded and the detail pane's tail
+// both describe a run whose effects the reboot already wiped.
 func ensureNoStaleLog(v core.VM) {
 	if v.Mode != "live" {
 		return
