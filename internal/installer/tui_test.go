@@ -39,13 +39,11 @@ func TestChecksAdvanceToDirPrompt(t *testing.T) {
 	}
 }
 
-// checkTable's own comment documents a real lipgloss v2.0.5 bug: a headerless
-// table that ever calls .Height() silently drops its last row. This is the
-// regression test that comment promises but does not enforce on its own:
-// internal/tui/fields_test.go's TestFieldsKeepsEveryRow is the sibling for
-// the main TUI's equivalent landmine. It fails the moment someone adds a
-// width/height clamp to checkTable to fit a narrow terminal without
-// re-reading the warning.
+// lipgloss v2.0.5 drops the last row of a headerless table once it calls
+// .Height(); see checkTable's comment. This test pins that behavior.
+// internal/tui/fields_test.go's TestFieldsKeepsEveryRow covers the same bug
+// in the main TUI. A width or height clamp added to checkTable without
+// checking this test would break it silently.
 func TestCheckTableKeepsEveryRow(t *testing.T) {
 	m := Model{checks: []Check{
 		{Name: "qemu-system-x86_64", OK: true, Detail: "/usr/bin"},
@@ -71,11 +69,10 @@ func TestCheckTableKeepsEveryRow(t *testing.T) {
 	}
 }
 
-// Typing a relative path and pressing enter must resolve it to an absolute
-// path before it becomes m.dir: a bare "bin" left relative would write a
-// PATH entry any cwd can shadow. This is the test that would have caught it:
-// it drives the real key.Matches(keys.Install) dispatch in m.key, not a
-// phase set by hand.
+// A typed relative path must resolve to absolute before it becomes m.dir.
+// A bare "bin" left relative lets any cwd shadow the PATH entry. This test
+// drives the real key.Matches(keys.Install) dispatch in m.key, not a
+// hand-set phase.
 func TestDirPromptTypedPathBecomesAbsolute(t *testing.T) {
 	m := newTestModel(t, "/usr/bin")
 	next, _ := m.Update(checksDoneMsg{checks: nil})
@@ -152,10 +149,10 @@ func TestDirPromptExpandsHome(t *testing.T) {
 	}
 }
 
-// Ctrl+C at the dir prompt, before anything is built or installed, must
-// not let `just setup` report success. binPath is still empty at this point,
-// which is exactly what Failed() and done() key on to tell this apart from
-// quitting after a successful install.
+// Ctrl+C at the dir prompt must not let `just setup` report success, before
+// anything is built or installed. binPath is still empty at this point.
+// Failed() and done() use that to tell this apart from quitting after a
+// successful install.
 func TestCtrlCAtDirPromptFailsTheRun(t *testing.T) {
 	m := newTestModel(t, "/usr/bin")
 	next, _ := m.Update(checksDoneMsg{checks: nil})
@@ -179,10 +176,9 @@ func TestCtrlCAtDirPromptFailsTheRun(t *testing.T) {
 	}
 }
 
-// Ctrl+C at the rc prompt is different: the binary is already on disk by
-// then, so walking away from the optional PATH question must stay as
-// non-fatal as answering "n" to it; see the settled design in Failed's
-// comment.
+// Ctrl+C at the rc prompt is different: the binary is already on disk.
+// Walking away from the optional PATH question must stay as non-fatal as
+// answering "n". See Failed's comment for the design.
 func TestCtrlCAfterInstallStaysNonFatal(t *testing.T) {
 	m := newTestModel(t, "/usr/bin")
 	m.dir = "/home/x/.local/bin"
@@ -318,9 +314,8 @@ func TestDoneDedupesIdenticalFixCommands(t *testing.T) {
 }
 
 // A failed rc write is recoverable: the build and install already succeeded
-// by the time AppendRC runs, so it must not be reported as a hard failure.
-// Failed() must stay false, and the done screen must still show the install
-// alongside the line the user needs to add themselves.
+// by the time AppendRC runs. Failed() must stay false. The done screen must
+// still show the install and the line the user needs to add themselves.
 func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
 	tmp := t.TempDir()
 	blocker := filepath.Join(tmp, "blocker")
@@ -356,10 +351,9 @@ func TestFailedRCWriteDoesNotFailTheInstall(t *testing.T) {
 	}
 }
 
-// ansiRE strips SGR colour codes so pastedRCLine can read a rendered line's
-// real text: it must not care which colours the theme picked, only what
-// characters would land in the terminal, since those are what a paste
-// carries.
+// ansiRE strips SGR colour codes so pastedRCLine reads a rendered line's
+// real text. The theme's colours do not matter. Only the characters that
+// would land in the terminal matter, since those are what a paste carries.
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // longRCDir is long enough that its rc line overflows both 60 and 80
@@ -367,22 +361,21 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // below actually exercises wrapping rather than the single-line fast path.
 var longRCDir = "/home/exampleuser/" + strings.Repeat("wide-prefix-segment/", 6) + "bin"
 
-// rcLineBlock finds the rc-line block in a rendered View: every ANSI-
-// stripped physical line indented by exactly indent, immediately following
-// the line containing anchor. Each returned line still carries its own
-// indent and, but for the last, its trailing `\` continuation marker;
-// pasteValue (paths_test.go) is what interprets those.
+// rcLineBlock finds the rc-line block in a rendered View. It returns every
+// ANSI-stripped physical line indented by exactly indent, starting right
+// after the line containing anchor. Each returned line keeps its indent.
+// Every line but the last keeps its trailing `\` continuation marker.
+// pasteValue (paths_test.go) interprets those markers.
 //
-// It also fails the test directly if any such physical line, once
-// lipgloss.JoinVertical's own trailing space padding is discounted (it
-// right-pads every line in a block to the block's widest line: here,
-// that's the unrelated and unwrapped "<dir> is not on your PATH" status
-// line, since dir is deliberately huge in these tests; trailing spaces are
-// inert padding a terminal clips for free, never part of what a paste
-// carries), is wider than width: that's the payload Bubble Tea's real
-// per-line clip would truncate, which this in-process View() call does not
-// reproduce on its own, so this check is what actually stands in for
-// "did not get silently clipped."
+// It also fails the test if a line's payload is wider than width, once
+// lipgloss.JoinVertical's trailing-space padding is discounted. JoinVertical
+// right-pads every line in a block to the block's widest line; here that
+// widest line is the unrelated, unwrapped "<dir> is not on your PATH"
+// status line, since dir is deliberately huge in these tests. A terminal
+// clips trailing spaces for free, so they never reach a paste.
+//
+// This check stands in for Bubble Tea's real per-line clip, which this
+// in-process View() call does not reproduce on its own.
 func rcLineBlock(t *testing.T, view, anchor, indent string, width int) []string {
 	t.Helper()
 	lines := strings.Split(ansiRE.ReplaceAllString(view, ""), "\n")
@@ -413,9 +406,8 @@ func rcLineBlock(t *testing.T, view, anchor, indent string, width int) []string 
 }
 
 // The active rc prompt (phaseRC) must show the complete, pasteable rc line
-// even on a narrow terminal, not silently clipped by Bubble Tea's per-line
-// width clamp, and not corrupted by a naive wrap that breaks the line
-// inside its quotes.
+// even on a narrow terminal. Bubble Tea's per-line width clamp must not
+// silently clip it. A naive wrap must not break the line inside its quotes.
 func TestRCPromptLinePastesSafelyAtNarrowWidths(t *testing.T) {
 	for _, width := range []int{60, 80} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
@@ -496,9 +488,9 @@ func TestBuildFailureShowsCompilerOutput(t *testing.T) {
 	}
 }
 
-// A hard failure must not swallow the host advice: a user whose install died
-// on, say, a permission error still needs to know what to fix before their
-// first VM, and this is the only place that guidance is ever given.
+// A hard failure must not swallow the host advice. A user whose install
+// died on, say, a permission error, still needs to know what to fix before
+// their first VM. This is the only place that guidance is given.
 func TestFailedInstallStillShowsHostAdvice(t *testing.T) {
 	m := newTestModel(t, "/home/x/.local/bin")
 	m.checks = []Check{

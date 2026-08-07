@@ -21,10 +21,9 @@ func publicPath() string  { return PrivatePath() + ".pub" }
 // keypair is only usable as a unit; either half missing means broken.
 //
 // Only a genuine absence (fs.ErrNotExist) counts as missing. Any other stat
-// error (e.g. a permissions problem on the directory) is treated as
-// "present" rather than triggering repair: wrongly regenerating the
-// identity would invalidate the authorized_keys already baked into every
-// running guest.
+// error, such as a permissions problem on the directory, is treated as
+// "present" rather than triggering repair. Regenerating the identity would
+// invalidate the authorized_keys already baked into every running guest.
 func pairExists(path string) bool {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return false
@@ -41,26 +40,26 @@ func generate(path, comment string) error {
 	if pairExists(path) {
 		return nil
 	}
-	// Serialised across PROCESSES, not just goroutines. Note this is
-	// LockKeys, a DIFFERENT lock file from config.Lock: Clone holds the
-	// data-root lock and then calls Ensure, and flock does not nest: sharing
-	// one lock here deadlocked the whole suite against itself. See Lock's doc
-	// comment.
+	// Serialised across processes, not just goroutines, using LockKeys.
+	// LockKeys is a different lock file from config.Lock: Clone holds the
+	// data-root lock and then calls Ensure, and flock does not nest, so
+	// sharing one lock here deadlocked the whole suite against itself. See
+	// Lock's doc comment.
 	//
-	// Every stoat command calls Ensure at startup, so two invocations against
-	// a fresh data root
-	// both saw no key, both cleared the pair, and both ran ssh-keygen against
-	// the same path, at which point the loser found the file recreated under
-	// it and ssh-keygen sat on an interactive "Overwrite (y/n)?" prompt.
-	// Observed for real: six concurrent `stoat create` calls, one failed with
-	// exactly that, on a command that never asks the user anything.
+	// Every stoat command calls Ensure at startup. Without this lock, two
+	// invocations against a fresh data root both see no key, both clear the
+	// pair, and both run ssh-keygen against the same path. The loser then
+	// finds the file recreated under it and ssh-keygen sits on an
+	// interactive "Overwrite (y/n)?" prompt. Observed for real: six
+	// concurrent `stoat create` calls, one failed exactly that way, on a
+	// command that never asks the user anything.
 	unlock, err := config.LockKeys()
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	// Re-checked under the lock. The winner has created the pair by the time
-	// the loser gets here, and regenerating would hand out a key the winner's
+	// the loser gets here. Regenerating would hand out a key the winner's
 	// already-seeded guest does not accept.
 	if pairExists(path) {
 		return nil
@@ -69,15 +68,16 @@ func generate(path, comment string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	// ssh-keygen refuses to overwrite; a stale half of the pair (either
-	// the private key or its .pub) would wedge us, so clear both first.
+	// ssh-keygen refuses to overwrite. A stale half of the pair, either the
+	// private key or its .pub, would wedge this, so clear both first.
 	os.Remove(path)
 	os.Remove(path + ".pub")
 	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", path)
-	// Belt and braces with the lock above: ssh-keygen prompts on stdin when it
-	// finds a file it did not expect, and a background or MCP-driven stoat has
-	// no one to answer. With no stdin it fails immediately and reports, rather
-	// than hanging forever waiting for a keystroke that cannot arrive.
+	// Extra safety alongside the lock above. ssh-keygen prompts on stdin
+	// when it finds a file it did not expect, and a background or
+	// MCP-driven stoat has no one to answer. With no stdin it fails and
+	// reports immediately, instead of hanging for a keystroke that cannot
+	// arrive.
 	cmd.Stdin = nil
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ssh-keygen: %v: %s", err, strings.TrimSpace(string(out)))

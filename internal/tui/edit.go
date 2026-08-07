@@ -18,18 +18,16 @@ import (
 	"github.com/novusedge/stoat/internal/theme"
 )
 
-// editModel is the in-TUI editor for an existing VM, replacing the round trip
-// through $EDITOR for the fields worth changing. The raw editor stays on "E"
-// as the escape hatch for anything this form deliberately doesn't expose.
+// editModel is the in-TUI editor for an existing VM. It replaces the round
+// trip through $EDITOR for the fields worth changing. "E" still opens the
+// raw editor for anything this form does not expose.
 //
-// It is a separate model from formModel rather than a mode of it: the create
-// form's whole centre of gravity is the image picker and its download, none
-// of which applies to a VM that already exists.
+// editModel is a separate model from formModel, not a mode of it. The create
+// form centers on the image picker and its download. Neither applies to a
+// VM that already exists.
 //
-// There is no mode field here: mode used to be editable (live/disk/cloud),
-// but core.Update holds it immutable (see core/update.go's checkImmutable),
-// and this form must not be looser than core. Removing the row is a real,
-// deliberate feature removal, not an oversight.
+// The form has no mode field. core.Update holds Mode immutable (see
+// core/update.go's checkImmutable), so this form must not allow it either.
 type editModel struct {
 	vm     *config.VM
 	inputs []textinput.Model
@@ -81,10 +79,10 @@ func newEdit(v *config.VM) editModel {
 	}
 	e.inputs[eRAM].Focus()
 
-	// Recipes are offered for the VM's own os/backend pair, exactly as the
-	// create form does, so a cloud VM is never offered a shell recipe. This
-	// list is built once: unlike the old mode switch, nothing on this form
-	// can change the (OS, backend) pair, so it never needs resyncing.
+	// Recipes match the VM's own os/backend pair, the same rule the create
+	// form uses. A cloud VM never sees a shell recipe this way. The list is
+	// built once here: nothing on this form can change OS or backend, so it
+	// never needs a resync.
 	names, _ := recipes.List(v.OS, backendOf(v))
 	e.recipeNames = names
 	for _, r := range v.Recipes {
@@ -93,10 +91,10 @@ func newEdit(v *config.VM) editModel {
 	return e
 }
 
-// backendOf reports the provisioning backend for v, deriving it from Mode
-// when the field is empty. VMs created before the backend field existed have
-// no value, and defaulting those to "ssh" would offer an Alpine VM the wrong
-// recipes.
+// backendOf reports the provisioning backend for v. It derives the backend
+// from Mode when the field is empty. VMs created before the backend field
+// existed have no value. Defaulting those to "ssh" would offer an Alpine VM
+// the wrong recipes.
 func backendOf(v *config.VM) string {
 	if v.Backend != "" {
 		return v.Backend
@@ -107,22 +105,22 @@ func backendOf(v *config.VM) string {
 	return "ssh"
 }
 
-// parseSize is core.ParseSize. edit.go no longer calls this itself (disk
-// size validation moved to core.Update), but form.go's create-VM disk field
-// still does its own presentational parse before a Spec is ever built, the
-// same way buildPatch's RAM/CPUs/SSHPort fields do here, and needs a name
-// for it.
+// parseSize is core.ParseSize under a local name. core.Update now owns disk
+// size validation, so edit.go no longer calls this. form.go's create-VM
+// disk field still needs it for its own presentational parse, the same
+// role buildPatch's RAM/CPUs/SSHPort checks play here.
 var parseSize = core.ParseSize
 
 // name is this VM's identity for core.Update and config.Load: the
 // directory, never the vm.toml `name` field, which can diverge from it (see
-// core.VM.Name's own comment on why the directory is authoritative). e.vm.Dir
-// is always set, either by config.Load or by a VM this form saved earlier.
+// core.VM.Name's own comment on why the directory is authoritative).
+// e.vm.Dir is always set, either by config.Load or by a VM this form saved
+// earlier.
 func (e editModel) name() string { return filepath.Base(e.vm.Dir) }
 
-// order is the tab-traversal order for the VM's mode. Rows viewEdit does not
-// draw are omitted rather than included-but-hidden, so focus can never land
-// somewhere invisible and edit a field the user can't see.
+// order is the tab-traversal order for the VM's mode. It omits rows viewEdit
+// does not draw. Focus can then never land on a hidden field and edit
+// something the user cannot see.
 func (e editModel) order() []int {
 	o := []int{eRAM, eCPUs}
 	if e.vm.Mode != "live" {
@@ -212,23 +210,17 @@ func prevIn(o []int, focus int) int {
 	return o[0]
 }
 
-// buildPatch turns the form's text into a core.Patch naming only the fields
-// the user actually touched: a Patch pointer left nil never reaches
-// core.Update, so a field the user never typed into can't be silently
-// rewritten (notably Share, whose read-expands/write-verbatim asymmetry with
-// "~" means setting it unconditionally would rewrite every edited VM's
-// share path to an absolute one).
+// buildPatch turns the form's text into a core.Patch. It names only the
+// fields the user touched. A nil Patch pointer never reaches core.Update, so
+// an untouched field can't be silently rewritten. Share needs this rule most:
+// its read-expands/write-verbatim asymmetry with "~" would otherwise rewrite
+// every edited VM's share path to an absolute one.
 //
-// This function is deliberately thin. RAM/CPUs/SSHPort's numeric ranges, the
-// disk shrink guard and the ssh port collision check all used to live here;
-// core.Update enforces every one of them now, under config.Lock(), against
-// fresh data rather than a UI snapshot. Duplicating a rule core already owns
-// is exactly how the two drifted before: this form's disk shrink guard used
-// to skip itself outright when the VM's stored size wouldn't parse ("+8G",
-// the exact value a past release wrote), silently truncating the image.
-// What is left here is presentational only: an unparseable integer gets an
-// inline error before it ever reaches core, rather than a vaguer one core
-// would give for a field it can't even parse into a number.
+// core.Update enforces RAM/CPUs/SSHPort ranges, the disk shrink guard and
+// the ssh port collision check, under config.Lock() against fresh data.
+// buildPatch does not duplicate any of those checks. It only catches a
+// value that fails to parse into a number at all, and returns an inline
+// error for it before core sees the field.
 func (e editModel) buildPatch() (core.Patch, error) {
 	ram, err := strconv.Atoi(strings.TrimSpace(e.inputs[eRAM].Value()))
 	if err != nil {
@@ -290,12 +282,12 @@ func sameRecipes(a, b []string) bool {
 }
 
 // editErrorText renders one of core.Update's errors as the sentence this
-// pane shows inline, keyed by errors.Is rather than the wrapped text, so a
-// wording change inside core can't silently stop matching here.
+// pane shows inline. It keys on errors.Is, not the wrapped text, so a
+// wording change inside core cannot silently break the match here.
 func editErrorText(err error) string {
 	// strip drops a sentinel's own text wherever it appears in the wrapped
-	// message: validateSSHPort re-wraps validateForwards' own ErrInvalidSpec
-	// as "ssh port: %w", so the sentinel text is not always a prefix.
+	// message. validateSSHPort re-wraps validateForwards' ErrInvalidSpec as
+	// "ssh port: %w", so the sentinel text is not always a prefix.
 	strip := func(sentinel error) string {
 		return strings.Replace(err.Error(), sentinel.Error()+": ", "", 1)
 	}
@@ -309,9 +301,9 @@ func editErrorText(err error) string {
 	case errors.Is(err, core.ErrInvalidSpec):
 		return strip(core.ErrInvalidSpec)
 	case errors.Is(err, core.ErrImmutableField):
-		// Unreachable from this form: buildPatch never sets Name, OS,
-		// Backend or Mode. Kept so a future field added here without
-		// checking core's mutability rules fails with a clear message
+		// buildPatch never sets Name, OS, Backend or Mode, so this case is
+		// unreachable today. It stays so a future field added here
+		// without checking core's mutability rules gets a clear message
 		// instead of a raw, unmapped one.
 		return "can't be changed here: " + strip(core.ErrImmutableField)
 	default:
@@ -325,15 +317,13 @@ type vmSavedMsg struct {
 	note    string
 }
 
-// saveEdit applies p to name through core.Update: the disk resize (if any)
-// and the vm.toml write both happen inside that call, under config.Lock(),
-// exactly like every other core mutator. It is a plain function, not a
-// tea.Cmd, and is called synchronously from updateEdit's "enter" handler so
-// a validation failure can be shown inline in m.edit.err immediately, in the
-// same place buildPatch's own presentational errors go, rather than as a
-// toast. The IO this does (qemu-img resize, when the disk changed) is the
-// same call this form used to make from inside a tea.Cmd; the UI blocks for
-// it either way, since nothing here overlapped it with a spinner before.
+// saveEdit applies p to name through core.Update. The disk resize, when the
+// disk changed, and the vm.toml write both happen inside that call, under
+// config.Lock(), like every other core mutator. saveEdit is a plain
+// function, not a tea.Cmd. updateEdit's "enter" handler calls it
+// synchronously, so a validation failure lands in m.edit.err immediately,
+// next to buildPatch's own presentational errors, not as a toast. The qemu-img
+// resize blocks the UI for the duration of the call.
 func saveEdit(name string, p core.Patch, running bool) (msg tea.Msg, errText string) {
 	if _, err := core.Update(name, p); err != nil {
 		return nil, editErrorText(err)
@@ -423,10 +413,9 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// editContentWidth matches the create form, so moving between the two panes
-// doesn't shift the layout under the user. Derived rather than restated: as
-// a second literal it had already drifted once, leaving this comment
-// claiming a match that wasn't there.
+// editContentWidth matches the create form's width, so switching between the
+// two panes does not shift the layout. It is derived from formContentWidth,
+// not a separate literal, so the two cannot drift apart again.
 const editContentWidth = formContentWidth
 
 func (m model) viewEdit() string {
@@ -436,10 +425,8 @@ func (m model) viewEdit() string {
 	}
 
 	b := fields{width: editContentWidth}
-	// row draws a field. A changed field carries a dim "was X" so the pane
-	// shows what is about to be written versus what is on disk. An edit form
-	// that looks identical whether or not you have touched it makes it far
-	// too easy to save something you didn't mean to.
+	// row draws a field. A changed field carries a dim "was X" marker, so the
+	// pane shows what is about to be written next to what is on disk.
 	row := func(i int, label, value string) {
 		marker := "  "
 		if e.focus == i {

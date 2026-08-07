@@ -30,8 +30,8 @@ func xattrOK(dir string) error {
 	const probe = "user.stoat.probe"
 	if err := unix.Setxattr(dir, probe, []byte{1}, 0); err != nil {
 		// ENOTSUP and EOPNOTSUPP are the same errno on Linux. EPERM/EACCES
-		// show up on hardened or nouser_xattr mounts and mean the same thing
-		// for our purposes: we cannot store the metadata there.
+		// show up on hardened or nouser_xattr mounts and mean the same
+		// thing here: the metadata cannot be stored on dir.
 		if errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
 			return fmt.Errorf("%w: %s (9p sharing needs user.* xattrs; is it on NFS, exFAT, or mounted nouser_xattr?)", ErrNoXattr, dir)
 		}

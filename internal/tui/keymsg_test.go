@@ -10,11 +10,11 @@ import (
 // switches name it: the string tea.KeyPressMsg.String() returns.
 //
 // Every test goes through this rather than constructing a tea.KeyPressMsg
-// itself. The literal form, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")},
-// is the one piece of bubbletea surface in this package that changes shape
-// rather than name in v2 (KeyMsg becomes an interface; KeyPressMsg carries
-// Code and Text instead of Type and Runes). Funnelled here, that is one edit
-// instead of nineteen spread over four files.
+// directly. Bubbletea v2 changed this type's shape, not just its name:
+// KeyMsg became an interface, and KeyPressMsg carries Code and Text instead
+// of the v1 Type and Runes fields. Funnelling every test through keyMsg
+// makes a future change like that one edit here, not nineteen spread over
+// four files.
 func keyMsg(name string) tea.KeyPressMsg {
 	if k, ok := namedKeys[name]; ok {
 		return tea.KeyPressMsg(k)
@@ -42,11 +42,11 @@ var namedKeys = map[string]tea.Key{
 	"space":     {Code: tea.KeySpace},
 }
 
-// TestKeyMsgRoundTrips is what makes keyMsg trustworthy: a key it builds must
-// report the same name back, or a test would be pressing something other than
-// what it says. It is also the guard for the v2 migration, since the space bar is
-// reported as "space" there rather than " ", and this fails loudly if keySpace
-// and the message stop agreeing.
+// TestKeyMsgRoundTrips is what makes keyMsg trustworthy. A key it builds
+// must report the same name back, or a test would press something other
+// than what it claims. It also guards the v2 migration: v2 reports the
+// space bar as "space", not " ", and this test fails loudly if keySpace and
+// the message disagree.
 func TestKeyMsgRoundTrips(t *testing.T) {
 	names := []string{
 		"enter", "esc", "tab", "shift+tab",

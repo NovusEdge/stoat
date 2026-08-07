@@ -45,21 +45,22 @@ var (
 )
 
 // paneFrame is the total width a pane() call adds on top of its content:
-// border on both sides plus the horizontal padding baked into paneStyle.
-// Callers that need to bound a pane to the terminal width subtract this
+// border on both sides plus the horizontal padding baked into paneStyle. A
+// caller that needs to bound a pane to the terminal width subtracts this
 // first.
 func paneFrame() int { return paneStyle.GetHorizontalFrameSize() }
 
 // pane draws body inside paneStyle's rounded, accent-colored box. A
-// non-empty title is rendered as a bold accent heading above the body,
-// inside the box, separated by a blank line. maxWidth bounds the box's
-// total rendered width (border + padding included) to fit a terminal of
-// that width; 0 leaves the box sized to its content.
-// pane leaves the box sized to its content whenever that content already
-// fits within maxWidth (0 means "always fits"). A box that hugs its rows
-// reads better than one stretched to the terminal's edge. Width is only
-// forced down, and only as far as maxWidth, when the content would
-// otherwise overflow a narrow terminal.
+// non-empty title renders as a bold accent heading above the body, inside
+// the box, separated by a blank line. maxWidth bounds the box's total
+// rendered width, border and padding included, to fit a terminal of that
+// width; 0 means the content always fits.
+//
+// The box stays sized to its content whenever the content already fits
+// within maxWidth. A box that hugs its rows reads better than one
+// stretched to the terminal's edge. Width is forced down only as far as
+// maxWidth, and only when the content would otherwise overflow a narrow
+// terminal.
 func pane(title, body string, maxWidth int) string {
 	content := body
 	if title != "" {
@@ -78,12 +79,12 @@ func pane(title, body string, maxWidth int) string {
 	return style.Render(content)
 }
 
-// Glyphs are named here for the same reason colours are: so a symbol means
-// one thing across every screen and changing it is one edit, not a grep.
+// Glyphs are named here for the same reason colours are: a symbol means one
+// thing across every screen, and changing it is one edit, not a grep.
 //
-// Nothing upstream to reuse: bubbletea and lipgloss export no glyphs at all,
-// and bubbles keeps its own bullet unexported and writes arrows as raw
-// literals in its key help. So these are ours to name.
+// There is nothing upstream to reuse. bubbletea and lipgloss export no
+// glyphs at all, and bubbles keeps its own bullet unexported and writes
+// arrows as raw literals in its key help. These are ours to name.
 const (
 	glyphCursor   = "❯ " // the focused row / selected item marker
 	glyphRadioOn  = "(•)"
@@ -115,11 +116,11 @@ func radio(label string, on bool) string {
 const rowGap = "\n\n"
 
 // paneAt draws a pane whose content is held at a fixed width, for screens
-// whose rows come and go, e.g. a download block, an error line, a conditional
-// disk row. pane() hugs its content, so without this the box changes width
-// (and re-centers) the moment an optional row appears, which reads as the
-// layout jumping under the user mid-action. width is still clamped to the
-// terminal, so a narrow terminal wins over the fixed width.
+// whose rows come and go, e.g. a download block, an error line, a
+// conditional disk row. pane() hugs its content, so without this the box
+// changes width, and re-centers, the moment an optional row appears, which
+// reads as the layout jumping under the user mid-action. width is still
+// clamped to the terminal, so a narrow terminal wins over the fixed width.
 func paneAt(title, body string, width, maxWidth int) string {
 	if maxWidth > 0 {
 		if inner := maxWidth - paneFrame(); width > inner {

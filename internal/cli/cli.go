@@ -1,15 +1,14 @@
 // Package cli implements stoat's non-interactive, scriptable interface: a
-// switch on the parsed subcommand dispatching into internal/core. No subcommand
-// contains business logic of its own: parsing flags, printing, and the
-// confirmation prompt are the whole of it, so the TUI, the CLI and an MCP
-// server can never drift into bugs that reproduce in one and not the others.
+// switch on the parsed subcommand dispatching into internal/core. A
+// subcommand only parses flags, prints, and runs the confirmation prompt.
+// All business logic lives in core, so the TUI, the CLI and an MCP server
+// share one set of bugs instead of three.
 //
-// It no longer imports internal/qemu at all: deciding whether a VM is running,
-// what happens when you start one, and whether a delete is allowed are core's
-// answers now, not three front ends' separate ones. What remains outside core
-// here is deliberate: internal/sshx for `ssh`, which execs and replaces this
-// process, and internal/recipes/logx for the two commands that are genuinely
-// about files on the host rather than about a VM.
+// This package does not import internal/qemu. Whether a VM is running, what
+// happens on start, and whether a delete is allowed are core's decisions.
+// Two things stay outside core on purpose: internal/sshx for `ssh`, which
+// execs and replaces this process, and internal/recipes/logx for the two
+// commands that operate on host files rather than a VM.
 //
 // The grammar lives in grammar.go (kong struct tags); this file holds Args,
 // Parse's thin wrapper around kong, and Main's dispatch.
@@ -206,20 +205,18 @@ func Parse(args []string) (*Args, error) {
 	return g.toArgs(commandPath(ctx))
 }
 
-// parseExec handles `exec <vm> <cmd>...` WITHOUT kong, deliberately. Kong's
-// passthrough is not verbatim enough for this command, verified by running it:
+// parseExec handles `exec <vm> <cmd>...` without kong. Kong's passthrough is
+// not verbatim enough for this command:
 //
-//   - a leading flag token is resolved against the root's own flags first, so
+//   - A leading flag token resolves against the root's own flags first, so
 //     `exec work -q` loses the -q to stoat's --quiet and the guest gets an
-//     empty command;
-//   - a leading shorthand cluster is split, so `exec work -la` reaches the
+//     empty command.
+//   - A leading shorthand cluster is split, so `exec work -la` reaches the
 //     guest as "-l" "a".
 //
-// Both are silent corruption of the one command whose entire contract is that
-// the guest's argv arrives untouched, and both are invisible to a caller. The
-// argv scan for --json (wire.SplitJSONFlag) already stops at exec's VM name
-// for exactly this reason, so this is the same rule applied twice, not a new
-// special case.
+// Both silently corrupt the guest command, which this command's contract
+// requires to arrive untouched. wire.SplitJSONFlag stops its own argv scan
+// at exec's VM name for the same reason.
 func parseExec(rest []string) (*Args, error) {
 	if len(rest) == 0 {
 		return nil, usageError("exec: missing vm name")

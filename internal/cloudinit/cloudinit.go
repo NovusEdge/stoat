@@ -1,12 +1,12 @@
 // Package cloudinit builds a NoCloud cloud-init seed (user-data + meta-data)
-// for cloud qcow2 images that expect a distro-default-user setup rather than
-// the Alpine-apkovl or bare-ssh mechanisms used elsewhere in stoat.
+// for cloud qcow2 images. These images expect a distro-default-user setup,
+// not the Alpine-apkovl or bare-ssh mechanisms stoat uses elsewhere.
 //
-// The seed is packed into an ISO9660 image labeled CIDATA via xorriso, which
-// NoCloud's datasource scans for at boot (matched case-insensitively). This
-// exact shape, including the quoted sudo string and the xorriso invocation
-// below, was hand-verified against a real Ubuntu 24.04 cloud image; do not
-// change it without re-verifying on hardware.
+// The seed is packed into an ISO9660 image labeled CIDATA, via xorriso.
+// NoCloud's datasource scans for that label at boot, case-insensitively.
+// The exact shape below, including the quoted sudo string and the xorriso
+// invocation, was hand-verified against a real Ubuntu 24.04 cloud image.
+// Re-verify on hardware before changing it.
 package cloudinit
 
 import (
@@ -21,27 +21,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// User is the account the seed creates, and therefore the account anything
-// provisioned through this backend must connect as. Cloud images lock root,
-// so connecting as anything else fails: sshx defaults an empty VM.SSHUser to
-// root, which is exactly the wrong answer here.
+// User is the account the seed creates. Anything provisioned through this
+// backend must connect as User. Cloud images lock root, so sshx's default
+// of root for an empty VM.SSHUser is the wrong answer here.
 //
 // Exported so the TUI can record it on the VM instead of repeating the
-// literal. userDataTemplate below must name this same user; TestSeedUserMatchesUser
-// pins that.
+// literal. userDataTemplate below must name this same user;
+// TestSeedUserMatchesUser pins that.
 const User = "stoat"
 
 // userDataTemplate declares the account stoat connects as. The shell is not
-// a constant: cloud-init's user module fails outright when the shell it is
-// told to assign does not exist in the image, so the shell has to match the
-// guest (see guestShell). The password block is filled in by
-// consolePasswordBlock below.
+// a constant: cloud-init's user module fails outright if the assigned shell
+// does not exist in the image. The shell must match the guest; see
+// guestShell. consolePasswordBlock below fills in the password block.
 //
-// ssh_pwauth stays false on purpose: the password exists so the VNC console
-// is usable, since a cloud VM never gets a qemu window (qemu.NeedsWindow), so
-// that socket is the only place a console login happens, not so the
-// forwarded port accepts one. Key-only over the network, password at the
-// console.
+// ssh_pwauth stays false on purpose. The password exists only for the VNC
+// console: a cloud VM never gets a qemu window (qemu.NeedsWindow), so the
+// console socket is the only place a password login happens. The network
+// stays key-only.
 const userDataTemplate = `#cloud-config
 users:
   - name: stoat
@@ -52,13 +49,15 @@ users:
 %sssh_pwauth: false
 `
 
-// guestShell is the login shell for the account the seed creates. It must be
-// a shell that EXISTS in the target image: cloud-init's user module fails
-// outright on a missing shell, leaving no account and no authorized_keys, so
-// the only symptom is "Permission denied (publickey)" forever. Boot-tested
-// against Alpine's 3.24.1 cloud image: /bin/bash refused every connection,
-// /bin/ash connected on the first try. That fact now lives in the guest
-// registry; this just reads it.
+// guestShell is the login shell for the account the seed creates. It must
+// be a shell that exists in the target image. cloud-init's user module
+// fails outright on a missing shell: no account gets created, and no
+// authorized_keys either. The only symptom is "Permission denied
+// (publickey)" forever.
+//
+// Alpine's 3.24.1 cloud image refused every connection with /bin/bash and
+// connected on the first try with /bin/ash. That fact lives in the guest
+// registry; this function only reads it.
 func guestShell(osName string) string {
 	if o, ok := guest.Lookup(osName); ok {
 		return o.Shell
@@ -69,16 +68,17 @@ func guestShell(osName string) string {
 	return "/bin/bash"
 }
 
-// extraPackages covers what the base block ASSUMES is present but isn't. The
-// users: sudo key writes a sudoers fragment; on Alpine the sudo binary is not
-// installed (the cloud-init aport prefers doas), so without this the fragment
-// refers to a command that does not exist and every escalating recipe fails.
+// extraPackages installs what the base block assumes is present but is not.
+// The users: sudo key writes a sudoers fragment. Alpine ships no sudo
+// binary (the cloud-init aport prefers doas); without this fragment,
+// sudoers refers to a command that does not exist, and every escalating
+// recipe fails.
 //
-// Returned as its own #cloud-config-shaped fragment body, not raw text
-// spliced onto the base block: it becomes its own document in the
-// cloud-config-archive (see buildArchive), alongside the base users: block
-// and any recipe bodies, so a recipe's own packages: list still ends up
-// merged with this one instead of one silently overwriting the other.
+// This returns its own #cloud-config-shaped fragment, not raw text spliced
+// onto the base block. It becomes its own document in the
+// cloud-config-archive (see buildArchive), next to the base users: block
+// and any recipe bodies. A recipe's own packages: list then merges with
+// this one instead of one silently overwriting the other.
 func extraPackages(osName string) string {
 	o, ok := guest.Lookup(osName)
 	if !ok || len(o.SeedPackages) == 0 {
@@ -97,8 +97,8 @@ func extraPackages(osName string) string {
 // hardware-proven users: block (parameterized by the guest's shell), the
 // OS's own extra packages if it needs any, and every selected cloud
 // recipe's body verbatim, each as its own document. cloud-init merges the
-// documents itself (see buildArchive), so this package no longer parses any
-// of them for packages:/runcmd:, so a fragment using write_files: or any
+// documents itself; see buildArchive. This package does not parse any
+// document for packages:/runcmd:, so a fragment using write_files: or any
 // other key survives instead of being silently dropped.
 func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
@@ -112,14 +112,14 @@ func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error
 	return buildArchive(docs)
 }
 
-// mountsDoc mounts the 9p exports. Cloud VMs previously got the exports on the
-// QEMU command line and nothing ever mounted them, so the share silently did
+// mountsDoc mounts the 9p exports. Cloud VMs used to get the exports on the
+// QEMU command line with nothing to mount them, so the share silently did
 // nothing.
 //
-// nofail is required: some cloud kernels ship no 9p module at all (Debian's
-// does not), and without it an unmountable share holds up boot. ro on the host
-// mount matches what QEMU enforces, so a write fails immediately instead of
-// after a remount that appears to succeed.
+// nofail is required: some cloud kernels ship no 9p module (Debian's does
+// not), and without nofail an unmountable share holds up boot. The host
+// mount is ro, matching what QEMU enforces, so a write fails immediately
+// instead of after a remount that appears to succeed.
 func mountsDoc(v *config.VM) string {
 	const opts = "trans=virtio,version=9p2000.L,%s,_netdev,nofail"
 	var b strings.Builder
@@ -134,13 +134,13 @@ func mountsDoc(v *config.VM) string {
 // consolePasswordBlock renders the two lines that make console login work,
 // or nothing when no password is set.
 //
-// It uses plain_text_passwd rather than a hash. cloud-init prefers a hash,
-// and for an internet-facing server that is right, but the hash would live
-// in the same seed file, in the same data root, next to the private key that
-// already grants full access to this VM. Protecting it from someone who can
-// read the seed but not the key guards a split that does not occur here, and
-// the alternative costs either a crypt(3) dependency or a hard requirement on
-// openssl at VM-create time.
+// It uses plain_text_passwd, not a hash. cloud-init prefers a hash, and for
+// an internet-facing server that is the right choice. Here the hash would
+// sit in the same seed file, in the same data root, next to the private key
+// that already grants full access to this VM. Hashing would guard against
+// someone who can read the seed but not the key, a split that does not
+// happen here, at the cost of a crypt(3) dependency or a hard openssl
+// requirement at VM-create time.
 func consolePasswordBlock(password string) string {
 	if password == "" {
 		return ""
@@ -160,9 +160,9 @@ func haveXorriso() bool {
 
 // haveCloudInit reports whether the cloud-init binary is on PATH. Mirrors
 // haveXorriso above: Arch does not install cloud-init by default (see
-// guest-subsystem.md §10), so schema validation must degrade to "not
-// checked" rather than "assumed valid"; callers of ValidateFragment must
-// treat a nil error with no annotated output as "not checked", not "passed".
+// guest-subsystem.md §10). Schema validation must degrade to "not checked",
+// not "assumed valid". Callers of ValidateFragment must treat a nil error
+// with no annotated output as "not checked", never as "passed".
 func haveCloudInit() bool {
 	_, err := exec.LookPath("cloud-init")
 	return err == nil
@@ -212,17 +212,17 @@ const mergeHow = "list(append)+dict(recurse_list)"
 // withMergeHow injects merge_how as a top-level key into a #cloud-config
 // document body.
 //
-// Per cloud-init's merge model (merging.rst, "Specifying multiple types"), a
-// document's OWN merge_how does not govern how it merges in: it governs
-// how the NEXT document in the archive merges into the accumulated result.
-// The first document is always merged with the built-in default regardless
-// of what it declares. So to guarantee every later document appends rather
-// than silently losing to an earlier one, every document except the last
-// needs the directive, and since callers may pass any number of recipe
-// bodies, the last one isn't known in advance, so every document gets it.
-// This matches cloud-init's own worked example in merging.rst, which puts
-// merge_how in both halves of a two-document merge rather than relying on
-// which one happens to be last.
+// A document's own merge_how does not govern how it merges in. It governs
+// how the NEXT document in the archive merges into the accumulated result
+// (cloud-init's merging.rst, "Specifying multiple types"). The first
+// document always merges with the built-in default, regardless of what it
+// declares.
+//
+// Every document except the last needs the directive, or a later document
+// silently loses to an earlier one. Callers may pass any number of recipe
+// bodies, so the last one is not known in advance; every document gets the
+// directive. This matches cloud-init's own worked example in merging.rst,
+// which puts merge_how in both halves of a two-document merge.
 func withMergeHow(doc string) string {
 	directive := fmt.Sprintf("merge_how: %q\n", mergeHow)
 	if rest, ok := strings.CutPrefix(doc, "#cloud-config\n"); ok {
@@ -260,13 +260,13 @@ func buildArchive(docs []string) (string, error) {
 }
 
 // Seed writes <v.OvlDir()>/seed/{user-data,meta-data} and builds
-// <v.OvlDir()>/seed.iso (ISO9660, volume label CIDATA) via xorriso,
-// returning the iso path. recipeBodies are the bodies of v's selected cloud
-// recipes (already read by the caller); their packages:/runcmd: sections
-// are merged into user-data alongside the fixed, hardware-proven users:
-// block, because cloud-init's packages: list only runs at first boot, so this is
-// how a cloud VM's recipes get applied, unlike the ssh-provisioning path
-// used by other backends.
+// <v.OvlDir()>/seed.iso (ISO9660, volume label CIDATA) via xorriso. It
+// returns the iso path. recipeBodies are the bodies of v's selected cloud
+// recipes, already read by the caller. Their packages:/runcmd: sections
+// merge into user-data alongside the fixed, hardware-proven users: block.
+// cloud-init's packages: list only runs at first boot, so this is how a
+// cloud VM's recipes get applied, unlike the ssh-provisioning path other
+// backends use.
 func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	if !haveXorriso() {
 		return "", fmt.Errorf("xorriso is required for cloud-init provisioning; install libisoburn")

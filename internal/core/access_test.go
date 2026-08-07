@@ -155,9 +155,9 @@ func TestLogsUnknownVM(t *testing.T) {
 }
 
 // Logs on a broken VM must still serve the console log; see Logs' doc
-// comment: the file lives in the VM directory and does not depend on
-// vm.toml parsing, and a broken VM is exactly the case where a user most
-// wants to read it.
+// comment. The file lives in the VM directory and does not depend on
+// vm.toml parsing. A broken VM is exactly the case where a user most wants
+// to read it.
 func TestLogsBrokenVMStillServesConsoleLog(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	dir := writeBrokenVMToml(t, "hosed")
@@ -201,10 +201,9 @@ func TestLogsBrokenVMMissingFileIsEmptyNotError(t *testing.T) {
 }
 
 // writeBrokenVMToml writes an unparseable vm.toml directly, bypassing
-// config.VM.Save, so SSHCommand/Logs's ErrBroken path is testable. Its own
-// declaration rather than vm_test.go's writeRawVMToml: both files are
-// package core, so importing that helper would mean depending on another
-// agent's in-flight test file and risking a name collision, not an import.
+// config.VM.Save, so SSHCommand and Logs's ErrBroken path is testable. It is
+// a separate declaration from vm_test.go's writeRawVMToml to avoid a name
+// collision between the two files in package core.
 func writeBrokenVMToml(t *testing.T, name string) string {
 	t.Helper()
 	dir := filepath.Join(config.Root(), name)

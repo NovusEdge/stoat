@@ -127,10 +127,9 @@ func runPrune(a *Args, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// prunePrefix renders a core.PruneItem.Class as the human-readable prefix
-// core.Prune used to hard-code into its return strings. core now returns the
-// class separately (docs/design/json-contract-draft.md §3.3's PruneItem), so
-// the CLI, the only human-facing renderer, owns this text.
+// prunePrefix renders a core.PruneItem.Class as a human-readable prefix.
+// core returns the class as data (§3.3's PruneItem); the CLI, the only
+// human-facing renderer, owns this text.
 func prunePrefix(class string) string {
 	switch class {
 	case "broken_vm":
@@ -203,15 +202,12 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// runDoctor prints core.Doctor's findings. It checks strictly more than it
-// used to: this was two ad-hoc probes (qemu.Preflight plus a bare ssh
-// LookPath), while core.Doctor runs the same set the installer's pre-install
-// checklist does (qemu-system-x86_64, qemu-img, ssh, xorriso and /dev/kvm),
-// so `stoat doctor` and `just setup` can no longer disagree about whether the
-// host is ready.
+// runDoctor prints core.Doctor's findings: the same checks the installer's
+// pre-install checklist runs (qemu-system-x86_64, qemu-img, ssh, xorriso,
+// /dev/kvm), so `stoat doctor` and `just setup` agree on host readiness.
 //
-// It also prints the fix command when there is one. The installer has always
-// told the user how to repair a failed check; the CLI made them guess.
+// It prints the fix command when there is one, so a failed check tells the
+// user how to repair it instead of leaving them to guess.
 func runDoctor(a *Args, stdout, stderr io.Writer) int {
 	checks := core.Doctor()
 	var failed []core.HostCheck

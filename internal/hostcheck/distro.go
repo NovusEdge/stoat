@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// Distro is as much as we need to know about the host's package manager to
-// print a working install command. Anything we do not recognise stays
-// DistroUnknown, and the installer names the packages without inventing a
-// command for them: a wrong sudo line is worse than no line.
+// Distro identifies the host's package manager, enough to print a working
+// install command. An unrecognized distro stays DistroUnknown. The installer
+// then names the packages with no command: a wrong sudo line is worse than
+// no line.
 //
 // Adding a distro touches three places: known() (the ID/ID_LIKE names it
 // answers to), PkgName (which Pkg field is its package name), and
@@ -22,8 +22,8 @@ const (
 	DistroFedora
 )
 
-// Pkg is one dependency's name across the distros we know. The same binary is
-// packaged under a different name almost everywhere.
+// Pkg is one dependency's name across the known distros. The same binary
+// carries a different package name almost everywhere.
 type Pkg struct{ Arch, Debian, Fedora string }
 
 // ParseOSRelease pulls ID and ID_LIKE out of /etc/os-release content. The
@@ -79,9 +79,9 @@ func known(name string) Distro {
 	return DistroUnknown
 }
 
-// DetectDistro reads the host's /etc/os-release. An unreadable or missing file
-// is not an error worth surfacing: it just means we print package names
-// without a command.
+// DetectDistro reads the host's /etc/os-release. An unreadable or missing
+// file is not an error: the installer then prints package names with no
+// command.
 func DetectDistro() Distro {
 	b, err := os.ReadFile("/etc/os-release")
 	if err != nil {
@@ -90,7 +90,7 @@ func DetectDistro() Distro {
 	return DistroFrom(ParseOSRelease(string(b)))
 }
 
-// PkgName is this distro's name for p, or "" when we do not know the distro.
+// PkgName is this distro's name for p, or "" for an unknown distro.
 func (d Distro) PkgName(p Pkg) string {
 	switch d {
 	case DistroArch:
@@ -110,11 +110,9 @@ var installPrefix = map[Distro]string{
 	DistroFedora: "sudo dnf install ",
 }
 
-// InstallCmd is the shell command that installs p, or (when the distro is
-// unknown) the package's names with no command attached. It returns a slice
-// because a Check's Fix is a command *list*, see checks.go for why that
-// matters: a wrong sudo line is worse than no line, but no line at all loses
-// information the user could have used.
+// InstallCmd is the shell command that installs p. For an unknown distro it
+// returns the package's names with no command attached. It returns a slice
+// because a Check's Fix is a command list; see checks.go.
 func (d Distro) InstallCmd(p Pkg) []string {
 	name := d.PkgName(p)
 	if name == "" {
@@ -127,8 +125,9 @@ func (d Distro) InstallCmd(p Pkg) []string {
 	return []string{prefix + name}
 }
 
-// namesOnly is what an unrecognised distro gets: every candidate package name
-// we know, joined for a human to pick from, with no package manager invented.
+// namesOnly is what an unrecognized distro gets: every known candidate
+// package name, joined for a human to pick from. It invents no package
+// manager.
 func namesOnly(p Pkg) []string {
 	return []string{"install: " + p.Arch + " / " + p.Debian + " / " + p.Fedora}
 }

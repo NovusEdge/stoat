@@ -59,20 +59,17 @@ func FromPortForwards(fs []core.PortForward) []PortForward {
 // VM is core.VM for the wire (§3.2). Deliberately absent:
 //
 //   - Paths: six absolute host paths (core.VM.Paths); see this file's doc
-//     comment. core.VM.Paths is not read anywhere in this constructor.
+//     comment. Not read anywhere in this constructor.
 //   - ConsolePassword: core.VM's own doc comment says it must never reach a
-//     wire format; not read here either.
+//     wire format. Not read here either.
 //   - ISO / Base: plain vm.toml facts a human debugging config might want,
-//     but absent from the design doc's own worked VM example (§3.2) and not
-//     named among the fields the MCP boundary needs; omitted to match that
-//     example exactly rather than guessed back in. Flagged as a judgment
-//     call: add them if a real caller needs them.
+//     but not part of the MCP boundary (§3.2). Judgment call: add them if a
+//     real caller needs them.
 //   - The VNC socket path, and any rendered command containing it. Display
-//     below carries WHICH surface, never WHERE. A rendered attach command is
-//     not safer than the raw path, it embeds it; and an agent cannot run a
-//     GUI viewer anyway, so the path buys a consumer nothing the rule above
-//     is worth breaking for. A consumer that needs it runs `stoat get`,
-//     which prints it to the human who can use it.
+//     below carries WHICH surface, never WHERE. A rendered attach command
+//     still embeds the raw path, and an agent cannot run a GUI viewer, so
+//     the path buys a consumer nothing. A human who needs it runs `stoat
+//     get`.
 //
 // Error is present only for a broken VM (empty string omits it, matching
 // every other VM where core.VM.Error is unset).
@@ -93,13 +90,10 @@ type VM struct {
 	Forwards  []PortForward `json:"forwards"`
 	AllowExec bool          `json:"allow_exec"`
 	// Display is "window" or "vnc" ("" on a broken VM, like every other field
-	// a broken vm.toml cannot supply). Emitted rather than left to be derived
-	// from mode and installed, for the same reason Image.byo is: a structural
-	// rule a consumer has to re-derive is one a consumer will eventually
-	// re-derive wrong, and this particular rule is one stoat reserves the
-	// right to change. It has already changed once: it is no longer derivable
-	// from mode and installed at all, because a host with no graphical session
-	// puts an uninstalled disk VM on VNC too.
+	// a broken vm.toml cannot supply). Emitted rather than left for a
+	// consumer to derive from mode and installed: a host with no graphical
+	// session puts an uninstalled disk VM on VNC too, so that derivation is
+	// already wrong.
 	Display string `json:"display"`
 	Error   string `json:"error,omitempty"`
 }
@@ -142,11 +136,9 @@ func FromVMs(vs []core.VM, graphical bool) []VM {
 
 // Image is core.CatalogImage for the wire.
 //
-// BYO is derived, not carried by core.CatalogImage: today's CLI infers
-// "bring your own" from ID == "" and does not expose it as a field (§3.3
-// call-out). Re-deriving that structural rule is exactly the kind of
-// implicit contract the design doc warns against reimplementing wrong, so
-// it is computed once here and emitted explicitly.
+// BYO is derived, not carried by core.CatalogImage: the CLI infers "bring
+// your own" from ID == "" and does not expose it as a field (§3.3). Computed
+// once here and emitted explicitly, so a consumer never re-derives it.
 type Image struct {
 	ID         string `json:"id"`
 	OS         string `json:"os"`
@@ -244,11 +236,10 @@ func FromHostChecks(cs []core.HostCheck) []HostCheck {
 	return nonNil(out)
 }
 
-// PruneItem is core.PruneItem for the wire. Class is already the wire
-// value on core.PruneItem itself (see that type's doc comment: it was
-// designed with this contract in mind), so this constructor has nothing to
-// translate; it exists for the same reason every other From* does, so a
-// field added to core.PruneItem does not silently reach the wire unreviewed.
+// PruneItem is core.PruneItem for the wire. Class is already the wire value
+// on core.PruneItem itself, so this constructor translates nothing; it
+// exists so a field added to core.PruneItem does not silently reach the
+// wire unreviewed.
 type PruneItem struct {
 	Class string `json:"class"`
 	Path  string `json:"path"`
@@ -302,20 +293,15 @@ func FromRecipeIssues(is []core.RecipeIssue) []RecipeIssue {
 	return nonNil(out)
 }
 
-// ExecResult is core.ExecResult for the wire, plus the non-UTF-8 guest
-// output handling (§4): exec's stdout/stderr are arbitrary guest bytes, and
-// json.Marshal silently replaces invalid UTF-8 with U+FFFD, a lossy,
-// silent corruption. When a stream is not valid UTF-8 it is carried instead
-// as base64 in the matching *_base64 field, with that field's plain
-// counterpart omitted.
+// ExecResult is core.ExecResult for the wire, plus non-UTF-8 guest output
+// handling (§4). exec's stdout/stderr are arbitrary guest bytes.
+// json.Marshal silently replaces invalid UTF-8 with U+FFFD, a lossy
+// corruption. A stream that is not valid UTF-8 is carried instead as
+// base64 in the matching *_base64 field, with the plain field omitted.
 //
-// Encoding is reported per stream rather than as one flag for both (a
-// judgment call: the design doc's own example shows one top-level
-// "encoding" field and flags the choice as undecided). A consumer checking
-// "is this printable" for stdout and stderr independently, which is the
-// common case, does not need a compound rule to answer it: an empty
-// StdoutEncoding/StderrEncoding means "utf8", matching the documented
-// default in both cases.
+// Encoding is reported per stream, not as one flag for both: a consumer
+// checking "is this printable" for stdout and stderr independently does not
+// need a compound rule. An empty StdoutEncoding/StderrEncoding means "utf8".
 type ExecResult struct {
 	Stdout         string `json:"stdout,omitempty"`
 	StdoutBase64   string `json:"stdout_base64,omitempty"`

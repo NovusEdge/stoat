@@ -20,14 +20,13 @@ type Script struct {
 // WrapScripts renders scripts into a #cloud-config fragment: each script's
 // content becomes a write_files entry at scriptDir/<name>.sh with executable
 // permissions, and a runcmd entry that executes it. Order is preserved in
-// both write_files and runcmd, since provision-stage scripts must run in
+// both write_files and runcmd: provision-stage scripts must run in
 // selection order (docs/recipe-spec-v2.md, "For cloudinit backend").
 //
-// The returned fragment is a plain string, not yet merge_how-tagged: it is
-// meant to be handed to Seed alongside other recipe bodies exactly like any
-// other cloud recipe fragment (see userData in cloudinit.go), so it goes
-// through withMergeHow and buildArchive the same way every other document
-// does, rather than duplicating that here.
+// The returned fragment is a plain string, not yet merge_how-tagged. It is
+// meant to be handed to Seed alongside other recipe bodies, like any other
+// cloud recipe fragment (see userData in cloudinit.go). It goes through
+// withMergeHow and buildArchive the same way every other document does.
 func WrapScripts(scripts []Script) string {
 	if len(scripts) == 0 {
 		return ""
@@ -49,10 +48,10 @@ func WrapScripts(scripts []Script) string {
 }
 
 // indentBlock indents body by six spaces, the depth a YAML block scalar
-// needs under write_files' "content: |" (two for the write_files list item,
+// needs under write_files' "content: |": two for the write_files list item,
 // two more for content: under path/permissions, two more for the scalar
-// itself), and always ends in a newline so the next YAML key starts flush
-// left even when body doesn't already end in one.
+// itself. It always ends in a newline, so the next YAML key starts flush
+// left even when body does not already end in one.
 func indentBlock(body string) string {
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 	var b strings.Builder

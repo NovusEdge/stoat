@@ -12,48 +12,38 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// partStaleAfter is how long a *.part file under isos/ must sit with an
-// untouched mtime before Prune treats it as abandoned rather than in flight.
+// partStaleAfter is how long a *.part file under isos/ sits with no mtime
+// change before Prune treats it as abandoned.
 //
-// This is not a guess dressed up as a constant: it follows from what
-// internal/iso's Download already guarantees. Download resets a 60-second
-// stall timer (iso.go's stallTimeout) on every read, and if that timer ever
-// fires with zero progress, Download's own error path deletes the .part
-// itself. So a .part still sitting on disk is in exactly one of two states:
+// iso.Download resets a 60-second stall timer on every read. If the timer
+// fires with zero progress, Download deletes the .part itself. So a .part
+// still on disk is in exactly one of two states: an active download, mtime
+// moving and always under 60s old, or an abandoned one, mtime frozen because
+// the owning process died before its own cleanup ran. No third state exists.
 //
-//   - An active download: bytes are still landing, so the file's mtime is
-//     still moving forward, always well inside 60s of "now".
-//   - Abandoned: the process that owned it died before its own cleanup could
-//     run (killed with SIGKILL, OOM-killed, or the machine lost power), so
-//     the stall timer never got the chance to fire and delete the file for
-//     us. Its mtime is frozen at whatever byte last landed.
-//
-// There is no third state where a live, healthy download leaves a .part
-// motionless for minutes; iso.Download's own contract rules that out. The 2x
-// margin here exists only to absorb scheduler jitter and filesystem mtime
-// granularity, not because the 60s boundary itself is fuzzy. If
-// internal/iso's stallTimeout ever changes, this should move with it: it is
-// not re-derived from that unexported constant only because doing so would
-// require exporting it for a single caller.
+// The 2x margin absorbs scheduler jitter and mtime granularity. It is not a
+// guess at the 60s boundary itself. If internal/iso's stallTimeout changes,
+// update this too; it is not derived from that unexported constant to avoid
+// exporting it for one caller.
 const partStaleAfter = 2 * time.Minute
 
-// isoFieldLine and baseFieldLine best-effort extract vm.toml's `iso` and
-// `base` fields out of a file that failed to parse as TOML, mirroring
-// config.BrokenSSHPort's regex-over-raw-bytes approach for `sshport`. A
-// broken vm.toml is usually broken by one bad line, not a wholesale
-// rewrite; a hand-edit typo is the common case, so the rest of the file,
-// including the field naming the image it boots, is very often still
-// good text even though toml.Decode refuses the whole document.
+// isoFieldLine and baseFieldLine extract vm.toml's `iso` and `base` fields
+// by regex when the file fails to parse as TOML. config.BrokenSSHPort uses
+// the same approach for `sshport`.
+//
+// A broken vm.toml is usually broken by one bad line, from a hand-edit
+// typo. The rest of the file, including the image field, is often still
+// valid text even though toml.Decode refuses the whole document.
 var (
 	isoFieldLine  = regexp.MustCompile(`(?m)^\s*iso\s*=\s*"([^"]*)"\s*$`)
 	baseFieldLine = regexp.MustCompile(`(?m)^\s*base\s*=\s*"([^"]*)"\s*$`)
 )
 
-// PruneItem is one thing Prune removed, or would remove under DryRun. Class
-// is snake_case because it is also the wire value for the JSON contract's
-// "prune" command (docs/design/json-contract-draft.md §3.3); a caller that
-// wants prose renders it, rather than splitting a formatted string back
-// apart, which is the layering violation this type replaces.
+// PruneItem is one thing Prune removed, or would remove under DryRun.
+//
+// Class is snake_case: it is also the wire value for the JSON contract's
+// "prune" command (docs/design/json-contract-draft.md §3.3). A caller that
+// wants prose renders Class itself, instead of parsing a formatted string.
 type PruneItem struct {
 	// Class is one of "broken_vm", "partial_download" or "orphaned_image",
 	// matching pruneBroken, prunePartialDownloads and pruneImages respectively.
@@ -73,13 +63,13 @@ const (
 // on defaults to off (see the Broken and Images doc comments) except the
 // partial-download sweep, which needs no flag; see prunePartialDownloads.
 type PruneOpts struct {
-	// DryRun computes every candidate without touching disk. For an
-	// operation that can delete a disk image (real bandwidth to re-fetch) or
-	// a VM's disk.qcow2 (real guest state, gone for good), "show me first"
-	// is the normal way to call this, not a nicety bolted on afterwards. A
-	// caller (CLI, TUI) is expected to default its own flag to dry-run and
-	// require an explicit confirmation to flip it: Go's zero value can't
-	// encode that default for them, so it is stated here instead.
+	// DryRun computes every candidate without touching disk.
+	//
+	// Prune can delete a disk image (real bandwidth to re-fetch) or a VM's
+	// disk.qcow2 (guest state, gone for good). A caller (CLI, TUI) should
+	// default its own flag to dry-run and require explicit confirmation to
+	// disable it. Go's zero value cannot encode that default, so it is
+	// stated here instead.
 	DryRun bool
 
 	// Broken, when true, also removes VM directories whose vm.toml exists
@@ -91,27 +81,23 @@ type PruneOpts struct {
 	Images bool
 }
 
-// Prune removes (or, with DryRun, only reports) disposable stoat state:
-// broken VMs, abandoned partial downloads, and unreferenced local images,
-// each gated as described on PruneOpts and on the three helper functions
-// below. It returns every item acted on (or that would have been), each
-// carrying which class it fell into, so a caller can render or log the
-// decision without re-deriving it from a formatted string.
+// Prune removes, or with DryRun only reports, disposable stoat state:
+// broken VMs, abandoned partial downloads, and unreferenced local images.
+// PruneOpts and the three helpers below gate each class. Prune returns
+// every item acted on, each tagged with its class, so a caller can render
+// or log the decision without parsing a formatted string.
 //
-// Every helper below is independently scoped to a directory it is safe to
-// touch (Root()/<broken-vm-dir>, Root()/isos/*.part, Root()/isos/*), so
-// nothing here can reach id_stoat, guest_host_ed25519_key, recipes/ or
-// .manifest (all top-level files/dirs under Root() outside isos/), or a VM
-// directory outside Root() (config.VM.Delete's own guard, reused by
-// pruneBroken, refuses that). See docs/design/core-api.md §7 and §7.1 item 8.
+// Each helper only touches one scoped directory: Root()/<broken-vm-dir>,
+// Root()/isos/*.part, or Root()/isos/*. Prune never reaches id_stoat,
+// guest_host_ed25519_key, recipes/, .manifest, or a VM directory outside
+// Root(); config.VM.Delete's own guard enforces the last one. See
+// docs/design/core-api.md §7 and §7.1 item 8.
 func Prune(opts PruneOpts) ([]PruneItem, error) {
-	// The same data-root lock Create, Clone and Destroy take. Pruning decides
-	// what is unreferenced by reading every vm.toml, and a VM being created
-	// concurrently does not exist in one yet: without the lock, an image
-	// chosen by an in-flight Create can be judged orphaned and deleted between
-	// that Create picking it and writing the vm.toml that would have protected
-	// it. Held for the dry run too, so what it reports is what it would have
-	// removed rather than a snapshot that was already stale when printed.
+	// The same data-root lock Create, Clone and Destroy take. Prune decides
+	// what is unreferenced by reading every vm.toml. Without the lock, an
+	// image an in-flight Create just picked could be judged orphaned and
+	// deleted before that Create writes the vm.toml protecting it.
+	// Held for DryRun too, so the report matches what a real run would remove.
 	unlock, err := config.Lock()
 	if err != nil {
 		return nil, err
@@ -142,10 +128,9 @@ func Prune(opts PruneOpts) ([]PruneItem, error) {
 		}
 	}
 
-	// Sort by the same key the old []string return sorted on: the formatted
-	// "<prefix>: <path>" line. Reproduced here (rather than by class then
-	// path) only so the CLI's rendered output, ordering included, stays
-	// byte-identical to what it was before this type existed.
+	// Sorts by the formatted "<prefix>: <path>" line, the key the old
+	// []string return used, not by class then path. This keeps the CLI's
+	// rendered output byte-identical to before PruneItem existed.
 	prefix := map[string]string{
 		classBrokenVM:        "broken vm: ",
 		classPartialDownload: "partial download: ",
@@ -158,18 +143,12 @@ func Prune(opts PruneOpts) ([]PruneItem, error) {
 }
 
 // pruneBroken removes VM directories whose vm.toml exists but fails to
-// parse. Opt-in only (PruneOpts.Broken), and this is a deliberate departure
-// from what the design doc's one-line description ("remove broken VMs")
-// implies by default.
+// parse. Opt-in only (PruneOpts.Broken).
 //
-// A parse failure is not, by itself, proof the VM is disposable. The most
-// likely cause is a hand-edit typo in vm.toml (a stray quote, a duplicate
-// key), and the directory next to that broken file can hold a disk.qcow2
-// with hours of real guest work on it. "The config is unreadable" and "the
-// VM is worthless" are different claims; only a human who looks at *why* it
-// broke can tell them apart. core.Destroy already lets that human remove one
-// broken VM by name once they've decided; Prune's default must not make that
-// decision for them in bulk, silently, the first time they run it.
+// A parse failure does not prove the VM is disposable. The likely cause is
+// a hand-edit typo, and the directory can still hold a disk.qcow2 with real
+// guest work on it. Destroy already lets a human remove one broken VM by
+// name after they decide. Prune's default must not make that call in bulk.
 func pruneBroken(dryRun bool) ([]PruneItem, error) {
 	broken, err := config.ListBroken()
 	if err != nil {
@@ -180,23 +159,20 @@ func pruneBroken(dryRun bool) ([]PruneItem, error) {
 		dir := filepath.Join(config.Root(), b.Name)
 		bv := &config.VM{Name: b.Name, Dir: dir}
 
-		// qemu.Running only reads v.Dir and v.PidPath() (both derivable
-		// without a parsed vm.toml), so it works even though this VM's
-		// config doesn't. A broken vm.toml can still belong to a VM that
-		// was started before whatever edit corrupted the file: Destroy
-		// already refuses to touch a running VM, and Prune, acting in bulk
-		// with no one watching, must not become a quieter way around that
-		// same refusal.
+		// qemu.Running only needs v.Dir and v.PidPath(), both derivable
+		// without a parsed vm.toml, so it works on a broken VM too. The VM
+		// may have started before the edit that broke vm.toml. Destroy
+		// refuses to touch a running VM; Prune must refuse the same way,
+		// even acting in bulk.
 		if qemu.Running(bv) {
 			continue
 		}
 
 		out = append(out, PruneItem{Class: classBrokenVM, Path: dir})
 		if !dryRun {
-			// config.VM.Delete refuses anything whose parent isn't Root(),
-			// which dir always satisfies here (b.Name is a bare directory
-			// entry, never containing a separator), reused rather than
-			// re-implemented so this can't drift from that guard.
+			// config.VM.Delete refuses any path whose parent isn't Root().
+			// dir always satisfies that: b.Name is a bare directory entry,
+			// never a path with a separator.
 			if err := bv.Delete(); err != nil {
 				return out, err
 			}
@@ -206,16 +182,12 @@ func pruneBroken(dryRun bool) ([]PruneItem, error) {
 }
 
 // prunePartialDownloads removes *.part files under isos/ old enough that
-// they cannot be an in-flight download; see partStaleAfter for the proof.
+// they cannot be an in-flight download; see partStaleAfter.
 //
-// Unlike the other two classes, this one carries no opt-in flag and runs
-// every time Prune is called (DryRun still gates whether it actually
-// deletes). That asymmetry is deliberate, not an oversight: a stale .part
-// holds no guest state and represents no deliberate choice by the user; it
-// is exhaust from an interrupted fetch, and the age gate above is not a
-// heuristic guess but a consequence of iso.Download's own stall-timeout
-// contract. There is nothing here for a human to weigh that Broken and
-// Images both require.
+// Unlike Broken and Images, this class has no opt-in flag; it runs every
+// time Prune is called, and DryRun only gates the actual delete. A stale
+// .part holds no guest state and represents no user choice, it is exhaust
+// from an interrupted fetch. There is nothing here for a human to weigh.
 func prunePartialDownloads(dryRun bool) ([]PruneItem, error) {
 	isosDir := filepath.Join(config.Root(), "isos")
 	entries, err := os.ReadDir(isosDir)
@@ -274,10 +246,10 @@ func referencedImages() (map[string]bool, error) {
 	}
 	for _, v := range vms {
 		if v.ISO != "" {
-			// ISOPath resolves a bare "isos/foo.iso" against Root() but
-			// passes an absolute BYO path (outside isos/) through
-			// unchanged, exactly the case that would otherwise confuse a
-			// bare-filename comparison against isos/ contents.
+			// ISOPath resolves a bare "isos/foo.iso" against Root(), but
+			// passes an absolute BYO path through unchanged. A
+			// bare-filename comparison against isos/ contents would
+			// otherwise confuse the two.
 			add(v.ISOPath())
 		}
 		if v.Base != "" {
@@ -288,11 +260,10 @@ func referencedImages() (map[string]bool, error) {
 	}
 
 	// A vm.toml that fails a full TOML decode can still name a real image on
-	// an otherwise-intact line, so it is best-effort regexed for `iso` and
-	// `base` the same way config.BrokenSSHPort already regexes `sshport` out
-	// of a broken file. A field this can't find simply does not protect an
-	// image; the conservative direction, since Images only runs when a
-	// caller has opted in to begin with.
+	// an otherwise-intact line, regexed here for `iso` and `base` the same
+	// way config.BrokenSSHPort regexes `sshport`. A field this can't find
+	// simply does not protect an image, the safe direction since Images
+	// requires opt-in.
 	broken, err := config.ListBroken()
 	if err != nil {
 		return nil, err
@@ -317,18 +288,14 @@ func referencedImages() (map[string]bool, error) {
 	return refs, nil
 }
 
-// pruneImages removes files under isos/ that no VM (healthy or broken)
+// pruneImages removes files under isos/ that no VM, healthy or broken,
 // currently references. Opt-in only (PruneOpts.Images).
 //
-// An unreferenced image is not evidence of a mistake. It is, overwhelmingly,
-// evidence of the opposite: someone deliberately spent real bandwidth (these
-// are hundreds of MB) downloading it, has not yet built a VM from it, and
-// may do exactly that tomorrow. "No VM points at this today" and "this is
-// garbage" are not the same claim, and only the caller (not this package)
-// knows which one is true for a given file. Defaulting this on would
-// optimise for reclaiming disk space at the cost of occasionally forcing a
-// multi-minute re-download the user did nothing to deserve; defaulting it
-// off is what keeps that trade a choice instead of a surprise.
+// An unreferenced image is usually not a mistake. Someone spent real
+// bandwidth, hundreds of MB, downloading it and may build a VM from it
+// later. Only the caller knows whether a given file is garbage or a
+// deliberate download waiting to be used. Defaulting this off keeps that
+// call a choice, not a surprise re-download.
 func pruneImages(dryRun bool) ([]PruneItem, error) {
 	refs, err := referencedImages()
 	if err != nil {

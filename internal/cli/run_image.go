@@ -42,9 +42,9 @@ func runImages(a *Args, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// runPull downloads a catalog image. ^C cancels it for real now: the ctx
-// reaches the HTTP body read, which is why iso.Download needed a stall timeout
-// before and why an abandoned download used to keep running.
+// runPull downloads a catalog image. ^C cancels it: the ctx reaches the
+// HTTP body read, so an abandoned download stops instead of running to
+// completion in the background.
 func runPull(a *Args, stdout, stderr io.Writer) int {
 	var em *wire.Emitter
 	if a.JSON {

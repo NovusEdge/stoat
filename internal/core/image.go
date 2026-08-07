@@ -16,11 +16,11 @@ import (
 // LocalImages lists every plain file under isos/, any extension, so BYO
 // qcow2/img cloud images are picked up alongside ISOs.
 //
-// .part files are half-finished downloads. iso.Infer happily matches one
-// ("…cloudimg-amd64.img.part" contains "cloudimg"), so without this they show
-// up as selectable images and a VM can be built on a truncated file. Aborting
-// a download is routine, minutes long with no cancel key, so these do
-// accumulate.
+// .part files are excluded. iso.Infer matches one anyway
+// ("…cloudimg-amd64.img.part" contains "cloudimg"), so an included .part
+// file would show up as selectable and let a VM build on a truncated
+// image. Downloads run minutes with no cancel key, so aborted ones, and
+// their .part files, are common.
 func LocalImages() []string {
 	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
 	if err != nil {
@@ -35,18 +35,17 @@ func LocalImages() []string {
 	return out
 }
 
-// MatchLocal reports which local file (if any) satisfies catalog entry e:
-// either the exact basename of e.URL (direct-URL entries), or, for entries
-// resolved through an index rather than a fixed filename, whatever local file
-// iso.Infer agrees belongs to e's OS/backend pair.
+// MatchLocal reports which local file, if any, satisfies catalog entry e.
+// A direct-URL entry matches the exact basename of e.URL. An entry
+// resolved through an index instead of a fixed filename matches whatever
+// local file iso.Infer assigns the same OS/backend pair.
 //
-// The discriminator is e.Flavor, not e.OS == "alpine": alpine-cloud is an
-// alpine entry with a direct URL and Flavor == "", same as any other
-// direct-URL entry (see iso.Resolve's doc comment for why). Gating on OS alone
-// skipped the exact basename match for every alpine entry, including this one,
-// and fell through to the Infer-based loop below, which, depending on the
-// local directory's contents, can match the wrong file among several with the
-// same backend/OS pair.
+// The discriminator is e.Flavor, not e.OS == "alpine". alpine-cloud is an
+// alpine entry with a direct URL and Flavor == "", like any other
+// direct-URL entry (see iso.Resolve's doc comment). Gating on OS alone
+// would skip the basename match for every alpine entry and fall through to
+// the Infer loop, which can match the wrong file when several share a
+// backend/OS pair.
 func MatchLocal(e iso.Entry, files []string) string {
 	if e.Flavor == "" && e.URL != "" {
 		if u, err := url.Parse(e.URL); err == nil {
@@ -63,21 +62,20 @@ func MatchLocal(e iso.Entry, files []string) string {
 		if backend != e.Backend || osName != e.OS {
 			continue
 		}
-		// A FLAVOURED entry must also match its flavour in the filename.
+		// A flavoured entry must also match its flavour in the filename.
 		//
-		// iso.Infer only reports an OS and a backend, and alpine-standard and
-		// alpine-virt share both, so without this the first alpine .iso on
-		// disk satisfied BOTH entries. `stoat images` then reported alpine-virt
-		// as downloaded when only the standard ISO was present, and creating
-		// from alpine-virt silently built a VM on the standard image: a 352 MiB
-		// general-purpose kernel where the user asked for the 66 MiB
-		// virtualised one. Wrong image, no error, no way to notice.
+		// iso.Infer reports only an OS and a backend. alpine-standard and
+		// alpine-virt share both, so without this check the first alpine
+		// .iso on disk satisfied both entries. `stoat images` then
+		// reported alpine-virt as downloaded when only the standard ISO
+		// was present, and creating from alpine-virt silently built a VM
+		// on the standard image: a 352 MiB general-purpose kernel instead
+		// of the 66 MiB virtualised one the user asked for.
 		//
-		// Alpine's published filenames begin with exactly the flavour string
-		// the catalog stores ("alpine-virt" -> alpine-virt-3.24.1-x86_64.iso),
-		// which is what makes this a reliable discriminator rather than a
-		// guess. Entries with no flavour are unaffected: they matched by exact
-		// basename above.
+		// Alpine's published filenames begin with the catalog's flavour
+		// string ("alpine-virt" -> alpine-virt-3.24.1-x86_64.iso), which
+		// makes this a reliable check. Entries with no flavour already
+		// matched by exact basename above.
 		if e.Flavor != "" && !strings.Contains(f, e.Flavor) {
 			continue
 		}
@@ -97,8 +95,8 @@ type image struct {
 }
 
 // isoField is what vm.toml records. A bare name stays relative to the data
-// root so the VM survives a moved $STOAT_HOME; a file browsed to outside
-// isos/ has to be absolute, and joining "isos/" onto it would produce
+// root, so the VM survives a moved $STOAT_HOME. A file browsed to outside
+// isos/ must stay absolute; joining "isos/" onto it would produce
 // "…/isos/home/u/x.iso", a path that does not exist.
 func (i image) isoField() string {
 	if i.rel != "" {
@@ -158,15 +156,15 @@ func resolveImage(spec string) (image, error) {
 	return image{}, fmt.Errorf("%w: no catalog entry or local image called %q", ErrNotFound, spec)
 }
 
-// apply folds a Spec's BYO overrides onto what the file itself declared, and
-// derives the SSH user from the result.
+// apply folds a Spec's BYO overrides onto what the file itself declared,
+// and derives the SSH user from the result.
 //
-// The cloud-init seed creates exactly one account, cloudinit.User, so anything
-// provisioned through that backend connects as it, including a file the
-// caller has just declared to be a cloud image. Left to fall through, a BYO
-// image would record an empty SSHUser, sshx would default that to root, and
-// cloud images lock root: ssh and applying recipes would both fail on a VM
-// that looked correctly configured.
+// The cloud-init seed creates exactly one account, cloudinit.User.
+// Anything provisioned through that backend must connect as it, including
+// a file the caller has just declared to be a cloud image. Without this, a
+// BYO image would record an empty SSHUser, sshx would default that to
+// root, and cloud images lock root: ssh and recipes would both fail on a
+// VM that looked correctly configured.
 func (i image) apply(s Spec) image {
 	if i.entry == nil {
 		if s.Backend != "" {

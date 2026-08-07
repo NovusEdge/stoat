@@ -13,10 +13,10 @@ import (
 )
 
 // These tests exist because a whole-branch review found three geometry bugs
-// that a fully green suite had not noticed: rows wrapping, the pane running a
-// line past the terminal and cutting off the footer, and the footer coming
-// back wider than the screen. Every other test in this package asserts
-// behaviour; nothing measured what was actually drawn.
+// that a fully green suite had not noticed: rows wrapping, the pane running
+// a line past the terminal and cutting off the footer, and the footer
+// coming back wider than the screen. Every other test in this package
+// asserts behaviour. Nothing measured what was actually drawn.
 
 func geoVMs(t *testing.T, n int) []core.VM {
 	t.Helper()
@@ -30,11 +30,11 @@ func geoVMs(t *testing.T, n int) []core.VM {
 	return out
 }
 
-// TestListPaneFitsTheTerminal pins the pagination arithmetic. Budgeting two
-// lines for the pagination row (it costs one: bubbles only adds a top margin
-// when the delegate's spacing is 0, and ours is 1) made the block taller than
-// the terminal, which flips View() to top-align and lets the terminal eat the
-// bottom line: the help footer.
+// TestListPaneFitsTheTerminal pins the pagination arithmetic. The
+// pagination row costs one line: bubbles only adds a top margin when the
+// delegate's spacing is 0, and ours is 1. Budgeting two lines for it made
+// the block taller than the terminal, which flips View() to top-align and
+// lets the terminal eat the bottom line, the help footer.
 func TestListPaneFitsTheTerminal(t *testing.T) {
 	cases := []struct{ height, vms int }{
 		{20, 0}, {20, 1}, {20, 8}, {20, 50},
@@ -56,10 +56,11 @@ func TestListPaneFitsTheTerminal(t *testing.T) {
 }
 
 // TestListWidthFitsARunningRow is the test that would have caught the worst
-// finding. Every render in the suite showed STOPPED VMs, whose state column is
-// a single "-" (38 cells); a running one carries "up 1h30m0s  :2200" and needs
-// 54, so the pane wrapped the port onto its own line the moment anything was
-// actually up. Pure arithmetic on the row format, so it needs no live qemu.
+// finding. Every render in the suite showed STOPPED VMs, whose state column
+// is a single "-" (38 cells). A running one carries "up 1h30m0s  :2200" and
+// needs 54, so the pane wrapped the port onto its own line the moment
+// anything was actually up. This is pure arithmetic on the row format, so
+// it needs no live qemu.
 func TestListWidthFitsARunningRow(t *testing.T) {
 	// The widest state string the detail row can hold: a VM up for just under
 	// 1000 hours, with a 4-digit port.
@@ -73,11 +74,11 @@ func TestListWidthFitsARunningRow(t *testing.T) {
 	}
 }
 
-// TestFooterNeverOverflows covers help.Model giving up on truncation: once its
-// running total passes the width it can no longer fit an ellipsis, so it
-// appends every remaining binding and returns a line WIDER than the terminal,
-// which then wraps and pushes the whole screen up. 60 is the enforced floor
-// and 80 the classic default, and both were broken.
+// TestFooterNeverOverflows covers help.Model giving up on truncation. Once
+// its running total passes the width, it can no longer fit an ellipsis, so
+// it appends every remaining binding and returns a line WIDER than the
+// terminal, which then wraps and pushes the whole screen up. 60 is the
+// enforced floor and 80 the classic default; both were broken.
 func TestFooterNeverOverflows(t *testing.T) {
 	for w := 60; w <= 120; w += 2 {
 		for _, km := range []help.KeyMap{

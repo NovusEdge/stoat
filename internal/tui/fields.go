@@ -8,12 +8,12 @@ import (
 )
 
 // Every screen that shows rows of "label   value" renders through fields.
-// Before this, five files each hand-padded their own rows with
-// fmt.Sprintf("%-8s"), at three different label widths, and three of them
-// repeated a bare 11 (as strings.Repeat(" ", 11), as an eleven-space string
-// literal, and as contentWidth-11) for the indent a continuation line needs.
-// Changing the label column meant finding all of those; missing one left a
-// screen misaligned in a way no test covered.
+// Five files used to hand-pad their own rows with fmt.Sprintf("%-8s"), at
+// three different label widths. Three of them repeated a bare 11, as
+// strings.Repeat(" ", 11), as an eleven-space literal, and as
+// contentWidth-11, for the continuation-line indent. Changing the label
+// column meant finding every one of those; a missed spot left a screen
+// misaligned in a way no test covered.
 const (
 	fieldMarkerWidth = 2  // the focus cursor: "❯ ", or two spaces
 	fieldLabelWidth  = 10 // the widest label ("installed") plus a gap
@@ -57,17 +57,17 @@ func (f *fields) gap() { f.rows = append(f.rows, []string{"", "", ""}) }
 // cell, which a note never uses, so it cannot collide with a focus cursor.
 const noteMark = "\x00note"
 
-// note adds a dim remark under the row above, starting at the LABEL column
-// rather than the value column, since it is a remark ABOUT the field, not another
-// value for it, so it reads wrong indented under the value.
+// note adds a dim remark under the row above, starting at the label column
+// rather than the value column. It is a remark about the field, not
+// another value for it, so it reads wrong indented under the value.
 //
-// Notes are drawn as their own full-width lines rather than table rows: a
-// lipgloss table cannot span columns, and the text is wider than the label
-// cell, so in a cell it would wrap mid-word. Splitting the table around them
-// is safe precisely because every column here has a FIXED width: the
-// segments either side of a note still line up. Callers that leave width at
-// zero (the value column then auto-sizes) must not use notes; only the two
-// forms do, and both set a width.
+// A note is drawn as its own full-width line, not a table row. A lipgloss
+// table cannot span columns, and note text is wider than the label cell, so
+// a table cell would wrap it mid-word. Splitting the table around a note is
+// safe because every column here has a fixed width: the table segments
+// either side of the note still line up. A caller that leaves width at zero
+// (auto-sizing the value column) must not call note; only the two forms
+// call it, and both set a width.
 func (f *fields) note(text string) {
 	f.rows = append(f.rows, []string{noteMark, text, ""})
 }
@@ -107,20 +107,19 @@ func (f *fields) renderRows(rows [][]string) string {
 		Border(lipgloss.Border{}).
 		BorderTop(false).BorderLeft(false).BorderRight(false).
 		BorderHeader(false).BorderRow(false).BorderColumn(false).
-		// BorderBottom stays ON deliberately: with it off, lipgloss v1.1.0's
-		// table drops the last data row entirely (three rows render as two).
-		// The glyphs are all empty, so leaving it on draws nothing and costs
+		// BorderBottom stays on deliberately. With it off, lipgloss v1.1.0's
+		// table drops the last data row entirely: three rows render as two.
+		// All the glyphs are empty, so leaving it on draws nothing and costs
 		// no line; turning it off costs a row.
 		//
-		// The real fault is table.computeHeight(), which returns one line too
-		// few for a table with no headers, and which String() applies as a
-		// hard MaxHeight clamp. That arithmetic is unchanged in lipgloss
-		// v2.0.5; v2 only stops CALLING it, by clamping to
-		// min(t.height, computeHeight()), and t.height is 0 unless someone
-		// calls .Height(). So the migration must not "clean up" this line on
-		// the grounds that v2 fixed the bug: it did not, and calling .Height()
-		// on this table brings it straight back, in either version.
-		// TestFieldsKeepsEveryRow is the guard.
+		// The fault is in table.computeHeight(), which returns one line too
+		// few for a table with no headers; String() applies that as a hard
+		// MaxHeight clamp. lipgloss v2.0.5 has the same arithmetic. v2 only
+		// stops calling computeHeight by clamping to min(t.height,
+		// computeHeight()), and t.height is 0 unless something calls
+		// .Height(). Do not remove this line on the assumption v2 fixed the
+		// bug: it did not, and calling .Height() on this table brings the
+		// bug back, in either version. TestFieldsKeepsEveryRow guards it.
 		BorderBottom(true).
 		StyleFunc(func(_, col int) lipgloss.Style {
 			switch col {

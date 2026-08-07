@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/testutil"
@@ -12,9 +13,8 @@ import (
 
 // writeRawVMToml writes vm.toml content directly, bypassing config.VM.Save
 // and its TOML encoding, so a deliberately malformed file can be produced.
-// Mirrors config_test.go's helper of the same name, reimplemented here
-// rather than imported: it lives in package config_test, not exported for
-// reuse.
+// Mirrors config_test.go's helper of the same name; not imported, since it
+// lives in package config_test, unexported.
 func writeRawVMToml(t *testing.T, name, content string) {
 	t.Helper()
 	dir := filepath.Join(config.Root(), name)
@@ -26,15 +26,15 @@ func writeRawVMToml(t *testing.T, name, content string) {
 	}
 }
 
-// fakeRunning marks v as running without a real qemu process: it spawns
-// `sleep`, whose argv includes v.Dir (qemu.Running's cmdlineMatches only
-// checks that /proc/<pid>/cmdline contains dir+"/", not which binary it is),
-// and points the VM's pidfile at it. The returned func kills the process and
-// must be deferred by the caller.
+// fakeRunning marks v as running without a real qemu process. It spawns
+// `sleep` with v.Dir in its argv (qemu.Running's cmdlineMatches only checks
+// that /proc/<pid>/cmdline contains dir+"/", not which binary it is), and
+// points the VM's pidfile at it. The returned func kills the process; the
+// caller must defer it.
 //
-// This exists so Start/Stop/Destroy's "is it running" branches are testable
-// without qemu-system-x86_64 installed, exactly the CI constraint the
-// existing tests already work around for qemu-img.
+// This makes Start/Stop/Destroy's "is it running" branches testable without
+// qemu-system-x86_64 installed, the same CI constraint existing tests work
+// around for qemu-img.
 func fakeRunning(t *testing.T, v *config.VM) func() {
 	return testutil.FakeRunning(t, v.Dir)
 }
@@ -206,20 +206,19 @@ func TestDestroyBrokenVMDeletesTheDirectory(t *testing.T) {
 }
 
 // TestIdentityFromListRoundTrips pins the rule that every `name string` in
-// this package is a DIRECTORY name, and that VM.Name reports that directory
-// rather than vm.toml's `name` field.
+// this package is a DIRECTORY name, and VM.Name reports that directory, not
+// vm.toml's `name` field.
 //
-// The two diverge in practice: a VM's directory is fixed at creation and the
-// file's name field can be edited afterwards, and every operation here is
-// directory-anchored (config.Load builds Root()/<name>/vm.toml, qemu's pidfile
-// comes off v.Dir, Delete removes v.Dir). Before this was fixed, a directory
-// "work" holding `name = "work2"` came back from List as "work2", and feeding
-// that straight back into Get returned ErrNotFound: the API handed out an
-// identifier it would not itself accept. Worse than a failed lookup, had a
-// real "work2" existed, the caller would have operated on the WRONG VM.
+// The two diverge in practice: a VM's directory is fixed at creation, but
+// the file's name field can be edited afterwards. Every operation here is
+// directory-anchored (config.Load builds Root()/<name>/vm.toml, qemu's
+// pidfile comes off v.Dir, Delete removes v.Dir). Before this was fixed, a
+// directory "work" holding `name = "work2"` came back from List as "work2",
+// and Get("work2") then returned ErrNotFound. Worse, if a real "work2" VM
+// existed, the caller would have operated on the wrong VM.
 //
-// internal/tui/list_test.go's TestDeleteTargetsDirectoryNotName is the same
-// rule for the delete path; this is it for the core API's identity.
+// internal/tui/list_test.go's TestDeleteTargetsDirectoryNotName pins the
+// same rule for the delete path.
 func TestIdentityFromListRoundTrips(t *testing.T) {
 	root(t)
 	writeRawVMToml(t, "work", "name = \"work2\"\nmode = \"live\"\nram = 512\ncpus = 1\nsshport = 2222\n")
@@ -361,12 +360,92 @@ func TestGetDoesNotModifyVMTomlOnDisk(t *testing.T) {
 	}
 }
 
+// TestStartedAtRunningVsStopped pins that a running VM's StartedAt comes
+// from the pidfile qemu.Running just read, and a stopped one gets the zero
+// time, not some stale value left over from a previous run.
+func TestStartedAtRunningVsStopped(t *testing.T) {
+	dir := root(t)
+	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.StartedAt.IsZero() {
+		t.Errorf("stopped VM: StartedAt = %v, want the zero time", v.StartedAt)
+	}
+
+	cv := &config.VM{Name: "work", Dir: filepath.Join(dir, "work")}
+	stop := fakeRunning(t, cv)
+	defer stop()
+
+	v, err = Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.StartedAt.IsZero() {
+		t.Error("running VM: StartedAt is the zero time, want the pidfile's mtime")
+	}
+}
+
+// TestAppliedRoundTrips pins that a vm.toml's [applied] table survives onto
+// core.VM as core's own AppliedRecipe, not config's.
+func TestAppliedRoundTrips(t *testing.T) {
+	root(t)
+	writeRawVMToml(t, "work", `name = "work"
+mode = "live"
+ram = 1024
+cpus = 1
+sshport = 2200
+
+[applied.xfce]
+version = "1.0.0"
+at = 2026-01-15T10:00:00Z
+`)
+
+	v, err := Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := v.Applied["xfce"]
+	if !ok {
+		t.Fatalf("Applied = %+v, want an entry for xfce", v.Applied)
+	}
+	if got.Version != "1.0.0" {
+		t.Errorf("Applied[xfce].Version = %q, want 1.0.0", got.Version)
+	}
+	want := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	if !got.At.Equal(want) {
+		t.Errorf("Applied[xfce].At = %v, want %v", got.At, want)
+	}
+}
+
+// TestAppliedNilWhenNoRecipesApplied pins that a VM with no [applied] table
+// gets a nil map, which the brief calls out explicitly since it still reads
+// fine with len() and range.
+func TestAppliedNilWhenNoRecipesApplied(t *testing.T) {
+	root(t)
+	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := Get("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Applied != nil {
+		t.Errorf("Applied = %+v, want nil", v.Applied)
+	}
+}
+
 // TestDestroyRefusesARunningBrokenVM pins a real bug: Destroy's broken-VM
-// branch skipped the running check, on the stated but false grounds that
-// qemu.Running needed a parsed config.VM. It needs only Dir, which that
-// branch reconstructs, so a vm.toml corrupted AFTER its VM was started turned
-// Destroy into a quiet way around the refusal that applies to every healthy
-// VM, deleting the pidfile, monitor socket and disk from under a live qemu.
+// branch once skipped the running check. qemu.Running needs only Dir, which
+// that branch reconstructs. Skipping the check let a vm.toml corrupted
+// after its VM was started bypass the refusal that applies to every
+// healthy VM, deleting the pidfile, monitor socket and disk from under a
+// live qemu process.
 func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
 	root(t)
 	// A directory that is running but whose vm.toml no longer parses.

@@ -22,13 +22,16 @@ stage = "provision"
 script = "install.sh"
 `
 
-// shellTemplate is the install.sh skeleton. It carries the two things every
-// bundled shell recipe has and a first-timer would not think of: the
-// repository enable (docker, tailscale and most of what you would want live
-// in Alpine's community repo, which is off by default), and the live-vs-disk
-// honesty block that the test suite REQUIRES of every bundled recipe: on a
-// live VM the root is a tmpfs overlay, so anything installed is gone on
-// reboot, and a recipe that implies otherwise is lying.
+// shellTemplate is the install.sh skeleton. It carries two things every
+// bundled shell recipe needs, that a first-timer would not think to add.
+//
+// First, the repository enable: docker, tailscale, and most of what you
+// would want live in Alpine's community repo, which is off by default.
+//
+// Second, the live-vs-disk honesty block. The test suite requires this
+// block on every bundled recipe. On a live VM the root is a tmpfs overlay,
+// so anything installed is gone on reboot. A recipe that implies otherwise
+// is lying.
 const shellTemplate = `#!/bin/sh
 # %s: runs as root over ssh on a booted %s VM.
 set -e
@@ -61,9 +64,9 @@ func osSetup(osName string) (setup, install string) {
 }
 
 // New writes a skeleton recipe directory and returns its path. It refuses to
-// overwrite: Install() already promises never to clobber a user's edits, and
-// a scaffold command that could destroy the recipe you have been working on
-// would be a worse failure than not existing.
+// overwrite. Install() already promises never to clobber a user's edits.
+// A scaffold command that destroys the recipe you were working on is a
+// worse failure than the recipe not existing yet.
 func New(name, osName, _ string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("a recipe needs a name")

@@ -14,10 +14,10 @@ import (
 // offering different files.
 var imageExts = []string{".iso", ".qcow2", ".img"}
 
-// scanBatch is how many files pile up before a batch is sent. One message per
-// file would be correct but makes the list rebuild its filter once per file;
-// one message at the end would mean staring at an empty pane for the whole
-// walk. Batching gets results on screen early without a message storm.
+// scanBatch is how many files pile up before a batch is sent. One message
+// per file would rebuild the list's filter once per file. One message at
+// the end would leave the pane empty for the whole walk. Batching shows
+// results early without a message storm.
 const scanBatch = 32
 
 // foundImage is one candidate. Only what the row needs: the path is both the
@@ -28,21 +28,22 @@ type foundImage struct {
 	size int64
 }
 
-// scanImages walks root in the background and streams batches of disk images
-// down the returned channel, which is CLOSED when the walk finishes. The walk
-// runs in a goroutine because a home directory can take seconds; the caller
-// draws each batch as it lands rather than waiting for all of them.
+// scanImages walks root in the background and streams batches of disk
+// images down the returned channel. The channel closes when the walk
+// finishes. The walk runs in a goroutine because a home directory can take
+// seconds. The caller draws each batch as it lands, instead of waiting for
+// all of them.
 //
-// WalkDir, not Walk: it reads directory entries in bulk and skips one Lstat
-// per file. It also does not follow symlinks, which is what keeps a symlink
-// loop from hanging the scan.
+// scanImages uses WalkDir, not Walk. WalkDir reads directory entries in
+// bulk and skips one Lstat per file. It also does not follow symlinks,
+// which keeps a symlink loop from hanging the scan.
 //
-// cancel, when closed, ends the walk at the next batch boundary. Without it a
-// caller who stops reading (the finder is left, or the modal closes on a
-// selection) leaves the goroutine parked forever on an unconsumed send once
-// four batches (128 images) pile up in the buffer: out is capacity 4 and a
-// bare send blocks. A nil cancel is fine; the send just never has a second
-// case to race against.
+// cancel, when closed, ends the walk at the next batch boundary. Without
+// it, a caller who stops reading, because the finder is left or the modal
+// closes on a selection, leaves the goroutine parked forever on an
+// unconsumed send. This happens once four batches (128 images) fill the
+// buffer: out has capacity 4, and a bare send then blocks. A nil cancel is
+// fine. The send then has no second case to race against.
 func scanImages(root string, cancel <-chan struct{}) <-chan []foundImage {
 	out := make(chan []foundImage, 4)
 
@@ -76,10 +77,10 @@ func scanImages(root string, cancel <-chan struct{}) <-chan []foundImage {
 				return nil
 			}
 			if d.IsDir() {
-				// Hidden trees are where the file count lives (.cache, .git,
-				// .local) and where disk images do not. Skipping them is most
-				// of the reason this finishes quickly. root itself is never
-				// skipped, even when it is a dotted path.
+				// Hidden trees hold most of a home directory's file count
+				// (.cache, .git, .local) and hold no disk images. Skipping
+				// them is most of why this scan finishes quickly. root
+				// itself is never skipped, even when it is a dotted path.
 				if path != root && strings.HasPrefix(d.Name(), ".") {
 					return fs.SkipDir
 				}
@@ -121,14 +122,15 @@ func hasImageExt(name string) bool {
 	return false
 }
 
-// imagesFoundMsg carries one batch. done is set once the channel closes, which
-// is how the modal knows to stop saying it is still looking.
+// imagesFoundMsg carries one batch. done is set once the channel closes.
+// This is how the modal knows to stop saying it is still looking.
 //
-// gen is the scan generation waitForImages was issued for. The modal stamps
-// its current generation into every waitForImages call and drops any message
-// whose gen doesn't match: a message parked on a scan that has since been
-// abandoned (esc, or re-entering the finder) would otherwise be delivered
-// against the NEW scan, doubling its results or ending it early.
+// gen is the scan generation waitForImages was issued for. The modal
+// stamps its current generation into every waitForImages call, and drops
+// any message whose gen does not match. Without this check, a message
+// parked on an abandoned scan, from esc or re-entering the finder, would
+// deliver against the new scan instead, doubling its results or ending it
+// early.
 type imagesFoundMsg struct {
 	batch []foundImage
 	done  bool

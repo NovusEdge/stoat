@@ -14,22 +14,22 @@ const (
 )
 
 // GraphicalSession reports whether this host has a display server a qemu
-// window could open on, and is the argument every function below wants.
+// window could open on. Every function below takes it as an argument.
 //
-// Re-exported for the same reason the constants above are: internal/cli
-// deliberately does not import internal/qemu, and this is the one impure fact
-// it has to supply. Cheap enough to call per command (an env read and at most
-// one stat), and deliberately not cached: it is read where it is used, so a
-// user who exports the override sees it take effect.
+// GraphicalSession is re-exported for the same reason as the constants
+// above: internal/cli does not import internal/qemu, and this is the one
+// impure fact it needs. It costs an env read and at most one stat, cheap
+// enough to call per command, and it is not cached: reading it where it is
+// used means a user who exports the override sees it take effect.
 func GraphicalSession() bool { return qemu.GraphicalSession() }
 
 // Display is where a VM's screen is right now, and what to do about it.
 //
-// It exists because the answer changes under the user without saying so: a
-// disk VM shows a real qemu window until setup-alpine finishes and stoat sets
-// installed = true, and every start after that puts the screen on a VNC
-// socket that nothing in the CLI or the TUI mentions. Reported as "doesn't
-// spawn a qemu VM window anymore", with no error to go on.
+// The answer changes without notice. A disk VM shows a real qemu window
+// until setup-alpine finishes and stoat sets installed = true. Every start
+// after that puts the screen on a VNC socket that neither the CLI nor the
+// TUI mentions on its own. Users reported this as "doesn't spawn a qemu VM
+// window anymore", with no error to go on.
 type Display struct {
 	// Kind is DisplayWindow or DisplayVNC, or "" for a broken VM, whose
 	// vm.toml supplies neither of the facts the rule needs.
@@ -39,20 +39,19 @@ type Display struct {
 	// Attach is how to open Socket on this host. Zero unless Kind is
 	// DisplayVNC.
 	Attach qemu.Attach
-	// NoSession is true when this VM wanted a window and the host had no
-	// graphical session to open one on, which is the only case where Kind is
-	// DisplayVNC for a reason that is about the host rather than the VM. It
-	// exists so a caller can say WHY there is no window: an OS installer on a
-	// VNC socket needs explaining, and "no window" on its own reads as the
-	// failure the user just hit rather than the workaround for it.
+	// NoSession is true when this VM wanted a window but the host had no
+	// graphical session to open one on. It is the only case where Kind is
+	// DisplayVNC for a reason about the host, not the VM. A caller uses it to
+	// explain WHY there is no window: an OS installer on a VNC socket needs
+	// explaining, or "no window" reads as a failure instead of a workaround.
 	NoSession bool
 }
 
 // DisplayKind is the pure half: which surface, with no filesystem or PATH
-// access. The JSON DTO uses this rather than DisplayFor, because a DTO
-// constructor that shelled out to look at PATH would do so once per VM in a
-// list. graphical comes from GraphicalSession, resolved once by the caller for
-// the same reason.
+// access. The JSON DTO calls this instead of DisplayFor, because a DTO
+// constructor that checked PATH would do so once per VM in a list. graphical
+// comes from GraphicalSession, resolved once by the caller for the same
+// reason.
 func DisplayKind(v VM, graphical bool) string {
 	if v.State == StateBroken {
 		return ""

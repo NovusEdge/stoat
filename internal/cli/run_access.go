@@ -53,15 +53,13 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 // same way ssh itself does. That is what makes it scriptable: `stoat exec vm
 // make test && deploy` has to mean what it looks like.
 //
-// The cost is that stoat's own exit codes and the guest's share one range: a
-// guest command exiting 2 is indistinguishable from a stoat usage error. That
-// is accepted rather than worked around, because every alternative is worse:
-// remapping the guest's status silently lies about what the command did, and a
-// dedicated flag for "really give me the real code" would just be a footgun
-// with extra steps. ssh made the same trade for the same reason.
+// stoat's own exit codes and the guest's share one range, so a guest command
+// exiting 2 is indistinguishable from a stoat usage error. Remapping the
+// guest's status would misrepresent what the command did. ssh takes the
+// same trade.
 //
-// Note stoat's OWN failures here (no such VM, not running) still exit 1, and
-// print to stderr, so they are distinguishable from guest output.
+// stoat's OWN failures here (no such VM, not running) still exit 1 and
+// print to stderr, distinguishable from guest output.
 func runExec(a *Args, stdout, stderr io.Writer) int {
 	// No timeout: a guest command may legitimately run for hours, and ^C
 	// already kills the ssh process. Bounding it here would mean inventing a
@@ -132,11 +130,10 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	if v.Mode == "cloud" {
-		// cloud-init's packages: list only runs at first boot, baked into
-		// the seed when the overlay was created, there is nothing left for
-		// ssh-based provisioning to do, and piping a recipe (which for cloud
-		// VMs is #cloud-config YAML, not a shell script) into `sh -s` would
-		// just fail.
+		// cloud-init's packages: list runs only at first boot, baked into
+		// the seed when the overlay was created. There is nothing left for
+		// ssh-based provisioning to do, and a cloud recipe is #cloud-config
+		// YAML, not a shell script, so piping it into `sh -s` would fail.
 		const reason = "cloud VM: recipes are applied by cloud-init at first boot; recreate the VM to change them"
 		if a.JSON {
 			// A consumer has to be able to tell "recipes ran" from "there was

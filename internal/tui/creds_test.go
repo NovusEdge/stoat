@@ -5,18 +5,21 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
 )
 
-// TestDetailShowsConsoleCredentials covers the reported problem: launching an
-// Ubuntu cloud VM shows a login prompt in the qemu window, and nothing in
-// stoat said what to type. cloud-init locks every account by default
-// (lock_passwd defaults to true) and the seed sets ssh_pwauth: false, so
-// without a password there is no valid answer to that prompt at all.
+// TestDetailShowsConsoleCredentials covers the reported problem: an Ubuntu
+// cloud VM shows a login prompt in the qemu window, and stoat said nothing
+// about what to type.
+//
+// cloud-init locks every account by default (lock_passwd defaults to true).
+// The seed sets ssh_pwauth: false. Without a password there is no valid
+// answer to the prompt.
 func TestDetailShowsConsoleCredentials(t *testing.T) {
-	withPassword := &config.VM{
+	withPassword := core.VM{
 		Name: "ubuntu-1", Mode: "cloud", OS: "ubuntu", Backend: "cloudinit",
-		RAM: 4096, CPUs: 4, SSHPort: 2202, Dir: t.TempDir(),
+		RAM: 4096, CPUs: 4, SSHPort: 2202, Paths: core.Paths{Dir: t.TempDir()},
 		Base: "/tmp/b.qcow2", SSHUser: "stoat", ConsolePassword: "stoat",
 	}
 	m := model{screen: screenDetail, width: 100, height: 40}
@@ -29,11 +32,10 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 	if !strings.Contains(out, "stoat / stoat") {
 		t.Errorf("detail pane does not show the credential pair:\n%s", out)
 	}
-	// It must be clear the password is not an ssh credential. The seed
-	// refuses password auth over the forwarded port. Cloud VMs never get a
-	// qemu window (qemu.NeedsWindow), so the row must point at the vnc
-	// socket the detail screen also surfaces, not a window that never
-	// appears (see IMPORTANT 3 in the final review).
+	// The password is not an ssh credential: the seed refuses password auth
+	// over the forwarded port.
+	// Cloud VMs never get a qemu window (qemu.NeedsWindow). The row must
+	// point at the vnc socket the detail screen also surfaces.
 	if !strings.Contains(out, "vnc") {
 		t.Error("detail pane does not say the password is reached over vnc")
 	}
@@ -43,10 +45,10 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 
 	// A cloud VM without one (created before this existed) must say so
 	// rather than leaving the user to discover it at a login prompt.
-	noPassword := *withPassword
+	noPassword := withPassword
 	noPassword.ConsolePassword = ""
 	m2 := model{screen: screenDetail, width: 100, height: 40}
-	m2.detail = newDetail(&noPassword)
+	m2.detail = newDetail(noPassword)
 	out2 := m2.viewDetail()
 	if !strings.Contains(out2, "not possible") {
 		t.Errorf("a cloud VM with no console password does not warn:\n%s", out2)
@@ -58,9 +60,9 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 // the row should stay out of the way.
 func TestLiveVMNeedsNoConsolePassword(t *testing.T) {
 	m := model{screen: screenDetail, width: 100, height: 40}
-	m.detail = newDetail(&config.VM{
+	m.detail = newDetail(core.VM{
 		Name: "live1", Mode: "live", OS: "alpine", ISO: "isos/alpine.iso",
-		RAM: 4096, CPUs: 4, SSHPort: 2200, Dir: t.TempDir(),
+		RAM: 4096, CPUs: 4, SSHPort: 2200, Paths: core.Paths{Dir: t.TempDir()},
 	})
 	out := m.viewDetail()
 	if strings.Contains(out, "not possible") {
@@ -123,12 +125,13 @@ func containsFocus(o focusOrder, want int) bool {
 	return false
 }
 
-// TestCloudVMGetsADiskSize is the regression test for a reported failure that
-// looked like a broken recipe and was not. A CoW overlay inherits its BASE
-// image's virtual size, and cloud images are sized to boot and nothing more.
-// Ubuntu 24.04's is 3.5G with a 2.4G root. Installing a desktop filled it,
-// apt exited 100, and cloud-init reported a bare "error" with no mention of
-// disk space anywhere the user could see.
+// TestCloudVMGetsADiskSize is the regression test for a failure that looked
+// like a broken recipe.
+//
+// A CoW overlay inherits its base image's virtual size. Cloud images are
+// sized to boot only. Ubuntu 24.04's base is 3.5G with a 2.4G root.
+// Installing a desktop filled the disk, apt exited 100, and cloud-init
+// reported a bare "error" with no mention of disk space.
 func TestCloudVMGetsADiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	f := newForm()

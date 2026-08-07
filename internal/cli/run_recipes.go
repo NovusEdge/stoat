@@ -16,7 +16,7 @@ import (
 // resolved to every guest.OS it could mean and the per-OS results are merged,
 // rather than passed through and rejected.
 //
-//   - both given: exactly the one core.Recipes call the brief describes.
+//   - both given: one core.Recipes call, unfiltered.
 //   - OS given, backend empty: that OS's own backend (guest.Lookup), so
 //     `--os alpine` means "what alpine gets", not an error.
 //   - backend given, OS empty: every known OS queried against that backend.

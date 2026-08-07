@@ -16,8 +16,8 @@ import (
 	"github.com/novusedge/stoat/internal/theme"
 )
 
-// defaultWidth is used until the first WindowSizeMsg arrives, and as the floor
-// for a terminal that reports something unusably narrow.
+// defaultWidth applies until the first WindowSizeMsg arrives. It also floors
+// a terminal that reports an unusably narrow width.
 const defaultWidth = 60
 
 var (
@@ -32,15 +32,13 @@ var (
 	cellStyle = lipgloss.NewStyle().PaddingRight(2)
 )
 
-// keys are declared as key.Bindings rather than compared as strings, which is
-// both the Bubbles idiom and the thing that survives the v2 migration: v2
-// renames space from " " to "space", and key.Matches goes on working while a
-// `case " ":` silently stops.
+// keys use key.Binding, not raw string comparison. This is the Bubbles idiom.
+// It also survives the v2 migration: v2 renamed space from " " to "space".
+// key.Matches keeps working; a `case " ":` would silently break.
 //
-// Quit is split from Interrupt rather than one binding covering both "ctrl+c"
-// and "q": "q" is a character at the dir prompt, so it can only quit outside
-// phaseDir, and that has to be a second key.Matches call rather than a raw
-// msg.String() check on the combined binding.
+// Quit is separate from Interrupt. "q" is a character at the dir prompt, so
+// it can only quit outside phaseDir. That needs its own key.Matches call,
+// not a raw msg.String() check on a combined binding.
 var keys = struct {
 	Install, Accept, Decline, Interrupt, Quit key.Binding
 }{
@@ -51,11 +49,10 @@ var keys = struct {
 	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 }
 
-// helpModel returns a fresh help.Model rather than sharing one package-level
-// value: ShortHelpView never mutates it in practice, but a mutable
-// package-level UI model is exactly the kind of shared state that looks
-// harmless right up until something does. help.New() is a small struct
-// literal, so building one per render costs nothing.
+// helpModel returns a fresh help.Model instead of a shared package-level
+// value. ShortHelpView never mutates it today, but a mutable package-level
+// UI model is the kind of shared state that breaks later. help.New() is a
+// small struct literal; building one per render costs nothing.
 func helpModel() help.Model { return help.New() }
 
 type phase int
@@ -75,9 +72,9 @@ type (
 	errMsg        struct{ err error }
 )
 
-// Model is the whole installer. There are no screens: it is one transcript that
-// grows, with whatever prompt is active at the bottom, so the output survives in
-// the user's scrollback after it exits.
+// Model is the whole installer. It has no separate screens.
+// It is one transcript that grows, with the active prompt at the bottom.
+// The output survives in the user's scrollback after the installer exits.
 type Model struct {
 	phase   phase
 	checks  []Check
@@ -93,17 +90,16 @@ type Model struct {
 	rcPath  string
 	rcLine  string
 	rcAdded bool
-	// rcErr is a failed rc write. It is kept apart from err deliberately: by
-	// the time AppendRC runs, the build and install already succeeded, so
-	// this is a recoverable failure the user can finish by hand, not a
-	// reason to report the whole run as failed. See Failed and done.
+	// rcErr is a failed rc write. It stays separate from err. By the time
+	// AppendRC runs, the build and install already succeeded, so the user
+	// can finish the rc write by hand: this failure does not fail the whole
+	// run. See Failed and done.
 	rcErr error
 	err   error
 	width int
-	// cancelled is set by ctrl+c/q leaving before the run reached its own
-	// completion (phaseDone via the normal message flow). See Failed and
-	// done: whether that counts as a failure depends on whether binPath was
-	// already set when it happened.
+	// cancelled is set when ctrl+c or q exits before the run reaches
+	// phaseDone on its own. See Failed and done: it counts as a failure
+	// only if binPath was still empty at that point.
 	cancelled bool
 }
 
@@ -133,15 +129,17 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 	}
 }
 
-// Failed reports whether the installer stopped on an error, so main can pick an
-// exit code. A failed rc write does not count: the binary is already built and
-// installed by the time that can happen, so it exits 0 with a warning rather
-// than reporting a hard failure over a recoverable one.
+// Failed reports whether the installer stopped on an error, so main can pick
+// an exit code.
 //
-// Quitting before binPath is set is also a failure: nothing was installed, so
-// `just setup` reporting success would be a lie. Quitting after binPath is
-// set is not, since the install already succeeded, and walking away from the
-// optional PATH question is the same non-fatal outcome as answering it "n".
+// A failed rc write does not count. By the time AppendRC can fail, the
+// binary is already built and installed, so the installer exits 0 with a
+// warning instead of reporting a hard failure.
+//
+// Quitting before binPath is set is also a failure: nothing was installed,
+// and `just setup` would report success falsely. Quitting after binPath is
+// set is not a failure. The install already succeeded, and walking away
+// from the PATH question is the same outcome as answering it "n".
 func (m Model) Failed() bool { return m.err != nil || (m.cancelled && m.binPath == "") }
 
 func (m Model) Init() tea.Cmd {
@@ -160,9 +158,9 @@ func buildCmd(repoDir, version string) tea.Cmd {
 		}
 		out := filepath.Join(tmp, "stoat")
 		if err := Build(repoDir, version, out); err != nil {
-			// Nothing will ever call installCmd to clean this up: the build
-			// never produced a binary to hand it, so this is the one path
-			// that has to remove the temp dir itself.
+			// Nothing will call installCmd to clean this up. The build
+			// produced no binary to hand it, so this path
+			// removes the temp dir itself.
 			os.RemoveAll(tmp)
 			return errMsg{err: err}
 		}
@@ -172,9 +170,9 @@ func buildCmd(repoDir, version string) tea.Cmd {
 
 func installCmd(src, destDir, repoDir, home string) tea.Cmd {
 	return func() tea.Msg {
-		// The temp dir buildCmd created is done its job the moment the binary
-		// is copied out of it, whether that copy succeeds or fails, so it
-		// goes away here unconditionally rather than leaking ~10MB per run.
+		// buildCmd's temp dir has done its job once the binary is copied out,
+		// whether the copy succeeds or fails. It is removed here
+		// unconditionally, so a run never leaks ~10MB.
 		defer os.RemoveAll(filepath.Dir(src))
 		path, err := Install(src, destDir)
 		if err != nil {
@@ -220,10 +218,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		// Only phaseChecks and phaseBuild ever render the spinner. Ticking on
+		// Only phaseChecks and phaseBuild render the spinner. Ticking
 		// through phaseDir and phaseRC would repaint the whole transcript
-		// ~10x/s for a frame nothing shows, so the chain is left to die here
-		// and phaseBuild's dispatch in key() restarts it explicitly.
+		// ~10x/s for a frame nothing shows. The chain dies here; phaseBuild's
+		// dispatch in key() restarts it explicitly.
 		if m.phase != phaseChecks && m.phase != phaseBuild {
 			return m, nil
 		}
@@ -239,7 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ctrl+c always quits. "q" only quits once there is nothing left to type
-	// into (at the dir prompt it is a character), so it is checked separately
+	// into; at the dir prompt it is a character. It is checked separately,
 	// and only outside phaseDir.
 	if key.Matches(msg, keys.Interrupt) {
 		return m.cancel()
@@ -255,10 +253,10 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if v := strings.TrimSpace(m.input.Value()); v != "" {
 				dir = expandHome(v, m.home)
 			}
-			// Abs runs whether the value came from the prompt or the untouched
-			// default: it is what turns a bare "bin" into a real path instead
-			// of a PATH entry any cwd can shadow, and it is what paths.go's
-			// quoting later trusts to already be a real filesystem path.
+			// Abs runs whether the value came from the prompt or the
+			// untouched default. It turns a bare "bin" into a real path,
+			// not a PATH entry any cwd can shadow. paths.go's quoting
+			// later trusts this value to already be a real filesystem path.
 			abs, err := filepath.Abs(dir)
 			if err != nil {
 				m.err = err
@@ -297,22 +295,22 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// cancel is ctrl+c/q leaving before the run reached phaseDone on its own.
-// It still needs a phase to render the final frame from, so it goes to
-// phaseDone like every other terminal state; Failed and done tell an abort
-// apart from a normal finish by m.cancelled and m.binPath.
+// cancel is ctrl+c or q leaving before the run reaches phaseDone on its own.
+// It still needs a phase to render the final frame, so it goes to phaseDone
+// like every other terminal state. Failed and done tell an abort apart from
+// a normal finish using m.cancelled and m.binPath.
 func (m Model) cancel() (tea.Model, tea.Cmd) {
 	m.cancelled = true
 	m.phase = phaseDone
 	return m, tea.Quit
 }
 
-// rcLineLines renders m.rcLine indented by indent, breaking it across
-// physical lines (see WrapRCLine) so it never gets clipped by Bubble Tea's
-// per-line width clamp. indent is repeated on every line, continuation
-// lines included: a shell reading a `\`-continued paste treats leading
-// whitespace before the reopened quote as ordinary inter-token whitespace,
-// not part of the quoted value, so this is invisible to what gets pasted.
+// rcLineLines renders m.rcLine indented by indent, broken across physical
+// lines (see WrapRCLine) so Bubble Tea's per-line width clamp never clips
+// it. indent repeats on every line, continuation lines included. A shell
+// reading a `\`-continued paste treats leading whitespace before the
+// reopened quote as ordinary inter-token whitespace, not part of the
+// quoted value. The indent is invisible in what gets pasted.
 func (m Model) rcLineLines(indent string) []string {
 	chunks := WrapRCLine(m.shell, m.dir, m.width-len(indent))
 	lines := make([]string, len(chunks))
@@ -353,19 +351,18 @@ func (m Model) View() tea.View {
 
 // checkTable renders the probe results as an aligned table.
 //
-// lipgloss/table does the column sizing, so no width is hardcoded and the
-// pre-colored status cells still line up, because it measures cells ANSI-aware, which
-// a hand-rolled pad using len() would get wrong the moment a detail string
-// contains anything non-ASCII.
+// lipgloss/table sizes the columns, so no width is hardcoded. It measures
+// cells ANSI-aware, so pre-colored status cells still line up. A hand-rolled
+// pad using len() would get this wrong for any non-ASCII detail string.
 //
-// BorderBottom(false) with no header is the exact combination internal/tui's
-// fields.go documents as buggy in lipgloss v2.0.5's table: computeHeight()
-// undercounts a headerless table by one, and Render() clamps to
-// min(t.height, computeHeight()). It's silent here only because this table
-// never calls .Height(), so t.height stays 0 and the clamp is skipped
-// (lipgloss treats MaxHeight(0) as unset). The moment something calls
-// .Height() on this table, the last row (/dev/kvm, most often) disappears.
-// See fields.go's BorderBottom(true) comment for the full mechanism.
+// BorderBottom(false) with no header matches a bug internal/tui's fields.go
+// documents in lipgloss v2.0.5's table: computeHeight() undercounts a
+// headerless table by one, and Render() clamps to min(t.height,
+// computeHeight()). The bug stays silent here only because this table never
+// calls .Height(): t.height stays 0, so the clamp is skipped (lipgloss
+// treats MaxHeight(0) as unset). The moment something calls .Height() on
+// this table, the last row (/dev/kvm, most often) disappears. See
+// fields.go's BorderBottom(true) comment for the full mechanism.
 func (m Model) checkTable() string {
 	t := table.New().
 		BorderTop(false).BorderBottom(false).
@@ -429,17 +426,16 @@ func (m Model) active() string {
 }
 
 func (m Model) done() string {
-	// A hard failure still gets the host advice below: the checks already ran
-	// by the time anything can fail (build, install, or a bad dir), and a
-	// user whose install died on e.g. a permission error still needs to know
-	// what to fix before their first VM, and that guidance is meant to be given
-	// once, not only on a clean run.
+	// A hard failure still gets the host advice below. The checks already
+	// ran by the time anything can fail (build, install, or a bad dir). A
+	// user whose install died on, say, a permission error still needs to
+	// know what to fix before their first VM. This guidance always prints,
+	// not only on a clean run.
 	var lines []string
 	switch {
 	case m.cancelled && m.binPath == "":
-		// Left before the build/install ever finished: unlike every other
-		// branch here, nothing was actually installed, which is exactly what
-		// Failed() keys on too.
+		// Left before the build or install finished. Unlike every other
+		// branch here, nothing was installed. Failed() keys on the same fact.
 		lines = []string{"", errStyle.Render("cancelled") + ": nothing was installed"}
 	case m.err != nil:
 		lines = []string{"", errStyle.Render("failed") + ": " + m.err.Error()}
@@ -464,11 +460,11 @@ func (m Model) done() string {
 			)
 			lines = append(lines, m.rcLineLines("          ")...)
 		case m.rcLine != "":
-			// Declined: rcLine is only ever set once the rc prompt has been
-			// shown (see the installedMsg case in Update), so this is
-			// reachable only after a real "n". Mirrors the failed-write
-			// branch above, which already got this right: a user who
-			// skipped it still needs the line to add by hand.
+			// Declined. rcLine is set only once the rc prompt has shown (see
+			// the installedMsg case in Update), so this branch is reachable
+			// only after a real "n". It mirrors the failed-write branch
+			// above: a user who skipped it still needs the line to add by
+			// hand.
 			lines = append(lines,
 				"",
 				"  skipped, add this yourself:",
@@ -483,9 +479,10 @@ func (m Model) done() string {
 		for _, c := range problems {
 			lines = append(lines, "", "  "+warnStyle.Render(c.Name)+": "+c.Detail)
 			for _, f := range c.Fix {
-				// Fixes are deduplicated here rather than in Check: two checks
-				// (qemu-img, qemu-system-x86_64) can share one package, and the
-				// display layer is where "don't repeat the same line twice" belongs.
+				// Fixes are deduplicated here, not in Check. Two checks
+				// (qemu-img, qemu-system-x86_64) can share one package. The
+				// display layer is where "don't repeat the same line twice"
+				// belongs.
 				if seen[f] {
 					continue
 				}

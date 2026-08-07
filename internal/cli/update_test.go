@@ -9,11 +9,10 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 )
 
-// The whole risk in `update` is one distinction: a flag that was not given
-// must leave its field alone, and a flag given as the zero value must set it
-// to that zero value. Comparing against the zero value cannot tell those
-// apart, which is why Parse walks fs.Visit instead. These tests are what
-// stops that from regressing into "update --ram silently cleared my share".
+// A flag that was not given must leave its field alone. A flag given as the
+// zero value must set it to that zero value. Comparing against the zero
+// value cannot tell those apart; Parse walks fs.Visit instead. These tests
+// pin that against the regression "update --ram silently cleared my share".
 func TestParseUpdateOnlySetsFlagsThatWereGiven(t *testing.T) {
 	a, err := Parse([]string{"update", "work", "--ram", "8192"})
 	if err != nil {

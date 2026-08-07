@@ -55,14 +55,16 @@ func ShellRC(shell, home, dir string) (rcPath, line string) {
 // WrapRCLine (tui.go) uses the same three pieces to break the line only
 // between re-quotable chunks of dir, never inside syntax it doesn't own.
 //
-// dir is single-quoted rather than interpolated into surrounding double
-// quotes: a bare double-quoted insertion would let a `"`, `$`, or backtick in
-// dir run as shell syntax the moment the rc file is sourced, and an unquoted
-// relative dir would silently make PATH depend on whatever directory the
-// shell happens to be in. For the POSIX branch, the single-quoted segment
-// and the double-quoted ":$PATH" that follows it concatenate into one string
-// (adjacent quoted strings do that in every POSIX shell), so $PATH still
-// expands while dir does not.
+// dir is single-quoted, not interpolated into surrounding double quotes. A
+// bare double-quoted insertion would let a `"`, `$`, or backtick in dir run
+// as shell syntax the moment the rc file is sourced. An unquoted relative
+// dir would silently make PATH depend on whatever directory the shell
+// happens to be in.
+//
+// For the POSIX branch, the single-quoted segment and the double-quoted
+// ":$PATH" that follows it concatenate into one string (adjacent quoted
+// strings do that in every POSIX shell), so $PATH still expands while dir
+// does not.
 func rcLineParts(shell string) (prefix string, quote func(string) string, suffix string) {
 	if filepath.Base(shell) == "fish" {
 		return "fish_add_path ", fishQuote, ""
@@ -92,31 +94,28 @@ func fishQuote(s string) string {
 // than width, so a renderer that clips each physical line to a terminal
 // width (as Bubble Tea does) never truncates it. Pasting the result into a
 // live shell reproduces the same PATH value the unbroken line would have,
-// not the identical bytes. A chunk boundary that lands inside what was one
-// quoted run becomes two back-to-back quoted runs instead of one longer
-// one, which a shell evaluates as the same concatenated word but is not
-// the same text; the value pasting it assigns is exactly dir regardless.
-// See paths_test.go's TestWrapRCLineReassembles.
+// not the identical bytes: a chunk boundary that lands inside one quoted
+// run becomes two back-to-back quoted runs, which a shell evaluates as the
+// same concatenated word. See paths_test.go's TestWrapRCLineReassembles.
 //
 // The break itself only ever falls between two independently re-quoted
-// chunks of dir: quote(s1) followed by quote(s2), concatenated with nothing
+// chunks of dir. quote(s1) followed by quote(s2), concatenated with nothing
 // between them, evaluates to the same word as quote(s1+s2) for both
-// shellQuote and fishQuote, because both escape one input byte ("'" or "\")
-// at a time, so splitting the input never splits an escape sequence, and
-// chunking dir and quoting the chunks separately can never change what the
-// shell assigns. Each line but the last ends with a bare "\" immediately
-// before the newline: that is a shell line-continuation outside of quotes
-// in every shell ShellRC targets (posix sh/bash/zsh and fish alike), so
-// pasting the wrapped output into a live shell reassembles the identical
-// command before it runs, unlike a bare newline, which posix shells would
-// read as ending the statement, and unlike a newline *inside* the quotes,
-// which would paste a literal newline into PATH.
+// shellQuote and fishQuote. Both escape one input byte ("'" or "\") at a
+// time, so splitting the input never splits an escape sequence.
+//
+// Each line but the last ends with a bare "\" immediately before the
+// newline. That is a shell line-continuation outside of quotes in every
+// shell ShellRC targets (posix sh/bash/zsh and fish alike), so pasting the
+// wrapped output into a live shell reassembles the identical command
+// before it runs. A bare newline would end the statement in a posix shell.
+// A newline *inside* the quotes would paste a literal newline into PATH.
 //
 // If width is too narrow to fit even one byte of a quoted chunk (plus its
-// trailing "\" or the line's fixed prefix/suffix), no safe break exists and
-// the whole unbroken line is returned; the caller's terminal soft-wrapping
-// it is fine, unlike Bubble Tea's clip: a terminal's own wrap never
-// inserts a real newline into what gets copied.
+// trailing "\" or the line's fixed prefix/suffix), no safe break exists.
+// WrapRCLine returns the whole unbroken line; the caller's terminal can
+// soft-wrap it. That is safe, unlike Bubble Tea's clip: a terminal's own
+// wrap never inserts a real newline into what gets copied.
 func WrapRCLine(shell, dir string, width int) []string {
 	prefix, quote, suffix := rcLineParts(shell)
 	full := prefix + quote(dir) + suffix
@@ -124,15 +123,14 @@ func WrapRCLine(shell, dir string, width int) []string {
 		return []string{full}
 	}
 
-	// Every non-final line reserves as much room as the *wider* of its two
-	// possible trailing markers (the continuation "\" or the real
-	// suffix), not just the "\" it actually ends up using. Without that, a
-	// greedy chunk sized only for "\" can swallow the entire remainder of
-	// dir (since posix's suffix, `:"$PATH"`, is wider than one backslash)
-	// while still failing the final-line check below, which reserves room
-	// for the real suffix; the next iteration would then have nothing left
-	// but "" to close out, producing a pointless trailing `'':"$PATH"` line.
-	// Reserving the larger amount up front guarantees that whenever a chunk
+	// Every non-final line reserves room for the *wider* of its two possible
+	// trailing markers, the continuation "\" or the real suffix, not just
+	// the "\" it ends up using. Without that, a greedy chunk sized only for
+	// "\" can swallow the whole remainder of dir (posix's suffix,
+	// `:"$PATH"`, is wider than one backslash) while still failing the
+	// final-line check below. The next iteration would then have nothing
+	// left to close out, producing a pointless trailing `'':"$PATH"` line.
+	// Reserving the larger amount up front rules that out: whenever a chunk
 	// would exhaust rest, the final check above already caught it first.
 	reserve := len(`\`)
 	if len(suffix) > reserve {
@@ -163,12 +161,11 @@ func WrapRCLine(shell, dir string, width int) []string {
 }
 
 // largestQuotableChunk returns the largest n such that quote(s[:n]) fits
-// within budget bytes. It scans byte offsets rather than rune boundaries: a
-// split that lands inside a multi-byte UTF-8 rune still round-trips exactly
-// once rejoined (quoting only ever inspects the ASCII quote and backslash
-// bytes, never rune boundaries), so there is no correctness reason to
-// prefer a rune boundary here, only a cosmetic one this rendering does not
-// need to pay for.
+// within budget bytes. It scans byte offsets, not rune boundaries. A split
+// inside a multi-byte UTF-8 rune still round-trips exactly once rejoined:
+// quoting only inspects the ASCII quote and backslash bytes, never rune
+// boundaries. Preferring a rune boundary would only be cosmetic, and this
+// rendering does not need to pay for it.
 func largestQuotableChunk(s string, quote func(string) string, budget int) int {
 	lo, hi, best := 0, len(s), 0
 	for lo <= hi {
@@ -207,9 +204,9 @@ func AppendRC(rcPath, line string) (added bool, err error) {
 		if !strings.HasSuffix(string(existing), "\n") {
 			b.WriteString("\n")
 		}
-		// Separate our block from whatever the file already had. A fresh file
-		// has nothing to separate from, so this blank line only appears when
-		// existing content precedes it.
+		// Separates this block from whatever the file already had. A fresh
+		// file has nothing to separate from, so this blank line only
+		// appears when existing content precedes it.
 		b.WriteString("\n")
 	}
 	b.WriteString("# added by the stoat installer\n")
@@ -221,9 +218,9 @@ func AppendRC(rcPath, line string) (added bool, err error) {
 		return false, err
 	}
 	// Close is checked rather than deferred and ignored, same as build.go's
-	// Install: this is the one function that writes to a file the user owns,
-	// so a close-time failure (a full disk, most plausibly) must not be
-	// reported as added=true.
+	// Install. This is the one function that writes to a file the user
+	// owns, so a close-time failure, most plausibly a full disk, must not
+	// be reported as added=true.
 	if _, err := f.WriteString(b.String()); err != nil {
 		_ = f.Close()
 		return false, err

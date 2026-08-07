@@ -7,9 +7,9 @@ import (
 
 // Check is one host requirement and what to do when it is missing.
 //
-// Fix is a command *list*, not a preformatted string, so that offering to run
-// the fix later is an action over data that already exists rather than new
-// plumbing. Today nothing runs it: the installer only prints it.
+// Fix is a command list, not a preformatted string. A future caller can run
+// each command directly instead of parsing one. Today nothing runs it: the
+// installer only prints it.
 type Check struct {
 	Name   string
 	OK     bool

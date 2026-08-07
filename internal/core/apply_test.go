@@ -92,16 +92,15 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 	}
 }
 
-// A valid Only subset must pass validation and reach the actual run,
-// proven without a real sshd or the full sshx.WaitTimeout (90s): a bare TCP
-// listener that answers with the "SSH-" banner satisfies sshx.Wait's
+// A valid Only subset must pass validation and reach the actual run. This
+// is proven without a real sshd or the full sshx.WaitTimeout (90s): a bare
+// TCP listener answering the "SSH-" banner satisfies sshx.Wait's
 // reachability check (bannerReady) almost instantly, getting Provision past
-// "waiting for ssh" and into its per-recipe ctx.Err() check, where an
-// ALREADY-CANCELLED ctx returns context.Canceled immediately. That proves
-// two things at once: Only accepted "a" (no ErrRecipeNotApplicable, a
-// rejection would have returned before ctx was ever consulted), and the
-// call reached sshx.Provision's own ctx-aware cancellation, not a second,
-// separate one.
+// "waiting for ssh" into its per-recipe ctx.Err() check. An
+// already-cancelled ctx then returns context.Canceled immediately. That
+// proves two things: Only accepted "a" (a rejection would have returned
+// before ctx was ever consulted), and the call reached sshx.Provision's own
+// ctx-aware cancellation.
 func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 	dir := root(t)
 
@@ -251,18 +250,18 @@ func writeRecipe(t *testing.T, dir, name, body string) {
 	}
 }
 
-// TestCheckRecipesUsesDeclaredCapabilityReason is the case this change was
-// for: a recipe declaring "requires: systemd" with no "os" restriction of
-// its own must produce docs/design/core-api.md §4's exact example,
-// "requires systemd, alpine uses openrc", drawn from recipes.UnsupportedReason
-// against the recipe's OWN declared metadata, not the generic "not offered
-// to alpine/apkovl" the structural fallback would give for the same file.
+// TestCheckRecipesUsesDeclaredCapabilityReason pins that a recipe declaring
+// "requires: systemd" with no "os" restriction produces
+// docs/design/core-api.md §4's exact example, "requires systemd, alpine
+// uses openrc", from recipes.UnsupportedReason against the recipe's OWN
+// declared metadata, not the generic "not offered to alpine/apkovl" the
+// structural fallback would give for the same file.
 //
-// The filename still pins gizmo.debian.sh to debian (so recipes.List
-// excludes it for alpine, same as any other recipe), but the front matter
-// deliberately omits "stoat:os": that is what isolates the capability check
-// from the OS check UnsupportedReason also makes, proving THIS reason came
-// from "requires", not from the filename.
+// The filename still pins gizmo.debian.sh to debian, so recipes.List
+// excludes it for alpine like any other recipe. The front matter omits
+// "stoat:os" deliberately, isolating the capability check from the OS
+// check UnsupportedReason also makes: this proves the reason came from
+// "requires", not from the filename.
 func TestCheckRecipesUsesDeclaredCapabilityReason(t *testing.T) {
 	dir := root(t)
 	writeRecipe(t, dir, "gizmo.debian.sh", "#!/bin/sh\n# stoat:name        gizmo\n# stoat:requires    systemd\nset -e\necho hi\n")

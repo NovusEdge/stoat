@@ -32,16 +32,14 @@ type imageOption struct {
 	osName  string     // entry.OS for catalog; iso.Infer's guess for BYO (unrecognised files: "")
 	sshUser string     // entry.SSHUser for catalog; "" for BYO (sshx defaults empty to root)
 
-	// A browsed BYO file (byoOptionFromPath) puts an ABSOLUTE path here
-	// instead, since the whole point is that it lives outside isos/. Anything
-	// resolving this to a real path must go through imagePath, not join it
-	// onto isos/ directly.
+	// A browsed BYO file (byoOptionFromPath) stores an ABSOLUTE path here.
+	// It lives outside isos/. Code that resolves this field to a real path
+	// must call imagePath. Do not join it onto isos/ directly.
 	//
-	// bytes is the image's size and exact is whether it was measured rather
-	// than declared: a file already on disk is stat'd, one still to be
-	// downloaded carries the catalog's approximation. Resolved once in
-	// buildImages, which runs on form-open and after a download, never per
-	// render, so the stat costs nothing in the draw path.
+	// bytes is the image's size. exact marks whether the size was measured
+	// or declared. A file already on disk gets a stat'd size. A file not yet
+	// downloaded gets the catalog's approximate size. buildImages resolves
+	// both once, at form-open and after each download, not on every render.
 	bytes int64
 	exact bool
 }
@@ -61,11 +59,12 @@ func (o imageOption) sizeLabel() string {
 
 func (o imageOption) isBYO() bool { return o.entry == nil }
 
-// imagePath resolves file to an absolute path. A browsed BYO image is already
-// absolute and lives outside isos/; everything else is a bare name under it.
-// filepath.Join does NOT special-case an absolute second element, so joining
-// isos/ onto "/home/u/x.iso" yields "…/isos/home/u/x.iso". The two cases
-// have to be told apart here rather than at each call site.
+// imagePath resolves file to an absolute path. A browsed BYO image is
+// already absolute and lives outside isos/. Every other file is a bare name
+// under isos/. filepath.Join does not special-case an absolute second
+// argument: joining isos/ onto "/home/u/x.iso" gives
+// "…/isos/home/u/x.iso". This function keeps the two cases apart in one
+// place instead of at each call site.
 func (o imageOption) imagePath() (string, error) {
 	if filepath.IsAbs(o.file) {
 		return o.file, nil
@@ -73,42 +72,40 @@ func (o imageOption) imagePath() (string, error) {
 	return filepath.Abs(filepath.Join(config.Root(), "isos", o.file))
 }
 
-// byoFileWidth is the column a BYO filename is truncated into. Fixed so that
-// whatever follows it lands in the same place on every row: the "(byo)" tag
-// used to trail a variable-length filename, which put it at a different
-// column on every line and read as ragged. Real names run long
-// (ubuntu-24.04-server-cloudimg-amd64.img is 38 cells) and an untruncated one
-// pushed the row past the form pane and wrapped it.
+// byoFileWidth is the column a BYO filename is truncated into. A fixed
+// width keeps whatever follows it at the same column on every row. A
+// variable-length filename left the "(byo)" tag at a different column per
+// row. Real filenames run long (ubuntu-24.04-server-cloudimg-amd64.img is
+// 38 cells); an untruncated one pushed the row past the form pane and
+// wrapped it.
 //
-// 24, down from 30, to make room for the size column: the BYO row is the
-// widest the form draws (os, backend, filename, size, tag) and at 30 the whole
-// row came to 65 cells against a 60-cell value column. The filename is the
-// only one of the five with slack. Every other column is sized to its
-// content, so it is the one that gives.
+// The width is 24, down from 30, to make room for the size column. The BYO
+// row (os, backend, filename, size, tag) is the widest row the form draws.
+// At 30 it totaled 65 cells against a 60-cell value column. Only the
+// filename column has slack; every other column is sized to its content.
 const byoFileWidth = 24
 
-// osUnknown is shown when iso.Infer could not name a BYO file's OS. It used
-// to render as "?", which tells the user neither what happened nor that
-// anything is still selectable. This is a state, not an error.
+// osUnknown is shown when iso.Infer cannot name a BYO file's OS. A bare "?"
+// told the user neither what happened nor that the row is still selectable.
+// This is a state, not an error.
 const osUnknown = "unknown"
 
 // imageMetaWidth is the second column of an image row: the catalog entry's
-// variant, or a BYO file's backend. It must fit the widest of BOTH, which is
-// "13 (trixie)" at 11. At 10 that one row overflowed by a single cell and
-// pushed debian's size column one right of every other row's.
-// TestImageMetaColumnFitsEveryValue keeps it honest.
+// variant, or a BYO file's backend. The widest value is "13 (trixie)" at 11
+// cells. At 10 cells that row overflowed by one cell and pushed debian's
+// size column one right of every other row's. TestImageMetaColumnFitsEveryValue
+// pins the width.
 const imageMetaWidth = 11
 
 // label renders the image picker row for one option.
 //
-// Padding happens on the PLAIN strings and styling is applied to whole
-// segments afterwards, never inside the format: a styled substring carries
-// ANSI bytes that %-8s counts as width, which is how the `ls` output in this
-// repo once came out visibly skewed.
+// Padding runs on the plain strings first. Styling is applied to whole
+// segments afterward, never inside the format string. A styled substring
+// carries ANSI bytes, and %-8s counts those bytes as width, which once
+// skewed this repo's `ls` output visibly.
 func (o imageOption) label() string {
-	// Size shares the picker's column width so the form row and the modal
-	// agree, and is right-aligned for the same reason: sizes exist to be
-	// compared, and comparing is easier when the digits line up.
+	// size shares the picker's column width with the modal, and is
+	// right-aligned so the digits of different rows line up for comparison.
 	size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, o.sizeLabel()))
 
 	if o.entry != nil {
@@ -129,9 +126,9 @@ func (o imageOption) label() string {
 }
 
 // byoOptionFromPath turns a path the user browsed to into the same option
-// shape localImageFiles produces for a file already in isos/. It must stay
-// the same shape: everything downstream (backend/OS inference, and the ssh
-// user resolution fixed in b6593b3) keys off entry == nil.
+// shape localImageFiles produces for a file already in isos/. The shape
+// must match: everything downstream, including backend/OS inference and ssh
+// user resolution, keys off entry == nil.
 func byoOptionFromPath(path string) (imageOption, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -150,26 +147,25 @@ func byoOptionFromPath(path string) (imageOption, error) {
 	}, nil
 }
 
-// matchLocalImage is core.MatchLocal. The picker and core.Create must agree on
-// which file a catalog entry means. The form now names the ENTRY and lets
-// core resolve it, so two copies of this would let the picker offer one file
-// and Create build on another.
+// matchLocalImage is core.MatchLocal. The picker and core.Create must agree
+// on which file a catalog entry means. The form names the entry and lets
+// core resolve it. A second copy of this logic here could let the picker
+// offer one file while Create builds on another.
 var matchLocalImage = core.MatchLocal
 
 // buildImages assembles the form's image picker from core.Images(): every
-// catalog entry (in Catalog order), each flagged with whether it's already
-// downloaded, then every local file that isn't claimed by a catalog entry,
-// as BYO options. Matching a catalog entry to its local file and deciding
-// whether the size shown is exact or the catalog's declared approximation is
-// core's job now, not a second copy of it here (see core.Images' doc); this
-// only decides how the picker PRESENTS what core reports.
+// catalog entry in catalog order, each flagged with whether it is already
+// downloaded, then every local file not claimed by a catalog entry as a BYO
+// option. core.Images owns matching a catalog entry to its local file and
+// deciding whether the shown size is exact or the catalog's declared
+// approximation (see core.Images' doc). This function only decides how the
+// picker presents what core reports.
 //
-// core.CatalogImage carries an ID but not the richer iso.Entry (Variant,
-// SSHUser) the picker's rows and resolvedSSHUser want, so a downloaded-or-not
-// catalog row is still paired with its iso.Entry by ID here. The error core.Images
-// returns is not surfaced: LocalImages, underneath it, already swallows an
-// unreadable isos/ dir as "no local files" rather than an error, so there is
-// nothing left for a caller to react to.
+// core.CatalogImage carries an ID but not the richer iso.Entry fields
+// (Variant, SSHUser) the picker's rows and resolvedSSHUser need, so each row
+// is paired with its iso.Entry by ID here. The error core.Images returns is
+// not surfaced: LocalImages, underneath it, already treats an unreadable
+// isos/ dir as "no local files" rather than an error.
 func buildImages() []imageOption {
 	imgs, _ := core.Images()
 	catalog := map[string]iso.Entry{}
@@ -196,20 +192,17 @@ var byoBackends = []string{"ssh", "apkovl", "cloudinit"}
 // catalog knows, in catalog order, led by "" meaning "whatever iso.Infer
 // guessed".
 //
-// This row exists because Infer names an OS in exactly one case: a filename
-// containing "alpine" that ends in .iso. Every qcow2, every img and every
-// unrecognised file comes back with an empty OS, which flows into
-// recipes.List, where both branches compare against a real OS name parsed off
-// a recipe's filename. An empty OS matches nothing, so before this row a BYO
-// image was offered NO recipes at all, ever. A hand-downloaded Ubuntu cloud
-// image got none while the byte-identical catalog entry got xfce and
-// devtools.
+// iso.Infer names an OS in exactly one case: a filename containing "alpine"
+// that ends in .iso. Every qcow2, every img and every other unrecognised
+// file comes back with an empty OS. recipes.List compares against a real OS
+// name parsed off a recipe's filename, so an empty OS matches no recipes.
+// Without this row a BYO image was offered no recipes at all: a
+// hand-downloaded Ubuntu cloud image got none, while the byte-identical
+// catalog entry got xfce and devtools.
 //
-// Letting the user say so is the safe half of a choice the form already
-// offers: fBackend lets them override the BACKEND guess, and getting that
-// wrong yields an unbootable VM, where a wrong OS yields a recipe that fails
-// loudly on apt-get. Permitting the dangerous override and forbidding the
-// safe one was an oversight, not a guard.
+// fBackend already lets the user override the backend guess, where a wrong
+// guess yields an unbootable VM. A wrong OS guess only yields a recipe that
+// fails on apt-get, a smaller failure. This row closes that gap.
 func byoOSNames() []string {
 	out := []string{""}
 	for _, g := range iso.ByOS() {
@@ -219,17 +212,17 @@ func byoOSNames() []string {
 }
 
 // formContentWidth holds the new-vm pane at a constant width, so the box
-// never resizes as optional rows appear.
+// does not resize as optional rows appear.
 //
-// Sized off the HINT lines, which are the widest thing the form regularly
-// shows. The mode hints are 44 and 45 cells, so at the old width of 56
-// (a 44-cell value column) they wrapped by a single character and left a
-// dangling word under every mode row. 60 cells of value column clears all
-// of them but the cloud disk hint, which is 71 and would need a pane too
-// wide to sit in an 80-column terminal.
+// The width is sized off the hint lines, the widest thing the form
+// regularly shows. The mode hints are 44 and 45 cells. At the old width of
+// 56 (a 44-cell value column) they wrapped by one character and left a
+// dangling word under every mode row. A 60-cell value column clears every
+// hint but the cloud disk hint, which is 71 cells and would need a pane too
+// wide for an 80-column terminal.
 //
-// 72 plus the pane frame is 78, which is the point of it: the box still
-// fits an 80-column terminal without paneAt having to clamp it.
+// 72 plus the pane frame is 78 cells, so the box fits an 80-column terminal
+// without paneAt having to clamp it.
 const formContentWidth = 72
 
 type formModel struct {
@@ -251,21 +244,20 @@ type formModel struct {
 	randomPassword bool
 	dl             dlStats // last snapshot of the in-flight download
 
-	// dlCtx/dlCancel are the in-flight fetch's ctx and its CancelFunc; nil
-	// when nothing is running. esc calls dlCancel so the download actually
-	// stops rather than merely being abandoned (core.DownloadImage's ctx
-	// wiring is what makes that real; see fetchImage). dlCtx has no
-	// production reader of its own: it is kept alongside dlCancel so a test
-	// can check ctx.Err() after esc and confirm the cancellation was real,
-	// not just that a flag flipped.
+	// dlCtx and dlCancel hold the in-flight fetch's ctx and CancelFunc, nil
+	// when nothing is running. esc calls dlCancel, which stops the download
+	// (core.DownloadImage builds its request from ctx; see fetchImage).
+	// dlCtx has no production reader beyond that: tests use it to check
+	// ctx.Err() after esc, to confirm the cancellation was real, not just a
+	// flag flip.
 	dlCtx    context.Context
 	dlCancel context.CancelFunc
-	// dlGen is bumped every time a fetch starts or is cancelled. It is
-	// stamped into imageFetchedMsg/imageFetchErrMsg so an outcome from a
-	// fetch that has since been cancelled (the goroutine keeps running for
-	// one more read after ctx is cancelled) is recognisable as stale and
-	// dropped rather than reviving "fetching" or toasting a "context
-	// canceled" the user did not cause.
+	// dlGen counts fetch starts and cancellations. imageFetchedMsg and
+	// imageFetchErrMsg carry the generation they were started under. The
+	// fetch goroutine keeps running for one more read after ctx is
+	// cancelled, so its outcome can still arrive after esc. A generation
+	// mismatch marks that outcome as stale, so updateForm drops it instead
+	// of reviving "fetching" or toasting a cancellation the user caused.
 	dlGen int
 }
 
@@ -296,12 +288,12 @@ type focusOrder []int
 
 // order returns the tab-traversal order for the form's current state: name,
 // image, [backend override, BYO only], [mode, apkovl only], ram, cpus,
-// [disk, effective disk mode only], share, recipes. Conditional fields are
-// omitted rather than included-but-hidden: viewForm doesn't render them in
-// those states, so landing focus there would silently edit an invisible
-// field (the same reasoning fDisk already followed pre-Task-8). recipes is
-// always included, even with zero recipes matching: viewForm always renders
-// that row (with a "none" placeholder), so it's always a valid landing spot.
+// [disk, effective disk mode only], share, recipes. A conditional field is
+// omitted, not included-but-hidden: viewForm does not render it in the
+// other states, so landing focus there would silently edit an invisible
+// field. recipes is always included, even with zero recipes matching:
+// viewForm always renders that row, with a "none" placeholder, so it is
+// always a valid landing spot.
 func (f formModel) order() focusOrder {
 	o := focusOrder{fName, fISO}
 	if opt := f.selected(); opt != nil && opt.isBYO() {
@@ -384,26 +376,25 @@ func (f formModel) resolvedSSHUser() string {
 	if opt == nil {
 		return ""
 	}
-	// The cloud-init seed creates exactly one account, cloudinit.User, so
-	// anything provisioned through that backend connects as it, including a
-	// BYO file the user has just declared to be a cloud image via fBackend.
-	// Left to fall through, a BYO image would record an empty SSHUser, sshx
-	// would default that to root, and cloud images lock root: ssh and
-	// provisioning would both fail on a VM that looked correctly configured.
-	// Catalog cloud entries already carry this same user, so this changes
-	// nothing for them.
+	// The cloud-init seed creates exactly one account, cloudinit.User.
+	// Anything provisioned through that backend connects as it, including a
+	// BYO file the user has just declared a cloud image via fBackend.
+	// Without this check a BYO image would record an empty SSHUser, sshx
+	// would default that to root, and root is locked on a cloud image: ssh
+	// and provisioning would both fail on a VM that looked correctly
+	// configured. Catalog cloud entries already carry this same user, so
+	// this line changes nothing for them.
 	if f.resolvedBackend() == "cloudinit" {
 		return cloudinit.User
 	}
 	return opt.sshUser
 }
 
-// effectiveMode is the Mode build() will write. cloudinit is always "cloud"
-// (a cloud image boots straight off its overlay, no install step); ssh is
-// always "disk" (an unrecognised BYO file is assumed to need a real install,
-// then manual/ssh provisioning; the apkovl live path only exists for
-// Alpine). apkovl keeps the user-controlled live/disk toggle exactly as
-// before Task 8.
+// effectiveMode is the Mode build() will write. cloudinit is always "cloud":
+// a cloud image boots straight off its overlay, no install step. ssh is
+// always "disk": an unrecognised BYO file is assumed to need a real
+// install, then manual or ssh provisioning; the apkovl live path exists
+// only for Alpine. apkovl keeps the user-controlled live/disk toggle.
 func (f formModel) effectiveMode() string {
 	switch f.resolvedBackend() {
 	case "cloudinit":
@@ -424,15 +415,15 @@ func (f *formModel) refreshRecipes() {
 	f.recipeIdx = 0
 }
 
-// selectImage adopts the image at idx, along with everything that has to move
-// with it. Picking an image is not just an index: the BYO backend and OS
-// overrides belonged to the previous image and would otherwise silently apply
-// to this one, and the recipe list is filtered by the image's OS and backend,
-// so a stale list would offer recipes that cannot run on what is now selected.
+// selectImage adopts the image at idx, along with everything that has to
+// move with it. The BYO backend and OS overrides belong to the previous
+// image; left in place they would silently apply to the new one. The
+// recipe list is filtered by the image's OS and backend, so a stale list
+// would offer recipes that cannot run on the newly selected image.
 //
-// Out-of-range is ignored rather than clamped: every caller derives idx from
-// the image slice itself, so a bad index means a bug elsewhere, and clamping
-// would select an arbitrary image instead of making that visible.
+// An out-of-range idx is ignored, not clamped. Every caller derives idx
+// from the image slice itself, so a bad index means a bug elsewhere.
+// Clamping would select an arbitrary image and hide that bug.
 func (f *formModel) selectImage(idx int) {
 	if idx < 0 || idx >= len(f.images) {
 		return
@@ -453,17 +444,17 @@ func newForm() formModel {
 	}
 	f.inputs[fName].SetValue("")
 	f.inputs[fName].Placeholder = "name"
-	// An explicit width is required, not cosmetic: bubbles v2.1.1 sizes an
-	// internal buffer to Width()+1 when rendering a placeholder, so with the
-	// width unset the placeholder is cut to its first rune ("name" -> "n").
-	// Only safe on rows that append nothing after the input: a width also
-	// pads the VALUE out to it, which would push the " MB" after ram far right.
+	// The width is required, not cosmetic. bubbles v2.1.1 sizes an internal
+	// buffer to Width()+1 when rendering a placeholder, so an unset width
+	// cuts the placeholder to its first rune ("name" becomes "n"). Setting a
+	// width is only safe on a row with nothing appended after the input: it
+	// also pads the value out to that width, which would push the " MB"
+	// after ram far to the right.
 	f.inputs[fName].SetWidth(formContentWidth - fieldValueColumn)
 	f.inputs[fName].Focus()
 
 	f.images = buildImages()
-	// Default to the Alpine catalog entry, so a fresh form behaves exactly
-	// like the pre-Task-8 Alpine-only picker: live/disk toggle available,
+	// Default to the Alpine catalog entry: live/disk toggle available,
 	// apkovl provisioning, recipes filtered to alpine.
 	for i, opt := range f.images {
 		if opt.entry != nil && opt.entry.OS == "alpine" {
@@ -478,10 +469,10 @@ func newForm() formModel {
 // imageFetchedMsg and imageFetchErrMsg both carry gen, the generation the
 // fetch was started under. A cancelled fetch's underlying goroutine (see
 // core.DownloadImage) does not stop instantly, so its outcome can still
-// arrive after esc has already moved dlGen on; updateForm compares gen
-// against the CURRENT m.form.dlGen and drops anything that doesn't match,
-// rather than reviving a "fetching" state or a "context canceled" toast the
-// user did not ask to see.
+// arrive after esc has already moved dlGen on. updateForm compares gen
+// against the current m.form.dlGen and drops a mismatch, instead of
+// reviving a "fetching" state or toasting a "context canceled" the user did
+// not ask to see.
 type imageFetchedMsg struct {
 	entryID string
 	gen     int
@@ -495,15 +486,14 @@ type imageFetchErrMsg struct {
 	gen     int
 }
 
-// fetchImage downloads catalog entry id, reporting progress through dlRecord
-// exactly as before. Re-running it on an image that is already local is safe
-// and is how "re-download" works: core.DownloadImage's checksum check only
-// short-circuits when the local file's digest MATCHES the published one, so
-// a truncated or superseded file mismatches and is refetched in full.
+// fetchImage downloads catalog entry id, reporting progress through
+// dlRecord. Re-running it on an image that is already local is safe, and is
+// how "re-download" works: core.DownloadImage's checksum check short-circuits
+// only when the local file's digest matches the published one, so a
+// truncated or superseded file mismatches and gets refetched in full.
 //
-// ctx is the caller's to cancel. Unlike the direct iso.Resolve/iso.Download
-// call this replaces, core.DownloadImage builds its request from ctx, so
-// cancelling it (updateForm's esc handler) genuinely stops the transfer
+// ctx is the caller's to cancel. core.DownloadImage builds its request from
+// ctx, so cancelling it (updateForm's esc handler) stops the transfer
 // instead of abandoning a goroutine that keeps writing.
 func fetchImage(ctx context.Context, id string, gen int) tea.Cmd {
 	return func() tea.Msg {
@@ -519,10 +509,9 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case dlTickMsg:
 		// Anchored to m.form.fetching, not dlGen: the tick chain only needs
-		// to know whether ANY fetch is live, not which one, and fetching is
-		// cleared the instant esc cancels, so the chain stops re-arming right
-		// away rather than ticking a bar for a download that no longer
-		// exists.
+		// to know whether any fetch is live, not which one. esc clears
+		// fetching immediately, so the chain stops re-arming right away
+		// instead of ticking a bar for a download that no longer exists.
 		if !m.form.fetching {
 			return m, nil
 		}
@@ -564,11 +553,11 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			// core.DownloadImage builds its request from ctx, so cancelling
-			// it here actually stops the transfer rather than abandoning a
-			// goroutine that keeps writing (the bug this used to be). dlGen
-			// is bumped so the abandoned goroutine's eventual outcome
-			// message, stamped with the OLD generation, is recognised as
-			// stale and dropped instead of reviving "fetching".
+			// it here stops the transfer instead of abandoning a goroutine
+			// that keeps writing. dlGen is bumped so the abandoned
+			// goroutine's eventual outcome message, stamped with the old
+			// generation, is recognised as stale and dropped instead of
+			// reviving "fetching".
 			if m.form.fetching {
 				m.form.dlGen++
 				if m.form.dlCancel != nil {
@@ -600,15 +589,15 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left", "right":
 			switch m.form.focus {
 			case fISO:
-				// Opens the picker rather than cycling in place. Cycling
-				// modelled one dimension, and the catalog now has two: alpine
-				// ships standard and virt, which differ only in build, so a
-				// flat cycle gave no way to see that a second Alpine even
-				// existed, let alone which one was under the cursor.
+				// Opens the picker rather than cycling in place. A flat
+				// cycle models one dimension, but the catalog has two:
+				// alpine ships standard and virt, which differ only in
+				// build. A cycle gave no way to see that a second Alpine
+				// entry existed, let alone which one was under the cursor.
 				//
-				// enter is not the opening key: it creates the VM everywhere
-				// else in this form, and a key that submits on eight rows and
-				// opens a picker on the ninth is a trap.
+				// enter is not the opening key. It creates the VM on every
+				// other row of this form; a key that submits on eight rows
+				// and opens a picker on the ninth is a trap.
 				if len(m.form.images) == 0 {
 					return m, nil
 				}
@@ -679,9 +668,10 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// space on the image row downloads the selected catalog entry.
-			// Pressing it on an image that is already local re-verifies it and
-			// refetches only if the bytes no longer match the published digest,
-			// so it doubles as "repair this image" at no risk to a good one.
+			// On an image that is already local it re-verifies the file and
+			// refetches only if the bytes no longer match the published
+			// digest, so it doubles as "repair this image" at no risk to a
+			// good one.
 			if m.form.focus == fPassword {
 				m.form.randomPassword = !m.form.randomPassword
 				return m, nil
@@ -746,11 +736,10 @@ func (f *formModel) refocus() {
 	}
 }
 
-// spec turns the form into a core.Spec. Everything that decides what the VM
-// IS (image resolution, OS, backend, ssh user, mode, defaults, validation)
-// lives in core, so the CLI and an MCP server get the same VM the form does.
-// What stays here is the two checks only the form can make, about its own
-// picker rather than about the VM.
+// spec turns the form into a core.Spec. core decides what the VM is: image
+// resolution, OS, backend, ssh user, mode, defaults, validation. That keeps
+// the CLI, an MCP server, and the form building the same VM. This function
+// only runs the two checks that concern the form's own picker, not the VM.
 func (f formModel) spec() (core.Spec, error) {
 	opt := f.selected()
 	if opt == nil {
@@ -759,12 +748,11 @@ func (f formModel) spec() (core.Spec, error) {
 	if opt.file == "" {
 		return core.Spec{}, fmt.Errorf("press space to download %s first", opt.entry.OS)
 	}
-	// A catalog image is named by its ID, not by the path the picker resolved
-	// it to: core re-runs the same MatchLocal to find the file, and keeping the
-	// ID is what lets it read the ENTRY's backend, OS and ssh user rather than
-	// re-inferring them from the filename. Inference is a good guess for a file
-	// nobody has described; it is strictly worse than an entry that states the
-	// answer. A BYO file has no entry, so it goes by path.
+	// A catalog image is named by its ID, not by the path the picker
+	// resolved it to. core re-runs MatchLocal to find the file. Keeping the
+	// ID lets core read the entry's backend, OS and ssh user, rather than
+	// re-inferring them from the filename: inference is a guess, an entry
+	// states the answer. A BYO file has no entry, so it goes by path.
 	var image string
 	var err error
 	if opt.entry != nil {
@@ -830,12 +818,12 @@ func (m model) viewForm() string {
 		marker := "  "
 		if f.focus == i {
 			marker = selStyle.Render(glyphCursor)
-			// Text inputs are NOT wrapped: a textinput's view carries its own
-			// cursor styling, and a styled substring's \x1b[0m resets the
-			// enclosing style too, so wrapping produced a row that was accent
-			// up to the cursor and default after it. The ❯ and the input's own
-			// cursor already mark focus. Picker rows are plain strings and wrap
-			// safely.
+			// Text inputs are not wrapped in style. A textinput's view
+			// carries its own cursor styling, and a styled substring's
+			// \x1b[0m resets the enclosing style too, so wrapping it
+			// produced a row that was accent up to the cursor and default
+			// after it. The ❯ marker and the input's own cursor already
+			// mark focus. Picker rows are plain strings and wrap safely.
 			if i >= fieldCount {
 				value = selStyle.Render(value)
 			}
@@ -855,10 +843,9 @@ func (m model) viewForm() string {
 
 	if opt != nil && opt.isBYO() {
 		row(fBackend, "backend", f.resolvedBackend())
-		// A BYO file's OS is almost never inferable from its name, and an
-		// unset one silently means "no recipes at all", so the row says
-		// "unknown" rather than rendering blank, and the hint says what
-		// setting it buys.
+		// A BYO file's OS is almost never inferable from its name. An unset
+		// OS silently means "no recipes at all", so the row shows "unknown"
+		// rather than a blank, and the hint states what setting it buys.
 		osValue := f.resolvedOS()
 		if osValue == "" {
 			osValue = dimStyle.Render(osUnknown)
@@ -940,8 +927,8 @@ func (m model) viewForm() string {
 // recipesLabel renders the recipes row's checkbox list, highlighting the
 // item under the row's sub-cursor when the row itself has focus. An empty
 // recipes list (nothing matches the selected image's OS/backend) renders a
-// placeholder instead of a blank row, and the row stays a harmless,
-// non-crashing landing spot in the focus cycle either way.
+// placeholder instead of a blank row, so the row stays a valid landing spot
+// in the focus cycle either way.
 func (f formModel) recipesLabel() string {
 	if len(f.recipeNames) == 0 {
 		return dimStyle.Render("- (no matching recipes)")

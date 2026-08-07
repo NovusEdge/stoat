@@ -7,18 +7,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// keySpace is what tea.KeyMsg.String() returns for the space bar, named once
-// because it is the one binding in the program whose spelling is decided by
-// bubbletea rather than by us: v2 reports it as "space" rather than " ".
-// Every switch case, key.Binding and test that means "space" goes through
-// this, so that change is one edit and not a silent no-match at runtime.
+// keySpace is what tea.KeyMsg.String() returns for the space bar. Bubbletea
+// v2 reports it as "space", not " ". Every switch case, key.Binding, and
+// test that means "space" uses this constant. A future spelling change is
+// then one edit, not a silent no-match at runtime.
 const keySpace = "space"
 
 // footerHelp renders both the short (single-line) and full (toggled by "?")
-// help footers. Its Styles are intentionally blank: every color still comes
-// from theme.go, applied per-binding via plainKey/styledKey below, so a
-// binding like "s" (ssh) can be dimmed independently of its neighbors,
-// something help.Model's own uniform Styles can't do.
+// help footers. Its Styles are blank on purpose. Color comes from theme.go
+// instead, applied per binding via plainKey/styledKey below. This lets a
+// binding like "s" (ssh) dim independently of its neighbors, which
+// help.Model's own uniform Styles cannot do.
 var footerHelp = func() help.Model {
 	h := help.New()
 	blank := lipgloss.NewStyle()
@@ -34,11 +33,10 @@ var footerHelp = func() help.Model {
 	return h
 }()
 
-// renderFooter draws the footer for km at the given terminal width, short
-// form unless showAll is set (the "?" toggle). The short form is a single
-// line that sits outside every pane; the full form ("?") gets its own pane,
-// so it reads as a distinct help panel rather than an extension of the
-// screen above it.
+// renderFooter draws the footer for km at the given terminal width. It uses
+// the short form unless showAll is set (the "?" toggle). The short form is
+// a single line outside every pane. The full form gets its own pane, so it
+// reads as a separate help panel, not an extension of the screen above it.
 func renderFooter(km help.KeyMap, width int, showAll bool) string {
 	h := footerHelp
 	h.ShowAll = showAll
@@ -51,10 +49,10 @@ func renderFooter(km help.KeyMap, width int, showAll bool) string {
 		return pane("", h.View(km), width)
 	}
 	h.SetWidth(width)
-	// help.Model gives up truncating once its running total passes the width
-	// (it can only cut where an ellipsis still fits), and then appends every
-	// remaining binding, so the short footer can come back WIDER than the
-	// terminal and wrap, pushing the whole screen up. Cut it here instead.
+	// help.Model can only cut where an ellipsis still fits. Once its running
+	// total passes the width, it gives up and appends every remaining
+	// binding. The short footer can then come back WIDER than the terminal,
+	// wrap, and push the whole screen up. Truncate it here instead.
 	return ansi.Truncate(h.View(km), width, "…")
 }
 
@@ -72,11 +70,11 @@ func plainKey(keys []string, label, desc string) key.Binding {
 var keyHelp = plainKey([]string{"?"}, "?", "help")
 var keyCtrlC = plainKey([]string{"ctrl+c"}, "ctrl+c", "quit")
 
-// sshKeyStyle picks the color for the "s" (ssh) binding: normal (dim) when
-// the selected VM is running and thus actually ssh-able, down (a duller,
-// "offline" shade already used elsewhere for stopped/broken VMs) when it is
-// not, since ssh can never work in that state, so the binding stays listed
-// (its position in the footer doesn't jump around) but visibly muted.
+// sshKeyStyle picks the color for the "s" (ssh) binding. It is dim (normal)
+// when the selected VM is running and thus ssh-able. It is down (the duller
+// "offline" shade used elsewhere for stopped or broken VMs) otherwise, since
+// ssh cannot work in that state. The binding stays listed either way, so its
+// position in the footer never jumps.
 func sshKeyStyle(available bool) lipgloss.Style {
 	if available {
 		return dimStyle
@@ -121,9 +119,9 @@ func (h listHelp) FullHelp() [][]key.Binding {
 }
 
 // detailHelp is the help.KeyMap for the detail screen. consolePassword
-// reflects whether the selected VM is running and has a console password set.
-// The "t" (type into guest) and "c" (copy to host clipboard) bindings only
-// do anything then, so they are only listed then.
+// reflects whether the selected VM is running and has a console password
+// set. The "t" (type into guest) and "c" (copy to host clipboard) bindings
+// only work in that state, so they are only listed then.
 type detailHelp struct {
 	sshAvailable    bool
 	consolePassword bool
@@ -140,6 +138,7 @@ func (h detailHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"i"}, "i", "installed"),
 		h.ssh(),
 		plainKey([]string{"p"}, "p", "provision"),
+		plainKey([]string{"S"}, "S", "snapshots"),
 	}
 	if h.consolePassword {
 		keys = append(keys,
@@ -158,6 +157,7 @@ func (h detailHelp) FullHelp() [][]key.Binding {
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
 		{plainKey([]string{"i"}, "i", "installed"), h.ssh()},
 		{plainKey([]string{"p"}, "p", "provision"), plainKey([]string{"L"}, "L", "console log")},
+		{plainKey([]string{"S"}, "S", "snapshots")},
 	}
 	if h.consolePassword {
 		rows = append(rows, []key.Binding{

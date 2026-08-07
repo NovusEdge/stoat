@@ -20,14 +20,13 @@ import (
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
-// TestFormTabOrder is a regression test for a user-reported bug: tab focus
-// followed the field constant declaration order (name, ram, cpus, disk,
-// share, iso, mode) instead of the order viewForm actually renders fields
-// in (name, iso, mode, ram, cpus, [disk], share). Worse, in live mode tab
-// could land on fDisk even though viewForm doesn't render a disk row (or
-// its "❯" marker) in that mode, so keystrokes silently edited an invisible
-// field. This asserts the exact visited sequence, forwards and backwards,
-// in both modes, including that it wraps at both ends.
+// TestFormTabOrder pins tab focus to the order viewForm renders fields in
+// (name, iso, mode, ram, cpus, [disk], share), not the field constants'
+// declaration order (name, ram, cpus, disk, share, iso, mode). In live mode,
+// tab must not land on fDisk: viewForm renders no disk row, and no "❯"
+// marker, in that mode, so a keystroke there would silently edit an
+// invisible field. The test checks the exact visited sequence, forward and
+// backward, in both modes, including the wrap at both ends.
 func TestFormTabOrder(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -105,10 +104,9 @@ func TestFormTabOrder(t *testing.T) {
 	}
 }
 
-// build is what formModel.build() used to be: the VM the form describes.
-// Deciding what that VM is now lives in core, so the form's own job ends at
-// spec() and these tests go through core.Plan exactly as the enter key does.
-// (core owns the disk-creation-failure test that used to live here.)
+// build is the VM the form describes. core decides what that VM is, so the
+// form's own job ends at spec(); build runs core.Plan on top of it, the
+// same as the enter key does.
 func (f formModel) build() (*config.VM, error) {
 	s, err := f.spec()
 	if err != nil {
@@ -117,10 +115,9 @@ func (f formModel) build() (*config.VM, error) {
 	return core.Plan(s)
 }
 
-// stubImage puts a real file under isos/ and returns the picker option for it.
-// core resolves an image against the filesystem, so a made-up filename no longer
-// builds, which is the point: the form used to happily create a VM pointing at
-// an image that was not there.
+// stubImage puts a real file under isos/ and returns the picker option for
+// it. core resolves an image against the filesystem, so a made-up filename
+// does not build.
 func stubImage(t *testing.T, name string) imageOption {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(config.Root(), "isos"), 0o755); err != nil {
@@ -133,11 +130,10 @@ func stubImage(t *testing.T, name string) imageOption {
 	return imageOption{file: name, backend: backend, osName: osName}
 }
 
-// TestBuildAssignsSelectedRecipes is the required regression test for C2:
-// nothing ever assigned config.VM.Recipes, so "p" was a guaranteed no-op.
-// build() must carry exactly the checked recipe names into the VM, in
-// recipeNames order, and an empty selection must build fine with an empty
-// (not nil-panicking) Recipes slice rather than blocking VM creation.
+// TestBuildAssignsSelectedRecipes checks that build() carries exactly the
+// checked recipe names into the VM, in recipeNames order. An empty
+// selection must still build, with an empty Recipes slice, not a blocked
+// build or a nil-panic.
 func TestBuildAssignsSelectedRecipes(t *testing.T) {
 	newBuildableForm := func(t *testing.T, name string) formModel {
 		t.Helper()
@@ -146,11 +142,11 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 		f.inputs[fName].SetValue(name)
 		f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
 		f.imgIdx = 0
-		// Real recipe names, as recipes.List returns them: core.Plan refuses a
-		// name that is not actually available for the VM's OS and backend, so
-		// synthetic "alpha"/"beta"/"gamma" no longer build. The property under
-		// test is unchanged: that the CHECKED subset is carried through in
-		// recipeNames order, not selection order.
+		// core.Plan refuses a recipe name that is not available for the VM's
+		// OS and backend, so these must be real names from recipes.List, not
+		// synthetic ones like "alpha". The test still checks that the
+		// checked subset carries through in recipeNames order, not
+		// selection order.
 		if err := recipes.Install(); err != nil {
 			t.Fatal(err)
 		}
@@ -185,13 +181,12 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 	})
 }
 
-// TestBuildRejectsRelativeDiskSize is a regression test: build() used to hand
-// the disk field straight to config.VM.Disk unchecked, so a relative size
-// like "+8G" reached qemu-img's resize, which reads a leading "+" as "grow
-// by" rather than "resize to", silently doubling a fresh overlay. edit.go's
-// parseSize already refuses this on the edit path; build() must refuse it
-// too, the same way it refuses other invalid input (returning an error from
-// build(), surfaced by the caller as m.form.err).
+// TestBuildRejectsRelativeDiskSize checks that build() refuses a relative
+// disk size like "+8G". qemu-img's resize reads a leading "+" as "grow by",
+// not "resize to", which would silently double a fresh overlay if the value
+// reached it unchecked. edit.go's parseSize already refuses this on the
+// edit path; build() must refuse it the same way, returning an error that
+// the caller surfaces as m.form.err.
 func TestBuildRejectsRelativeDiskSize(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	f := newForm()
@@ -248,9 +243,9 @@ func TestFormAndParseSizeAgreeOnDiskStrings(t *testing.T) {
 	}
 }
 
-// TestFormPaneWidthIsStable pins the fix for the box resizing (and
-// re-centering) the moment the download block appears: pane() hugs its
-// content, and the download stats line is wider than any form row, so the
+// TestFormPaneWidthIsStable checks that the pane does not resize, or
+// re-center, when the download block appears. pane() hugs its content, and
+// the download stats line is wider than any form row, so without this the
 // whole pane jumped mid-download.
 func TestFormPaneWidthIsStable(t *testing.T) {
 	// newForm()/build() read the data root; without this they see the
@@ -366,13 +361,10 @@ func TestQuestionMarkTypesIntoTextFields(t *testing.T) {
 	}
 }
 
-// TestEscCancelsInFlightDownload replaces what used to be
-// TestDownloadSurvivesLeavingTheForm: esc no longer abandons the fetch
-// goroutine, it CANCELS it. core.DownloadImage builds its request from the
-// ctx fetchImage hands it, so cancelling that ctx (what esc now does) is what
-// actually stops the transfer, not just the UI's opinion that one is
-// running. This is the fix for app.go's long-standing "esc during a download
-// leaves the goroutine running" open item.
+// TestEscCancelsInFlightDownload checks that esc cancels the fetch
+// goroutine, not just the UI's fetching flag. core.DownloadImage builds its
+// request from the ctx fetchImage hands it, so cancelling that ctx (what esc
+// does) stops the transfer itself.
 func TestEscCancelsInFlightDownload(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
@@ -431,12 +423,12 @@ func TestEscCancelsInFlightDownload(t *testing.T) {
 	}
 }
 
-// TestStaleFetchOutcomeAfterCancelIsIgnored: the goroutine core.DownloadImage
-// runs in does not stop the instant ctx is cancelled (unblocking a Read
-// takes one more pass), so its outcome message can still land after esc. It
-// must not resurrect "fetching" or toast a "context canceled" the user did
-// not cause; the generation stamped on the message is what tells updateForm
-// it is stale.
+// TestStaleFetchOutcomeAfterCancelIsIgnored checks that a fetch outcome
+// arriving after esc does not resurrect "fetching" or toast a "context
+// canceled" the user did not cause. The goroutine core.DownloadImage runs in
+// does not stop the instant ctx is cancelled; unblocking a Read takes one
+// more pass, so its outcome message can still land after esc. The
+// generation stamped on the message tells updateForm it is stale.
 func TestStaleFetchOutcomeAfterCancelIsIgnored(t *testing.T) {
 	m := model{screen: screenForm, form: newForm(), provisioning: map[string]provState{}}
 	m.form.fetching = true
@@ -464,10 +456,9 @@ func TestStaleFetchOutcomeAfterCancelIsIgnored(t *testing.T) {
 	}
 }
 
-// TestFetchOutcomesReachTheUserFromTheList covers the other half of C1: a
-// download that fails after the user has gone back to the list must still
-// report itself. Routed by screen, imageFetchErrMsg was dropped on the floor
-// and a checksum failure was simply never mentioned.
+// TestFetchOutcomesReachTheUserFromTheList checks that a download failing
+// after the user has gone back to the list still reports itself, rather
+// than dropping imageFetchErrMsg because it is routed by screen.
 func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
@@ -485,18 +476,14 @@ func TestFetchOutcomesReachTheUserFromTheList(t *testing.T) {
 	}
 }
 
-// A browsed path must produce exactly the same shape of option as a file
-// found in isos/, or downstream code (backend/OS inference, ssh user
-// resolution) silently behaves differently for the two.
-// a4befa9 added alpine-cloud as an index-resolved... no, direct-URL entry
-// with Flavor == "" (see iso.Resolve's doc comment), so matchLocalImage must
-// find the downloaded file by the same exact-basename match every other
-// direct-URL entry uses. Before this fix, the gate was `e.OS != "alpine"`,
-// which skipped that basename match for EVERY alpine entry (including
-// alpine-cloud) and fell through to iso.Infer, which used to return an empty
-// OS for the .qcow2 filename, so the download could never be matched back
-// to its catalog entry and the form offered it as an unlabeled BYO file
-// forever. See CRITICAL 1 in the final review.
+// alpine-cloud is a direct-URL catalog entry with Flavor == "" (see
+// iso.Resolve's doc comment), so matchLocalImage must find its downloaded
+// file by the same exact-basename match every other direct-URL entry uses.
+// A gate of `e.OS != "alpine"` skips that basename match for every alpine
+// entry, including alpine-cloud, and falls through to iso.Infer, which
+// returns an empty OS for a .qcow2 filename. That empty OS never matches
+// the catalog entry back, so the form would offer the download as an
+// unlabeled BYO file forever.
 func TestMatchLocalImageFindsDownloadedAlpineCloudFile(t *testing.T) {
 	var entry iso.Entry
 	for _, e := range iso.Catalog() {

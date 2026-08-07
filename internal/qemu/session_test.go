@@ -12,11 +12,9 @@ import (
 // looks like: the directory usually exists (systemd makes one per login), it
 // just has no compositor socket in it.
 //
-// Clearing DISPLAY and WAYLAND_DISPLAY alone would NOT be headless, which is
-// the trap this whole check exists for: GTK finds $XDG_RUNTIME_DIR/wayland-0
-// by itself and starts. A test that faked headless that way would be asserting
-// nothing, and verified against qemu it is the difference between exit 1 and a
-// VM that runs.
+// Clearing DISPLAY and WAYLAND_DISPLAY alone is not headless: GTK finds
+// $XDG_RUNTIME_DIR/wayland-0 by itself and starts. A test that faked
+// headless that way would assert nothing.
 func headless(t *testing.T) string {
 	t.Helper()
 	rt := t.TempDir()
@@ -43,8 +41,7 @@ func TestGraphicalSessionOnAHostWithASession(t *testing.T) {
 	}
 
 	// Wayland, unnamed: neither variable is set, and there is a session
-	// anyway. This is the case that produced a wrong measurement, and the
-	// reason this function does not stop at the two obvious variables.
+	// anyway.
 	rt := headless(t)
 	if err := os.WriteFile(filepath.Join(rt, "wayland-0"), nil, 0o600); err != nil {
 		t.Fatal(err)

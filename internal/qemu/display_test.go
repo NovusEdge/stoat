@@ -89,14 +89,12 @@ func TestNeedsWindowMatchesDisplayKind(t *testing.T) {
 
 // The install flow, pinned end to end at the argv: a fresh disk VM on a host
 // with a graphical session gets a real GTK window and no VNC socket, because
-// setup-alpine is driven at that window or not at all. Nothing in the display
-// messaging work may change this.
+// setup-alpine is driven at that window or not at all.
 //
-// The host fact is taken from GraphicalSession over a real session's variables
-// rather than passed as a literal true, so the pin covers the whole chain.
-// Args(v, true) alone would keep passing if detection started answering "no
-// session" on a machine that plainly has one, which is the exact way this case
-// would regress now that a no is no longer fatal but silent.
+// The host fact is taken from GraphicalSession over a real session's
+// variables, not passed as a literal true, so the pin covers the whole
+// chain. Args(v, true) alone would keep passing even if detection started
+// answering "no session" on a machine that has one.
 func TestFreshDiskVMStillGetsARealWindow(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
@@ -129,13 +127,10 @@ func TestFreshDiskVMStillGetsARealWindow(t *testing.T) {
 	}
 }
 
-// The bug: on a host with no graphical session, this VM could not be started
-// at all, because qemu exits 1 on -display gtk rather than degrading. Measured
-// on a Wayland host with the three variables cleared: gtk,gl=on reports
-// "OpenGL is not supported by display backend 'gtk'", plain gtk reports "gtk
-// initialization failed", and -display none -vnc unix:... starts and binds the
-// socket. So the install console goes to VNC, where a human on another machine
-// can drive it.
+// The bug: on a host with no graphical session, this VM could not start at
+// all, because qemu exits 1 on -display gtk rather than degrading. The
+// install console falls back to VNC instead, where a human on another
+// machine can drive it.
 func TestFreshDiskVMOnAHeadlessHostFallsBackToVNC(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{

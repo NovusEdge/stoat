@@ -14,12 +14,16 @@ import (
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
-// The access box sits beside the VM list and answers "how do I get into this
-// one" without a trip to the detail screen. It exists because the answer is
-// genuinely different per VM: root with a key on Alpine live, stoat with a
-// key over ssh and a password at the console on cloud images, and whatever
-// you typed into the installer on a disk VM. Guessing wrong leaves you
-// staring at a login prompt.
+// The access box sits beside the VM list. It shows how to log in to the
+// selected VM without a trip to the detail screen.
+//
+// The login method differs per VM:
+//   - A live Alpine VM uses root with a key.
+//   - A cloud VM uses the stoat user with a key over ssh, and a password
+//     at the console.
+//   - A disk VM uses whatever account the installer created.
+//
+// A wrong guess leaves the user at a login prompt.
 
 // accessWidth is the box's content width, sized so the lines it holds do not
 // wrap: a label column plus "stoat@127.0.0.1:65535" or a shortened key path.

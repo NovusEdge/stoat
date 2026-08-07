@@ -43,8 +43,8 @@ func TestInstallCopiesAndCreatesDir(t *testing.T) {
 	}
 }
 
-// Reinstalling over an existing binary must work: that is the common case,
-// and on Linux writing over a running executable needs the file replaced, not
+// Reinstalling over an existing binary must work; it is the common case.
+// On Linux, writing over a running executable needs the file replaced, not
 // opened for write.
 func TestInstallOverwrites(t *testing.T) {
 	dest := t.TempDir()

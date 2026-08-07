@@ -161,16 +161,16 @@ func Build(v *config.VM) error {
 	b.file("etc/ssh/ssh_host_ed25519_key.pub", 0o644, hostPub)
 
 	fstab := "/dev/cdrom /media/cdrom iso9660 noauto,ro 0 0\n"
-	// Two exports (core-api.md §10.2): `host` is the user's directory,
-	// read-only; `work` is stoat's per-VM scratch, writable. `work` always
-	// exists; `host` only when the user configured a share.
+	// Two exports (core-api.md §10.2). `host` is the user's directory,
+	// read-only. `work` is stoat's per-VM scratch, writable. `work` always
+	// exists; `host` exists only when the user configured a share.
 	//
-	// `ro` matches what QEMU enforces host-side. Without it the guest
-	// mounts rw, `mount -o remount,rw` reports success, and writes only fail
-	// EROFS later with no explanation.
+	// `ro` matches what QEMU enforces host-side. Without it the guest mounts
+	// rw, `mount -o remount,rw` reports success, and writes fail EROFS
+	// later with no explanation.
 	//
 	// `nofail`: some guest kernels have no 9p module at all (Debian's cloud
-	// kernel doesn't), and without it an unmountable share holds up boot.
+	// kernel doesn't). Without it an unmountable share holds up boot.
 	fstab += "work /mnt/work 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0\n"
 	b.dir("mnt", 0o755)
 	b.dir("mnt/work", 0o755)
@@ -185,12 +185,12 @@ func Build(v *config.VM) error {
 	b.file("etc/fstab", 0o644, fstab)
 
 	if _, ok := installRecipe(v); ok {
-		// setup-alpine runs from an unattended answerfile, then the local.d
-		// script marks success on the work share and reboots into the
+		// setup-alpine runs from an unattended answerfile. The local.d
+		// script then marks success on the work share and reboots into the
 		// installed disk (docs/recipe-spec-v2.md's "For install stage"
-		// execution model). etc/runlevels/default/local is what makes the
-		// initramfs actually run local.d scripts at all; without it
-		// stoat-install.start would just sit there unexecuted.
+		// execution model). etc/runlevels/default/local makes the initramfs
+		// run local.d scripts at all. Without it stoat-install.start never
+		// runs.
 		b.dir("etc/stoat", 0o755)
 		b.file("etc/stoat/answerfile", 0o644, GenerateAnswerfile(v))
 		b.dir("etc/local.d", 0o755)

@@ -8,12 +8,11 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 )
 
-// TestKongFlagNamingSurface pins every multi-word field in grammar.go against
-// the flag or command spelling kong actually derives, not the one a person
-// reading camelCase would guess. Kong reads CPUs as "CP"+"Us" and would
-// otherwise emit --cp-us, which is why createCmd.CPUs and updateCmd.CPUs
-// carry an explicit name:"cpus" tag; if that tag is ever deleted, --cpus
-// starts failing here instead of silently renaming itself in the field.
+// TestKongFlagNamingSurface pins every multi-word field in grammar.go
+// against the flag or command spelling kong actually derives. Kong reads
+// CPUs as "CP"+"Us" and would emit --cp-us without an explicit name:"cpus"
+// tag on createCmd.CPUs and updateCmd.CPUs. If that tag is ever deleted,
+// --cpus fails here instead of silently renaming itself.
 func TestKongFlagNamingSurface(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -104,13 +103,10 @@ func TestTrimListAcrossCommands(t *testing.T) {
 		t.Errorf("apply --only with trailing comma = %v, want %v", a.Only, want)
 	}
 
-	// check-recipes' Names is a positional []string (arg:""), and kong's Sep
-	// tag only splits the value of a FLAG, never a positional. So kong alone
-	// hands "a.sh,b.sh" back as ONE element containing a comma, which the
-	// stdlib parser this replaced did split, and which usage() documented as
-	// `check-recipes a,b`. trimList splits positionals itself for that
-	// reason: without it, two recipe names silently became one bogus name and
-	// the command reported "no such recipe" for something nobody typed.
+	// check-recipes' Names is a positional []string (arg:""). Kong's Sep tag
+	// only splits a FLAG's value, never a positional, so kong alone hands
+	// "a.sh,b.sh" back as one element containing a comma. trimList splits
+	// positionals itself for that reason.
 	for _, argv := range [][]string{
 		{"check-recipes", "a.sh,b.sh", "--os", "alpine"},
 		{"check-recipes", "a.sh, b.sh", "--os", "alpine"},

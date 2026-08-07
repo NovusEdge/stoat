@@ -116,10 +116,10 @@ func TestScanImagesSurvivesAnUnreadableDir(t *testing.T) {
 	}
 }
 
-// If nothing keeps reading (the finder is left, or the modal closes on a
-// selection), the walk must still stop, otherwise the goroutine blocks
-// forever on the 5th pending batch (out has capacity 4) and leaks, holding an
-// open WalkDir, once per abandoned scan.
+// If nothing keeps reading, because the finder is left or the modal closes
+// on a selection, the walk must still stop. Otherwise the goroutine blocks
+// forever on the 5th pending batch, since out has capacity 4, and leaks an
+// open WalkDir per abandoned scan.
 func TestScanImagesStopsWhenCancelled(t *testing.T) {
 	root := t.TempDir()
 	// More than fits in the channel's buffer (4 batches) plus one more, so

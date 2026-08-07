@@ -10,14 +10,9 @@ import (
 )
 
 // The kong grammar: one struct per subcommand, tags instead of a hand-written
-// FlagSet per case. It replaces ~600 lines of Parse whose bulk was not the
-// interesting part of parsing but the same four mechanical steps repeated 26
-// times: build a FlagSet, pull the positional off BEFORE parsing (because
-// stdlib flag stops at the first non-flag argument), parse, then re-check the
-// argument count by hand.
+// FlagSet per case.
 //
-// Two tags here are load-bearing and were verified against kong v1.16.0 by
-// running it, not by reading its docs:
+// Two tags here are load-bearing, confirmed against kong v1.16.0:
 //
 //   - ExecCmd.Command's `passthrough:""`. It must sit on the POSITIONAL, not
 //     on the command: kong refuses a passthrough COMMAND that has more than
@@ -152,20 +147,18 @@ type execCmd struct {
 
 // cpCmd carries two mutually exclusive spellings: the positional scp/docker
 // cp form for humans, and an explicit-flag form for a machine caller (§1.1 of
-// docs/design/mcp-server.md) that would otherwise have to reimplement the
-// colon split in splitCopyArgs, and can never tell a host path that legitimately
-// contains a colon from a "<vm>:<path>" compound. Both positionals are
-// `optional:""` so kong accepts either form; toArgs is what enforces "both or
-// neither, not a mix".
+// docs/design/mcp-server.md). The flag form exists because a caller cannot
+// always tell a host path with a colon in it from a "<vm>:<path>" compound.
+// Both positionals are `optional:""` so kong accepts either form; toArgs
+// enforces "both or neither, not a mix".
 //
-// Direction is a *string, not a plain enum string, specifically so kong's own
-// "enum value is only valid if it is either required or has a valid default"
-// rule (tag.go) does not apply: that rule is skipped for pointer/slice/map
-// kinds. A default would silently copy the wrong way when a caller forgets
-// the flag; `required:""` would make the flag form's own enum mandatory even
-// under the positional form, which kong applies unconditionally to the
-// struct field, not conditionally on which form was used. nil is exactly
-// "the flag form was not used", checked in toArgs.
+// Direction is a *string, not a plain enum string. kong's rule "enum value
+// is only valid if it is either required or has a valid default" (tag.go)
+// skips pointer, slice and map kinds. A default would silently pick the
+// wrong direction when a caller forgets the flag. `required:""` would force
+// the flag form's enum even when the positional form is used, since kong
+// applies it to the struct field unconditionally. nil marks "the flag form
+// was not used"; toArgs checks it.
 type cpCmd struct {
 	Source string `arg:"" optional:"" help:"source, either a host path or <vm>:<path>"`
 	Dest   string `arg:"" optional:"" help:"destination, either a host path or <vm>:<path>"`
@@ -242,10 +235,9 @@ type logsCmd struct {
 	Which string `enum:"console,apply" default:"console" help:"which log, with a vm name"`
 }
 
-// toArgs flattens the selected command back into the Args every runX already
-// consumes. Args survives this commit on purpose: it keeps the parser change
-// separate from the refactor that would thread these structs through 18 run
-// functions, so a behaviour regression here cannot hide inside that.
+// toArgs flattens the selected command into the Args every runX consumes.
+// Args stays the interface between parsing and running rather than
+// threading the kong structs through 18 run functions directly.
 func (g *grammar) toArgs(path string) (*Args, error) {
 	a := &Args{Cmd: path, Quiet: g.Quiet}
 	switch path {
@@ -419,21 +411,16 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	return a, nil
 }
 
-// trimList splits each element on commas and trims what is left. Both halves
-// are needed, for different reasons:
+// trimList splits each element on commas and trims what is left.
 //
-//   - Kong splits a FLAG's value on commas but keeps the surrounding
-//     whitespace, so `--only "a.sh, b.sh"` arrives as {"a.sh", " b.sh"} and
-//     that leading space reaches a filename comparison.
+//   - Kong splits a FLAG's value on commas but keeps surrounding whitespace,
+//     so `--only "a.sh, b.sh"` arrives as {"a.sh", " b.sh"}.
 //   - Kong never comma-splits a POSITIONAL, so `check-recipes a.sh,b.sh`
-//     arrives as one element containing a comma. The stdlib flag parser this
-//     replaced did split it, and usage() documented `check-recipes a,b`, so
-//     leaving it would silently turn two recipe names into one bogus one.
+//     arrives as one element containing a comma.
 //
-// Doing both here means a positional list and a flag list behave the same,
-// which is what anyone typing either would expect. It returns nil for an
-// all-blank list, so "cleared" stays distinguishable from "not given" by the
-// pointer, never by the length.
+// Splitting both here makes a positional list and a flag list behave the
+// same. It returns nil for an all-blank list, so "cleared" stays
+// distinguishable from "not given" by the pointer, never by the length.
 func trimList(in []string) []string {
 	var out []string
 	for _, elem := range in {

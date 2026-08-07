@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,33 +20,37 @@ import (
 )
 
 type detailModel struct {
-	vm  *config.VM
+	vm  core.VM
 	log string
 	// pager is non-nil only while the console log viewer (key L) is open. It
 	// takes over the detail screen's keyboard and body; see updateDetail and
 	// viewDetail.
 	pager *logPager
+	// snapshots is non-nil only while the snapshots modal (key S) is open. It
+	// takes over the detail screen's keyboard and body the same way pager
+	// does; see snapshots.go.
+	snapshots *snapshotsModal
 }
 
-func newDetail(v *config.VM) detailModel { return detailModel{vm: v} }
+func newDetail(v core.VM) detailModel { return detailModel{vm: v} }
 
-// name is the VM's identity: its DIRECTORY, never the vm.toml `name` field,
-// which the "E" key lets a user edit into something else entirely. See
-// core.VM.Name's comment for the bug that rule exists to prevent.
-func (d detailModel) name() string { return filepath.Base(d.vm.Dir) }
+// name reports the VM's directory, not the vm.toml `name` field. The "E" key
+// can edit that field to something else entirely. See core.VM.Name's comment
+// for the bug this rule prevents. core.VM.Name already returns the directory;
+// this exists so every call site below reads "the VM's identity" instead of a
+// raw field access.
+func (d detailModel) name() string { return d.vm.Name }
 
-// coreVM re-asks core for the current view of the VM this screen is showing.
-// The detail screen holds the on-disk record, because it renders Applied and
-// writes vm.toml, neither of which a core.VM carries; the shared "s" and "p"
-// handlers are on core.VM, which is what the list holds. Rather than keep a
-// second copy here that drifts every time this pane reloads, this asks by
-// directory name, which is also what makes State fresh at the moment the key
-// was pressed.
+// coreVM asks core for the VM's current state, fresh at call time. d.vm is a
+// snapshot taken when this screen was last entered or reloaded. Another
+// terminal can start or stop the VM before the user acts on it. The "s" and
+// "p" keys must act on current state, not a stale snapshot, so they call this
+// instead of reading d.vm directly.
 func (d detailModel) coreVM() (core.VM, error) { return core.Get(d.name()) }
 
 // tickMsg carries the generation of the detail-screen visit that scheduled
-// it. updateDetail only re-arms the chain when gen still matches
-// m.detailGen; every other visit to the detail screen bumps detailGen, so a
+// it. updateDetail re-arms the chain only when gen still matches
+// m.detailGen. Every other visit to the detail screen bumps detailGen, so a
 // stale chain left over from a prior visit dies silently on its next tick
 // instead of re-arming and running forever alongside the live one.
 type tickMsg struct {
@@ -57,9 +62,17 @@ func tick(gen int) tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{t: t, gen: gen} })
 }
 
-// tailLog reads the last n lines of the most recent provision run.
-func tailLog(v *config.VM, n int) string {
-	b, err := os.ReadFile(v.ProvisionLogPath())
+// tailLog reads the last n lines of the most recent recipe-apply run. It goes
+// through core.Logs rather than opening ProvisionLogPath directly. Logs
+// resolves name to the right file. It returns an empty reader, not an error,
+// for a VM that has never had recipes applied or has a broken vm.toml.
+func tailLog(name string, n int) string {
+	r, err := core.Logs(name, core.WhichApply)
+	if err != nil {
+		return ""
+	}
+	defer r.Close()
+	b, err := io.ReadAll(r)
 	if err != nil {
 		return ""
 	}
@@ -83,9 +96,29 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// The snapshots modal owns the keyboard while it's open, like the pager
+	// above. Every message goes to it first. It reports whether it should
+	// close rather than reacting to a bare esc here: esc means different
+	// things inside it, cancel a sub-prompt or close outright. See
+	// snapshotsModal.update.
+	if m.detail.snapshots != nil {
+		cmd, closed := m.detail.snapshots.update(msg)
+		if closed {
+			m.detail.snapshots = nil
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case logOpenedMsg:
 		m.detail.pager = msg.pager
+		return m, nil
+	case snapshotsOpenedMsg:
+		if msg.err != nil {
+			cmd := m.showToast(msg.err.Error(), true)
+			return m, cmd
+		}
+		m.detail.snapshots = newSnapshotsModal(msg.name, msg.snaps)
 		return m, nil
 	case tickMsg:
 		if msg.gen != m.detailGen {
@@ -93,10 +126,10 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Let it die here instead of re-arming.
 			return m, nil
 		}
-		if m.detail.vm == nil {
+		if m.detail.vm.Name == "" {
 			return m, nil
 		}
-		m.detail.log = tailLog(m.detail.vm, 10)
+		m.detail.log = tailLog(m.detail.vm.Name, 10)
 		if m.screen == screenDetail {
 			return m, tick(m.detailGen)
 		}
@@ -111,12 +144,20 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = !m.showHelp
 			return m, nil
 		}
-		if m.detail.vm == nil {
+		if m.detail.vm.Name == "" {
 			return m, nil
 		}
 		switch msg.String() {
 		case "e":
-			m.edit = newEdit(m.detail.vm)
+			// The edit screen writes vm.toml directly through core.Update. It
+			// needs the real config.VM, which this screen no longer holds.
+			// Loaded by directory, per the identity rule above.
+			cv, err := config.Load(m.detail.name())
+			if err != nil {
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
+			}
+			m.edit = newEdit(cv)
 			m.screen = screenEdit
 			m.showHelp = false
 			m.status = ""
@@ -126,13 +167,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if editor == "" {
 				editor = "vi"
 			}
-			c := exec.Command(editor, filepath.Join(m.detail.vm.Dir, "vm.toml"))
+			c := exec.Command(editor, filepath.Join(m.detail.vm.Paths.Dir, "vm.toml"))
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
-				// By directory. This used to reload m.detail.vm.Name, the
-				// vm.toml field, which is the one thing the editor session
-				// that just ran is able to change: renaming a VM in the file
-				// made the reload miss, or hit a different VM entirely.
-				v, lerr := config.Load(m.detail.name())
+				// By directory. This used to reload by m.detail.vm.Name, the
+				// vm.toml field. That field is the one thing the editor
+				// session can change: renaming a VM in the file made the
+				// reload miss it, or load a different VM.
+				v, lerr := m.detail.coreVM()
 				if lerr != nil {
 					return errMsg(lerr.Error())
 				}
@@ -144,17 +185,20 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.showToast("installed only applies to disk vms", true)
 				return m, cmd
 			}
-			// Save a copy first: only flip the live in-memory VM once the
-			// write to disk actually succeeds, so a failed Save can't leave
-			// the pane showing a state that was never persisted.
-			next := *v
-			next.Installed = !v.Installed
-			if err := next.Save(); err != nil {
+			// core.Update takes the data-root lock and writes vm.toml. This
+			// replaced a second, unlocked Save() call that wrote straight to
+			// the file, bypassing the lock every other mutation uses. The
+			// in-memory toggle updates only after the write to disk lands. A
+			// failed Update then cannot leave the pane showing a state that
+			// was never persisted.
+			next := !v.Installed
+			updated, err := core.Update(v.Name, core.Patch{Installed: &next})
+			if err != nil {
 				cmd := m.showToast(err.Error(), true)
 				return m, cmd
 			}
-			v.Installed = next.Installed
-			cmd := m.showToast(fmt.Sprintf("%s installed=%v", v.Name, v.Installed), false)
+			m.detail.vm = updated
+			cmd := m.showToast(fmt.Sprintf("%s installed=%v", updated.Name, updated.Installed), false)
 			return m, tea.Batch(loadVMs, cmd)
 		case "s":
 			v, err := m.detail.coreVM()
@@ -176,6 +220,8 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startProvision(v)
 		case "L":
 			return m, openLogPager(m.detail.name())
+		case "S":
+			return m, openSnapshots(m.detail.name())
 		case "t":
 			v := m.detail.vm
 			if !consolePasswordAvailable(v) {
@@ -203,24 +249,34 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-type vmReloadedMsg struct{ vm *config.VM }
+type vmReloadedMsg struct{ vm core.VM }
 
-// consolePasswordAvailable reports whether v has a console password that
-// could be typed or copied right now: the VM must be running (the monitor
-// socket and the login prompt both only exist then), and it must actually
-// have one set. This is the same rule the "console" row in viewDetail and
-// qemu.consoleCredential's log line already use.
-func consolePasswordAvailable(v *config.VM) bool {
-	return v != nil && qemu.Running(v) && v.ConsolePassword != ""
+// consolePasswordAvailable reports whether v has a console password to type
+// or copy right now. The VM must be running: the monitor socket and the
+// login prompt exist only then. It must also have a password set. The
+// "console" row in viewDetail and qemu.consoleCredential's log line use the
+// same rule. v.State already answers "is qemu running" as of core.Get's
+// call, so this makes no separate qemu.Running call.
+func consolePasswordAvailable(v core.VM) bool {
+	return v.State == core.StateRunning && v.ConsolePassword != ""
+}
+
+// qemuMonitorVM builds the minimal *config.VM that qemu.TypeConsolePassword
+// needs to dial v's monitor socket. MonitorPath is a filepath.Join off Dir,
+// so Dir plus the password is everything the call requires. This avoids
+// loading a second copy of the on-disk record. app.go's cfgVM uses the same
+// shim to cross the same boundary for sshx.
+func qemuMonitorVM(v core.VM) *config.VM {
+	return &config.VM{Name: v.Name, Dir: v.Paths.Dir, ConsolePassword: v.ConsolePassword}
 }
 
 // typeConsolePassword has qemu type v's console password into the guest, off
-// the UI goroutine: sending it can take a while (one monitor round trip per
-// character, deliberately paced (see qemu.TypeConsolePassword), and the TUI
-// must stay responsive while that happens.
-func typeConsolePassword(v *config.VM) tea.Cmd {
+// the UI goroutine. Sending it can take a while: one monitor round trip per
+// character, paced deliberately (see qemu.TypeConsolePassword). The TUI must
+// stay responsive while that runs.
+func typeConsolePassword(v core.VM) tea.Cmd {
 	return func() tea.Msg {
-		if err := qemu.TypeConsolePassword(v); err != nil {
+		if err := qemu.TypeConsolePassword(qemuMonitorVM(v)); err != nil {
 			return errMsg(err.Error())
 		}
 		return statusMsg(v.Name + ": typed console password into the guest")
@@ -230,7 +286,7 @@ func typeConsolePassword(v *config.VM) tea.Cmd {
 func (m model) viewDetail() string {
 	v := m.detail.vm
 
-	if v == nil {
+	if v.Name == "" {
 		parts := []string{pane("", dimStyle.Render("no vm selected"), m.width), ""}
 		if m.status != "" {
 			parts = append(parts, warnStyle.Render(m.status))
@@ -244,8 +300,13 @@ func (m model) viewDetail() string {
 		return lipgloss.JoinVertical(lipgloss.Center, m.detail.pager.view(m.width))
 	}
 
+	if m.detail.snapshots != nil {
+		m.detail.snapshots.resize(m.width, m.height)
+		return lipgloss.JoinVertical(lipgloss.Center, m.detail.snapshots.view(m.width))
+	}
+
 	state := downStyle.Render("stopped")
-	if qemu.Running(v) {
+	if v.State == core.StateRunning {
 		state = upStyle.Render("running")
 	}
 
@@ -264,70 +325,63 @@ func (m model) viewDetail() string {
 	}
 	if v.Mode == "disk" {
 		size := "-"
-		if fi, err := os.Stat(v.DiskPath()); err == nil {
+		if fi, err := os.Stat(v.Paths.Disk); err == nil {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
-		// Until this is true the VM boots its installer ISO, so "p" would be
-		// provisioning the installer's tmpfs. startProvision refuses with
-		// the same instruction rather than timing out on ssh. The next start
-		// sets it automatically once the install has written to the disk; "i"
-		// is the override for when that guess is wrong either way.
+		// Until this is true, the VM boots its installer ISO. Pressing "p"
+		// would then provision the installer's tmpfs. startProvision refuses
+		// with the same instruction instead of timing out on ssh. The next
+		// start sets this automatically once the install has written to the
+		// disk. "i" overrides it when that guess is wrong.
 		installed := warnStyle.Render("no: run " + installerName(v.OS) + " in the qemu window, then restart")
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}
 		line("installed", installed)
 	}
-	sshUser := sshx.User(v)
+	sshUser := sshx.User(cfgVM(v))
 	line("ssh", fmt.Sprintf("%s@127.0.0.1:%d", sshUser, v.SSHPort))
 	// Forwards are otherwise invisible everywhere in the TUI (see the
-	// migration plan's D1): showing them here is what lets a user notice
-	// "oh, another VM already has that port" before the edit screen lets
-	// them collide with it. Omitted entirely when there are none, rather
-	// than a "forwards: none" row, matching every other optional row above.
+	// migration plan's D1). Showing them here lets a user notice a port
+	// collision before the edit screen creates one. Omitted entirely when
+	// there are none, matching every other optional row above.
 	if len(v.Forwards) > 0 {
 		label := "forward"
 		for _, f := range v.Forwards {
 			line(label, fmt.Sprintf("%d %s %d (guest)", f.HostPort, glyphTo, f.GuestPort))
 			label = ""
 		}
-		// qemu's user-mode netdev argv is fixed at process launch; it has no
-		// way to hot-add a hostfwd rule to a running process. So a forward
-		// declared while the VM is running is saved to vm.toml (and WILL
-		// apply) but has no effect on the qemu process already up. This is
-		// exactly the distinction docs/design/core-api.md §8 decision 5
-		// exists to keep visible: "applied later" must never read the same
-		// as "already true". Rendered as its own line, in its own color, so
-		// it cannot be mistaken for a caption on the rows above it.
+		// qemu's user-mode netdev argv is fixed at process launch. It cannot
+		// hot-add a hostfwd rule to a running process. A forward declared
+		// while the VM is running saves to vm.toml and applies later, but
+		// has no effect on the qemu process already up.
+		// docs/design/core-api.md §8 decision 5 requires this distinction to
+		// stay visible: "applied later" must never read like "already true".
+		// This renders as its own line, in its own color, so it cannot be
+		// mistaken for a caption on the rows above it.
 		effect := upStyle.Render("in effect")
-		if qemu.Running(v) {
+		if v.State == core.StateRunning {
 			effect = warnStyle.Render("saved, applies at next start (not the running process)")
 		}
 		facts.row("", "", effect)
 	}
-	// qemu.NeedsWindow is the one case that gets a real qemu window (a
-	// disk-mode VM mid-install); every other VM is headless, and the VNC
-	// socket bound in that case (internal/qemu/args.go) is otherwise
-	// invisible anywhere in the UI, so surface it: it's the only way to
-	// get a display on a headless VM.
+	// qemu.DisplayKind takes mode, installed, and host graphical directly, not
+	// a *config.VM, so a core.VM caller can call it without going through
+	// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
 	//
-	// "connect a VNC viewer here" was the whole hint and it was not enough:
-	// the reported failure is a disk VM whose window disappears the moment
-	// setup-alpine marks it installed, by a user who then has a path and no
-	// idea what opens it. So print the command, for a viewer that is actually
-	// on this host.
+	// A bare socket path is not enough: the user needs the actual command
+	// that opens it, so this prints one for a viewer installed on this host.
 	//
-	// The host is the second half of the rule: with no graphical session, even
-	// the install console lands on this socket, and that is the case where a
-	// user most needs to be told, since the alternative was a VM that refused
-	// to start at all.
-	if graphical := qemu.GraphicalSession(); !qemu.NeedsWindow(v, graphical) {
-		if !graphical && qemu.WantsWindow(v) {
+	// With no graphical session, the install console also lands on this
+	// socket. That is the case where the user needs the explanation most,
+	// since the VM would otherwise look like it refused to start.
+	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Mode, v.Installed, graphical) != qemu.DisplayWindow {
+		if !graphical && qemu.DisplayKind(v.Mode, v.Installed, true) == qemu.DisplayWindow {
 			facts.row("", "", warnStyle.Render("no usable graphical session on this host: the installer console is on vnc"))
 		}
-		line("vnc", v.VNCPath())
-		att := qemu.AttachVNC(v.VNCPath())
+		line("vnc", v.Paths.VNCSocket)
+		att := qemu.AttachVNC(v.Paths.VNCSocket)
 		if att.Command == "" {
 			facts.row("", "", warnStyle.Render("no VNC viewer found: install "+strings.Join(att.Missing, " or ")))
 		} else {
@@ -337,13 +391,12 @@ func (m model) viewDetail() string {
 			}
 		}
 	}
-	// How to get in. The console line matters most for cloud images: they
-	// lock every account, so without a password the console shows a login
-	// prompt with no valid answer, and the moment you need it is the moment
-	// ssh isn't working, which is the worst time to go looking. This
-	// password is only ever set for the cloudinit backend (form.go), which
-	// is always cloud mode, so it is always reached over VNC, never a qemu
-	// window.
+	// The console line matters most for cloud images. Cloud images lock
+	// every account, so without a password the console shows a login prompt
+	// with no valid answer. The moment a user needs it is the moment ssh has
+	// failed. This password is set only by the cloudinit backend (form.go),
+	// which is always cloud mode, so it is always reached over VNC, never a
+	// qemu window.
 	if v.ConsolePassword != "" {
 		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (over vnc, above)"))
 	} else if v.Mode == "cloud" {
@@ -364,10 +417,10 @@ func (m model) viewDetail() string {
 			line(label, recipeLabel(r)+" ("+status+")")
 			label = ""
 		}
-		// Stale: a recipe that was applied but has since been removed from
-		// v.Recipes (the user edited it out of vm.toml after the fact). The
-		// applied record survives that edit, so it needs its own status
-		// rather than silently vanishing from this pane.
+		// Stale means applied but since removed from v.Recipes: the user
+		// edited it out of vm.toml. The applied record survives that edit.
+		// It needs its own status instead of silently vanishing from this
+		// pane.
 		stale := make([]string, 0, len(v.Applied))
 		for name := range v.Applied {
 			if !inConfig[name] {
@@ -398,7 +451,7 @@ func (m model) viewDetail() string {
 		parts = append(parts, warnStyle.Render(m.status))
 	}
 	parts = append(parts, renderFooter(detailHelp{
-		sshAvailable:    qemu.Running(v),
+		sshAvailable:    v.State == core.StateRunning,
 		consolePassword: consolePasswordAvailable(v),
 	}, m.width, m.showHelp))
 	// Center for the same reason as the list: the footer is wider than the

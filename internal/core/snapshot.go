@@ -12,11 +12,10 @@ import (
 // Snapshot is one saved state of a VM's disk, and possibly its RAM.
 type Snapshot struct {
 	Tag string
-	// VMState reports whether the guest's MEMORY was captured too. A snapshot
-	// taken while the VM ran resumes execution where it left off; one taken
-	// while it was stopped restores the disk only and the guest boots. Both
-	// are useful and they are not interchangeable, so a caller has to be able
-	// to tell which it is holding.
+	// VMState reports whether the snapshot captured the guest's memory. A
+	// snapshot taken while the VM ran resumes execution where it left off.
+	// One taken while stopped restores the disk only; the guest boots
+	// fresh. The two are not interchangeable.
 	VMState bool
 	Size    string // as qemu reports it; free-form, for display only
 	Created string
@@ -24,30 +23,22 @@ type Snapshot struct {
 
 // ErrNoDisk is returned for a VM that has no qcow2 to put a snapshot in.
 //
-// A live-mode VM is diskless by design: it boots an ISO into a tmpfs root, so
-// there is nowhere for a snapshot to live and nothing that would survive one.
-// This is a property of the mode, not a missing feature.
+// A live-mode VM is diskless by design: it boots an ISO into a tmpfs root.
+// There is nowhere to store a snapshot, and nothing in it would survive one.
 var ErrNoDisk = fmt.Errorf("no disk to snapshot")
 
 // TakeSnapshot saves VM name's current state under tag.
 //
-// Named TakeSnapshot, not Snapshot as the design doc spells it: Snapshot is
-// the RESULT type above, and Go will not let a package hold both. The type
-// keeps the plain name because callers pass it around; the verb takes the
-// longer one.
+// Go cannot have both a type and a function named Snapshot in one package,
+// so the function is TakeSnapshot; the type above keeps the plain name
+// (docs/design/core-api.md §8, decision 2).
 //
-// Two mechanisms, chosen by state, exactly as the design settled
-// (docs/design/core-api.md §8, decision 2):
+// The mechanism depends on VM state. A stopped VM uses `qemu-img snapshot
+// -c`: no process holds the image open. A running VM uses QMP savevm, which
+// captures RAM as well as disk; qemu-img refuses to write an image QEMU has
+// open, and forcing it would snapshot a torn filesystem.
 //
-//   - STOPPED: `qemu-img snapshot -c`. No running process is needed and
-//     nothing has the image open, so this is the simple and safe path.
-//   - RUNNING: QMP savevm, which captures RAM as well as disk. Doing it with
-//     qemu-img instead would mean writing to an image QEMU has open and is
-//     actively writing; qemu-img warns about exactly that, and the result
-//     would be a snapshot of a torn filesystem.
-//
-// The two produce different things (see Snapshot.VMState) and that difference
-// is reported rather than smoothed over.
+// The two produce different results. See Snapshot.VMState.
 func TakeSnapshot(name, tag string) error {
 	v, err := snapshotTarget(name, tag)
 	if err != nil {
@@ -61,14 +52,12 @@ func TakeSnapshot(name, tag string) error {
 
 // Restore resets VM name to the snapshot named tag.
 //
-// On a RUNNING VM this resumes execution inside the snapshot: the guest does
-// not reboot, and anything it was doing since is gone. On a stopped VM it
-// rolls the disk back and the next start boots from there.
+// On a running VM this resumes execution inside the snapshot; the guest
+// does not reboot. On a stopped VM it rolls the disk back, and the next
+// start boots from there.
 //
-// This is the operation the design doc calls the core testing loop: set it up,
-// snapshot, break it, restore. It is also unambiguously destructive: whatever
-// happened since the snapshot is discarded with no second copy, so a caller
-// that wraps it should say so before calling.
+// Restore is destructive. It discards everything since the snapshot with no
+// second copy. A caller that wraps this must warn before calling it.
 func Restore(name, tag string) error {
 	v, err := snapshotTarget(name, tag)
 	if err != nil {
@@ -80,10 +69,9 @@ func Restore(name, tag string) error {
 	return qemuImgSnapshot(v, "-a", tag)
 }
 
-// DeleteSnapshot removes one snapshot, freeing the space it holds in the
-// qcow2. Named DeleteSnapshot rather than joining Destroy's family because
-// deleting a VM and deleting one of its snapshots are very different sizes of
-// mistake.
+// DeleteSnapshot removes one snapshot and frees its space in the qcow2. It
+// is not part of Destroy's naming family: deleting a VM and deleting a
+// snapshot are very different sizes of mistake.
 func DeleteSnapshot(name, tag string) error {
 	v, err := snapshotTarget(name, tag)
 	if err != nil {
@@ -97,10 +85,10 @@ func DeleteSnapshot(name, tag string) error {
 
 // Snapshots lists what VM name has saved.
 //
-// A running VM is asked over QMP rather than having its qcow2 read behind its
-// back: QEMU holds the image open and writes to it, so qemu-img can report
-// state that is already stale. Both paths come back through parseSnapshots,
-// because both print QEMU's same "info snapshots" table.
+// A running VM is queried over QMP, not by reading its qcow2 directly. QEMU
+// holds the image open and writes to it, so qemu-img can report stale
+// state. Both paths return QEMU's same "info snapshots" table, parsed by
+// parseSnapshots.
 func Snapshots(name string) ([]Snapshot, error) {
 	v, err := load(name)
 	if err != nil {
@@ -119,9 +107,9 @@ func Snapshots(name string) ([]Snapshot, error) {
 		out = string(b)
 	}
 	if err != nil {
-		// A VM that has never been started has no qcow2 at all in cloud mode
-		// (the overlay is created on first start; see core.Create), which is
-		// "no snapshots", not a failure.
+		// A cloud VM that never started has no qcow2 yet; the overlay is
+		// created on first start (see core.Create). That is "no
+		// snapshots", not a failure.
 		if strings.Contains(out, "No such file") || strings.Contains(err.Error(), "no such file") {
 			return nil, nil
 		}
@@ -136,9 +124,9 @@ func snapshotTarget(name, tag string) (*config.VM, error) {
 	if strings.TrimSpace(tag) == "" {
 		return nil, fmt.Errorf("%w: a snapshot needs a tag", ErrInvalidSpec)
 	}
-	// The tag reaches the monitor as a bare word in "savevm <tag>", so a tag
-	// with whitespace in it would be read as extra arguments and mean
-	// something other than what was asked. Refused rather than mangled.
+	// The tag reaches the monitor as a bare word in "savevm <tag>".
+	// Whitespace in it would be read as extra arguments. Refused rather
+	// than mangled.
 	if strings.ContainsAny(tag, " \t\n") {
 		return nil, fmt.Errorf("%w: snapshot tag %q cannot contain whitespace", ErrInvalidSpec, tag)
 	}
@@ -160,30 +148,23 @@ func qemuImgSnapshot(v *config.VM, flag, tag string) error {
 	return nil
 }
 
-// parseSnapshots reads QEMU's "info snapshots" / "qemu-img snapshot -l" table.
-//
-// Both print the same fixed-column format:
+// parseSnapshots reads QEMU's "info snapshots" / "qemu-img snapshot -l"
+// table. Both commands print the same fixed-column format:
 //
 //	ID        TAG               VM_SIZE      DATE         VM_CLOCK  ICOUNT
 //	1         clean              203 MiB  2026-08-04 12:00:00  00:00:12.345
 //
-// Parsed by FIELDS rather than by byte offsets: the columns are padded to fit
-// their content, so a long tag or a large VM_SIZE shifts everything after it
-// and any fixed-width assumption breaks on exactly the snapshots people make.
+// Parsing splits on fields, not byte offsets. The columns are padded to
+// their content, so a long tag or large VM_SIZE shifts every column after
+// it.
 //
-// A row is identified by its DATE column, not by its ID. The ID differs
-// between the two producers and that difference is invisible until you look at
-// real output: `qemu-img snapshot -l` numbers them 1, 2, 3, while the running
-// VM's `info snapshots` prints "--" for both ID and ICOUNT. An earlier version
-// of this required a numeric ID and therefore silently dropped EVERY snapshot
-// belonging to a running VM: `stoat snapshot <vm>` reported "no snapshots"
-// immediately after successfully taking one. Caught only by running it against
-// a real VM; the unit test could not, because its "running" sample was written
-// from memory with a numeric ID that QEMU never prints.
+// A row is identified by its DATE column, not its ID. `qemu-img snapshot
+// -l` numbers rows 1, 2, 3. The running VM's `info snapshots` prints "--"
+// for both ID and ICOUNT. An earlier version required a numeric ID and
+// silently dropped every snapshot belonging to a running VM.
 //
-// A VM_SIZE of "0 B" is what marks a disk-only snapshot, one taken while the
-// VM was stopped captured no RAM. That is the distinction Snapshot.VMState
-// carries, and it is derived here rather than guessed from context.
+// A VM_SIZE of "0 B" marks a disk-only snapshot: one taken while the VM was
+// stopped captured no RAM. This is the fact Snapshot.VMState carries.
 func parseSnapshots(out string) []Snapshot {
 	var snaps []Snapshot
 	for _, line := range strings.Split(out, "\n") {
@@ -192,8 +173,8 @@ func parseSnapshots(out string) []Snapshot {
 		if len(f) < 6 {
 			continue
 		}
-		// The DATE column is the discriminator: headers ("VM_CLOCK" sits
-		// there), preambles and blank lines all fail it, and both producers
+		// The DATE column is the discriminator. Headers ("VM_CLOCK" sits
+		// there), preambles, and blank lines all fail it. Both producers
 		// print the same YYYY-MM-DD there regardless of what they put in ID.
 		if !isDate(f[4]) {
 			continue
@@ -209,11 +190,12 @@ func parseSnapshots(out string) []Snapshot {
 	return snaps
 }
 
-// isDate reports whether s is a YYYY-MM-DD date, the shape both `qemu-img
-// snapshot -l` and the monitor's `info snapshots` print in their DATE column.
-// Deliberately a shape check rather than a time.Parse: this decides "is this a
-// data row", and a row whose date QEMU formats slightly differently should
-// still be listed rather than silently vanishing.
+// isDate reports whether s has the YYYY-MM-DD shape both `qemu-img
+// snapshot -l` and `info snapshots` print in their DATE column.
+//
+// This is a shape check, not a time.Parse. It only decides "is this a data
+// row". A row whose date QEMU formats slightly differently still gets
+// listed, rather than silently dropped.
 func isDate(s string) bool {
 	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
 		return false

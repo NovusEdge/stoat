@@ -14,13 +14,13 @@ import (
 
 var errNotRunning = errors.New("not running: start it first")
 
-// installerName is what the user actually types at the guest console. Only
-// Alpine has setup-alpine; a BYO Fedora/Debian/unknown ISO has its own, so
-// naming the wrong one is worse than staying general.
+// installerName is what the user types at the guest console. Only Alpine has
+// setup-alpine. A BYO Fedora, Debian, or unknown ISO has its own installer,
+// so naming the wrong one is worse than staying general.
 //
-// Takes the OS string rather than a VM: its two kinds of caller now hold
-// different VM types (the list a core.VM, the detail screen a config.VM), and
-// one field is all it ever read.
+// installerName takes the OS string, not a VM. Its two callers hold
+// different VM types: the list holds core.VM, the detail screen holds
+// config.VM. Only one field is ever read.
 func installerName(osName string) string {
 	if os, ok := guest.Lookup(osName); ok && os.Installer != "" {
 		return os.Installer
@@ -44,45 +44,47 @@ func provision(v core.VM) tea.Cmd {
 		if v.State != core.StateRunning {
 			return provisionDoneMsg{v.Name, errNotRunning}
 		}
-		// No cancellation source reaches here yet: the TUI has no "abort
-		// provision" key, so this is a call site noted for the caller to
-		// decide whether one should exist, not a design decision made here.
-		// core.Apply refuses a cloudinit-backed VM with ErrAppliedAtBoot on
-		// its own; that case should already be caught by startProvision's
-		// refusal below, but app.go's generic err.Error() toast reports it
-		// honestly if it ever reaches here anyway.
+		// No cancellation source reaches here: the TUI has no "abort
+		// provision" key.
+		//
+		// core.Apply refuses a cloudinit-backed VM with ErrAppliedAtBoot.
+		// startProvision's refusal below should catch that case first, but if
+		// it reaches here anyway, app.go's generic err.Error() toast still
+		// reports it.
 		return provisionDoneMsg{v.Name, core.Apply(context.Background(), v.Name, core.ApplyOpts{})}
 	}
 }
 
 // startProvision is the shared "p" handler for both the list and detail
-// screens: guard against a provision already in flight for v, mark it as
-// running, set the status line, and return the command to run it.
+// screens. It guards against a provision already in flight for v, marks it
+// as running, sets the status line, and returns the command to run it.
 //
-// A VM with zero recipes never had anything for sshx.Provision to do, but it
-// used to loop zero times, write "done", and report "provisioned" anyway,
-// a success message for having done nothing. That case is short-circuited
-// here, before m.provisioning is even touched, so it neither lies about
-// what happened nor blocks a second real provision from starting right
+// A VM with zero recipes has nothing for sshx.Provision to do. It used to
+// loop zero times, write "done", and report "provisioned" anyway, a false
+// success message. This case is short-circuited before m.provisioning is
+// touched, so it does not block a second real provision from starting right
 // after.
 func (m *model) startProvision(v core.VM) tea.Cmd {
 	if backend.For(cfgVM(v)).Name() == "cloudinit" {
-		// Keyed on the BACKEND, not v.Mode == "cloud": the edit screen's mode
-		// switch can produce mode="disk" with backend="cloudinit" (D9a), a
-		// state this refusal must still catch. cloud-init's packages: list is
-		// baked into the seed and only runs at first boot; there is nothing
-		// for ssh-based provisioning to do, and a cloud recipe is
-		// #cloud-config YAML, not a shell script, so piping it into `sh -s`
-		// would just fail. core.Apply refuses the same state with
-		// ErrAppliedAtBoot; this refusal exists so the user sees it before
-		// anything starts, rather than after a failed attempt.
+		// Keyed on the BACKEND, not v.Mode == "cloud". The edit screen's mode
+		// switch can produce mode="disk" with backend="cloudinit" (D9a), and
+		// this refusal must still catch that state.
+		//
+		// cloud-init's packages: list is baked into the seed and runs only at
+		// first boot. ssh-based provisioning has nothing to do there, and a
+		// cloud recipe is #cloud-config YAML, not a shell script, so piping
+		// it into `sh -s` fails.
+		//
+		// core.Apply refuses the same state with ErrAppliedAtBoot. This check
+		// shows the user the refusal before anything starts, instead of
+		// after a failed attempt.
 		return m.showToast(v.Name+": cloud VMs provision at first boot via cloud-init. Recipes are applied automatically; recreate the VM to change them", true)
 	}
-	// A disk VM is still booting its installer ISO until its OS is on disk;
-	// sshd there belongs to the installer, not to the system being built, so
+	// A disk VM still boots its installer ISO until its OS is on disk. sshd
+	// there belongs to the installer, not the system being built, so
 	// provisioning it would run recipes against a tmpfs about to be thrown
-	// away. Without this the user waits the full 90s ssh timeout and gets
-	// "ssh not reachable", which says nothing about the real cause.
+	// away. Without this check, the user waits the full 90s ssh timeout and
+	// gets "ssh not reachable", which says nothing about the real cause.
 	if v.Mode == "disk" && !v.Installed {
 		return m.showToast(v.Name+": not installed yet, run "+installerName(v.OS)+
 			" in the qemu window, then stop and start it (stoat notices the install itself)", true)

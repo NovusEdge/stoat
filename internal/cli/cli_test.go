@@ -16,8 +16,8 @@ import (
 
 // TestColorStateWidth pins the pad-then-colour order. The escape sequences
 // are zero-width on screen but count toward a %-8s verb, so colouring first
-// (as the original did) silently under-pads every coloured row by 9 columns
-// and every field after STATE drifts left.
+// under-pads every coloured row by 9 columns and every field after STATE
+// drifts left.
 func TestColorStateWidth(t *testing.T) {
 	for _, state := range []string{"running", "stopped", "broken"} {
 		got := colorState(state, 8)
@@ -86,12 +86,9 @@ func TestParse(t *testing.T) {
 
 		{"rm", []string{"rm", "alpine"}, &Args{Cmd: "rm", VM: "alpine"}, false},
 		{"rm -y", []string{"rm", "-y", "alpine"}, &Args{Cmd: "rm", VM: "alpine", Yes: true}, false},
-		// This case used to assert an ERROR, with the comment "flag stops
-		// parsing at first positional": it was pinning the parser's limitation
-		// as though it were intended behaviour, even though usage() has always
-		// documented exactly this form ("rm <name> [-y]"). rm now pulls the
-		// positional off before flag parsing, the same as create and recipe
-		// new, so both orders work. See TestParseRMAcceptsFlagsEitherSide.
+		// rm pulls the positional off before flag parsing, the same as
+		// create and recipe new, so both orders work. See
+		// TestParseRMAcceptsFlagsEitherSide.
 		{"rm name then -y", []string{"rm", "alpine", "-y"}, &Args{Cmd: "rm", VM: "alpine", Yes: true}, false},
 		{"rm two names", []string{"rm", "alpine", "extra"}, nil, true},
 		{"rm missing name", []string{"rm"}, nil, true},
@@ -129,12 +126,9 @@ func TestParse(t *testing.T) {
 }
 
 // TestParseCreateAllowExecDefaultsTrue pins that an omitted --allow-exec
-// still produces Spec.AllowExec pointing at true, not a nil pointer (which
-// plan() would also read as true, but a nil pointer here would hide a kong
-// misconfiguration that made the flag look unset) and not false (Go's bool
-// zero value, which is exactly the regression AllowExec's default guards
-// against). Verified with `stoat create --help` that the flag itself is
-// `default:"true"`.
+// still produces Spec.AllowExec pointing at true. A nil pointer would hide
+// a kong misconfiguration that made the flag look unset. false would be
+// Go's bool zero value, the regression AllowExec's default guards against.
 func TestParseCreateAllowExecDefaultsTrue(t *testing.T) {
 	got, err := Parse([]string{"create", "work", "--image", "alpine"})
 	if err != nil {
@@ -239,10 +233,10 @@ func TestParseRecipe(t *testing.T) {
 	}
 }
 
-// Help text is generated from the kong grammar now, so the failure mode is
-// not "the text is stale" (it cannot be) but "the text is empty", which is
-// what `stoat help` did when the help COMMAND set Cmd without rendering
-// anything and only the -h FLAG path worked. Exit code 0 hid it.
+// Help text is generated from the kong grammar, so it cannot go stale; the
+// failure mode this pins is empty text. `stoat help` used to set Cmd
+// without rendering anything, working only through the -h FLAG path, and
+// exit code 0 hid the bug.
 func TestParseHelpCarriesGeneratedText(t *testing.T) {
 	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}} {
 		a, err := Parse(args)
@@ -381,14 +375,11 @@ func TestRunRMRunningRefusesBeforePrompting(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	// runRM directly, not Main(): fakeRunning's stand-in process is real (see
-	// its doc comment) and only "running" for as long as it survives, and
-	// Main()'s EnsureRoot/recipes.Install/keys.Ensure setup is enough extra
-	// wall-clock time for a test sandbox to reap it before the check ever
-	// runs, the same reason internal/core's own fakeRunning-based tests
-	// check state right after spawning it, not after unrelated work. Calling
-	// runRM straight away keeps that gap effectively zero.
-	// -y is passed specifically to prove the refusal happens before the
-	// confirmation gate, not because of it.
+	// its doc comment) and only "running" for as long as it survives. A test
+	// sandbox can reap it during Main()'s setup work before the check runs.
+	// Calling runRM immediately keeps that gap effectively zero.
+	// -y proves the refusal happens before the confirmation gate, not
+	// because of it.
 	code := runRM(&Args{Cmd: "rm", VM: "work", Yes: true}, nil, &out, &errOut)
 	if code != ExitFail {
 		t.Fatalf("rm: exit %d, want %d", code, ExitFail)
@@ -417,10 +408,8 @@ func TestRunRMDeletesAStoppedVM(t *testing.T) {
 	}
 }
 
-// TestParseRMAcceptsFlagsEitherSide pins the fix for a usage/parser mismatch
-// that predates the core API: `usage()` has always documented "rm <name> [-y]",
-// but Go's flag package stops at the first non-flag argument, so that exact
-// form was rejected as "too many arguments" while only `rm -y <name>` worked.
+// TestParseRMAcceptsFlagsEitherSide pins that `rm <name> -y` and `rm -y
+// <name>` both work.
 func TestParseRMAcceptsFlagsEitherSide(t *testing.T) {
 	for _, args := range [][]string{
 		{"rm", "work", "-y"},
@@ -447,10 +436,9 @@ func TestParseRMAcceptsFlagsEitherSide(t *testing.T) {
 }
 
 // TestParseExecTakesTheCommandVerbatim pins that exec does no flag parsing of
-// its own. `stoat exec work ls -la` must send -la to ls; if stoat's flag
-// package ever gets hold of the command, every guest command with a flag in it
-// breaks, and it breaks by doing something OTHER than what was asked rather
-// than by failing.
+// its own. `stoat exec work ls -la` must send -la to ls. If stoat's flag
+// package ever gets hold of the command, a guest command with a flag in it
+// silently runs the wrong thing instead of failing.
 func TestParseExecTakesTheCommandVerbatim(t *testing.T) {
 	cases := []struct {
 		args []string
@@ -573,12 +561,11 @@ func TestParseCPDirectionEnumRejectsGarbage(t *testing.T) {
 	}
 }
 
-// TestParseCPResolvesLocalToAbsolutePath pins the reason this task exists
-// (docs/design/mcp-server.md §1.1): a caller passing a relative path, or one
-// with a leading ~, must see the RESOLVED absolute path in a.Local, since
-// that is what runCopy echoes back on the wire for the server to
-// post-verify. Both the positional and flag forms go through the same
-// resolution.
+// TestParseCPResolvesLocalToAbsolutePath pins that a relative path, or one
+// with a leading ~, resolves to the RESOLVED absolute path in a.Local
+// (docs/design/mcp-server.md §1.1): runCopy echoes it back on the wire for
+// the server to post-verify. Both the positional and flag forms resolve the
+// same way.
 func TestParseCPResolvesLocalToAbsolutePath(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

@@ -12,10 +12,10 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 )
 
-// fakeSSHD listens on 127.0.0.1 (on port, or a free one if port is 0) and
+// fakeSSHD listens on 127.0.0.1, on port, or a free one if port is 0. It
 // answers every connection with a real SSH identification banner, so
-// sshBannerUp's "SSH-" check passes without a real sshd installed. Returns
-// the port it bound and a func the caller must defer to shut it down.
+// sshBannerUp's "SSH-" check passes without a real sshd installed. It
+// returns the bound port and a func the caller must defer to shut it down.
 func fakeSSHD(t *testing.T, port int) (int, func()) {
 	t.Helper()
 	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
@@ -215,11 +215,10 @@ func TestWaitStoppedPollsUntilProcessExits(t *testing.T) {
 	}
 }
 
-// TestWaitCtxCancellationIsPrompt is the test the brief specifically asks to
-// falsify: it must fail if the ctx.Done() check in pollUntil is removed.
-// A VM that is running but never becomes reachable would otherwise poll
-// forever; cancelling ctx right away must return well under the 30s test
-// deadline used here as a "this would have hung" tripwire.
+// TestWaitCtxCancellationIsPrompt must fail if the ctx.Done() check in
+// pollUntil is removed. A VM that is running but never becomes reachable
+// would otherwise poll forever. Cancelling ctx right away must return well
+// under the test's own timeout, a tripwire for "this would have hung".
 func TestWaitCtxCancellationIsPrompt(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2306}

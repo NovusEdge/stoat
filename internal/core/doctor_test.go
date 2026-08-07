@@ -44,9 +44,9 @@ func TestDoctorStructure(t *testing.T) {
 		}
 	}
 
-	// The union of both prior doctors' checks must all be present: the four
-	// installer binChecks plus /dev/kvm. Losing one silently is exactly the
-	// failure mode the task brief warned about.
+	// The union of both prior doctors' checks must be present: the four
+	// installer binChecks plus /dev/kvm. Losing one silently is the failure to
+	// catch.
 	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "/dev/kvm"}
 	for _, name := range want {
 		if !seen[name] {
@@ -70,9 +70,8 @@ func TestDoctorStructure(t *testing.T) {
 	}
 }
 
-// TestDoctorNoSSHKeygenCheck pins the ruling from the task brief: ssh and
-// ssh-keygen ship in one package on every supported distro, so ssh-keygen
-// must not appear as a second, redundant check.
+// TestDoctorNoSSHKeygenCheck pins that ssh-keygen gets no separate check: it
+// ships in the same package as ssh on every supported distro.
 func TestDoctorNoSSHKeygenCheck(t *testing.T) {
 	for _, c := range Doctor() {
 		if strings.Contains(c.Name, "ssh-keygen") {

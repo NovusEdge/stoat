@@ -23,12 +23,12 @@ import (
 // TestDownload_RenameFailureCleansUpPart drives Download down the success
 // path (matching checksum) but forces the final os.Rename to fail by
 // pre-creating a non-empty directory at the destination path. It asserts
-// that the .part file is removed rather than orphaned, per the brief's
-// invariant that every error path in Download cleans up .part.
+// that the .part file is removed rather than orphaned: every error path in
+// Download must clean up .part.
 //
 // This test is hermetic: it never touches the network or the real Alpine
-// mirror. The "download" is served by a local httptest.Server, and the
-// expected checksum is computed from the bytes that server serves.
+// mirror. A local httptest.Server serves the "download", and the expected
+// checksum is computed from the bytes that server serves.
 func TestDownload_RenameFailureCleansUpPart(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
@@ -194,20 +194,18 @@ func TestInfer(t *testing.T) {
 		wantBackend string
 		wantOS      string
 	}{
-		// Infer now recognises every registered OS by its FilenameHints, not
-		// just Alpine, so these two resolve an OS where they used to return
-		// "": see TestInferRecognisesEveryRegisteredOS. That's the intended
-		// effect of the registry migration: a BYO ubuntu/debian cloud image
-		// used to get zero recipes offered (recipes.List("", backend)), and
-		// now gets whatever its OS supports.
+		// Infer recognises every registered OS by its FilenameHints, not
+		// just Alpine; see TestInferRecognisesEveryRegisteredOS. A BYO
+		// ubuntu/debian cloud image gets whatever recipes its OS supports
+		// instead of zero (recipes.List("", backend) with an empty OS).
 		{"ubuntu cloudimg qcow2", "ubuntu-24.04-server-cloudimg-amd64.qcow2", "cloudinit", "ubuntu"},
 		{"debian genericcloud qcow2", "debian-12-genericcloud-amd64.qcow2", "cloudinit", "debian"},
 		{"bare .img", "some-cloud-image.img", "cloudinit", ""},
 		{"alpine iso", "alpine-standard-3.20.0-x86_64.iso", "apkovl", "alpine"},
-		// The alpine-cloud catalog entry (a4befa9) downloads exactly this
-		// filename. An empty OS here is what makes the BYO fallback in
-		// internal/tui/form.go dangerous: it flows to guestShell(""),
-		// which returns /bin/bash, and Alpine has no bash.
+		// The alpine-cloud catalog entry downloads exactly this filename.
+		// An empty OS here would send the BYO fallback in
+		// internal/tui/form.go to guestShell(""), which returns /bin/bash,
+		// and Alpine has no bash.
 		{"alpine cloud qcow2", "generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2", "cloudinit", "alpine"},
 		{"random unrecognised name", "my-random-install.raw", "ssh", ""},
 	}
@@ -316,8 +314,7 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 // TestDownload_SHA512 exercises the algorithm-agnostic verification path: a
 // 128-hex expected digest (as Debian's SHA512SUMS publishes) must be
 // checked with sha512, not sha256, and must still gate the .part rename on
-// a match. Regression coverage for the fix that made Download pick the hash
-// by digest length instead of hardcoding sha256.
+// a match.
 func TestDownload_SHA512(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
@@ -347,11 +344,10 @@ func TestDownload_SHA512(t *testing.T) {
 	}
 }
 
-// TestDownload_UnverifiedWhenNoChecksum is the Important-3 regression: an
-// entry resolved with no checksum available must still download (never
-// silently fail), but Verified must stay false so a caller can distinguish
-// "downloaded, unverified" from "downloaded, verified" instead of the two
-// looking identical.
+// TestDownload_UnverifiedWhenNoChecksum: an entry resolved with no checksum
+// available must still download, never silently fail, but Verified must
+// stay false so a caller can distinguish "downloaded, unverified" from
+// "downloaded, verified".
 func TestDownload_UnverifiedWhenNoChecksum(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
@@ -401,10 +397,9 @@ iQIzBAEBCAAdFiEExufwgc+A4TFGZ26IgptgZjFkVTEFAmj9DpIACgkQgptgZjFk
 	}
 }
 
-// TestCatalog_ArchAndDebianHaveChecksumURL is a narrow regression for the
-// review findings: Arch does publish a matching .SHA256 sidecar and Debian
-// does publish SHA512SUMS, so both entries must carry a ChecksumURL now
-// rather than shipping unverified for no real reason.
+// TestCatalog_ArchAndDebianHaveChecksumURL: Arch publishes a matching
+// .SHA256 sidecar and Debian publishes SHA512SUMS, so both entries must
+// carry a ChecksumURL rather than shipping unverified for no reason.
 func TestCatalog_ArchAndDebianHaveChecksumURL(t *testing.T) {
 	for _, id := range []string{"arch-cloud", "debian-13"} {
 		found := false
@@ -422,20 +417,19 @@ func TestCatalog_ArchAndDebianHaveChecksumURL(t *testing.T) {
 	}
 }
 
-// TestCatalog_FedoraURLNotArchived guards against the exact defect the
-// review found: a Fedora catalog URL pointing at a release that has aged
-// out of releases/ into archives.fedoraproject.org (a 404 for users today).
+// TestCatalog_FedoraURLNotArchived guards against a Fedora catalog URL
+// pointing at a release that has aged out of releases/ into
+// archives.fedoraproject.org, a 404 for users.
 //
-// Grepping e.URL for the literal string "archives.fedoraproject.org" (the
-// old version of this test) can never fail: the catalog URL is always
-// spelled with releases/ in it, right up until the day Fedora retires that
-// release and it starts 404ing. Catching that means actually asking the
-// server, so this does a ranged GET against the real URL. Per this
-// package's convention of skipping rather than failing when a dependency
-// isn't there (see the xorriso/qemu-img skips elsewhere in this repo), a
-// network-level failure (DNS, connect, TLS) skips instead of failing:
-// only a reachable server telling us the pinned release is gone is a real
-// failure.
+// Grepping e.URL for the literal string "archives.fedoraproject.org" can
+// never fail: the catalog URL is always spelled with releases/ in it, right
+// up until the day Fedora retires that release and it starts 404ing.
+// Catching that means asking the server, so this does a ranged GET against
+// the real URL. Following this package's convention of skipping rather than
+// failing when a dependency is not there (see the xorriso/qemu-img skips
+// elsewhere in this repo), a network-level failure (DNS, connect, TLS)
+// skips instead of failing: only a reachable server reporting the pinned
+// release gone is a real failure.
 func TestCatalog_FedoraURLNotArchived(t *testing.T) {
 	// Every other test in this package serves from a local httptest server;
 	// this is the only one that touches the real internet, so -short stays
@@ -481,13 +475,12 @@ func TestCatalog_FedoraURLNotArchived(t *testing.T) {
 	}
 }
 
-// TestDownloadOutlastsMetadataTimeout is the regression test for a reported
-// failure: "ubuntu: context deadline exceeded (Client.Timeout or context
-// cancellation while reading body)". Download shared the metadata client,
-// whose Timeout bounds the WHOLE request including the body, so any image
-// taking longer than that ceiling died mid-transfer, which is every real
-// image. The server here dribbles the body out over noticeably longer than
-// the metadata client's own timeout; the download must still complete.
+// TestDownloadOutlastsMetadataTimeout: Download must not share the metadata
+// client's Timeout, which bounds the whole request including the body. Any
+// image taking longer than that ceiling would die mid-transfer, which is
+// every real image. The server here dribbles the body out over noticeably
+// longer than the metadata client's own timeout; the download must still
+// complete.
 func TestDownloadOutlastsMetadataTimeout(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 
@@ -605,27 +598,24 @@ func TestCatalogOffersAlpineCloud(t *testing.T) {
 	}
 }
 
-// TestDownloadConcurrentSameTargetDoesNotCorrupt is the regression test for a
-// silent data-corruption bug.
-//
-// Download used to open final+".part" with os.Create, which truncates in place
-// and grants no exclusivity. Two downloads of the same image therefore held
-// two handles on the SAME inode: one truncated the file out from under the
-// other, both wrote at independent offsets, and (worst of all) a writer that
-// was still going when the other renamed its .part into place kept writing
+// TestDownloadConcurrentSameTargetDoesNotCorrupt guards against a silent
+// data-corruption bug: os.Create on final+".part" truncates in place and
+// grants no exclusivity, so two downloads of the same image held two
+// handles on the same inode. Each wrote at independent offsets; a writer
+// still going when the other renamed its .part into place kept writing
 // straight into the finished image.
 //
 // The checksum could not catch it: the digest is fed from the bytes each
-// goroutine reads off the NETWORK, never re-read from disk, so whichever
+// goroutine reads off the network, never re-read from disk. Whichever
 // writer finished computed a valid digest of its own complete stream, set
 // Verified, and renamed a mangled file into place as a verified image.
 //
-// The two downloads must serve DIFFERENT bytes for this to be detectable at
-// all: interleaving identical content is invisible. That is not a contrived
-// setup: iso.Catalog's own comments note that cloud images are rebuilt in
-// place, so cancelling a download and retrying can genuinely fetch different
-// content under one filename. Each download now gets its own temp file, so
-// whichever wins must land byte-for-byte as one server response, never a mix.
+// The two downloads must serve different bytes for this to be detectable:
+// interleaving identical content is invisible. Cloud images are rebuilt in
+// place (see Catalog()), so cancelling a download and retrying can fetch
+// different content under one filename. Each download gets its own temp
+// file now, so whichever wins must land byte-for-byte as one server
+// response, never a mix.
 func TestDownloadConcurrentSameTargetDoesNotCorrupt(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 

@@ -12,11 +12,11 @@ import (
 // openRecipesDir hands the recipes directory to $EDITOR, the same escape
 // hatch "E" uses for a vm.toml.
 //
-// Authoring a recipe has always been "put a correctly named file in this
-// directory": recipes.Install leaves an edited recipe alone, so it survives
-// upgrades, and recipes.List picks up a new file with no code change at all.
-// The only real problem was that nothing in the UI ever said so. A key that
-// puts you in the directory says it better than any amount of documentation.
+// Authoring a recipe has always meant putting a correctly named file in
+// this directory. recipes.Install leaves an edited recipe alone, so it
+// survives upgrades, and recipes.List picks up a new file with no code
+// change at all. Nothing in the UI said so until now. A key that puts you
+// in the directory says it better than any documentation would.
 func openRecipesDir() tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {

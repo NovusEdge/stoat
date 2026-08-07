@@ -155,11 +155,11 @@ func TestBuildFstabMountOptions(t *testing.T) {
 	}
 }
 
-// TestBuildSymlinksLocalmountWhenShareConfigured proves that a configured
-// share is actually mounted at boot: the initramfs's default-boot-services
-// set does not include localmount, and the overlay otherwise only symlinks
-// networking (boot) and sshd (default), so an fstab entry with no
-// corresponding localmount symlink is never processed.
+// TestBuildSymlinksLocalmountWhenShareConfigured proves a configured share
+// actually mounts at boot. The initramfs's default-boot-services set does
+// not include localmount. The overlay otherwise only symlinks networking
+// (boot) and sshd (default). An fstab entry with no matching localmount
+// symlink is never processed.
 func TestBuildSymlinksLocalmountWhenShareConfigured(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -181,22 +181,21 @@ func TestBuildSymlinksLocalmountWhenShareConfigured(t *testing.T) {
 }
 
 // TestBuildTempFileDoesNotMatchApkovlGlob proves the in-progress temp file
-// cannot be picked up as the overlay by Alpine's nlplug-findfs, which globs
+// cannot be picked up as the overlay. Alpine's nlplug-findfs globs
 // *.apkovl.tar.gz* (note the trailing wildcard) at the root of the exported
-// directory. An orphaned temp file matching that glob would be selected as
-// the overlay after a kill or power loss mid-Build, silently unpacking a
-// truncated tarball.
+// directory. A temp file matching that glob, orphaned by a kill or power
+// loss mid-Build, would be unpacked as a truncated overlay.
 func TestBuildTempFileDoesNotMatchApkovlGlob(t *testing.T) {
 	if strings.Contains(tmpName, "apkovl.tar.gz") {
 		t.Fatalf("temp file name %q matches the nlplug-findfs *.apkovl.tar.gz* glob", tmpName)
 	}
 }
 
-// TestBuildFailureLeavesGoodOverlayIntact proves that a failed rebuild does
-// not leave a corrupt tarball at the canonical path, and does not destroy a
+// TestBuildFailureLeavesGoodOverlayIntact proves a failed rebuild neither
+// leaves a corrupt tarball at the canonical path nor destroys a
 // previously-good overlay. It forces the failure by making the output
-// directory read-only, which os.Create refuses to write into; that only
-// works as non-root, since root ignores permission bits.
+// directory read-only, which os.Create refuses to write into. This only
+// works as non-root: root ignores permission bits.
 func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission bits are ignored, cannot force a write failure")
@@ -245,11 +244,10 @@ func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
 	entries(t, out)
 }
 
-// TestBuildRemovesLegacyTmpFile proves that a file orphaned by a crash
-// mid-Build from before tmpName was introduced (stoat.apkovl.tar.gz.tmp,
-// which DOES match nlplug-findfs's *.apkovl.tar.gz* glob) is cleaned up by
-// Build, so it can never be picked up by the initramfs as a truncated
-// overlay.
+// TestBuildRemovesLegacyTmpFile proves Build cleans up a file orphaned by a
+// crash mid-Build from before tmpName existed: stoat.apkovl.tar.gz.tmp,
+// which does match nlplug-findfs's *.apkovl.tar.gz* glob. Left behind, the
+// initramfs could pick it up as a truncated overlay.
 func TestBuildRemovesLegacyTmpFile(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)

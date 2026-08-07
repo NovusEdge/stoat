@@ -8,12 +8,11 @@ import (
 	"os"
 )
 
-// KVMCheck reports whether this user can actually open /dev/kvm read/write,
-// which is the thing that fails, not whether the file exists.
+// KVMCheck reports whether this user can open /dev/kvm read/write. That is
+// the failure mode that matters, not whether the file exists.
 //
-// This file is the installer's one platform seam. Windows support means adding
-// kvm_windows.go with a WHPX probe, and stoat itself does not compile for
-// Windows yet, so that is not a near-term concern.
+// This file is the installer's one platform seam. Windows support needs a
+// kvm_windows.go with a WHPX probe. Stoat does not compile for Windows yet.
 func KVMCheck() Check { return kvmCheckAt("/dev/kvm") }
 
 func kvmCheckAt(path string) Check {

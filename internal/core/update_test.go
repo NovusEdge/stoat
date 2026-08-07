@@ -43,10 +43,9 @@ func TestUpdateImmutableFields(t *testing.T) {
 	}
 }
 
-// Setting an immutable field to the value it already has is not a change
-// request and must not be refused: an MCP tool or CLI flag that round
-// trips a full VM through Patch shouldn't be punished for fields it never
-// meant to touch.
+// Setting an immutable field to its current value is not a change
+// request. An MCP tool or CLI flag that round-trips a full VM through
+// Patch must not be refused for fields it never meant to touch.
 func TestUpdateImmutableFieldsAllowedWhenUnchanged(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl", RAM: 1024, CPUs: 1, SSHPort: 2200}
@@ -189,8 +188,12 @@ func TestUpdateSSHPortRejectsCollisionWithAnotherVMsSSHPort(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update("work", Patch{SSHPort: ptr(2201)}); !errors.Is(err, ErrInvalidSpec) {
+	_, err := Update("work", Patch{SSHPort: ptr(2201)})
+	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("err = %v, want ErrInvalidSpec for collision with another VM's ssh port", err)
+	}
+	if !strings.Contains(err.Error(), `"other"`) {
+		t.Errorf("error does not name the colliding VM: %v", err)
 	}
 }
 
@@ -207,16 +210,45 @@ func TestUpdateSSHPortRejectsCollisionWithAnotherVMsForward(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Update("work", Patch{SSHPort: ptr(8080)}); !errors.Is(err, ErrInvalidSpec) {
+	_, err := Update("work", Patch{SSHPort: ptr(8080)})
+	if !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("err = %v, want ErrInvalidSpec for collision with another VM's forward", err)
+	}
+	if !strings.Contains(err.Error(), `"other"`) {
+		t.Errorf("error does not name the colliding VM: %v", err)
+	}
+	if !strings.Contains(err.Error(), "declared forward") {
+		t.Errorf("error does not say the collision is with a declared forward: %v", err)
 	}
 }
 
-// The synthetic-forward reuse trick in validateSSHPort must not leak
-// forward.go's "requested twice" wording, written for Forward's own
-// duplicate-in-request case, into an SSHPort error: a caller changing the
-// ssh port supplied exactly one value and has no idea a PortForward was
-// synthesized under the hood, so that message would be actively confusing.
+// A broken VM (vm.toml exists but fails to parse) still claims its ssh port
+// via config.BrokenSSHPort, and the refusal must still name it.
+func TestUpdateSSHPortRejectsCollisionWithBrokenVMsSSHPort(t *testing.T) {
+	dir := root(t)
+	writeBroken(t, dir, "hosed", "sshport = 2201")
+
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Update("work", Patch{SSHPort: ptr(2201)})
+	if !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("err = %v, want ErrInvalidSpec for collision with a broken VM's ssh port", err)
+	}
+	if !strings.Contains(err.Error(), `"hosed"`) {
+		t.Errorf("error does not name the colliding broken VM: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh port") {
+		t.Errorf("error does not say the collision is with an ssh port: %v", err)
+	}
+}
+
+// validateSSHPort's synthetic-forward trick must not leak forward.go's
+// "requested twice" wording into an SSHPort error. That wording is
+// written for Forward's own duplicate-in-request case. A caller changing
+// the ssh port supplied one value and has no idea a PortForward was
+// synthesized underneath.
 func TestUpdateSSHPortCollisionWithOwnForwardHasClearMessage(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
@@ -416,9 +448,52 @@ func TestUpdateDoesNotChangeUnrelatedFields(t *testing.T) {
 	}
 }
 
-// Sanity check that Patch's int-pointer fields really do distinguish
-// "not set" from "set to zero": CPUs: ptr(0) must be REJECTED (cpus must
-// be at least 1), not silently ignored as if nil.
+// Installed is a plain mutable field; checkImmutable does not check it.
+// This replaces the TUI's "i" key, which used to flip it via a second,
+// unlocked Save() straight onto vm.toml instead of going through Update
+// and its config.Lock().
+func TestUpdateInstalledFlips(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Disk: "1G", Installed: false}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Update("work", Patch{Installed: ptr(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Installed {
+		t.Fatalf("Installed = %v, want true", got.Installed)
+	}
+	reloaded, err := config.Load("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.Installed {
+		t.Fatalf("not persisted: %+v", reloaded)
+	}
+}
+
+// A nil Installed must leave the field alone, matching every other Patch
+// field's "nil means don't touch" rule.
+func TestUpdateInstalledNilLeavesUnchanged(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200, Disk: "1G", Installed: true}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Update("work", Patch{RAM: ptr(2048)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Installed {
+		t.Fatalf("Installed = %v, want unchanged (true)", got.Installed)
+	}
+}
+
+// Patch's int-pointer fields distinguish "not set" from "set to zero".
+// CPUs: ptr(0) must be REJECTED (cpus must be at least 1), not silently
+// ignored as if nil.
 func TestUpdatePatchZeroValueIsAReadValue(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}

@@ -7,18 +7,12 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 )
 
-// TestParseSnapshotsRealOutput parses the actual table QEMU prints. The
-// samples below are the real format from `qemu-img snapshot -l` and the
-// monitor's `info snapshots`, not an invented one: the columns are padded to
-// fit their content, so anything parsing by byte offset breaks the first time
-// a tag is longer than the header.
+// TestParseSnapshotsRealOutput parses QEMU's actual table output, not an
+// invented sample. The columns are padded to fit their content, so a fixed
+// byte-offset parse breaks the first time a tag is longer than the header.
 func TestParseSnapshotsRealOutput(t *testing.T) {
-	// CAPTURED VERBATIM from `qemu-img snapshot -l` on a real qcow2 (qemu-img
-	// 11.0.2, 2026-08-04), not written from memory. The first version of this
-	// test used an invented sample that got the header wrong (VM SIZE rather
-	// than VM_SIZE) and omitted the ICOUNT column entirely; parsing by fields
-	// happens to survive both, but the test would have been asserting against
-	// a format QEMU does not print.
+	// CAPTURED VERBATIM from `qemu-img snapshot -l` on a real qcow2
+	// (qemu-img 11.0.2, 2026-08-04), not written from memory.
 	stopped := `Snapshot list:
 ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT
 1       clean                 0 B 2026-08-04 00:21:33  0000:00:00.000          0
@@ -37,12 +31,10 @@ ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT
 		}
 	}
 
-	// CAPTURED VERBATIM over QMP from a real running Alpine VM (2026-08-04),
-	// CRLF line endings and all. Note the ID and ICOUNT columns are "--", NOT
-	// numbers: a running VM's snapshots have no numeric id. The invented
-	// sample this replaced used "1" there, which is why the unit test happily
-	// passed while `stoat snapshot <vm>` listed nothing at all on a running
-	// VM: parseSnapshots was requiring an ID that QEMU never prints.
+	// CAPTURED VERBATIM over QMP from a running Alpine VM (2026-08-04),
+	// CRLF endings included. The ID and ICOUNT columns are "--", not
+	// numeric: a running VM's snapshots have no numeric ID. A parser that
+	// requires one silently drops every snapshot from a running VM.
 	running := "List of snapshots present on all disks:\r\n" +
 		"ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT\r\n" +
 		"--      live              283 MiB 2026-08-04 00:24:24  0000:00:40.074         --\r\n"
@@ -96,9 +88,9 @@ func TestParseSnapshotsIgnoresNonRows(t *testing.T) {
 }
 
 // A live VM is diskless by design: an ISO booted into a tmpfs root. There is
-// nowhere to put a snapshot and nothing that would survive one, so every
-// entry point must refuse it rather than producing a confusing qemu-img error
-// about a missing file.
+// nowhere to put a snapshot and nothing that would survive one. Every entry
+// point must refuse it, rather than fail later with a confusing qemu-img
+// error about a missing file.
 func TestSnapshotRefusesLiveVM(t *testing.T) {
 	root(t)
 	if err := (&config.VM{Name: "livevm", Mode: "live", RAM: 512, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
@@ -118,10 +110,9 @@ func TestSnapshotRefusesLiveVM(t *testing.T) {
 	}
 }
 
-// A tag reaches the monitor as a bare word in "savevm <tag>", so whitespace in
-// one would be read as extra arguments and mean something other than what was
-// asked. Refused rather than mangled, the same rule passwordKeys applies to
-// sendkey, for the same reason.
+// A tag reaches the monitor as a bare word in "savevm <tag>". Whitespace in
+// it would be read as extra arguments. Refused rather than mangled, the
+// same rule passwordKeys applies to sendkey.
 func TestSnapshotRejectsBadTags(t *testing.T) {
 	root(t)
 	if err := (&config.VM{Name: "d", Mode: "disk", RAM: 512, CPUs: 1, SSHPort: 2200, Disk: "8G"}).Save(); err != nil {

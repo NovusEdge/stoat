@@ -74,15 +74,15 @@ func TestPruneProtectsImageReferencedViaBase(t *testing.T) {
 	}
 }
 
-// An absolute-path BYO image living outside isos/ must not be treated as an
-// unreferenced isos/ file (it never appears in LocalImages at all, since
-// that only lists isos/ contents) and must not confuse the reference check
-// into leaving a same-named isos/ file looking referenced when it isn't.
+// A BYO image living outside isos/ must not be treated as an unreferenced
+// isos/ file. It never appears in LocalImages, which only lists isos/
+// contents. It also must not make a same-named isos/ file look referenced
+// when it isn't.
 func TestPruneBYOOutsideIsosDoesNotConfuseImages(t *testing.T) {
-	// A BYO .iso with no alpine hint infers the ssh backend, which means disk
-	// mode, which means Create shells out to qemu-img. CI has no qemu-img, and
-	// a missing host tool must never redden CI, the same rule the xorriso and
-	// qemu-img tests elsewhere in this repo already follow.
+	// A BYO .iso with no alpine hint infers the ssh backend, disk mode, and
+	// a qemu-img shell-out from Create. CI has no qemu-img, and a missing
+	// host tool must never redden CI; the xorriso and qemu-img tests
+	// elsewhere in this repo follow the same rule.
 	if _, err := exec.LookPath("qemu-img"); err != nil {
 		t.Skip("qemu-img not installed")
 	}
@@ -147,10 +147,10 @@ func TestPruneDryRunRemovesNothingFromDisk(t *testing.T) {
 		t.Fatalf("removed = %v, want 3 dry-run candidates (broken vm, part file, orphaned image)", removed)
 	}
 
-	// Each of the three classes must be produced by the item it actually
-	// describes, not just present in some order: pin class to path here so a
-	// mislabeled item (e.g. the orphaned image reported as a broken_vm) fails
-	// this test instead of silently passing the len(removed) == 3 check above.
+	// Each class must be produced by the item it actually describes, not
+	// just present in some order. Pinning class to path here makes a
+	// mislabeled item, e.g. an orphaned image reported as broken_vm, fail
+	// this test instead of passing the len(removed) == 3 check above.
 	byClass := map[string]string{}
 	for _, r := range removed {
 		byClass[r.Class] = r.Path
@@ -304,16 +304,13 @@ func TestPruneBrokenVMWithReadableBaseFieldProtectsItsImage(t *testing.T) {
 	}
 }
 
-// A broken VM directory whose qemu process is still actually running must
-// never be deleted, even with Broken opted in: Destroy already refuses to
-// touch a running VM, and Prune, acting without anyone watching, must not
-// become a quieter way around that refusal.
-// This was called TestPruneNeverRemovesARunningBrokenVM and asserted the
-// OPPOSITE of its name: a pid of 999999999 cannot exist, so qemu.Running was
-// always false and the running guard was never reached. Disabling that guard
-// entirely left every prune test still passing. Renamed to what it actually
-// checks (which is worth checking), and the guard it claimed to cover now has
-// a real test below.
+// A stale pidfile, left by a crashed qemu, must not protect a broken VM
+// from Broken pruning.
+//
+// This test was named TestPruneNeverRemovesARunningBrokenVM and used a pid
+// of 999999999, which can never exist. qemu.Running was always false, so
+// it never tested the running guard at all. The real running-VM guard now
+// has its own test below.
 func TestPruneRemovesABrokenVMWithAStalePidfile(t *testing.T) {
 	dir := root(t)
 	writeBroken(t, dir, "busted")
@@ -338,17 +335,15 @@ func TestPruneRemovesABrokenVMWithAStalePidfile(t *testing.T) {
 	}
 }
 
-// TestPruneNeverRemovesARunningBrokenVM covers the single guard standing
-// between `stoat prune --broken` and deleting a live qemu's directory:
-// pidfile, monitor socket and disk, out from under it. A vm.toml can be
-// corrupted AFTER its VM was started, which is exactly the state that reaches
-// this path.
+// TestPruneNeverRemovesARunningBrokenVM covers the guard between `stoat
+// prune --broken` and deleting a live qemu's pidfile, monitor socket and
+// disk. A vm.toml can be corrupted after its VM started; that is the state
+// this test reaches.
 //
-// It uses fakeRunning, which spawns a real process with the VM's directory in
-// its argv, because that is what qemu.Running actually matches on. The
-// previous version fabricated an impossible pid instead, so the guard was
-// never executed: with `if qemu.Running(bv)` changed to `if false && ...`,
-// every prune test still passed.
+// It uses fakeRunning, which spawns a real process with the VM's directory
+// in its argv: that is what qemu.Running matches on. An earlier version
+// used an impossible pid instead, so the guard never ran; the mutation
+// `if qemu.Running(bv)` -> `if false && ...` still passed every test.
 func TestPruneNeverRemovesARunningBrokenVM(t *testing.T) {
 	dir := root(t)
 	writeBroken(t, dir, "busted")
