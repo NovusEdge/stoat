@@ -89,7 +89,15 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	// next reload.
 	if v.State == core.StateRunning {
 		dot, dotStyle = glyphRunning, upStyle
-		state = fmt.Sprintf("up %s  :%d", time.Since(v.StartedAt).Truncate(time.Second), v.SSHPort)
+		// State and StartedAt come from separate qemu.Running checks in
+		// fromConfig; a pidfile vanishing between them leaves a running row
+		// with a zero StartedAt, which time.Since renders as a nonsense
+		// six-figure uptime. Drop the duration in that window.
+		up := "up ?"
+		if !v.StartedAt.IsZero() {
+			up = "up " + time.Since(v.StartedAt).Truncate(time.Second).String()
+		}
+		state = fmt.Sprintf("%s  :%d", up, v.SSHPort)
 	}
 	// The dot and the state stay OUTSIDE the selection wrap. A styled
 	// substring ends in \x1b[0m, which resets the enclosing style too.
