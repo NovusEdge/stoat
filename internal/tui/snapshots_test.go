@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -16,6 +17,10 @@ import (
 // synchronously. esc closes the modal and hands back the detail screen's
 // normal body.
 func TestSnapshotsModalOpensAndEscCloses(t *testing.T) {
+	// openSnapshots' Cmd calls core.Snapshots, which shells to qemu-img.
+	if _, err := exec.LookPath("qemu-img"); err != nil {
+		t.Skip("qemu-img not installed")
+	}
 	// core.Snapshots (which openSnapshots calls) resolves the VM by name
 	// under config.Root(), not by v.Dir, so the fixture has to live there;
 	// see TestLogPagerOpensAndEscCloses for the same requirement.
