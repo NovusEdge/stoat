@@ -14,7 +14,6 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
-	"github.com/novusedge/stoat/internal/recipes"
 )
 
 const repositories = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main\n" +
@@ -36,35 +35,25 @@ const tmpName = ".stoat-ovl.tmp"
 const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 
 // installScript is the local.d script that drives an unattended disk
-// install: run setup-alpine against the baked answerfile, mark success on
-// the 9p work share (docs/recipe-spec-v2.md's "Install stage signaling"
-// decision), then reboot into the newly installed disk.
+// install: refuse a disk that already holds data, then run setup-alpine
+// against the baked answerfile, mark success on the 9p work share
+// (docs/recipe-spec-v2.md's "Install stage signaling" decision), and reboot
+// into the newly installed disk.
+//
+// The blank-disk check is the safety gate, not the !Installed flag. `i` on the
+// detail screen can set installed off on a VM whose disk is already installed
+// (a half-failed install that tripped the byte heuristic), and the overlay is
+// rebuilt every uninstalled-disk start. Without this check, setup-alpine would
+// repartition and wipe /dev/vda on that boot. blkid finds a partition table or
+// filesystem on any non-blank disk; a fresh qcow2 has neither.
 const installScript = `#!/bin/sh
+if blkid /dev/vda >/dev/null 2>&1 || [ -e /dev/vda1 ]; then
+	exit 0
+fi
 setup-alpine -f /etc/stoat/answerfile
 echo "$(date -Iseconds)" > /mnt/work/.installed
 reboot
 `
-
-// installRecipe returns the manifest of v's install-stage recipe, if it has
-// one. Install-stage recipes only make sense for Alpine disk-mode installs
-// (docs/recipe-spec-v2.md's Stages section); a live VM has no disk to
-// install onto. Recipe creation is responsible for rejecting more than one
-// install-stage recipe per VM, so the first match here is authoritative.
-func installRecipe(v *config.VM) (recipes.Manifest, bool) {
-	if v.Mode != "disk" {
-		return recipes.Manifest{}, false
-	}
-	for _, name := range v.Recipes {
-		m, ok, err := recipes.ManifestFor(name)
-		if !ok || err != nil {
-			continue // v1 flat-file recipe, or no manifest at all: not install-stage
-		}
-		if m.Stage == "install" {
-			return m, true
-		}
-	}
-	return recipes.Manifest{}, false
-}
 
 type builder struct {
 	tw  *tar.Writer
@@ -184,13 +173,14 @@ func Build(v *config.VM) error {
 	b.symlink("etc/runlevels/boot/localmount", "/etc/init.d/localmount")
 	b.file("etc/fstab", 0o644, fstab)
 
-	if _, ok := installRecipe(v); ok {
-		// setup-alpine runs from an unattended answerfile. The local.d
-		// script then marks success on the work share and reboots into the
-		// installed disk (docs/recipe-spec-v2.md's "For install stage"
-		// execution model). etc/runlevels/default/local makes the initramfs
-		// run local.d scripts at all. Without it stoat-install.start never
-		// runs.
+	if v.Mode == "disk" {
+		// Every uninstalled disk VM auto-installs: setup-alpine runs from the
+		// config-derived answerfile, the local.d script marks success on the
+		// work share and reboots into the installed disk. The script refuses a
+		// non-blank disk itself (see installScript), so re-baking it on a disk
+		// that already holds data does not wipe it. etc/runlevels/default/local
+		// makes the initramfs run local.d scripts at all; without it
+		// stoat-install.start never runs.
 		b.dir("etc/stoat", 0o755)
 		b.file("etc/stoat/answerfile", 0o644, GenerateAnswerfile(v))
 		b.dir("etc/local.d", 0o755)

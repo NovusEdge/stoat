@@ -329,12 +329,16 @@ func (m model) viewDetail() string {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
-		// Until this is true, the VM boots its installer ISO. Pressing "p"
-		// would then provision the installer's tmpfs. startProvision refuses
-		// with the same instruction instead of timing out on ssh. The next
-		// start sets this automatically once the install has written to the
-		// disk. "i" overrides it when that guess is wrong.
-		installed := warnStyle.Render("no: run " + installerName(v.OS) + " in the qemu window, then restart")
+		// Until this is true, the VM boots its installer ISO. An apkovl-backend
+		// (Alpine) disk VM runs setup-alpine unattended and installs itself;
+		// any other backend needs its installer run at the console. The next
+		// start sets this once the install writes to the disk; "i" overrides a
+		// wrong guess.
+		hint := "installing on first boot"
+		if v.Backend != "apkovl" {
+			hint = "run " + installerName(v.OS) + " in the console, then restart"
+		}
+		installed := warnStyle.Render("no: " + hint)
 		if v.Installed {
 			installed = upStyle.Render("yes")
 		}

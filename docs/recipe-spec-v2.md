@@ -85,13 +85,11 @@ Runs after the VM is booted and reachable over SSH. This is the common case: ins
 
 ### `install`
 
-Runs during initial disk setup, before the first real boot. For Alpine disk mode, this means automating `setup-alpine`.
+Reserved for initial disk setup, before the first real boot. Alpine disk-mode VMs automate `setup-alpine` unattended without needing a recipe (see below); install-stage recipe bodies are not executed today.
 
-- **apkovl backend (disk mode)**: Baked into the apkovl as a local.d script that runs on the live boot, performs disk install, then reboots.
+- **apkovl backend (disk mode)**: stoat bakes the answerfile and local.d install script for every uninstalled disk VM, from VM config alone.
 - **cloudinit backend**: N/A (cloud images are pre-installed).
 - **ssh backend**: N/A (assumes already installed).
-
-Only one `install`-stage recipe makes sense per VM. If multiple are selected, stoat errors at creation time.
 
 ## Execution Model
 
@@ -121,11 +119,11 @@ VM creation
   -> (no post-boot apply needed)
 ```
 
-### For install stage (Alpine disk mode)
+### Unattended install (Alpine disk mode)
 
 ```
-VM creation (disk mode, install-stage recipe selected)
-  -> stoat bakes into apkovl:
+VM creation (disk mode)
+  -> stoat bakes into apkovl (every uninstalled disk VM):
      - /etc/local.d/stoat-install.start
      - /etc/stoat/answerfile (generated from VM config)
   -> VM boots into live environment

@@ -4,13 +4,12 @@ Symptom-first. Find the error text you're seeing and jump to it.
 
 ## No QEMU window appears any more
 
-You installed a disk VM, ran `setup-alpine` at its console, maybe provisioned a
-desktop onto it, and now no window opens on start. There is no error because
-nothing failed.
+You created a disk VM, let it install itself, maybe provisioned a desktop onto
+it, and now no window opens on start. There is no error because nothing failed.
 
 Exactly one kind of VM gets a real QEMU window: a disk-mode VM that is **not
-yet installed**, on a host with a graphical session. That window exists for the
-OS installer, which draws to VGA and has to be driven by a human. The moment
+yet installed**, on a host with a graphical session. That window shows the
+unattended `setup-alpine` install as it runs, which draws to VGA. The moment
 stoat records `installed = true`,
 the next start uses `-display none` with a VNC server bound to a unix socket in
 the VM's directory (`internal/qemu/args.go`). `-display none` cannot be undone
@@ -59,21 +58,21 @@ run with STOAT_GRAPHICAL=0 to put the screen on this VM's VNC socket instead
 
 ## Installing a disk VM on a machine with no screen
 
-An OS installer has to be driven by a human, and `setup-alpine` has no
-unattended mode stoat drives for you. On a host with no graphical session there
-is no window to drive it at, and QEMU does not fall back: `-display gtk` exits
-1.
+The install runs unattended, so a headless host needs no interaction: stoat
+bakes a `setup-alpine` answerfile into the boot overlay, the guest installs
+itself on first boot and reboots, and stoat notices the install. You wait, you
+do not drive anything.
 
-So stoat detects the host itself and puts the install console on the VM's VNC
-socket instead, exactly like every other headless VM, and prints how to reach
-it:
+On a host with no graphical session there is no window, and QEMU does not fall
+back: `-display gtk` exits 1. So stoat puts the console on the VM's VNC socket
+instead, for watching the install if you want to:
 
 ```
 $ stoat up alpinedisk
 starting alpinedisk...
 alpinedisk started (ssh :2200)
-display: no usable graphical session on this host, so the OS installer's
-  console is on VNC instead; drive it from a machine with a screen
+display: no usable graphical session on this host, so the install console is
+  on VNC instead; attach to watch it
 display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
   attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
 ```
@@ -81,9 +80,7 @@ display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
 That socket is a unix socket on the server, so reaching it from your laptop is
 three steps: run stoat's own `socat` bridge on the server to republish it on
 `127.0.0.1:5900`, forward that port over ssh (`ssh -L 5900:127.0.0.1:5900
-server`), and point any VNC client at `127.0.0.1:5900` on the laptop. Then run
-the installer as usual, stop and start the VM, and stoat notices the install
-the same way it does for a windowed one.
+server`), and point any VNC client at `127.0.0.1:5900` on the laptop.
 
 ### Overriding the detection
 
@@ -110,20 +107,18 @@ session exists but QEMU cannot draw on it.
 
 (`internal/sshx/sshx.go`'s `Wait`, with `WaitTimeout` set to 90 seconds.)
 
-**If this happens while provisioning a disk VM:** the VM is still booting its
-installer ISO. Its guest OS is not on the disk yet, so there is nothing to
+**If this happens while provisioning a disk VM:** the VM is still installing
+itself off the ISO. Its guest OS is not on the disk yet, so there is nothing to
 provision, and `sshd` answering means the *installer's* sshd is up, not the
 system you are building.
 
-**Fix:** open the QEMU window for the VM, run the installer at the console
-(`setup-alpine` on Alpine; check the ISO's own installer otherwise), then stop
-and start the VM in stoat. The next start notices the OS on the disk, marks
-the VM installed and drops the ISO from the boot order. Pressing `p` before
-that is refused outright, with a message pointing at the same fix, rather than
-making you wait out the full timeout to find out:
+**Fix:** wait. The unattended `setup-alpine` finishes, reboots into the disk,
+and the next start notices the OS, marks the VM installed and drops the ISO from
+the boot order. Pressing `p` before that is refused outright, rather than making
+you wait out the full timeout to find out:
 
 ```
-<name>: not installed yet, run <installer> in the qemu window, then stop and start it (stoat notices the install itself)
+<name>: installing itself; wait for it to finish and reboot, then stoat notices the install and offers to provision
 ```
 
 `i` on the detail screen still toggles `installed` by hand, for when that

@@ -516,22 +516,24 @@ func contains(haystack, needle string) bool {
 	})()
 }
 
-// TestInstallerHintMatchesOS covers the reported bug where an uninstalled
-// disk VM was always told to run setup-alpine, even when its image was a
-// Fedora/Debian/unknown BYO ISO that has no such command.
+// TestInstallerHintMatchesOS covers the installed-field hint on an uninstalled
+// disk VM. An Alpine VM installs itself unattended, so it says so. A
+// Fedora/Debian/unknown BYO ISO has no setup-alpine, so it names its own
+// installer instead.
 func TestInstallerHintMatchesOS(t *testing.T) {
 	cases := []struct {
-		os   string
-		want string
+		os      string
+		backend string
+		want    string
 	}{
-		{"alpine", "setup-alpine"},
-		{"fedora", "the installer"},
-		{"", "the installer"},
+		{"alpine", "apkovl", "installing on first boot"},
+		{"fedora", "cloudinit", "the installer"},
+		{"", "", "the installer"},
 	}
 	for _, c := range cases {
 		m := model{screen: screenDetail, width: 100, height: 40}
 		m.detail = newDetail(core.VM{
-			Name: "d", Mode: "disk", OS: c.os, Paths: core.Paths{Dir: t.TempDir()}, Disk: "disk.qcow2",
+			Name: "d", Mode: "disk", OS: c.os, Backend: c.backend, Paths: core.Paths{Dir: t.TempDir()}, Disk: "disk.qcow2",
 		})
 		out := m.viewDetail()
 		if !strings.Contains(out, c.want) {

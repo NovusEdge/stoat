@@ -86,8 +86,12 @@ func (m *model) startProvision(v core.VM) tea.Cmd {
 	// away. Without this check, the user waits the full 90s ssh timeout and
 	// gets "ssh not reachable", which says nothing about the real cause.
 	if v.Mode == "disk" && !v.Installed {
+		if v.Backend == "apkovl" {
+			return m.showToast(v.Name+": installing itself; wait for it to finish and reboot, "+
+				"then stoat notices the install and offers to provision", true)
+		}
 		return m.showToast(v.Name+": not installed yet, run "+installerName(v.OS)+
-			" in the qemu window, then stop and start it (stoat notices the install itself)", true)
+			" at the console, then stop and start it", true)
 	}
 	if len(v.Recipes) == 0 {
 		return m.showToast(v.Name+": no recipes selected, nothing to provision", true)

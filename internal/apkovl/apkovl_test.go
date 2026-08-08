@@ -274,36 +274,16 @@ func TestBuildRemovesLegacyTmpFile(t *testing.T) {
 	}
 }
 
-// writeInstallRecipe writes a minimal install-stage recipe.toml under
-// STOAT_HOME/recipes/<name>, so installRecipe can find it the same way it
-// would find one Install() copied from internal/recipes.
-func writeInstallRecipe(t *testing.T, root, name string) {
-	t.Helper()
-	dir := filepath.Join(root, "recipes", name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := "name = \"" + name + "\"\nscript = \"install.sh\"\nstage = \"install\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestBuildIncludesInstallStageForDiskMode proves that a disk-mode VM with
-// an install-stage recipe selected gets the answerfile and local.d script
-// baked into the apkovl, so setup-alpine runs unattended on first live boot.
+// TestBuildIncludesInstallStageForDiskMode proves a disk-mode VM gets the
+// answerfile and local.d script baked into the apkovl, so setup-alpine runs
+// unattended on first live boot. No install-stage recipe is needed: the
+// answerfile comes from VM config alone, and Build only runs while the disk is
+// uninstalled and empty.
 func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
-	writeInstallRecipe(t, root, "alpine-install")
 
-	v := &config.VM{
-		Name: "disky", Mode: "disk", Dir: filepath.Join(root, "disky"),
-		Recipes: []string{"alpine-install"},
-	}
+	v := &config.VM{Name: "disky", Mode: "disk", Dir: filepath.Join(root, "disky")}
 	if err := Build(v); err != nil {
 		t.Fatal(err)
 	}
@@ -321,6 +301,14 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 			t.Errorf("stoat-install.start missing %q:\n%s", want, script)
 		}
 	}
+	// The blank-disk guard must precede setup-alpine, or re-baking the overlay
+	// on an already-installed disk (installed toggled off) wipes it.
+	if !strings.Contains(script, "blkid /dev/vda") {
+		t.Errorf("stoat-install.start missing the blank-disk guard:\n%s", script)
+	}
+	if strings.Index(script, "blkid") > strings.Index(script, "setup-alpine") {
+		t.Errorf("blank-disk guard must run before setup-alpine:\n%s", script)
+	}
 	if m := hdrs["etc/local.d/stoat-install.start"].Mode; m&0o111 == 0 {
 		t.Errorf("stoat-install.start mode = %o, not executable", m)
 	}
@@ -331,41 +319,18 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 }
 
 // TestBuildOmitsInstallStageForLiveMode proves a live VM never gets the
-// install-stage files, even if it happens to have an install-stage recipe
-// name in v.Recipes: a live VM has no disk to install onto.
+// install-stage files: a live VM has no disk to install onto.
 func TestBuildOmitsInstallStageForLiveMode(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
-	writeInstallRecipe(t, root, "alpine-install")
 
-	v := &config.VM{
-		Name: "livey", Mode: "live", Dir: filepath.Join(root, "livey"),
-		Recipes: []string{"alpine-install"},
-	}
+	v := &config.VM{Name: "livey", Mode: "live", Dir: filepath.Join(root, "livey")}
 	if err := Build(v); err != nil {
 		t.Fatal(err)
 	}
 	content, _ := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
 	if _, ok := content["etc/local.d/stoat-install.start"]; ok {
 		t.Error("live VM got the install-stage script; live VMs have no disk to install onto")
-	}
-}
-
-// TestBuildOmitsInstallStageWithNoInstallRecipe proves a disk-mode VM with
-// no install-stage recipe selected gets no install-stage files: baking an
-// unattended setup-alpine run into every disk VM regardless of choice would
-// wipe the disk the user didn't ask to have partitioned.
-func TestBuildOmitsInstallStageWithNoInstallRecipe(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("STOAT_HOME", root)
-
-	v := &config.VM{Name: "diskbare", Mode: "disk", Dir: filepath.Join(root, "diskbare")}
-	if err := Build(v); err != nil {
-		t.Fatal(err)
-	}
-	content, _ := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
-	if _, ok := content["etc/local.d/stoat-install.start"]; ok {
-		t.Error("disk VM with no install-stage recipe got the install-stage script")
 	}
 }
 

@@ -107,9 +107,11 @@ case: install packages, enable services, write config.
 
 ### `install`
 
-Runs during initial disk setup, before the first real boot. On Alpine disk
-mode this drives `setup-alpine` itself. Only one `install`-stage recipe makes
-sense per VM; stoat errors at creation time if more than one is selected.
+Reserved for initial disk setup, before the first real boot. Alpine disk-mode
+VMs already run `setup-alpine` unattended on first boot from a config-derived
+answerfile (`internal/apkovl`), so no recipe is needed to install the OS.
+Install-stage recipe bodies are not executed today; the stage is accepted by
+the manifest parser but does nothing yet.
 
 ## Run modes
 

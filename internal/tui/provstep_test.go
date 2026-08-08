@@ -122,7 +122,7 @@ func TestProvElapsed(t *testing.T) {
 func TestProvisionRefusedUntilInstalled(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
 	v := core.VM{
-		Name: "alpine-test-1", Mode: "disk", OS: "alpine", Installed: false,
+		Name: "alpine-test-1", Mode: "disk", OS: "alpine", Backend: "apkovl", Installed: false,
 		SSHPort: 2201, Recipes: []string{"xfce.alpine.sh"},
 		Paths: core.Paths{Dir: t.TempDir()},
 	}
@@ -134,7 +134,7 @@ func TestProvisionRefusedUntilInstalled(t *testing.T) {
 	if len(m.provisioning) != 0 {
 		t.Error("the VM was marked as provisioning anyway")
 	}
-	for _, want := range []string{"not installed", "setup-alpine", "stop and start"} {
+	for _, want := range []string{"installing itself", "reboot", "provision"} {
 		if !strings.Contains(m.toast.text, want) {
 			t.Errorf("toast = %q, missing %q", m.toast.text, want)
 		}
