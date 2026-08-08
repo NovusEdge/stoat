@@ -213,28 +213,12 @@ func (w *jsonLogWriter) Flush() {
 
 func (w *jsonLogWriter) line(s string) {
 	s = strings.TrimSuffix(s, "\r")
-	// sshx.Provision writes "=== recipe NAME ===" between recipes, so the
-	// boundaries are already in the stream: a consumer gets real per-recipe
-	// progress instead of a percentage nobody can compute.
-	if name, ok := recipeMarker(s); ok {
+	// Provision marks each recipe boundary in the stream, so a consumer gets
+	// real per-recipe progress instead of a percentage nobody can compute.
+	if name, ok := sshx.ParseRecipeMarker(s); ok {
 		_ = w.em.Event(wire.TypeStage, w.cmd, map[string]any{"recipe": name})
 	}
 	_ = w.em.Event(wire.TypeLog, w.cmd, map[string]any{"line": s})
-}
-
-// recipeMarker parses the marker sshx.Provision writes between recipes
-// (internal/sshx/sshx.go: "\n=== recipe %s ===\n").
-func recipeMarker(line string) (string, bool) {
-	const prefix, suffix = "=== recipe ", " ==="
-	line = strings.TrimSpace(line)
-	// The length check is load-bearing: without it prefix and suffix overlap
-	// on "=== recipe ===" and it parses as a recipe literally named "===".
-	if len(line) < len(prefix)+len(suffix) ||
-		!strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
-		return "", false
-	}
-	name := strings.TrimSuffix(strings.TrimPrefix(line, prefix), suffix)
-	return name, name != ""
 }
 
 // streamFile copies newly-appended bytes of path to out every tick until
