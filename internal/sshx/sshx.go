@@ -245,7 +245,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
 		}
-		fmt.Fprintf(log, "\n=== recipe %s ===\n", name)
+		fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
 
 		cmd := exec.CommandContext(ctx, "ssh", Args(v, "sh", "-s")...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }

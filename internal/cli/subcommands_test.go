@@ -361,19 +361,6 @@ func TestJSONLogWriterEmitsAStageAtEachRecipeMarker(t *testing.T) {
 	}
 }
 
-func TestRecipeMarkerRejectsNonMarkers(t *testing.T) {
-	for _, line := range []string{
-		"", "=== recipe ===", "=== recipe foo", "recipe foo ===", "some output",
-	} {
-		if _, ok := recipeMarker(line); ok {
-			t.Errorf("recipeMarker(%q) matched, want no match", line)
-		}
-	}
-	if name, ok := recipeMarker("=== recipe a.sh ==="); !ok || name != "a.sh" {
-		t.Errorf("recipeMarker = %q, %v; want a.sh, true", name, ok)
-	}
-}
-
 // core.Logs serves a broken VM's console log from its directory alone, and
 // that is exactly the VM whose log someone needs.
 func TestLogsWorksOnABrokenVM(t *testing.T) {

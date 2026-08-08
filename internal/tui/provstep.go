@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 // provState is what the UI knows about one in-flight provision run. There is
@@ -52,13 +53,9 @@ func tailBytes(path string, n int64) []byte {
 	return b
 }
 
-// recipeMarker is what sshx.Provision writes before each recipe. Parsing the
-// log the run already produces avoids plumbing progress through a channel.
-// The provisioning goroutine stays a plain function, and the CLI's `stoat
-// provision` gets the same information by streaming that same file.
-const recipeMarker = "=== recipe "
-
 // readProvStep derives the current step from the tail of a VM's provision log.
+// Parsing the log the run already produces avoids plumbing progress through a
+// channel, and the CLI's `stoat provision` reads the same file the same way.
 // Returns the step (which recipe, or the phase before one starts) and the most
 // recent line of real output.
 func readProvStep(v core.VM) (step, last string) {
@@ -73,10 +70,11 @@ func readProvStep(v core.VM) (step, last string) {
 		if l == "" {
 			continue
 		}
-		if step == "" && strings.HasPrefix(l, recipeMarker) {
-			step = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(l, recipeMarker), "==="))
+		name, isMarker := sshx.ParseRecipeMarker(l)
+		if step == "" && isMarker {
+			step = name
 		}
-		if last == "" && !strings.HasPrefix(l, recipeMarker) {
+		if last == "" && !isMarker {
 			last = l
 		}
 		if step != "" && last != "" {
