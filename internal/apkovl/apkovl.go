@@ -14,7 +14,6 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
-	"github.com/novusedge/stoat/internal/recipes"
 )
 
 const repositories = "https://dl-cdn.alpinelinux.org/alpine/latest-stable/main\n" +
@@ -44,27 +43,6 @@ setup-alpine -f /etc/stoat/answerfile
 echo "$(date -Iseconds)" > /mnt/work/.installed
 reboot
 `
-
-// installRecipe returns the manifest of v's install-stage recipe, if it has
-// one. Install-stage recipes only make sense for Alpine disk-mode installs
-// (docs/recipe-spec-v2.md's Stages section); a live VM has no disk to
-// install onto. Recipe creation is responsible for rejecting more than one
-// install-stage recipe per VM, so the first match here is authoritative.
-func installRecipe(v *config.VM) (recipes.Manifest, bool) {
-	if v.Mode != "disk" {
-		return recipes.Manifest{}, false
-	}
-	for _, name := range v.Recipes {
-		m, ok, err := recipes.ManifestFor(name)
-		if !ok || err != nil {
-			continue // v1 flat-file recipe, or no manifest at all: not install-stage
-		}
-		if m.Stage == "install" {
-			return m, true
-		}
-	}
-	return recipes.Manifest{}, false
-}
 
 type builder struct {
 	tw  *tar.Writer
@@ -184,13 +162,14 @@ func Build(v *config.VM) error {
 	b.symlink("etc/runlevels/boot/localmount", "/etc/init.d/localmount")
 	b.file("etc/fstab", 0o644, fstab)
 
-	if _, ok := installRecipe(v); ok {
-		// setup-alpine runs from an unattended answerfile. The local.d
-		// script then marks success on the work share and reboots into the
-		// installed disk (docs/recipe-spec-v2.md's "For install stage"
-		// execution model). etc/runlevels/default/local makes the initramfs
-		// run local.d scripts at all. Without it stoat-install.start never
-		// runs.
+	if v.Mode == "disk" {
+		// Every uninstalled disk VM auto-installs: setup-alpine runs from the
+		// config-derived answerfile, the local.d script marks success on the
+		// work share and reboots into the installed disk. Build only runs for a
+		// disk VM while !Installed (backend apkovl's applies), so an empty disk
+		// is the only disk this ever partitions. etc/runlevels/default/local
+		// makes the initramfs run local.d scripts at all; without it
+		// stoat-install.start never runs.
 		b.dir("etc/stoat", 0o755)
 		b.file("etc/stoat/answerfile", 0o644, GenerateAnswerfile(v))
 		b.dir("etc/local.d", 0o755)

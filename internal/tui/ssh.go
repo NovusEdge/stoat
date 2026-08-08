@@ -86,10 +86,14 @@ func sshIntoArgs(v core.VM) []string {
 // unreachableMsg is what sshInto reports when ssh fails to connect (exit
 // 255) and the guest is not still booting.
 //
-// It names the actual installer for v's OS (installerName,
-// internal/tui/provision.go). A hardcoded "setup-alpine" was wrong on every
-// non-Alpine guest.
+// An Alpine disk VM installs itself and is unreachable until it reboots. Any
+// other disk VM needs its installer (installerName) run at the console first.
 func unreachableMsg(v core.VM) string {
+	if v.OS == "alpine" {
+		return fmt.Sprintf(
+			"ssh: couldn't reach %s@127.0.0.1:%d, a disk VM isn't reachable until it finishes installing and reboots, or the key isn't installed",
+			sshx.User(cfgVM(v)), v.SSHPort)
+	}
 	return fmt.Sprintf(
 		"ssh: couldn't reach %s@127.0.0.1:%d, a disk VM needs %s run at its console first, or the key isn't installed",
 		sshx.User(cfgVM(v)), v.SSHPort, installerName(v.OS))

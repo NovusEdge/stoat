@@ -48,13 +48,17 @@ func TestUnreachableMsgNamesRealInstaller(t *testing.T) {
 	}
 }
 
-// TestUnreachableMsgNamesAlpineInstaller: an Alpine VM keeps the specific,
-// correct name.
-func TestUnreachableMsgNamesAlpineInstaller(t *testing.T) {
+// TestUnreachableMsgAlpineSelfInstalls: an Alpine VM installs itself, so its
+// message says it is unreachable until the install reboots, not "run
+// setup-alpine".
+func TestUnreachableMsgAlpineSelfInstalls(t *testing.T) {
 	v := core.VM{Name: "x", SSHPort: 2201, OS: "alpine"}
 	got := unreachableMsg(v)
 
-	if !strings.Contains(got, "setup-alpine") {
-		t.Errorf("expected setup-alpine named for an alpine VM, got: %q", got)
+	if !strings.Contains(got, "finishes installing") {
+		t.Errorf("expected the self-install wording for an alpine VM, got: %q", got)
+	}
+	if strings.Contains(got, "setup-alpine") {
+		t.Errorf("alpine VM installs itself, must not tell the user to run setup-alpine: %q", got)
 	}
 }

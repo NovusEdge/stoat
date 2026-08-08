@@ -134,7 +134,7 @@ func TestProvisionRefusedUntilInstalled(t *testing.T) {
 	if len(m.provisioning) != 0 {
 		t.Error("the VM was marked as provisioning anyway")
 	}
-	for _, want := range []string{"not installed", "setup-alpine", "stop and start"} {
+	for _, want := range []string{"installing itself", "reboot", "provision"} {
 		if !strings.Contains(m.toast.text, want) {
 			t.Errorf("toast = %q, missing %q", m.toast.text, want)
 		}
