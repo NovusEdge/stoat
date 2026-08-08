@@ -52,7 +52,7 @@ func TestUnreachableMsgNamesRealInstaller(t *testing.T) {
 // message says it is unreachable until the install reboots, not "run
 // setup-alpine".
 func TestUnreachableMsgAlpineSelfInstalls(t *testing.T) {
-	v := core.VM{Name: "x", SSHPort: 2201, OS: "alpine"}
+	v := core.VM{Name: "x", SSHPort: 2201, OS: "alpine", Backend: "apkovl"}
 	got := unreachableMsg(v)
 
 	if !strings.Contains(got, "finishes installing") {

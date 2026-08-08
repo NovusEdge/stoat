@@ -301,6 +301,14 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 			t.Errorf("stoat-install.start missing %q:\n%s", want, script)
 		}
 	}
+	// The blank-disk guard must precede setup-alpine, or re-baking the overlay
+	// on an already-installed disk (installed toggled off) wipes it.
+	if !strings.Contains(script, "blkid /dev/vda") {
+		t.Errorf("stoat-install.start missing the blank-disk guard:\n%s", script)
+	}
+	if strings.Index(script, "blkid") > strings.Index(script, "setup-alpine") {
+		t.Errorf("blank-disk guard must run before setup-alpine:\n%s", script)
+	}
 	if m := hdrs["etc/local.d/stoat-install.start"].Mode; m&0o111 == 0 {
 		t.Errorf("stoat-install.start mode = %o, not executable", m)
 	}

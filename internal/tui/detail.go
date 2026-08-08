@@ -329,13 +329,13 @@ func (m model) viewDetail() string {
 			size = fmt.Sprintf("%.1fG on disk", float64(fi.Size())/(1<<30))
 		}
 		line("disk", v.Disk+"  "+size)
-		// Until this is true, the VM boots its installer ISO. An Alpine disk VM
-		// runs setup-alpine unattended (internal/apkovl) and installs itself;
-		// any other disk VM needs its installer run at the console. The next
+		// Until this is true, the VM boots its installer ISO. An apkovl-backend
+		// (Alpine) disk VM runs setup-alpine unattended and installs itself;
+		// any other backend needs its installer run at the console. The next
 		// start sets this once the install writes to the disk; "i" overrides a
 		// wrong guess.
 		hint := "installing on first boot"
-		if v.OS != "alpine" {
+		if v.Backend != "apkovl" {
 			hint = "run " + installerName(v.OS) + " in the console, then restart"
 		}
 		installed := warnStyle.Render("no: " + hint)

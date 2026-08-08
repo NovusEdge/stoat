@@ -522,17 +522,18 @@ func contains(haystack, needle string) bool {
 // installer instead.
 func TestInstallerHintMatchesOS(t *testing.T) {
 	cases := []struct {
-		os   string
-		want string
+		os      string
+		backend string
+		want    string
 	}{
-		{"alpine", "installing on first boot"},
-		{"fedora", "the installer"},
-		{"", "the installer"},
+		{"alpine", "apkovl", "installing on first boot"},
+		{"fedora", "cloudinit", "the installer"},
+		{"", "", "the installer"},
 	}
 	for _, c := range cases {
 		m := model{screen: screenDetail, width: 100, height: 40}
 		m.detail = newDetail(core.VM{
-			Name: "d", Mode: "disk", OS: c.os, Paths: core.Paths{Dir: t.TempDir()}, Disk: "disk.qcow2",
+			Name: "d", Mode: "disk", OS: c.os, Backend: c.backend, Paths: core.Paths{Dir: t.TempDir()}, Disk: "disk.qcow2",
 		})
 		out := m.viewDetail()
 		if !strings.Contains(out, c.want) {

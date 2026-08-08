@@ -35,10 +35,21 @@ const tmpName = ".stoat-ovl.tmp"
 const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 
 // installScript is the local.d script that drives an unattended disk
-// install: run setup-alpine against the baked answerfile, mark success on
-// the 9p work share (docs/recipe-spec-v2.md's "Install stage signaling"
-// decision), then reboot into the newly installed disk.
+// install: refuse a disk that already holds data, then run setup-alpine
+// against the baked answerfile, mark success on the 9p work share
+// (docs/recipe-spec-v2.md's "Install stage signaling" decision), and reboot
+// into the newly installed disk.
+//
+// The blank-disk check is the safety gate, not the !Installed flag. `i` on the
+// detail screen can set installed off on a VM whose disk is already installed
+// (a half-failed install that tripped the byte heuristic), and the overlay is
+// rebuilt every uninstalled-disk start. Without this check, setup-alpine would
+// repartition and wipe /dev/vda on that boot. blkid finds a partition table or
+// filesystem on any non-blank disk; a fresh qcow2 has neither.
 const installScript = `#!/bin/sh
+if blkid /dev/vda >/dev/null 2>&1 || [ -e /dev/vda1 ]; then
+	exit 0
+fi
 setup-alpine -f /etc/stoat/answerfile
 echo "$(date -Iseconds)" > /mnt/work/.installed
 reboot
@@ -165,9 +176,9 @@ func Build(v *config.VM) error {
 	if v.Mode == "disk" {
 		// Every uninstalled disk VM auto-installs: setup-alpine runs from the
 		// config-derived answerfile, the local.d script marks success on the
-		// work share and reboots into the installed disk. Build only runs for a
-		// disk VM while !Installed (backend apkovl's applies), so an empty disk
-		// is the only disk this ever partitions. etc/runlevels/default/local
+		// work share and reboots into the installed disk. The script refuses a
+		// non-blank disk itself (see installScript), so re-baking it on a disk
+		// that already holds data does not wipe it. etc/runlevels/default/local
 		// makes the initramfs run local.d scripts at all; without it
 		// stoat-install.start never runs.
 		b.dir("etc/stoat", 0o755)

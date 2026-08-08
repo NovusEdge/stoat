@@ -86,7 +86,7 @@ func (m *model) startProvision(v core.VM) tea.Cmd {
 	// away. Without this check, the user waits the full 90s ssh timeout and
 	// gets "ssh not reachable", which says nothing about the real cause.
 	if v.Mode == "disk" && !v.Installed {
-		if v.OS == "alpine" {
+		if v.Backend == "apkovl" {
 			return m.showToast(v.Name+": installing itself; wait for it to finish and reboot, "+
 				"then stoat notices the install and offers to provision", true)
 		}

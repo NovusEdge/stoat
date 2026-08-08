@@ -122,7 +122,7 @@ func TestProvElapsed(t *testing.T) {
 func TestProvisionRefusedUntilInstalled(t *testing.T) {
 	m := model{provisioning: map[string]provState{}, spin: newSpinner()}
 	v := core.VM{
-		Name: "alpine-test-1", Mode: "disk", OS: "alpine", Installed: false,
+		Name: "alpine-test-1", Mode: "disk", OS: "alpine", Backend: "apkovl", Installed: false,
 		SSHPort: 2201, Recipes: []string{"xfce.alpine.sh"},
 		Paths: core.Paths{Dir: t.TempDir()},
 	}
