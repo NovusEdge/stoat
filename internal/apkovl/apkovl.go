@@ -193,11 +193,11 @@ func Build(v *config.VM) error {
 	//
 	// `nofail`: some guest kernels have no 9p module at all (Debian's cloud
 	// kernel doesn't). Without it an unmountable share holds up boot.
-	fstab += "work /mnt/work 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0\n"
+	fstab += WorkMount9p.FstabLine()
 	b.dir("mnt", 0o755)
 	b.dir("mnt/work", 0o755)
 	if v.Share != "" {
-		fstab += "host /mnt/host 9p trans=virtio,version=9p2000.L,ro,_netdev,nofail 0 0\n"
+		fstab += HostMount9p.FstabLine()
 		b.dir("mnt/host", 0o755)
 	}
 	// The initramfs's default-boot-services set doesn't include localmount,

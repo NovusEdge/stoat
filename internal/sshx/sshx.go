@@ -231,6 +231,8 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 		return err
 	}
 
+	mountShares(ctx, v, log)
+
 	for _, name := range v.Recipes {
 		// Checked before each recipe, not left to cmd.Run below alone: a ctx
 		// cancelled between recipes must stop here rather than start one more
