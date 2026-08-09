@@ -36,15 +36,25 @@ func (apkovlBackend) Prepare(v *config.VM) error {
 	if err := apkovl.Build(v); err != nil {
 		return fmt.Errorf("building apkovl: %w", err)
 	}
+	if err := apkovl.ExtractKernel(v); err != nil {
+		return fmt.Errorf("extracting boot kernel: %w", err)
+	}
 	return nil
 }
 
-// Args attaches the vvfat overlay drive whenever applies is true. The
-// -boot d that makes QEMU prefer the ISO over this drive's empty MBR stays
-// in qemu.Args's Mode switch, alongside the rest of that mode's boot media.
+// Args boots the kernel and initramfs directly (Prepare extracted them from the
+// ISO) and attaches the vvfat overlay drive. -kernel bypasses the ISO's
+// ISOLINUX, whose boot: prompt hangs under QEMU; the ISO stays attached in
+// qemu.Args's Mode switch so the initramfs still finds modloop on it. QEMU
+// boots -kernel regardless of the -boot order there.
 func (apkovlBackend) Args(v *config.VM) []string {
 	if !applies(v) {
 		return nil
 	}
-	return []string{"-drive", "file=fat:rw:" + v.OvlDir() + ",format=raw,if=virtio"}
+	return []string{
+		"-kernel", apkovl.KernelPath(v),
+		"-initrd", apkovl.InitramfsPath(v),
+		"-append", apkovl.KernelAppend,
+		"-drive", "file=fat:rw:" + v.OvlDir() + ",format=raw,if=virtio",
+	}
 }
