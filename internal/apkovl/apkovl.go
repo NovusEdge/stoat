@@ -36,8 +36,11 @@ const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 
 // installScript is the local.d script that drives an unattended disk
 // install: skip if a previous run already finished, else run setup-alpine
-// against the baked answerfile, mark success on the 9p work share, and reboot
-// into the newly installed disk.
+// against the baked answerfile, mark success on the 9p work share, and power
+// off. stoat marks the VM installed at the next start (run.go's diskWritten
+// check) and boots the disk then; the guest cannot flip that flag itself, so it
+// hands control back by stopping rather than rebooting into the still-attached
+// installer kernel.
 //
 // Output goes to /dev/ttyS0, the serial port stoat captures to console.log, so
 // `stoat logs` and the detail screen's console pager show the install. Alpine
@@ -53,7 +56,7 @@ const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 // (marker present, `i` toggled off, or diskWritten not yet seen) is left alone,
 // while a failed or partial install (no marker) is retried rather than left
 // stuck. On failure setup-alpine's own error stays on screen and the VM does
-// not reboot or mark itself done.
+// not power off or mark itself done.
 const installScript = `#!/bin/sh
 [ -c /dev/ttyS0 ] && exec >/dev/ttyS0 2>&1
 if [ -f /mnt/work/.installed ]; then
@@ -67,8 +70,8 @@ echo "stoat: installing Alpine unattended, this takes a few minutes..."
 export ERASE_DISKS=/dev/vda
 if setup-alpine -e -f /etc/stoat/answerfile; then
 	echo "$(date -Iseconds)" > /mnt/work/.installed
-	echo "stoat: install complete, rebooting into the disk"
-	reboot
+	echo "stoat: install complete, powering off; run 'stoat up' to boot the disk"
+	poweroff
 else
 	echo "stoat: setup-alpine FAILED; leaving the installer up so you can inspect it (see the log above)"
 fi
@@ -80,7 +83,7 @@ fi
 // only a bare login prompt with no sign that an unattended install is running.
 const installIssue = `
     stoat is installing Alpine on this VM.
-    It runs unattended and reboots itself when done. Do not log in.
+    It runs unattended and powers off when done. Do not log in.
     Watch progress from the host:  stoat logs <vm>
 
 `

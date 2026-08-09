@@ -31,6 +31,27 @@ func TestApkovlBootsKernelDirectly(t *testing.T) {
 	}
 }
 
+// TestDiskInstallerExitsOnReboot pins -no-reboot to the uninstalled disk boot.
+// The installer kernel is still attached, so a guest reboot would re-run
+// setup-alpine and wipe the disk again; -no-reboot makes that reboot exit QEMU,
+// and Start marks the VM installed at the next boot. A live VM keeps its reboot.
+func TestDiskInstallerExitsOnReboot(t *testing.T) {
+	disk := &config.VM{
+		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl", Installed: false,
+		Dir: filepath.Join(t.TempDir(), "work"),
+	}
+	if got := joined(For(disk).Args(disk)); !strings.Contains(got, "-no-reboot") {
+		t.Errorf("disk installer missing -no-reboot, so a guest reboot would reinstall:\n%s", got)
+	}
+	live := &config.VM{
+		Name: "live1", Mode: "live", OS: "alpine", Backend: "apkovl",
+		Dir: filepath.Join(t.TempDir(), "live1"),
+	}
+	if got := joined(For(live).Args(live)); strings.Contains(got, "-no-reboot") {
+		t.Errorf("live VM got -no-reboot; its reboot must stay a reboot:\n%s", got)
+	}
+}
+
 func TestAlpineLiveGetsTheOverlayDrive(t *testing.T) {
 	v := &config.VM{
 		Name: "live1", Mode: "live", OS: "alpine", Backend: "apkovl",

@@ -51,10 +51,19 @@ func (apkovlBackend) Args(v *config.VM) []string {
 	if !applies(v) {
 		return nil
 	}
-	return []string{
+	args := []string{
 		"-kernel", apkovl.KernelPath(v),
 		"-initrd", apkovl.InitramfsPath(v),
 		"-append", apkovl.KernelAppend,
 		"-drive", "file=fat:rw:" + v.OvlDir() + ",format=raw,if=virtio",
 	}
+	// The disk installer still boots this kernel, so a guest reboot would
+	// re-enter setup-alpine and wipe the disk again. -no-reboot turns the
+	// install script's poweroff, or any reboot, into a QEMU exit. Start then
+	// marks the VM installed and boots the disk instead. A live VM has no disk
+	// to protect, so its reboot stays a reboot.
+	if v.Mode == "disk" && !v.Installed {
+		args = append(args, "-no-reboot")
+	}
+	return args
 }
