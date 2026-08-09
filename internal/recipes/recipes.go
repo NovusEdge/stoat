@@ -317,9 +317,24 @@ func ListManifests() ([]Manifest, error) {
 	return out, nil
 }
 
-// Read returns a recipe's body. name is the full filename as returned by
-// List.
+// Read returns a v1 flat-file recipe's body. name is a filename directly
+// under the recipes root. A v2 recipe is a directory, not a file, so callers
+// with a guest OS in hand use ScriptBody instead.
 func Read(name string) (string, error) {
 	b, err := os.ReadFile(Path(name))
 	return string(b), err
+}
+
+// ScriptBody returns the script a recipe runs on osName. A v2 recipe resolves
+// through its manifest to install.sh, or the per-OS override the manifest
+// declares. A name with no recipe.toml is a v1 flat file, read as-is.
+func ScriptBody(name, osName string) (string, error) {
+	m, ok, err := ManifestFor(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return Read(name)
+	}
+	return m.ScriptContent(osName)
 }
