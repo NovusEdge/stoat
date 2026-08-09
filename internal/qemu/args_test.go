@@ -29,10 +29,15 @@ func TestArgsLive(t *testing.T) {
 		"-virtfs local,path=/home/u/vms,mount_tag=host,security_model=mapped-xattr,readonly=on",
 		"-cdrom /data/isos/alpine.iso",
 		"-drive file=fat:rw:/data/live1/ovl,format=raw,if=virtio",
+		"-device qemu-xhci,id=xhci", "-device usb-tablet",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
+	}
+	// The tablet must ride the VNC path too, or a VNC client's clicks miss.
+	if vnc := joined(Args(v, false)); !strings.Contains(vnc, "-device usb-tablet") {
+		t.Errorf("headless VM lacks usb-tablet, so VNC clicks would miss:\n%s", vnc)
 	}
 	if strings.Contains(got, "disk.qcow2") {
 		t.Error("live mode must not attach a disk")

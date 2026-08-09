@@ -12,6 +12,19 @@ setup-apkrepos -c -1
 setup-xorg-base
 apk add xfce4 xfce4-terminal dbus-x11
 
+# Xorg reads its input devices from udev. Alpine boots mdev by default, which
+# never feeds Xorg, so libinput finds no mouse or keyboard and the desktop
+# ignores every click. setup-devd switches the device manager to eudev and
+# adds udev, udev-trigger, and udev-settle to sysinit for the next boot.
+# Ubuntu, Debian, and Arch already run udev under systemd, so only Alpine
+# needs this.
+setup-devd udev
+# Cold-plug the devices that already exist so Xorg finds the tablet in this
+# boot, not only after a reboot. The live case below starts X now with a HUP
+# to init, before udev-trigger would run at the next sysinit.
+udevadm trigger 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+
 rc-update add dbus
 rc-service dbus start || true
 
