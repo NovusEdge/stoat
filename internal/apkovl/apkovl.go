@@ -40,6 +40,11 @@ const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 // (docs/recipe-spec-v2.md's "Install stage signaling" decision), and reboot
 // into the newly installed disk.
 //
+// Output goes to /dev/ttyS0, the serial port stoat captures to console.log, so
+// `stoat logs` and the detail screen's console pager show the install. Alpine
+// live puts its own console on the VGA tty, which stoat does not capture, so
+// without this redirect the install ran with no visible log at all.
+//
 // The blank-disk check is the safety gate, not the !Installed flag. `i` on the
 // detail screen can set installed off on a VM whose disk is already installed
 // (a half-failed install that tripped the byte heuristic), and the overlay is
@@ -47,12 +52,27 @@ const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 // repartition and wipe /dev/vda on that boot. blkid finds a partition table or
 // filesystem on any non-blank disk; a fresh qcow2 has neither.
 const installScript = `#!/bin/sh
+[ -c /dev/ttyS0 ] && exec >/dev/ttyS0 2>&1
 if blkid /dev/vda >/dev/null 2>&1 || [ -e /dev/vda1 ]; then
+	echo "stoat: /dev/vda already holds data, skipping install"
 	exit 0
 fi
+echo "stoat: installing Alpine unattended, this takes a few minutes..."
 setup-alpine -f /etc/stoat/answerfile
 echo "$(date -Iseconds)" > /mnt/work/.installed
+echo "stoat: install complete, rebooting into the disk"
 reboot
+`
+
+// installIssue is the getty banner (/etc/issue) shown on the VGA console while
+// the install runs. The console output itself goes to the serial port, not
+// here (see installScript's ttyS0 redirect), so the window would otherwise show
+// only a bare login prompt with no sign that an unattended install is running.
+const installIssue = `
+    stoat is installing Alpine on this VM.
+    It runs unattended and reboots itself when done. Do not log in.
+    Watch progress from the host:  stoat logs <vm>
+
 `
 
 type builder struct {
@@ -186,6 +206,9 @@ func Build(v *config.VM) error {
 		b.dir("etc/local.d", 0o755)
 		b.file("etc/local.d/stoat-install.start", 0o755, installScript)
 		b.symlink("etc/runlevels/default/local", "/etc/init.d/local")
+		// The getty on the VGA console shows this instead of a bare login
+		// prompt, so the window says an unattended install is running.
+		b.file("etc/issue", 0o644, installIssue)
 	}
 
 	if b.err != nil {
