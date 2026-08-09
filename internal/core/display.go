@@ -1,6 +1,10 @@
 package core
 
-import "github.com/novusedge/stoat/internal/qemu"
+import (
+	"fmt"
+
+	"github.com/novusedge/stoat/internal/qemu"
+)
 
 // Re-exported so a caller can branch on Display.Kind without importing
 // internal/qemu, which is otherwise entirely below this package.
@@ -56,7 +60,19 @@ func DisplayKind(v VM, graphical bool) string {
 	if v.State == StateBroken {
 		return ""
 	}
-	return qemu.DisplayKind(v.Mode, v.Installed, graphical)
+	return qemu.DisplayKind(v.Display, v.Mode, v.Installed, graphical)
+}
+
+// validateDisplay checks a config.VM.Display candidate. "" and "auto" both
+// mean the installer-console default; anything but those two and "window"/
+// "vnc" is rejected so a typo in vm.toml or an MCP call fails loudly instead
+// of silently falling back to auto.
+func validateDisplay(pref string) error {
+	switch pref {
+	case "", "auto", qemu.DisplayWindow, qemu.DisplayVNC:
+		return nil
+	}
+	return fmt.Errorf("%w: display must be one of \"\", auto, window, vnc, not %q", ErrInvalidSpec, pref)
 }
 
 // DisplayFor is DisplayKind plus the lookup of a VNC viewer installed on this

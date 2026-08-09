@@ -107,6 +107,39 @@ func TestUpdateRejectsInvalidRAMAndCPUs(t *testing.T) {
 	}
 }
 
+func TestUpdateDisplay(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Update("work", Patch{Display: ptr("window")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Display != "window" {
+		t.Errorf("Display = %q, want window", got.Display)
+	}
+	reloaded, err := config.Load("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Display != "window" {
+		t.Errorf("not persisted: Display = %q", reloaded.Display)
+	}
+}
+
+func TestUpdateRejectsInvalidDisplay(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "disk", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Update("work", Patch{Display: ptr("fullscreen")}); !errors.Is(err, ErrInvalidSpec) {
+		t.Errorf("err = %v, want ErrInvalidSpec", err)
+	}
+}
+
 func TestUpdateRecipesReplacesWholesale(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"old.yaml"}}

@@ -37,6 +37,8 @@ type editModel struct {
 	recipeNames []string
 	recipeIdx   int
 	recipeSel   map[string]bool
+
+	display string // one of displayChoices; seeded from vm.Display, "" reads as "auto"
 }
 
 // edit field indices
@@ -52,10 +54,11 @@ const (
 // focus positions past the text inputs
 const (
 	eRecipes = eFieldCount + iota
+	eDisplay
 )
 
 func newEdit(v *config.VM) editModel {
-	e := editModel{vm: v, recipeSel: map[string]bool{}}
+	e := editModel{vm: v, recipeSel: map[string]bool{}, display: displayPrefLabel(v.Display)}
 	vals := []string{
 		strconv.Itoa(v.RAM),
 		strconv.Itoa(v.CPUs),
@@ -126,7 +129,7 @@ func (e editModel) order() []int {
 	if e.vm.Mode != "live" {
 		o = append(o, eDisk)
 	}
-	o = append(o, eShare, eSSHPort)
+	o = append(o, eShare, eSSHPort, eDisplay)
 	if len(e.recipeNames) > 0 {
 		o = append(o, eRecipes)
 	}
@@ -257,6 +260,17 @@ func (e editModel) buildPatch() (core.Patch, error) {
 		}
 	}
 
+	// "auto" writes back as "", matching config.VM.Display's own default so
+	// a VM edited back to auto looks the same as one that never set a
+	// preference.
+	if e.display != displayPrefLabel(e.vm.Display) {
+		v := e.display
+		if v == "auto" {
+			v = ""
+		}
+		p.Display = &v
+	}
+
 	var picked []string
 	for _, n := range e.recipeNames {
 		if e.recipeSel[n] {
@@ -373,14 +387,17 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.edit.refocus()
 			return m, nil
 		case "left", "right":
+			d := 1
+			if msg.String() == "left" {
+				d = -1
+			}
 			if m.edit.focus == eRecipes {
 				if n := len(m.edit.recipeNames); n > 0 {
-					d := 1
-					if msg.String() == "left" {
-						d = -1
-					}
 					m.edit.recipeIdx = (m.edit.recipeIdx + d + n) % n
 				}
+			}
+			if m.edit.focus == eDisplay {
+				m.edit.display = cycle(displayChoices, m.edit.display, d)
 			}
 			return m, nil
 		case keySpace:
@@ -462,6 +479,21 @@ func (m model) viewEdit() string {
 
 	row(eShare, "share", e.inputs[eShare].View())
 	row(eSSHPort, "ssh", e.inputs[eSSHPort].View())
+
+	displayMarker := "  "
+	if e.focus == eDisplay {
+		displayMarker = selStyle.Render(glyphCursor)
+	}
+	displayRow := radio("auto", e.display == "auto") + "  " +
+		radio("window", e.display == "window") + "  " +
+		radio("vnc", e.display == "vnc")
+	if e.focus == eDisplay {
+		displayRow = selStyle.Render(displayRow)
+	}
+	if was := displayPrefLabel(e.vm.Display); e.display != was {
+		displayRow += warnStyle.Render("  " + glyphWas + " was " + was)
+	}
+	b.row(displayMarker, "display", displayRow)
 	b.gap()
 
 	// Recipes are only offered when any exist for this VM's os/backend;

@@ -162,6 +162,30 @@ func TestPlanRefusesRelativeDiskSize(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsInvalidDisplay(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+
+	_, err := plan(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso", Display: "fullscreen"})
+	if !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("err = %v, want ErrInvalidSpec", err)
+	}
+}
+
+func TestPlanAcceptsEveryValidDisplay(t *testing.T) {
+	dir := root(t)
+	for _, pref := range []string{"", "auto", "window", "vnc"} {
+		haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+		v, err := plan(Spec{Name: "work-" + pref, Image: "alpine-virt-3.24.1-x86_64.iso", Display: pref})
+		if err != nil {
+			t.Fatalf("Display=%q: %v", pref, err)
+		}
+		if v.Display != pref {
+			t.Errorf("Display = %q, want %q", v.Display, pref)
+		}
+	}
+}
+
 func TestPlanRefusesDuplicateName(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")

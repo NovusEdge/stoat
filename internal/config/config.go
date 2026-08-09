@@ -45,6 +45,13 @@ type VM struct {
 	SSHPort   int      `toml:"sshport"`
 	Recipes   []string `toml:"recipes"`
 
+	// Display is the user's screen preference: "" or "auto" (default),
+	// "window", or "vnc". core.validateDisplay is the single place that
+	// checks the value; empty means an old vm.toml predates this field, so
+	// it must read the same as "auto". qemu.DisplayKind is the rule that
+	// turns this into DisplayWindow or DisplayVNC.
+	Display string `toml:"display"`
+
 	// Forwards are user-declared TCP ports forwarded from host to guest, in
 	// addition to the SSHPort forward that always exists. internal/qemu.Args
 	// renders them into qemu's -netdev hostfwd= clauses. Changes apply at

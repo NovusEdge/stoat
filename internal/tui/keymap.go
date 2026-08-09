@@ -136,6 +136,7 @@ func (h detailHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"e"}, "e", "edit"),
 		plainKey([]string{"E"}, "E", "raw toml"),
 		plainKey([]string{"i"}, "i", "installed"),
+		plainKey([]string{"d"}, "d", "display"),
 		h.ssh(),
 		plainKey([]string{"p"}, "p", "provision"),
 		plainKey([]string{"S"}, "S", "snapshots"),
@@ -155,7 +156,8 @@ func (h detailHelp) ShortHelp() []key.Binding {
 func (h detailHelp) FullHelp() [][]key.Binding {
 	rows := [][]key.Binding{
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
-		{plainKey([]string{"i"}, "i", "installed"), h.ssh()},
+		{plainKey([]string{"i"}, "i", "installed"), plainKey([]string{"d"}, "d", "cycle display: auto/window/vnc")},
+		{h.ssh()},
 		{plainKey([]string{"p"}, "p", "provision"), plainKey([]string{"L"}, "L", "console log")},
 		{plainKey([]string{"S"}, "S", "snapshots")},
 	}

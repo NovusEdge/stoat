@@ -44,6 +44,46 @@ func modeLabel(mode string) string {
 	return mode
 }
 
+// cycle returns the choice after (d=1) or before (d=-1) cur in choices,
+// wrapping at either end. An unrecognised cur is treated as choices[0]
+// before stepping.
+func cycle(choices []string, cur string, d int) string {
+	idx := 0
+	for i, c := range choices {
+		if c == cur {
+			idx = i
+		}
+	}
+	return choices[(idx+d+len(choices))%len(choices)]
+}
+
+// displayChoices is the fixed cycle the create form, the edit form, and the
+// detail screen's "d" key all offer for config.VM.Display.
+var displayChoices = []string{"auto", "window", "vnc"}
+
+// displayPrefLabel is what a display preference row shows: "" and "auto" both
+// read as "auto", since config.VM.Display treats them the same.
+func displayPrefLabel(pref string) string {
+	if pref == "" {
+		return "auto"
+	}
+	return pref
+}
+
+// nextDisplayPref cycles a display preference forward through
+// displayChoices: auto -> window -> vnc -> auto. An unrecognised value (a
+// hand-edited vm.toml) is treated as auto, the same fallback validateDisplay
+// applies to "".
+func nextDisplayPref(pref string) string {
+	cur := displayPrefLabel(pref)
+	for i, c := range displayChoices {
+		if c == cur {
+			return displayChoices[(i+1)%len(displayChoices)]
+		}
+	}
+	return displayChoices[0]
+}
+
 // modeHint is the sentence shown under a mode picker for the selected mode.
 func modeHint(mode string) string {
 	switch mode {

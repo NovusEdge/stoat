@@ -19,35 +19,43 @@ const (
 	DisplayVNC    = "vnc"
 )
 
-// DisplayKind is the rule, stated over the three facts it actually depends on
-// rather than over a *config.VM: core.VM is a different type that carries the
-// first two, and it must ask this question rather than restate it.
+// DisplayKind is the rule, stated over the four facts it actually depends on
+// rather than over a *config.VM: core.VM is a different type that carries
+// pref/mode/installed, and it must ask this question rather than restate it.
 //
-// Only an uninstalled disk-mode VM wants a real window, because its OS
-// installer draws to VGA rather than the serial console and a human has to
-// drive it. live, cloud and installed disk VMs reach ssh with no console
-// interaction, so their screen goes to the VNC socket instead.
+// pref is config.VM.Display: "window" or "vnc" pins the surface outright,
+// "" or "auto" runs the installer-console default below. Only an uninstalled
+// disk-mode VM wants a window under that default, because its OS installer
+// draws to VGA rather than the serial console and a human has to drive it.
+// live, cloud and installed disk VMs reach ssh with no console interaction,
+// so their screen goes to the VNC socket unless pref overrides it.
 //
-// graphical is the host's veto, and it is a veto rather than a preference:
+// graphical is the host's veto, checked before pref and unconditional: even
+// a "window" preference falls back to VNC on a host with no display server.
 // -display gtk needs a display server on the HOST, and qemu does not degrade
 // when there is none, it exits 1 (measured: "gtk initialization failed", and
 // with gl=on it fails one option earlier still, on "OpenGL is not supported by
-// display backend 'gtk'"). Before this argument existed, a fresh disk VM on a
+// display backend 'gtk'"). Before this veto existed, a fresh disk VM on a
 // headless host could not be started at all, and the install could not be
 // completed by any route. It falls back to VNC instead, which serves the exact
 // same VGA framebuffer over a socket the user can reach from a machine that
 // does have a screen. Whoever answers this must answer it for the host, not
 // for the VM: see GraphicalSession.
-//
-// This is deliberately blind to whether the guest has a desktop on it. An
-// installed disk VM running XFCE would like a window and does not get one; see
-// docs/troubleshooting.md. Widening that needs an explicit per-VM preference,
-// not a looser predicate.
-func DisplayKind(mode string, installed, graphical bool) string {
-	if mode == "disk" && !installed && graphical {
-		return DisplayWindow
+func DisplayKind(pref, mode string, installed, graphical bool) string {
+	if !graphical {
+		return DisplayVNC
 	}
-	return DisplayVNC
+	switch pref {
+	case DisplayWindow:
+		return DisplayWindow
+	case DisplayVNC:
+		return DisplayVNC
+	default:
+		if mode == "disk" && !installed {
+			return DisplayWindow
+		}
+		return DisplayVNC
+	}
 }
 
 // NeedsWindow reports whether this VM gets a real qemu window on a host whose
@@ -56,7 +64,7 @@ func DisplayKind(mode string, installed, graphical bool) string {
 // Exported so the TUI can describe the right escape hatch (a GTK window vs.
 // the VNC socket) without duplicating this rule.
 func NeedsWindow(v *config.VM, graphical bool) bool {
-	return DisplayKind(v.Mode, v.Installed, graphical) == DisplayWindow
+	return DisplayKind(v.Display, v.Mode, v.Installed, graphical) == DisplayWindow
 }
 
 // WantsWindow reports whether this VM would use a window if the host could
