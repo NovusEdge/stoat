@@ -146,7 +146,11 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 		if v.Applied == nil {
 			v.Applied = make(map[string]config.AppliedRecipe, len(runTargets))
 		}
-		v.Applied[name] = config.AppliedRecipe{Version: m.Version, At: time.Now()}
+		hash, err := recipes.ScriptHash(name, v.OS)
+		if err != nil {
+			return err
+		}
+		v.Applied[name] = config.AppliedRecipe{Version: m.Version, Hash: hash, At: time.Now()}
 		changed = true
 	}
 	if !changed {
@@ -161,9 +165,14 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 //
 // "manual" never runs implicitly. It runs only when explicit[name] is true,
 // meaning the caller named it directly via ApplyOpts.Only. "once" is
-// skipped when v.Applied already has an entry for name at the same version
-// the manifest declares now; a version bump makes it run again, the reason
-// Version is recorded alongside At. "always" is never skipped.
+// skipped when v.Applied already has an entry for name whose Hash matches
+// the script that would run now; a changed script reruns even at the same
+// manifest version, since a version bump is not the only way a recipe
+// author fixes one. "always" is never skipped.
+//
+// An Applied entry saved before Hash existed decodes with an empty string.
+// That never equals a real script hash, so an existing VM reruns its
+// "once" recipes exactly once, then carries a real hash from then on.
 //
 // A target with no recipe.toml (ManifestFor's ok=false) is a v1 flat-file
 // recipe. It has no run-mode concept and always stays in the result,
@@ -190,8 +199,14 @@ func filterByRunMode(v *config.VM, targets []string, explicit map[string]bool) (
 				continue
 			}
 		case "once":
-			if applied, done := v.Applied[name]; done && applied.Version == m.Version {
-				continue
+			if applied, done := v.Applied[name]; done {
+				hash, err := recipes.ScriptHash(name, v.OS)
+				if err != nil {
+					return nil, nil, err
+				}
+				if applied.Hash == hash {
+					continue
+				}
 			}
 		}
 		kept = append(kept, name)

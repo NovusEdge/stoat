@@ -68,11 +68,13 @@ type Paths struct {
 }
 
 // AppliedRecipe mirrors config.AppliedRecipe: which version of a recipe ran
-// against a VM, and when. Defined here rather than re-exported from config,
-// because core is the headless layer the CLI, the TUI and the MCP server all
-// depend on, and a type alias would leak config as part of that contract.
+// against a VM, the hash of the script that ran, and when. Defined here
+// rather than re-exported from config, because core is the headless layer
+// the CLI, the TUI and the MCP server all depend on, and a type alias would
+// leak config as part of that contract.
 type AppliedRecipe struct {
 	Version string
+	Hash    string
 	At      time.Time
 }
 
@@ -243,7 +245,7 @@ func applied(m map[string]config.AppliedRecipe) map[string]AppliedRecipe {
 	}
 	out := make(map[string]AppliedRecipe, len(m))
 	for k, v := range m {
-		out[k] = AppliedRecipe{Version: v.Version, At: v.At}
+		out[k] = AppliedRecipe{Version: v.Version, Hash: v.Hash, At: v.At}
 	}
 	return out
 }

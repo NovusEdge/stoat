@@ -25,9 +25,13 @@ type PortForward struct {
 	GuestPort int `toml:"guestport"`
 }
 
-// AppliedRecipe records when a recipe was applied and which version.
+// AppliedRecipe records when a recipe was applied, which version, and the
+// hash of the script that ran. An entry saved before Hash existed decodes
+// with an empty string, never equal to a current script's hash, so that
+// recipe re-runs once and then carries a real hash from then on.
 type AppliedRecipe struct {
 	Version string    `toml:"version"`
+	Hash    string    `toml:"hash"`
 	At      time.Time `toml:"at"`
 }
 
