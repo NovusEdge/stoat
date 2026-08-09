@@ -5,10 +5,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/novusedge/stoat/internal/apkovl"
 	"github.com/novusedge/stoat/internal/config"
 )
 
 func joined(a []string) string { return strings.Join(a, " ") }
+
+// TestApkovlBootsKernelDirectly proves a live or uninstalled-disk Alpine VM
+// boots -kernel/-initrd, not the ISO's ISOLINUX, whose boot: prompt hangs under
+// QEMU. Prepare extracts the two files; Args points QEMU at them.
+func TestApkovlBootsKernelDirectly(t *testing.T) {
+	v := &config.VM{
+		Name: "live1", Mode: "live", OS: "alpine", Backend: "apkovl",
+		Dir: filepath.Join(t.TempDir(), "live1"),
+	}
+	got := joined(For(v).Args(v))
+	for _, want := range []string{
+		"-kernel " + apkovl.KernelPath(v),
+		"-initrd " + apkovl.InitramfsPath(v),
+		"-append " + apkovl.KernelAppend,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("apkovl Args missing %q, so it would boot via the hanging ISOLINUX:\n%s", want, got)
+		}
+	}
+}
 
 func TestAlpineLiveGetsTheOverlayDrive(t *testing.T) {
 	v := &config.VM{
