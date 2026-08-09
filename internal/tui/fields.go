@@ -57,9 +57,9 @@ func (f *fields) gap() { f.rows = append(f.rows, []string{"", "", ""}) }
 // cell, which a note never uses, so it cannot collide with a focus cursor.
 const noteMark = "\x00note"
 
-// note adds a dim remark under the row above, starting at the label column
-// rather than the value column. It is a remark about the field, not
-// another value for it, so it reads wrong indented under the value.
+// note adds a dim remark under the row above, starting at the value column,
+// the same offset as hint. Both are gray helper text; a shared indent keeps
+// them lined up regardless of which one a screen uses.
 //
 // A note is drawn as its own full-width line, not a table row. A lipgloss
 // table cannot span columns, and note text is wider than the label cell, so
@@ -89,9 +89,8 @@ func (f *fields) String() string {
 	for _, r := range f.rows {
 		if r[0] == noteMark {
 			flush()
-			// Indented to the label column, so it lines up with the name of
-			// the field it is talking about.
-			out = append(out, strings.Repeat(" ", fieldMarkerWidth)+dimStyle.Render(r[1]))
+			// Indented to the value column, so it lines up with hint text.
+			out = append(out, strings.Repeat(" ", fieldValueColumn)+dimStyle.Render(r[1]))
 			continue
 		}
 		run = append(run, r)
