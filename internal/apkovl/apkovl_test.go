@@ -296,7 +296,7 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 	if !ok {
 		t.Fatal("missing etc/local.d/stoat-install.start")
 	}
-	for _, want := range []string{"setup-alpine -f /etc/stoat/answerfile", "/mnt/work/.installed", "reboot"} {
+	for _, want := range []string{"setup-alpine -e -f /etc/stoat/answerfile", "/mnt/work/.installed", "reboot"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("stoat-install.start missing %q:\n%s", want, script)
 		}
@@ -315,6 +315,11 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 	// install marks itself done and the VM never retries.
 	if !strings.Contains(script, "if setup-alpine") {
 		t.Errorf("setup-alpine must be gated so the marker is written only on success:\n%s", script)
+	}
+	// ERASE_DISKS must be exported, or setup-disk stops at its erase
+	// confirmation: the answerfile's copy does not reach the child process.
+	if !strings.Contains(script, "export ERASE_DISKS") {
+		t.Errorf("install script does not export ERASE_DISKS:\n%s", script)
 	}
 	// Install output goes to the serial port stoat captures, or the detail
 	// screen's console pager shows nothing during the install.

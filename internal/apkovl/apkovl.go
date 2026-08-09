@@ -61,7 +61,11 @@ if [ -f /mnt/work/.installed ]; then
 	exit 0
 fi
 echo "stoat: installing Alpine unattended, this takes a few minutes..."
-if setup-alpine -f /etc/stoat/answerfile; then
+# setup-alpine sources the answerfile but does not export ERASE_DISKS, so its
+# setup-disk child never sees it and stops at the erase confirmation. Export it
+# here so the child inherits it and repartitions /dev/vda unattended.
+export ERASE_DISKS=/dev/vda
+if setup-alpine -e -f /etc/stoat/answerfile; then
 	echo "$(date -Iseconds)" > /mnt/work/.installed
 	echo "stoat: install complete, rebooting into the disk"
 	reboot
@@ -208,7 +212,7 @@ func Build(v *config.VM) error {
 		// makes the initramfs run local.d scripts at all; without it
 		// stoat-install.start never runs.
 		b.dir("etc/stoat", 0o755)
-		b.file("etc/stoat/answerfile", 0o644, GenerateAnswerfile(v))
+		b.file("etc/stoat/answerfile", 0o644, GenerateAnswerfile(v, pub))
 		b.dir("etc/local.d", 0o755)
 		b.file("etc/local.d/stoat-install.start", 0o755, installScript)
 		b.symlink("etc/runlevels/default/local", "/etc/init.d/local")
