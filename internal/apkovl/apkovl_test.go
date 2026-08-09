@@ -296,7 +296,7 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 	if !ok {
 		t.Fatal("missing etc/local.d/stoat-install.start")
 	}
-	for _, want := range []string{"setup-alpine -e -f /etc/stoat/answerfile", "/mnt/work/.installed", "reboot"} {
+	for _, want := range []string{"setup-alpine -e -f /etc/stoat/answerfile", "/mnt/work/.installed", "poweroff"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("stoat-install.start missing %q:\n%s", want, script)
 		}
