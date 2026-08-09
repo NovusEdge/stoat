@@ -113,6 +113,14 @@ func Args(v *config.VM, graphical bool) []string {
 		a = append(a, "-display", "none", "-vnc", "unix:"+v.VNCPath())
 	}
 
+	// Absolute pointer for the framebuffer above. qemu's default is a relative
+	// PS/2 mouse; a desktop guest cannot align its cursor to the host cursor
+	// from relative deltas, so the pointer drifts and clicks land off target.
+	// usb-tablet reports absolute coordinates, so the guest cursor tracks the
+	// host cursor in the gtk window and in a VNC client alike. qemu-xhci gives
+	// it a USB bus, which the default pc machine has none of.
+	a = append(a, "-device", "qemu-xhci,id=xhci", "-device", "usb-tablet")
+
 	// Two exports (core-api.md §10.2): the user's dir read-only, stoat's
 	// per-VM scratch writable.
 	//
