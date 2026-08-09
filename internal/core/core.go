@@ -68,6 +68,11 @@ type Spec struct {
 	Share   string
 	Recipes []string
 
+	// Display is the screen preference to record in vm.toml: "" or "auto"
+	// (default), "window", or "vnc". validateDisplay is the single check
+	// for the value; plan applies it.
+	Display string
+
 	// ConsolePassword: empty means config.DefaultConsolePassword, "random"
 	// generates one, anything else is used verbatim. Written for the
 	// cloudinit backend only; see config.VM.ConsolePassword for why no
@@ -206,6 +211,10 @@ func plan(s Spec) (*config.VM, error) {
 		return nil, err
 	}
 
+	if err := validateDisplay(s.Display); err != nil {
+		return nil, err
+	}
+
 	port, err := config.FreePort()
 	if err != nil {
 		return nil, err
@@ -232,6 +241,7 @@ func plan(s Spec) (*config.VM, error) {
 		SSHPort:   port,
 		Recipes:   s.Recipes,
 		AllowExec: allowExec,
+		Display:   s.Display,
 	}
 
 	if img.backend == "cloudinit" {

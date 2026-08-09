@@ -28,6 +28,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		SSHPort:   2201,
 		Recipes:   []string{"xfce"},
 		Forwards:  []PortForward{{HostPort: 8080, GuestPort: 80}},
+		Display:   "window",
 		Dir:       filepath.Join(Root(), "alpine-live"),
 	}
 	if err := want.Save(); err != nil {
@@ -40,6 +41,30 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("roundtrip mismatch:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// TestSaveLoadRoundtripEmptyDisplayMeansAuto covers a vm.toml with no display
+// preference, the shape every pre-existing VM has. Load must leave it "",
+// not default it to a literal "auto": core.validateDisplay and
+// qemu.DisplayKind both already treat "" the same as "auto".
+func TestSaveLoadRoundtripEmptyDisplayMeansAuto(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := &VM{Name: "plain", Mode: "live", SSHPort: 2203, Dir: filepath.Join(Root(), "plain")}
+	if err := want.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load("plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Display != "" {
+		t.Errorf("Display = %q, want empty", got.Display)
 	}
 }
 

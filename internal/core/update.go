@@ -60,6 +60,11 @@ type Patch struct {
 	// looks written; this field is the escape hatch when that guess is wrong,
 	// so it is mutable, unlike Name/OS/Backend/Mode.
 	Installed *bool
+
+	// Display is the screen preference: "" or "auto", "window", or "vnc".
+	// Safe: it only changes which -display argument qemu.Args builds next
+	// start, nothing about the running process.
+	Display *string
 }
 
 // checkImmutable reports ErrImmutableField, naming the field, when a Patch sets
@@ -130,6 +135,12 @@ func Update(name string, p Patch) (VM, error) {
 	}
 	if p.Installed != nil {
 		v.Installed = *p.Installed
+	}
+	if p.Display != nil {
+		if err := validateDisplay(*p.Display); err != nil {
+			return VM{}, err
+		}
+		v.Display = *p.Display
 	}
 
 	if p.SSHPort != nil && *p.SSHPort != v.SSHPort {

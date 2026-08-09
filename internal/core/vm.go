@@ -112,6 +112,11 @@ type VM struct {
 	SSHPort int
 	SSHUser string
 
+	// Display is the user's screen preference: "" or "auto" (default),
+	// "window", or "vnc". DisplayKind and DisplayFor turn this, plus the
+	// host's graphical session, into where the screen actually lands.
+	Display string
+
 	// ISO and Base are plain vm.toml facts. They are here because a caller
 	// asking what a VM IS needs them, and without them the TUI would have to
 	// keep a second config.Load beside every core.Get.
@@ -210,6 +215,7 @@ func fromConfig(v *config.VM) VM {
 		Applied:         applied(v.Applied),
 		SSHPort:         v.SSHPort,
 		SSHUser:         v.SSHUser,
+		Display:         v.Display,
 		ISO:             v.ISO,
 		Base:            v.Base,
 		ConsolePassword: v.ConsolePassword,

@@ -119,3 +119,17 @@ func TestDisplayKindIsPure(t *testing.T) {
 		t.Errorf("DisplayKind = %q, want %q on a host with no session", got, DisplayVNC)
 	}
 }
+
+// A per-VM preference overrides the mode/installed default, but not the
+// host's veto.
+func TestDisplayKindHonoursPreference(t *testing.T) {
+	if got := DisplayKind(VM{Mode: "cloud", Display: "window"}, true); got != DisplayWindow {
+		t.Errorf("Display=window: got %q, want %q", got, DisplayWindow)
+	}
+	if got := DisplayKind(VM{Mode: "disk", Installed: false, Display: "vnc"}, true); got != DisplayVNC {
+		t.Errorf("Display=vnc: got %q, want %q", got, DisplayVNC)
+	}
+	if got := DisplayKind(VM{Mode: "cloud", Display: "window"}, false); got != DisplayVNC {
+		t.Errorf("Display=window on a headless host: got %q, want %q", got, DisplayVNC)
+	}
+}

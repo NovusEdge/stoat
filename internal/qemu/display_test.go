@@ -25,26 +25,43 @@ func fakeBins(t *testing.T, names ...string) {
 
 func TestDisplayKind(t *testing.T) {
 	for _, c := range []struct {
+		pref      string
 		mode      string
 		installed bool
 		graphical bool
 		want      string
 	}{
-		// The install console: the one case a human MUST be able to look at,
-		// because setup-alpine cannot be driven any other way.
-		{"disk", false, true, DisplayWindow},
+		// pref "" and "auto" both run the installer-console default.
+		{"", "disk", false, true, DisplayWindow},
+		{"auto", "disk", false, true, DisplayWindow},
 		// The same VM on a host with no display server. qemu would exit 1 on
 		// the window rather than fall back, so stoat falls back for it.
-		{"disk", false, false, DisplayVNC},
-		{"disk", true, true, DisplayVNC},
-		{"live", false, true, DisplayVNC},
-		{"live", true, true, DisplayVNC},
-		{"cloud", false, true, DisplayVNC},
-		{"cloud", true, true, DisplayVNC},
-		{"cloud", false, false, DisplayVNC},
+		{"", "disk", false, false, DisplayVNC},
+		{"auto", "disk", false, false, DisplayVNC},
+		{"", "disk", true, true, DisplayVNC},
+		{"", "live", false, true, DisplayVNC},
+		{"", "live", true, true, DisplayVNC},
+		{"", "cloud", false, true, DisplayVNC},
+		{"", "cloud", true, true, DisplayVNC},
+		{"", "cloud", false, false, DisplayVNC},
+
+		// "window" pins the surface, on every mode/installed combination,
+		// as long as the host has a session.
+		{"window", "live", false, true, DisplayWindow},
+		{"window", "disk", true, true, DisplayWindow},
+		{"window", "cloud", false, true, DisplayWindow},
+		// "vnc" pins the other way, including the installer-console case
+		// the auto default would have given a window.
+		{"vnc", "disk", false, true, DisplayVNC},
+		{"vnc", "live", true, true, DisplayVNC},
+
+		// graphical is a veto: it wins over "window" too, so a headless
+		// host never gets handed a qemu argv that makes qemu exit 1.
+		{"window", "disk", false, false, DisplayVNC},
+		{"window", "live", true, false, DisplayVNC},
 	} {
-		if got := DisplayKind(c.mode, c.installed, c.graphical); got != c.want {
-			t.Errorf("DisplayKind(%q, %v, graphical=%v) = %q, want %q", c.mode, c.installed, c.graphical, got, c.want)
+		if got := DisplayKind(c.pref, c.mode, c.installed, c.graphical); got != c.want {
+			t.Errorf("DisplayKind(%q, %q, %v, graphical=%v) = %q, want %q", c.pref, c.mode, c.installed, c.graphical, got, c.want)
 		}
 	}
 }
@@ -58,7 +75,7 @@ func TestDisplayKindReadsNoEnvironment(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "")
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	t.Setenv(GraphicalEnv, "0")
-	if got := DisplayKind("disk", false, true); got != DisplayWindow {
+	if got := DisplayKind("", "disk", false, true); got != DisplayWindow {
 		t.Errorf("DisplayKind = %q, want %q: the argument decides, not the environment", got, DisplayWindow)
 	}
 }
