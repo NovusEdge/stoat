@@ -131,7 +131,11 @@ func provLine(spin spinner.Model, name string, st provState, now time.Time) stri
 	case st.last != "":
 		out += dimStyle.Render(" · " + ansi.Truncate(st.last, provMaxLast, "…"))
 	}
-	return out + dimStyle.Render(" · "+provElapsed(now.Sub(st.start)))
+	out += dimStyle.Render(" · " + provElapsed(now.Sub(st.start)))
+	// A long VM name can still push the line past the pane and wrap what
+	// should be one row. Every field above already has its own cap; this
+	// is the backstop for the sum of them.
+	return ansi.Truncate(out, appContentWidth, "…")
 }
 
 // installLine renders one disk VM mid unattended install the same way

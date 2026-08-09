@@ -14,6 +14,15 @@ import (
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
+// containsWrapped reports whether s contains needle once the pane's border
+// and whitespace are stripped. The facts pane holds every value to a fixed
+// column width now, so a path longer than that column wraps mid-token
+// across two rendered lines instead of pushing the pane wider.
+func containsWrapped(s, needle string) bool {
+	flat := strings.NewReplacer("\n", "", " ", "", "│", "").Replace(s)
+	return strings.Contains(flat, needle)
+}
+
 // TestTickGenerationOnlyReArmsCurrentChain proves the fix for the ticker
 // chain leak. A tickMsg carrying a stale generation must not re-arm; its
 // chain dies. One carrying the current generation must re-arm. Without the
@@ -240,7 +249,7 @@ func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
 	if !strings.Contains(out, "vnc") {
 		t.Fatalf("headless VM's detail screen must show a vnc row:\n%s", out)
 	}
-	if !strings.Contains(out, sock) {
+	if !containsWrapped(out, sock) {
 		t.Fatalf("vnc row must show the actual socket path %q:\n%s", sock, out)
 	}
 	if strings.Contains(out, "qemu window only") {
@@ -278,7 +287,7 @@ func TestDetailExplainsTheVNCFallbackOnAHeadlessHost(t *testing.T) {
 	m.detail = newDetail(v)
 	out := ansi.Strip(m.viewDetail())
 
-	if !strings.Contains(out, sock) {
+	if !containsWrapped(out, sock) {
 		t.Errorf("the install console is on the socket now; the detail screen must show it:\n%s", out)
 	}
 	if !strings.Contains(out, "no usable graphical session on this host") {

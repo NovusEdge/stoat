@@ -3,14 +3,35 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/core"
+)
+
+// Row cells are fixed-width lipgloss styles, not fmt padding, so a value
+// wider than its column truncates or wraps instead of shoving every column
+// after it out of place.
+const (
+	nameCellWidth = 14
+	modeCellWidth = 5
+	ramValueWidth = 5  // digits only, right-aligned; "M" is appended after
+	cpuValueWidth = 2  // digits only, right-aligned; "c" is appended after
+	upCellWidth   = 13 // "up " plus a duration up to "999h59m59s"
+	portCellWidth = 6  // ":" plus up to 5 digits
+)
+
+var (
+	nameCellStyle = lipgloss.NewStyle().Width(nameCellWidth)
+	modeCellStyle = lipgloss.NewStyle().Width(modeCellWidth)
+	ramCellStyle  = lipgloss.NewStyle().Width(ramValueWidth).Align(lipgloss.Right)
+	cpuCellStyle  = lipgloss.NewStyle().Width(cpuValueWidth).Align(lipgloss.Right)
+	upCellStyle   = lipgloss.NewStyle().Width(upCellWidth)
+	portCellStyle = lipgloss.NewStyle().Width(portCellWidth).Align(lipgloss.Right)
 )
 
 // vmItem is one row of the VM list. A single type covers both good VMs and
@@ -59,22 +80,19 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		// even when the row isn't selected, while the text stays muted so a
 		// whole line of red isn't shouting from the list.
 		plain := fmt.Sprintf("%-14s broken: %s", it.vm.Name, brokenReason(it.vm.Error))
+		glyph := cursor + errStyle.Render(glyphBroken) + " "
 		// A long reason wraps inside the pane. paneAt wraps the whole
-		// rendered list as one blob and has no idea this line starts 4
-		// columns in: the cursor, the glyph, and the space after it. Left
-		// to paneAt, the continuation lands flush against the pane's
-		// padding, under the cursor instead of under the text. Wrapping
-		// here first, with a hanging indent matching that prefix, makes
-		// every physical line already fit listWidth, so paneAt has
-		// nothing left to rewrap.
-		prefixWidth := lipgloss.Width(cursor) + lipgloss.Width(glyphBroken) + 1 // +1 for the space after the glyph
-		plain = strings.ReplaceAll(lipgloss.Wrap(plain, listWidth-prefixWidth, ""), "\n", "\n"+strings.Repeat(" ", prefixWidth))
+		// rendered list as one blob and has no idea this line starts past
+		// the cursor and the glyph. Wrapping the reason to its own column
+		// here, then joining it beside the glyph, keeps every continuation
+		// line under the text instead of flush against the pane's padding.
+		reason := lipgloss.NewStyle().Width(listWidth - lipgloss.Width(glyph)).Render(plain)
 		if selected {
-			plain = selStyle.Render(plain)
+			reason = selStyle.Render(reason)
 		} else {
-			plain = downStyle.Render(plain)
+			reason = downStyle.Render(reason)
 		}
-		fmt.Fprint(w, cursor+errStyle.Render(glyphBroken)+" "+plain)
+		fmt.Fprint(w, lipgloss.JoinHorizontal(lipgloss.Top, glyph, reason))
 		return
 	}
 
@@ -97,14 +115,20 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		if !v.StartedAt.IsZero() {
 			up = "up " + time.Since(v.StartedAt).Truncate(time.Second).String()
 		}
-		state = fmt.Sprintf("%s  :%d", up, v.SSHPort)
+		// Their own fixed cells, so the port lands in the same column on
+		// every running row regardless of how long the uptime string is.
+		state = upCellStyle.Render(up) + "  " + portCellStyle.Render(fmt.Sprintf(":%d", v.SSHPort))
 	}
 	// The dot and the state stay OUTSIDE the selection wrap. A styled
 	// substring ends in \x1b[0m, which resets the enclosing style too.
 	// Wrapping a row that starts with a coloured dot would leave everything
 	// after it unhighlighted, and a trailing dim "-" would render unbolded
 	// inside an otherwise highlighted row.
-	label := fmt.Sprintf("%-14s %-5s %5dM %2dc  ", v.Name, v.Mode, v.RAM, v.CPUs)
+	name := nameCellStyle.Render(ansi.Truncate(v.Name, nameCellWidth, "…"))
+	mode := modeCellStyle.Render(v.Mode)
+	ram := ramCellStyle.Render(fmt.Sprintf("%d", v.RAM)) + "M"
+	cpu := cpuCellStyle.Render(fmt.Sprintf("%d", v.CPUs)) + "c"
+	label := name + " " + mode + " " + ram + " " + cpu + "  "
 	if selected {
 		label = selStyle.Render(label)
 	}
@@ -123,10 +147,13 @@ const (
 	// render and then wraps the port onto its own line the moment
 	// something is actually up. A terminal narrower than this still clamps
 	// (paneAt bounds to the window); that is unavoidable at that size.
-	listWidth        = 60
-	listVisibleRows  = 6
-	listMinRows      = 2
-	listRowsHeadroom = 14 // banner, pane frame, status, footer
+	listWidth       = 60
+	listVisibleRows = 6
+	listMinRows     = 2
+	// banner, pane frame, search line, status line, footer. The search and
+	// status lines are always-present slots (see viewList), so they cost a
+	// line whether or not either has anything to show.
+	listRowsHeadroom = 16
 )
 
 // newVMList builds the list component with stoat's styling: the component's

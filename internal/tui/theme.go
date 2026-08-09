@@ -115,6 +115,30 @@ func radio(label string, on bool) string {
 // one place.
 const rowGap = "\n\n"
 
+// appContentWidth is the left edge every screen's stacked panes share. Before
+// this, each pane centered on its own width, so switching screens, or a pane
+// changing size as content appeared, shifted the whole block sideways.
+const appContentWidth = 72
+
+// column stacks parts left-aligned inside one block, at least width cells
+// wide. Every part then starts at the same left edge, instead of each one
+// centering on its own width.
+//
+// The block widens for a part wider than width rather than wrapping it: a
+// lipgloss Style.Width() narrower than its content word-wraps that content,
+// which mangles a bordered pane's box-drawing runs instead of just leaving
+// it be. The list pane plus its side-by-side access box is routinely wider
+// than appContentWidth, so this has to hold.
+func column(width int, parts ...string) string {
+	for _, p := range parts {
+		if w := lipgloss.Width(p); w > width {
+			width = w
+		}
+	}
+	return lipgloss.NewStyle().Width(width).Align(lipgloss.Left).
+		Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
 // paneAt draws a pane whose content is held at a fixed width, for screens
 // whose rows come and go, e.g. a download block, an error line, a
 // conditional disk row. pane() hugs its content, so without this the box

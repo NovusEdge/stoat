@@ -66,12 +66,11 @@ func renderProgressPanel(phase string, p Progress, hasProg bool, elapsed time.Du
 	var f fields
 	f.row("", "phase", dimStyle.Render(phase))
 	if hasProg {
-		f.row("", "", bar(p.Frac, detailBarWidth))
 		num := fmt.Sprintf("%3.0f%%", p.Frac*100)
 		if p.Total > 0 {
 			num = fmt.Sprintf("%d/%d", p.Done, p.Total)
 		}
-		f.row("", "", dimStyle.Render(num))
+		f.row("", "", bar(p.Frac, detailBarWidth)+" "+dimStyle.Render(num))
 		if p.Label != "" {
 			f.row("", "package", p.Label)
 		}
@@ -79,5 +78,5 @@ func renderProgressPanel(phase string, p Progress, hasProg bool, elapsed time.Du
 		f.row("", "", dimStyle.Render("waiting for output…"))
 	}
 	f.row("", "elapsed", provElapsed(elapsed))
-	return pane("progress", f.String(), width)
+	return paneAt("progress", f.String(), appContentWidth, width)
 }

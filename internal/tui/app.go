@@ -448,17 +448,20 @@ func (m model) View() tea.View {
 		s = lipgloss.JoinVertical(lipgloss.Center, banner(), "", body)
 	}
 
-	vAlign := lipgloss.Center
-	if lipgloss.Height(s) > m.height {
-		// Content taller than the terminal: centering vertically would clip
-		// it top and bottom with no way to scroll back to what's lost.
-		// Anchor to the top instead so everything stays reachable.
-		vAlign = lipgloss.Top
+	// Anchored to the top, not centered: a centered screen re-centers
+	// vertically every time its height changes, e.g. a toast, a progress
+	// panel, or a search prompt appearing. Anchoring to the top means only
+	// content below the change moves, not the whole screen.
+	const topMargin = 1
+	margin := topMargin
+	if lipgloss.Height(s)+margin > m.height {
+		margin = 0
 	}
+	s = strings.Repeat("\n", margin) + s
 	// Overlays go on last, over the finished screen: they must not be part of
 	// what Place centers. The modal sits under the toast, so a toast raised
 	// while the picker is open is still readable.
-	return m.newView(m.renderToast(m.renderModal(lipgloss.Place(m.width, m.height, lipgloss.Center, vAlign, s))))
+	return m.newView(m.renderToast(m.renderModal(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Top, s))))
 }
 
 // newView wraps a rendered frame in a tea.View with the alt-screen flag set,
