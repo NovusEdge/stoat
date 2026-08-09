@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/core"
 )
@@ -71,6 +74,35 @@ func TestListWidthFitsARunningRow(t *testing.T) {
 	if len(worst) > listWidth {
 		t.Errorf("listWidth = %d but the widest running row is %d cells; rows will wrap:\n%s",
 			listWidth, len(worst), worst)
+	}
+}
+
+// TestColumnHoldsEveryLineWithinWidth pins column's left-align contract: a
+// caller stacking narrower pieces gets back a block padded to width, not one
+// that drifts wider or narrower line by line.
+func TestColumnHoldsEveryLineWithinWidth(t *testing.T) {
+	out := column(appContentWidth, "short", "a bit longer than short", "")
+	for _, l := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(l); w != appContentWidth {
+			t.Errorf("line %q is %d cells wide, want %d", l, w, appContentWidth)
+		}
+	}
+}
+
+// TestListRowWidthInvariantForLongNames covers the bug hand-padded
+// fmt.Sprintf rows had: a name longer than its column pushed every column
+// after it to the right instead of being cut off. vmDelegate.Render must
+// truncate the name instead, so the row's rendered width stays fixed
+// regardless of how long a VM's name is.
+func TestListRowWidthInvariantForLongNames(t *testing.T) {
+	v := core.VM{
+		Name: strings.Repeat("n", 200), Mode: "cloud", State: core.StateRunning,
+		RAM: 8192, CPUs: 8, SSHPort: 65535, StartedAt: time.Now().Add(-999 * time.Hour),
+	}
+	l := list.New([]list.Item{vmItem{vm: v}}, vmDelegate{}, listWidth, 2)
+	if got := lipgloss.Width(ansi.Strip(l.View())); got > listWidth {
+		t.Errorf("row for a %d-char name rendered %d cells wide, want <= listWidth (%d)",
+			len(v.Name), got, listWidth)
 	}
 }
 
