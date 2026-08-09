@@ -10,8 +10,7 @@ import "github.com/novusedge/stoat/internal/config"
 // idempotent but leaves no Applied entry to check.
 //
 // A cloud VM always returns false. cloud-init applies its recipes from the
-// seed at first boot, matching the guard autoprov.go's
-// wantsAutoProvisionPrompt uses.
+// seed at first boot, so an ssh provision run has nothing to do.
 func NeedsProvision(v *config.VM) (bool, error) {
 	if v.Mode == "cloud" {
 		return false, nil

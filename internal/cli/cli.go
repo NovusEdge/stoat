@@ -46,6 +46,11 @@ type Args struct {
 	Yes   bool
 	N     int // logs -n
 
+	// NoProvision belongs to "up": it skips the automatic post-boot
+	// provision, leaving `up` returning as soon as the VM starts, as it did
+	// before that behavior existed.
+	NoProvision bool
+
 	// JSON is set by Main from the pre-parse argv scan, never by Parse: the
 	// flag has to be recognized before any parser exists so a usage error
 	// can still produce an envelope. It implies Quiet, so every prose line

@@ -75,7 +75,8 @@ type getCmd struct {
 }
 
 type upCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM          string `arg:"" help:"vm name"`
+	NoProvision bool   `name:"no-provision" help:"start only; skip the automatic post-boot provision"`
 }
 
 type downCmd struct {
@@ -248,8 +249,12 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		// FLAG path gets it from kong's own buffer.
 		a.Help = helpText()
 
-	case "get", "up", "down", "ssh", "ssh-command", "provision":
+	case "get", "down", "ssh", "ssh-command", "provision":
 		a.VM = g.vmFor(path)
+
+	case "up":
+		a.VM = g.Up.VM
+		a.NoProvision = g.Up.NoProvision
 
 	case "rm":
 		a.VM, a.Yes = g.RM.VM, g.RM.Yes
