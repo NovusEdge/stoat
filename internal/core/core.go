@@ -247,8 +247,8 @@ func plan(s Spec) (*config.VM, error) {
 	if img.backend == "cloudinit" {
 		v.Base = img.abs
 		// Only a cloud image needs a console password. cloud-init locks
-		// every account by default, so its VNC console (a cloud VM never
-		// gets a qemu window; see qemu.NeedsWindow) shows a login prompt
+		// every account by default, so its console (a qemu window, or VNC
+		// on a headless host; see qemu.NeedsWindow) shows a login prompt
 		// with no valid answer otherwise. A live Alpine VM logs root in at
 		// the console with no password. A disk VM's password is whatever
 		// the user set in the guest's own installer.

@@ -94,24 +94,23 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 // printDisplay says where a VM's screen is and how to reach it.
 //
 // This prints on every start, not only the surprising one, because the
-// surprising one is not detectable from here: a disk VM shows a window until
-// setup-alpine marks it installed, and the start after that silently moves
-// the screen to a VNC socket. A user who was never told the socket exists has
-// no error to search for and no path to guess.
+// surprising one is not detectable from here: a VM with display="vnc", or one
+// on a host with no graphical session, has its screen on a socket instead of
+// the window a user expects by default. A user who was never told the socket
+// exists has no error to search for and no path to guess.
 func printDisplay(w io.Writer, d core.Display) {
 	switch d.Kind {
 	case core.DisplayWindow:
-		fmt.Fprintln(w, "display: a qemu window, for the OS installer's console")
+		fmt.Fprintln(w, "display: a qemu window")
 	case core.DisplayVNC:
 		if d.NoSession {
-			// The install console, on a host that cannot open a window. Said
-			// before the socket line, because without it "no qemu window" for a
-			// VM that is mid-install reads as the thing that went wrong.
+			// Said before the socket line, because without it "no qemu window"
+			// on its own reads as the thing that went wrong.
 			// "no usable session" rather than "no session": the same line
 			// prints when the user set STOAT_GRAPHICAL=0 on a host that plainly
 			// has one, because its GTK cannot draw on it.
-			fmt.Fprintln(w, "display: no usable graphical session on this host, so the OS installer's")
-			fmt.Fprintln(w, "  console is on VNC instead; drive it from a machine with a screen")
+			fmt.Fprintln(w, "display: no usable graphical session on this host, so the screen")
+			fmt.Fprintln(w, "  is on VNC instead; attach to watch it")
 		}
 		fmt.Fprintf(w, "display: no qemu window; the screen is on %s\n", d.Socket)
 		if d.Attach.Command == "" {

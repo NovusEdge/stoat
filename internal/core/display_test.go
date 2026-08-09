@@ -17,14 +17,29 @@ func fakeBins(t *testing.T, names ...string) {
 	t.Setenv("PATH", dir)
 }
 
-// The reported case: a disk VM that showed a window through setup-alpine and
-// is headless on every start after it. DisplayFor must be able to say where
-// the screen went and what opens it.
+// An installed disk VM on a graphical host still gets a window: "auto" no
+// longer singles out the installer console.
 func TestDisplayForAnInstalledDiskVM(t *testing.T) {
-	fakeBins(t, "gvncviewer")
 	v := VM{
 		Name: "alpinedisk", Mode: "disk", Installed: true, State: StateStopped,
 		Paths: Paths{VNCSocket: "/home/u/.stoat/alpinedisk/vnc.sock"},
+	}
+	d := DisplayFor(v, true)
+	if d.Kind != DisplayWindow {
+		t.Errorf("Kind = %q, want %q", d.Kind, DisplayWindow)
+	}
+	if d.Socket != "" || d.Attach.Command != "" {
+		t.Errorf("a windowed VM must offer no VNC attach: %+v", d)
+	}
+}
+
+// The same VM with display="vnc" set explicitly. That is the only way an
+// installed disk VM stays headless now.
+func TestDisplayForAnInstalledDiskVMPinnedToVNC(t *testing.T) {
+	fakeBins(t, "gvncviewer")
+	v := VM{
+		Name: "alpinedisk", Mode: "disk", Installed: true, State: StateStopped,
+		Display: "vnc", Paths: Paths{VNCSocket: "/home/u/.stoat/alpinedisk/vnc.sock"},
 	}
 	d := DisplayFor(v, true)
 	if d.Kind != DisplayVNC {
@@ -78,14 +93,14 @@ func TestDisplayForAFreshDiskVMWithNoSessionFallsBackToVNC(t *testing.T) {
 	}
 }
 
-// An installed disk VM was already on VNC for its own reasons. A headless host
-// must not make it claim it was demoted, or the explanation gets printed on
-// every VM stoat has.
+// A VM pinned to display="vnc" was already on VNC for its own reasons. A
+// headless host must not make it claim it was demoted, or the explanation
+// gets printed on every VM stoat has.
 func TestDisplayForAnAlreadyHeadlessVMIsNotBlamedOnTheHost(t *testing.T) {
 	fakeBins(t)
-	v := VM{Name: "c", Mode: "cloud", State: StateStopped, Paths: Paths{VNCSocket: "/x/vnc.sock"}}
+	v := VM{Name: "c", Mode: "cloud", Display: "vnc", State: StateStopped, Paths: Paths{VNCSocket: "/x/vnc.sock"}}
 	if d := DisplayFor(v, false); d.NoSession {
-		t.Error("a cloud VM never wanted a window; NoSession must be false")
+		t.Error("this VM never wanted a window; NoSession must be false")
 	}
 }
 
@@ -108,8 +123,8 @@ func TestDisplayKindIsPure(t *testing.T) {
 	t.Setenv("DISPLAY", "")
 	t.Setenv("WAYLAND_DISPLAY", "")
 	t.Setenv("XDG_RUNTIME_DIR", "")
-	if got := DisplayKind(VM{Mode: "cloud"}, true); got != DisplayVNC {
-		t.Errorf("DisplayKind = %q, want %q", got, DisplayVNC)
+	if got := DisplayKind(VM{Mode: "cloud"}, true); got != DisplayWindow {
+		t.Errorf("DisplayKind = %q, want %q", got, DisplayWindow)
 	}
 	if got := DisplayKind(VM{Mode: "disk"}, true); got != DisplayWindow {
 		t.Errorf("DisplayKind = %q, want %q", got, DisplayWindow)
@@ -120,8 +135,7 @@ func TestDisplayKindIsPure(t *testing.T) {
 	}
 }
 
-// A per-VM preference overrides the mode/installed default, but not the
-// host's veto.
+// A per-VM preference overrides the auto default, but not the host's veto.
 func TestDisplayKindHonoursPreference(t *testing.T) {
 	if got := DisplayKind(VM{Mode: "cloud", Display: "window"}, true); got != DisplayWindow {
 		t.Errorf("Display=window: got %q, want %q", got, DisplayWindow)

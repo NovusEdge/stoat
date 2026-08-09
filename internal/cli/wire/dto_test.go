@@ -12,7 +12,7 @@ import (
 
 func TestVMGolden(t *testing.T) {
 	got := marshal(t, FromVM(sampleVM(), true))
-	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"vnc"}`
+	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"window"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -28,11 +28,13 @@ func TestVMDisplayNamesTheSurfaceNotTheSocket(t *testing.T) {
 	if !strings.Contains(got, `"display":"window"`) {
 		t.Errorf("a VM mid-install has a real window: %s", got)
 	}
-	installed := fresh
-	installed.Installed = true
-	got = marshal(t, FromVM(installed, true))
+
+	pinned := fresh
+	pinned.Installed = true
+	pinned.Display = "vnc"
+	got = marshal(t, FromVM(pinned, true))
 	if !strings.Contains(got, `"display":"vnc"`) {
-		t.Errorf("an installed disk VM is headless: %s", got)
+		t.Errorf("a VM pinned to vnc is headless: %s", got)
 	}
 	if strings.Contains(got, "vnc.sock") || strings.Contains(got, "/home/u") {
 		t.Errorf("the socket path reached the wire: %s", got)

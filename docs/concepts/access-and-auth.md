@@ -130,7 +130,7 @@ the detail screen:
 
 ```
   ssh       stoat@127.0.0.1:2202
-  console   stoat / stoat  (qemu window only)
+  console   stoat / stoat  (over the qemu window, or vnc on a headless host)
 ```
 
 and in the log line written when the VM starts, which you can read with

@@ -232,13 +232,13 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 }
 
-// A cloud VM never gets a qemu window (qemu.NeedsWindow), so the detail
-// screen must surface the VNC socket as the actual way to get a display.
-// Before this fix, nothing told the user that socket exists. The
-// console-password row also claimed a "(qemu window only)" that never
-// applies: the password is set only by the cloudinit backend, which is
-// always cloud mode.
+// This VM runs with no graphical session (the test sets no Display and no
+// WAYLAND_DISPLAY/DISPLAY), so qemu.DisplayKind falls back to vnc regardless
+// of mode. The detail screen must surface the VNC socket as the actual way
+// to get a display. Before this fix, nothing told the user that socket
+// exists.
 func TestDetailSurfacesVNCForAHeadlessVM(t *testing.T) {
+	t.Setenv(qemu.GraphicalEnv, "0")
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "vnc.sock")
 	v := core.VM{Name: "cloudy", Mode: "cloud", ConsolePassword: "stoat", Paths: core.Paths{Dir: dir, VNCSocket: sock}}
@@ -300,6 +300,7 @@ func TestDetailExplainsTheVNCFallbackOnAHeadlessHost(t *testing.T) {
 // no way to open it. The detail pane instead names a viewer actually
 // installed on this host.
 func TestDetailShowsHowToAttachToTheVNCSocket(t *testing.T) {
+	t.Setenv(qemu.GraphicalEnv, "0")
 	fakeViewerPath(t, "gvncviewer")
 	v := core.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 120, height: 40}
@@ -314,6 +315,7 @@ func TestDetailShowsHowToAttachToTheVNCSocket(t *testing.T) {
 // Naming a viewer the user does not have is worse than naming none: it reads
 // as an instruction and fails as one.
 func TestDetailSaysWhatToInstallWhenNoViewerExists(t *testing.T) {
+	t.Setenv(qemu.GraphicalEnv, "0")
 	fakeViewerPath(t)
 	v := core.VM{Name: "alpinedisk", Mode: "disk", Installed: true, Paths: core.Paths{Dir: t.TempDir()}}
 	m := model{screen: screenDetail, width: 120, height: 40}

@@ -914,10 +914,10 @@ func (m model) viewForm() string {
 			marker = selStyle.Render(glyphCursor)
 		}
 		b.row(marker, "console", radio("stoat", !f.randomPassword)+"  "+radio("random", f.randomPassword))
-		// cloudinit is always cloud mode (effectiveMode above), and a cloud VM
-		// never gets a QEMU window (qemu.NeedsWindow), so this password is only
-		// ever typed at the VNC socket the detail screen surfaces.
-		b.hint("stoat user's login over VNC, cloud VMs have no qemu window")
+		// This password is typed at whichever console the VM opens: a qemu
+		// window by default on a graphical host, or the VNC socket the
+		// detail screen surfaces on a headless host or display="vnc".
+		b.hint("stoat user's login at the console (window, or VNC on a headless host)")
 	}
 
 	// The download block and the error are full-width blocks, not field rows,
