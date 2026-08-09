@@ -9,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
@@ -522,12 +521,12 @@ func (m model) viewEdit() string {
 
 	box := paneAt("edit "+e.vm.Name, body, editContentWidth, m.width)
 
-	parts := []string{box, ""}
-	if m.status != "" {
-		parts = append(parts, warnStyle.Render(m.status))
-	}
+	// The status slot is always present, blank when there is nothing to
+	// show, so an appearing message replaces blank space instead of
+	// pushing the footer down.
+	parts := []string{box, "", warnStyle.Render(m.status)}
 	parts = append(parts, renderFooter(editHelp{}, m.width, m.showHelp))
-	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+	return column(appContentWidth, parts...)
 }
 
 func editRecipesLabel(e editModel) string {

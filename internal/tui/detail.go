@@ -310,12 +310,9 @@ func (m model) viewDetail() string {
 	v := m.detail.vm
 
 	if v.Name == "" {
-		parts := []string{pane("", dimStyle.Render("no vm selected"), m.width), ""}
-		if m.status != "" {
-			parts = append(parts, warnStyle.Render(m.status))
-		}
+		parts := []string{pane("", dimStyle.Render("no vm selected"), m.width), "", warnStyle.Render(m.status)}
 		parts = append(parts, dimStyle.Render("esc back"))
-		return lipgloss.JoinVertical(lipgloss.Center, parts...)
+		return column(appContentWidth, parts...)
 	}
 
 	if m.detail.pager != nil {
@@ -333,7 +330,7 @@ func (m model) viewDetail() string {
 		state = upStyle.Render("running")
 	}
 
-	var facts fields
+	facts := fields{width: appContentWidth}
 	facts.row("", "", dimStyle.Render(modeLabel(v.Mode))+dimStyle.Render(glyphSep)+state)
 	facts.hint(modeHint(v.Mode))
 	facts.gap()
@@ -462,13 +459,13 @@ func (m model) viewDetail() string {
 		}
 	}
 
-	factsBox := pane(v.Name, facts.String(), m.width)
+	factsBox := paneAt(v.Name, facts.String(), appContentWidth, m.width)
 
 	parts := []string{factsBox}
 	if m.detail.log != "" {
 		// lipgloss re-applies the style on every line of a multi-line string,
 		// so the log needs no per-line loop of its own.
-		parts = append(parts, "", pane("last provision", dimStyle.Render(m.detail.log), m.width))
+		parts = append(parts, "", paneAt("last provision", dimStyle.Render(m.detail.log), appContentWidth, m.width))
 	}
 
 	if panel := progressPanel(m); panel != "" {
@@ -479,14 +476,12 @@ func (m model) viewDetail() string {
 	for _, l := range provLinesExcept(m, v.Name) {
 		parts = append(parts, l)
 	}
-	if m.status != "" {
-		parts = append(parts, warnStyle.Render(m.status))
-	}
+	// An always-present slot: an appearing status line replaces blank
+	// space instead of pushing the footer down.
+	parts = append(parts, warnStyle.Render(m.status))
 	parts = append(parts, renderFooter(detailHelp{
 		sshAvailable:    v.State == core.StateRunning,
 		consolePassword: consolePasswordAvailable(v),
 	}, m.width, m.showHelp))
-	// Center for the same reason as the list: the footer is wider than the
-	// pane, and a left join would pin the pane to the footer's left edge.
-	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+	return column(appContentWidth, parts...)
 }

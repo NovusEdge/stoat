@@ -11,7 +11,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/cloudinit"
@@ -223,7 +222,10 @@ func byoOSNames() []string {
 //
 // 72 plus the pane frame is 78 cells, so the box fits an 80-column terminal
 // without paneAt having to clamp it.
-const formContentWidth = 72
+//
+// Equal to appContentWidth: the form and the list share one left edge and
+// one width, so switching between screens does not shift the column.
+const formContentWidth = appContentWidth
 
 type formModel struct {
 	inputs      []textinput.Model // name, ram, cpus, disk, share
@@ -930,15 +932,12 @@ func (m model) viewForm() string {
 
 	box := paneAt("new vm", body, formContentWidth, m.width)
 
-	// Center rather than Left: the footer is far wider than the box, so a
-	// left join pins the box to the footer's left edge and the pane reads as
-	// off-center once the whole rectangle is placed.
-	parts := []string{box, ""}
-	if m.status != "" {
-		parts = append(parts, warnStyle.Render(m.status))
-	}
+	// The status slot is always present, blank when there is nothing to
+	// show, so an appearing message replaces blank space instead of
+	// pushing the footer down.
+	parts := []string{box, "", warnStyle.Render(m.status)}
 	parts = append(parts, renderFooter(formHelp{}, m.width, m.showHelp))
-	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+	return column(appContentWidth, parts...)
 }
 
 // recipesLabel renders the recipes row's checkbox list, highlighting the

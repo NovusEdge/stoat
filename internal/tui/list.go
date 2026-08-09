@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/core"
@@ -289,36 +288,24 @@ func (m model) viewList() string {
 	}
 	box = joinAccess(box, accessBox(cur, ci, m.ciProg, m.width), m.width)
 
-	// lipgloss.Place centers (or left-aligns) each LINE of a string
-	// independently, sized against that string's widest line. Handing it
-	// box+status+footer concatenated as-is would make every shorter line
-	// drift toward center on its own: the "justified" look this used to
-	// have. JoinVertical instead pads every line of every piece out to the
-	// widest piece's width first, so the result is one rectangle that moves
-	// as a whole once centered in the terminal.
-	//
-	// Center, not Left, join: the footer is much wider than the box, so a
-	// left join pins the box to the footer's left edge, leaving it visibly
-	// off-center under the centered banner.
-	parts := []string{box, ""}
-	// The search line sits between the pane and the status: while the input
-	// is open it IS the input, and once a filter is applied it reports what
-	// is being hidden. Without it a filtered list just looks like VMs went
-	// missing.
-	if search := listStatusLine(m.list); search != "" {
-		parts = append(parts, search, "")
-	}
+	// column holds every piece to appContentWidth and stacks them left-
+	// aligned. Without it, the box, the status line, and the footer would
+	// each center on their own width, drifting sideways from one another
+	// as content came and went.
+	// The search line and the status line are always-present slots, blank
+	// when there is nothing to show. A conditionally-appended line pushes
+	// everything below it down the moment it appears; a slot that is
+	// always there just fills in.
+	parts := []string{box, "", listStatusLine(m.list)}
 	// In-flight provision runs sit above the status line: they are ongoing
 	// state, not a one-off message, and a run started from here keeps going
 	// while the user moves around the list.
 	for _, l := range provLines(m) {
 		parts = append(parts, l)
 	}
-	if m.status != "" {
-		parts = append(parts, warnStyle.Render(m.status))
-	}
+	parts = append(parts, warnStyle.Render(m.status))
 	v := m.current()
 	sshAvailable := v != nil && v.State == core.StateRunning
 	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
-	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+	return column(appContentWidth, parts...)
 }
