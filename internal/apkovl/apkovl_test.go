@@ -309,6 +309,15 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 	if strings.Index(script, "blkid") > strings.Index(script, "setup-alpine") {
 		t.Errorf("blank-disk guard must run before setup-alpine:\n%s", script)
 	}
+	// Install output goes to the serial port stoat captures, or the detail
+	// screen's console pager shows nothing during the install.
+	if !strings.Contains(script, "/dev/ttyS0") {
+		t.Errorf("stoat-install.start does not redirect to the captured serial port:\n%s", script)
+	}
+	// The VGA console shows a splash instead of a bare login prompt.
+	if !strings.Contains(content["etc/issue"], "installing") {
+		t.Errorf("etc/issue missing the install banner: %q", content["etc/issue"])
+	}
 	if m := hdrs["etc/local.d/stoat-install.start"].Mode; m&0o111 == 0 {
 		t.Errorf("stoat-install.start mode = %o, not executable", m)
 	}
