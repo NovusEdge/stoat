@@ -266,6 +266,14 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.Select(n - 1)
 		}
 		m.syncListHeight()
+		if anyInstalling(msg.vms) {
+			// Kicks the spinner tick chain for a VM installing itself, which
+			// never goes through startProvision and so never starts it the
+			// way a recipe run does. A redundant kick while the chain is
+			// already running is harmless: spinner.Model tags its ticks and
+			// drops one that doesn't match its current tag.
+			cmd = tea.Batch(cmd, m.spin.Tick)
+		}
 		return m, cmd
 	case statusMsg:
 		cmd := m.showToast(string(msg), false)
@@ -285,14 +293,14 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// provision finishes, it stops re-arming. Each tick also re-reads
 		// the tail of every running VM's log. That log tail is where the
 		// step and last-output text come from.
-		if len(m.provisioning) == 0 {
+		if len(m.provisioning) == 0 && !anyInstalling(m.vms) {
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		for name, st := range m.provisioning {
 			if v := m.vmByName(name); v != nil {
-				st.step, st.last = readProvStep(*v)
+				st.step, st.last, st.prog, st.hasProg = readProvStep(*v)
 				m.provisioning[name] = st
 			}
 		}

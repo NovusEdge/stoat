@@ -14,14 +14,17 @@ import (
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
-// provState is what the UI knows about one in-flight provision run. There is
-// no percentage: the run installs an unknown number of packages over ssh, so
-// any number shown would be invented. The UI shows which recipe is running,
-// its last printed line, and how long the run has taken.
+// provState is what the UI knows about one in-flight provision run. The UI
+// shows which recipe is running, its last printed line, how long the run has
+// taken, and a package-install bar whenever the underlying package manager's
+// own output names one. hasProg is false, and no bar shown, whenever it
+// doesn't: a made-up percentage is worse than none.
 type provState struct {
-	start time.Time
-	step  string // recipe name, or the phase before one starts
-	last  string // the log's most recent output line
+	start   time.Time
+	step    string // recipe name, or the phase before one starts
+	last    string // the log's most recent output line
+	prog    Progress
+	hasProg bool
 }
 
 // provTailBytes is how much of the end of last-provision.log gets read to
@@ -56,12 +59,13 @@ func tailBytes(path string, n int64) []byte {
 // readProvStep derives the current step from the tail of a VM's provision log.
 // Parsing the log the run already produces avoids plumbing progress through a
 // channel, and the CLI's `stoat provision` reads the same file the same way.
-// Returns the step (which recipe, or the phase before one starts) and the most
-// recent line of real output.
-func readProvStep(v core.VM) (step, last string) {
+// Returns the step (which recipe, or the phase before one starts), the most
+// recent line of real output, and the newest package-progress line the tail
+// contains, if any.
+func readProvStep(v core.VM) (step, last string, prog Progress, hasProg bool) {
 	b := tailBytes(v.Paths.ApplyLog, provTailBytes)
 	if len(b) == 0 {
-		return "starting", ""
+		return "starting", "", Progress{}, false
 	}
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 
@@ -90,7 +94,13 @@ func readProvStep(v core.VM) (step, last string) {
 			last = ""
 		}
 	}
-	return step, last
+
+	for i := len(lines) - 1; i >= 0; i-- {
+		if p, ok := ParseProgress(lines[i]); ok {
+			return step, last, p, true
+		}
+	}
+	return step, last, Progress{}, false
 }
 
 // provElapsed renders a duration at the resolution a human watching a
@@ -107,12 +117,17 @@ func provElapsed(d time.Duration) string {
 // pane or wrap it.
 const provMaxLast = 34
 
-// provLine renders one in-flight run: spinner, VM, current step, last output,
-// elapsed. Everything in it is derived from real state: there is no progress
-// bar here on purpose, because nothing knows how many steps remain.
+// provLine renders one in-flight run: spinner, VM, current step, elapsed,
+// and either a package-progress bar or the log's last output line, whichever
+// the tail has to offer. The bar replaces the last-output text instead of
+// sitting beside it: both describe the same log line, and the row has no
+// room to say it twice.
 func provLine(spin spinner.Model, name string, st provState, now time.Time) string {
 	out := spin.View() + " " + accentStyle.Render(name) + dimStyle.Render(" · "+st.step)
-	if st.last != "" {
+	switch {
+	case st.hasProg:
+		out += " " + progressLabel(st.prog, provBarWidth)
+	case st.last != "":
 		l := st.last
 		if len(l) > provMaxLast {
 			l = l[:provMaxLast-1] + "…"
@@ -122,20 +137,100 @@ func provLine(spin spinner.Model, name string, st provState, now time.Time) stri
 	return out + dimStyle.Render(" · "+provElapsed(now.Sub(st.start)))
 }
 
-// provLines renders every in-flight run, newest state first read fresh from
-// the logs. Sorted by name so the order doesn't shuffle between frames.
-func provLines(m model) []string {
-	if len(m.provisioning) == 0 {
-		return nil
+// installLine renders one disk VM mid unattended install the same way
+// provLine renders a recipe run: spinner, VM, phase, bar, elapsed. There is
+// no step name to show (installLine has no log line to derive one from, only
+// the console transcript), so the phase is always "installing".
+func installLine(spin spinner.Model, v core.VM, now time.Time) string {
+	out := spin.View() + " " + accentStyle.Render(v.Name) + dimStyle.Render(" · installing")
+	if p, ok := latestInstallProgress(v.Name); ok {
+		out += " " + progressLabel(p, provBarWidth)
 	}
+	elapsed := time.Duration(0)
+	if !v.StartedAt.IsZero() {
+		elapsed = now.Sub(v.StartedAt)
+	}
+	return out + dimStyle.Render(" · "+provElapsed(elapsed))
+}
+
+// latestInstallProgress reads the tail of a disk VM's console log and
+// returns the newest line ParseProgress can read as install progress. The
+// console log is the only record of an unattended install: it runs before
+// ssh exists, so there is no apply log yet to read instead.
+func latestInstallProgress(name string) (Progress, bool) {
+	rc, err := core.Logs(name, core.WhichConsole)
+	if err != nil {
+		return Progress{}, false
+	}
+	content, _, err := tailReadCloser(rc, provTailBytes)
+	if err != nil {
+		return Progress{}, false
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if p, ok := ParseProgress(lines[i]); ok {
+			return p, true
+		}
+	}
+	return Progress{}, false
+}
+
+// anyInstalling reports whether vms contains a disk VM running its own
+// unattended install: the same test provLines uses to decide whether to draw
+// an install-phase line. app.go's spinner.TickMsg case uses it too, to
+// re-arm the tick chain for a VM that entered this state without a "p"
+// press ever landing in m.provisioning.
+func anyInstalling(vms []core.VM) bool {
+	for _, v := range vms {
+		if v.Mode == "disk" && !v.Installed && v.State == core.StateRunning {
+			return true
+		}
+	}
+	return false
+}
+
+// provLines renders every in-flight run, newest state first read fresh from
+// the logs: package installs on uninstalled disk VMs booting for the first
+// time, then recipe runs from m.provisioning. Installing VMs are read
+// straight from m.vms rather than a tracked map, because the install starts
+// itself the moment the VM boots; there is no "p" press to record one in
+// m.provisioning the way a recipe run does. Each group is sorted by name so
+// neither shuffles between frames.
+func provLines(m model) []string { return provLinesExcept(m, "") }
+
+// provLinesExcept is provLines with one VM dropped. viewDetail calls it with
+// the selected VM's name: that VM already gets its own fuller panel from
+// progressPanel, and repeating it here as a second, compact line would say
+// the same thing twice on one screen.
+func provLinesExcept(m model, except string) []string {
+	inProvisioning := make(map[string]bool, len(m.provisioning))
 	names := make([]string, 0, len(m.provisioning))
 	for n := range m.provisioning {
+		if n == except {
+			continue
+		}
+		inProvisioning[n] = true
 		names = append(names, n)
 	}
 	sort.Strings(names)
 
+	var installing []core.VM
+	for _, v := range m.vms {
+		if v.Name != except && v.Mode == "disk" && !v.Installed && v.State == core.StateRunning && !inProvisioning[v.Name] {
+			installing = append(installing, v)
+		}
+	}
+	sort.Slice(installing, func(i, j int) bool { return installing[i].Name < installing[j].Name })
+
+	if len(names) == 0 && len(installing) == 0 {
+		return nil
+	}
+
 	now := time.Now()
-	out := make([]string, 0, len(names))
+	out := make([]string, 0, len(names)+len(installing))
+	for _, v := range installing {
+		out = append(out, installLine(m.spin, v, now))
+	}
 	for _, n := range names {
 		out = append(out, provLine(m.spin, n, m.provisioning[n], now))
 	}
