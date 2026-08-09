@@ -36,14 +36,13 @@ type snapshotsModal struct {
 
 	// pendingDelete and pendingRestore hold the snapshot awaiting a y/N
 	// answer. "y" confirms, any other key cancels, the same rule as
-	// list.go's pendingDelete and app.go's pendingProvision.
+	// list.go's pendingDelete.
 	//
 	// Restore discards everything since the snapshot was taken, with no way
 	// back. That makes it as destructive as delete, so it gets the same gate.
 	//
 	// Two fields, not one shared field with a "which action" tag. Only one is
-	// ever armed at a time. Mirrors app.go's own pendingDelete/pendingProvision
-	// split.
+	// ever armed at a time.
 	pendingDelete  *core.Snapshot
 	pendingRestore *core.Snapshot
 

@@ -54,8 +54,7 @@ type model struct {
 	// broken VMs too: core.Destroy takes a directory name and handles both, so
 	// there is no longer a second "which kind of row is this" state to keep
 	// mutually exclusive with this one.
-	pendingDelete    *core.VM
-	pendingProvision *core.VM // VM that just became reachable, awaiting a y/N to provision
+	pendingDelete *core.VM
 
 	// provisioning tracks VMs with a provision run in flight. It is keyed by
 	// the directory name core.VM.Name reports, like cloudInit below. This
@@ -327,32 +326,30 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cloudInit[msg.vm.Name] = "waiting"
 			return m, tea.Batch(started, loadVMs, checkCloudInit(msg.vm))
 		}
-		if !wantsAutoProvisionPrompt(msg.vm) {
+		if !needsAutoProvision(msg.vm) {
 			return m, tea.Batch(started, loadVMs)
 		}
 		// Watch for sshd in the background. The user keeps full use of the UI
-		// meanwhile: this is an offer that arrives when it is ready, not a
-		// modal wait.
+		// meanwhile: provisioning starts on its own once the VM is reachable.
 		return m, tea.Batch(started, loadVMs, awaitSSH(msg.vm))
 	case sshReadyMsg:
 		v := m.vmByName(msg.name)
 		// Re-check on arrival: up to 90 seconds have passed, in which the VM
 		// could have been stopped, deleted, edited to drop its recipes, or
 		// provisioned by hand.
-		if v == nil || v.State != core.StateRunning || !wantsAutoProvisionPrompt(*v) {
+		if v == nil || v.State != core.StateRunning || !needsAutoProvision(*v) {
 			return m, nil
 		}
 		if _, busy := m.provisioning[v.Name]; busy {
 			return m, nil
 		}
-		// Never stack prompts: a pending delete is a more consequential
-		// question and the user is mid-answer.
+		// A pending delete is a more consequential question and the user is
+		// mid-answer; starting a provision now would clear m.status and hide
+		// the confirmation.
 		if m.pendingDelete != nil {
 			return m, nil
 		}
-		m.pendingProvision = v
-		m.status = autoProvisionPrompt(*v)
-		return m, nil
+		return m, m.startProvision(*v)
 	case provisionDoneMsg:
 		delete(m.provisioning, msg.name)
 		if msg.err != nil {

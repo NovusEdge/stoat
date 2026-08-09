@@ -75,19 +75,6 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// The auto-provision offer owns all keys while pending, for the same
-	// reason the delete prompt below does: "n" is bound to new-VM, so a
-	// plain key switch would open the form on a decline.
-	if m.pendingProvision != nil {
-		v := *m.pendingProvision
-		m.pendingProvision = nil
-		if key.String() == "y" {
-			return m, m.startProvision(v)
-		}
-		cmd := m.showToast("not provisioning "+v.Name+", press p when you want to", false)
-		return m, cmd
-	}
-
 	// The delete confirmation prompt owns all keys while pending: "y"
 	// confirms, anything else cancels. This must run before the normal
 	// switch below because "n" is otherwise bound to "new VM".

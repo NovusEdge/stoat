@@ -1,38 +1,28 @@
 package tui
 
 import (
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/core"
 )
 
-func autoVM(t *testing.T, mode string, recipes []string, log string) core.VM {
+func autoVM(t *testing.T, mode string, recipes []string) core.VM {
 	t.Helper()
 	dir := t.TempDir()
-	applyLog := filepath.Join(dir, "last-provision.log")
-	if log != "" {
-		if err := os.WriteFile(applyLog, []byte(log), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	return core.VM{
 		Name: "vm", Mode: mode, OS: "alpine", Installed: true,
 		SSHPort: 2200, Recipes: recipes,
 		State: core.StateRunning,
-		Paths: core.Paths{Dir: dir, ApplyLog: applyLog},
+		Paths: core.Paths{Dir: dir, ApplyLog: filepath.Join(dir, "last-provision.log")},
 	}
 }
 
-// TestWantsAutoProvisionPrompt covers who gets offered and who doesn't. The
-// live-vs-disk difference is not a preference: a live VM's root is a tmpfs
-// overlay, so a previous run is genuinely gone after the reboot, while a disk
-// VM's packages are still there.
-func TestWantsAutoProvisionPrompt(t *testing.T) {
-	const ok = "=== recipe xfce.alpine.sh ===\nOK: 378 packages\n\ndone\n"
-	const failed = "waiting for ssh on port 2200…\nFAILED: vm: ssh not reachable\n"
+// TestNeedsAutoProvision covers who gets provisioned automatically and who
+// doesn't. The live-vs-disk difference is not a preference: a live VM's root
+// is a tmpfs overlay, so a previous run is genuinely gone after the reboot,
+// while a disk VM's packages persist and its Applied record can be trusted.
+func TestNeedsAutoProvision(t *testing.T) {
 	recipes := []string{"xfce.alpine.sh"}
 
 	cases := []struct {
@@ -40,119 +30,93 @@ func TestWantsAutoProvisionPrompt(t *testing.T) {
 		vm   core.VM
 		want bool
 	}{
-		{"live, never provisioned", autoVM(t, "live", recipes, ""), true},
-		{"live, previously succeeded, the reboot wiped it", autoVM(t, "live", recipes, ok), true},
-		{"disk, never provisioned", autoVM(t, "disk", recipes, ""), true},
-		{"disk, previously succeeded, still installed", autoVM(t, "disk", recipes, ok), false},
-		{"disk, previous run failed", autoVM(t, "disk", recipes, failed), true},
-		{"no recipes", autoVM(t, "live", nil, ""), false},
-		{"cloud, cloud-init already did it", autoVM(t, "cloud", recipes, ""), false},
+		{"live, never provisioned", autoVM(t, "live", recipes), true},
+		{"live, no recipes", autoVM(t, "live", nil), false},
+		{"disk, never provisioned", autoVM(t, "disk", recipes), true},
+		{"disk, no recipes, no share", autoVM(t, "disk", nil), false},
+		{"cloud, cloud-init already did it", autoVM(t, "cloud", recipes), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := wantsAutoProvisionPrompt(c.vm); got != c.want {
+			if got := needsAutoProvision(c.vm); got != c.want {
 				t.Errorf("got %v, want %v", got, c.want)
 			}
 		})
 	}
 
-	// A disk VM with no OS installed never becomes reachable at all.
-	uninstalled := autoVM(t, "disk", recipes, "")
+	// A disk VM with no OS installed never becomes reachable as itself; its
+	// sshd, if any, belongs to the installer.
+	uninstalled := autoVM(t, "disk", recipes)
 	uninstalled.Installed = false
-	if wantsAutoProvisionPrompt(uninstalled) {
-		t.Error("offered to provision a disk VM with no OS installed")
+	if needsAutoProvision(uninstalled) {
+		t.Error("wanted to auto-provision a disk VM with no OS installed")
+	}
+
+	// A live VM's tmpfs root wipes every reboot. Its Applied record, saved on
+	// the host, survives, but it describes a filesystem that is gone; a live
+	// VM auto-applies every boot regardless of what Applied says.
+	live := autoVM(t, "live", recipes)
+	live.Applied = map[string]core.AppliedRecipe{"xfce.alpine.sh": {Version: "1.0", Hash: "whatever"}}
+	if !needsAutoProvision(live) {
+		t.Error("a live VM must auto-provision every boot even with a stale Applied record")
+	}
+
+	// A disk VM with a share still needs the idempotent share-mount step,
+	// even once every recipe is applied.
+	shared := autoVM(t, "disk", nil)
+	shared.Share = "/host/path"
+	if !needsAutoProvision(shared) {
+		t.Error("a disk VM with a share must still auto-provision for the mount step")
 	}
 }
 
-func TestLastProvisionSucceeded(t *testing.T) {
-	cases := []struct {
-		name, log string
-		want      bool
-	}{
-		{"clean run", "=== recipe x ===\nOK\n\ndone\n", true},
-		{"trailing blank lines", "done\n\n\n", true},
-		{"failed", "FAILED: recipe x: exit 1\n", false},
-		{"still running", "=== recipe x ===\n(3/9) Installing foo\n", false},
-		{"no log at all", "", false},
-		{"the word done inside output", "installing done-stuff\n", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := lastProvisionSucceeded(autoVM(t, "disk", nil, c.log)); got != c.want {
-				t.Errorf("got %v, want %v", got, c.want)
-			}
-		})
-	}
-}
-
-// TestAutoProvisionPromptNamesTheRecipes: "provision vm?" says nothing about
-// what is about to run inside the guest, which is the whole point of asking.
-func TestAutoProvisionPromptNamesTheRecipes(t *testing.T) {
-	v := autoVM(t, "live", []string{"xfce.alpine.sh", "docker.alpine.sh"}, "")
-	p := autoProvisionPrompt(v)
-	for _, want := range []string{"vm", "xfce", "docker", "y/N"} {
-		if !strings.Contains(p, want) {
-			t.Errorf("prompt %q is missing %q", p, want)
-		}
-	}
-	// Filenames are an implementation detail the user never chose.
-	if strings.Contains(p, ".alpine.sh") {
-		t.Errorf("prompt shows raw filenames: %q", p)
-	}
-}
-
-// TestDeclinedOfferDoesNotOpenTheNewVMForm is the collision that makes a y/N
-// prompt dangerous here: "n" is bound to new-VM, so declining with the obvious
-// key would have opened the create form.
-func TestDeclinedOfferDoesNotOpenTheNewVMForm(t *testing.T) {
-	v := autoVM(t, "live", []string{"xfce.alpine.sh"}, "")
-	for _, key := range []string{"n", "N", "esc", "q"} {
-		m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
-			provisioning: map[string]provState{}, pendingProvision: &v}
-
-		out, _ := m.updateList(keyMsg(key))
-		after := out.(model)
-
-		if after.screen != screenList {
-			t.Errorf("declining with %q left screen %v", key, after.screen)
-		}
-		if after.pendingProvision != nil {
-			t.Errorf("declining with %q left the offer pending", key)
-		}
-		if len(after.provisioning) != 0 {
-			t.Errorf("declining with %q started provisioning anyway", key)
-		}
-		if !strings.Contains(after.toast.text, "press p") {
-			t.Errorf("declining with %q gave no way back in: %q", key, after.toast.text)
-		}
-	}
-}
-
-// TestAcceptedOfferProvisions is the other half.
-func TestAcceptedOfferProvisions(t *testing.T) {
-	v := autoVM(t, "live", []string{"xfce.alpine.sh"}, "")
+// TestSSHReadyAutoProvisions is the sshReadyMsg handler's main path: it
+// starts a provision run itself, with no confirmation state in between.
+func TestSSHReadyAutoProvisions(t *testing.T) {
+	v := autoVM(t, "live", []string{"xfce.alpine.sh"})
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
-		provisioning: map[string]provState{}, pendingProvision: &v}
+		provisioning: map[string]provState{}, vms: []core.VM{v}}
 
-	out, cmd := m.updateList(keyMsg("y"))
+	out, cmd := m.Update(sshReadyMsg{name: v.Name})
 	after := out.(model)
 
-	if after.pendingProvision != nil {
-		t.Error("accepting left the offer pending")
-	}
 	if _, running := after.provisioning[v.Name]; !running {
-		t.Error("accepting did not start a provision run")
+		t.Error("sshReadyMsg did not start a provision run")
 	}
 	if cmd == nil {
-		t.Error("accepting returned no command")
+		t.Error("sshReadyMsg returned no command")
+	}
+	if after.status != "" {
+		t.Errorf("status = %q, want no prompt", after.status)
 	}
 }
 
-// TestOfferNeverPreemptsADeletePrompt: a pending delete is a more
-// consequential question and the user is mid-answer; an offer arriving on a
-// 90-second timer must not overwrite it.
-func TestOfferNeverPreemptsADeletePrompt(t *testing.T) {
-	v := autoVM(t, "live", []string{"xfce.alpine.sh"}, "")
+// TestSSHReadyDoesNothingWhenNothingToProvision: a VM with no recipes and no
+// share must not start a run, and must show nothing.
+func TestSSHReadyDoesNothingWhenNothingToProvision(t *testing.T) {
+	v := autoVM(t, "disk", nil)
+	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
+		provisioning: map[string]provState{}, vms: []core.VM{v}}
+
+	out, cmd := m.Update(sshReadyMsg{name: v.Name})
+	after := out.(model)
+
+	if len(after.provisioning) != 0 {
+		t.Error("started a provision run with nothing to provision")
+	}
+	if cmd != nil {
+		t.Error("returned a command with nothing to provision")
+	}
+	if after.status != "" {
+		t.Errorf("status = %q, want nothing shown", after.status)
+	}
+}
+
+// TestSSHReadyNeverPreemptsADeletePrompt: an offer arriving on a 90-second
+// timer must not clear the status line out from under a pending delete
+// confirmation, a more consequential question the user is mid-answer.
+func TestSSHReadyNeverPreemptsADeletePrompt(t *testing.T) {
+	v := autoVM(t, "live", []string{"xfce.alpine.sh"})
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, vms: []core.VM{v},
 		pendingDelete: &v, status: "delete vm? y/N"}
@@ -160,8 +124,8 @@ func TestOfferNeverPreemptsADeletePrompt(t *testing.T) {
 	out, _ := m.Update(sshReadyMsg{name: v.Name})
 	after := out.(model)
 
-	if after.pendingProvision != nil {
-		t.Error("the provision offer overwrote a pending delete confirmation")
+	if len(after.provisioning) != 0 {
+		t.Error("auto-provision ran ahead of a pending delete confirmation")
 	}
 	if after.status != "delete vm? y/N" {
 		t.Errorf("status = %q, want the delete prompt intact", after.status)
