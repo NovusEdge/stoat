@@ -447,8 +447,12 @@ func (m model) viewDetail() string {
 		parts = append(parts, "", pane("last provision", dimStyle.Render(m.detail.log), m.width))
 	}
 
+	if panel := progressPanel(m); panel != "" {
+		parts = append(parts, "", panel)
+	}
+
 	parts = append(parts, "")
-	for _, l := range provLines(m) {
+	for _, l := range provLinesExcept(m, v.Name) {
 		parts = append(parts, l)
 	}
 	if m.status != "" {

@@ -63,7 +63,7 @@ func TestReadProvStep(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			step, last := readProvStep(provFixture(t, c.log))
+			step, last, _, _ := readProvStep(provFixture(t, c.log))
 			if step != c.wantStep {
 				t.Errorf("step = %q, want %q", step, c.wantStep)
 			}
@@ -81,7 +81,7 @@ func TestReadProvStepReadsOnlyTheTail(t *testing.T) {
 	big := strings.Repeat("(1/263) Installing something-or-other\n", 8000) // ~300KB
 	v := provFixture(t, "=== recipe xfce.alpine.sh ===\n"+big+"OK: done installing\n")
 
-	step, last := readProvStep(v)
+	step, last, _, _ := readProvStep(v)
 	if last != "OK: done installing" {
 		t.Errorf("last = %q, want the final line", last)
 	}
