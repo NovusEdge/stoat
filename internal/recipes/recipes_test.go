@@ -372,3 +372,63 @@ func TestScriptBodyReadsV1FlatFile(t *testing.T) {
 		t.Errorf("ScriptBody = %q, want %q", got, want)
 	}
 }
+
+// TestScriptHashMatchesScriptBody pins ScriptHash to the sha256 of the exact
+// bytes ScriptBody resolves, so a caller can compare it against a stored
+// AppliedRecipe.Hash without re-deriving the sum itself.
+func TestScriptHashMatchesScriptBody(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	rd := filepath.Join(dir(), "devtools")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"devtools\"\nscript = \"install.sh\"\n"
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := "#!/bin/sh\necho devtools\n"
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ScriptHash("devtools", "alpine")
+	if err != nil {
+		t.Fatalf("ScriptHash: %v", err)
+	}
+	if want := sum([]byte(body)); got != want {
+		t.Errorf("ScriptHash = %q, want %q", got, want)
+	}
+}
+
+// TestScriptHashChangesWithScriptBody proves a fixed script produces a
+// different hash than the original, the signal filterByRunMode uses to
+// re-apply a "once" recipe whose script changed at the same version.
+func TestScriptHashChangesWithScriptBody(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	rd := filepath.Join(dir(), "devtools")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"devtools\"\nscript = \"install.sh\"\n"
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte("#!/bin/sh\necho one\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ScriptHash("devtools", "alpine")
+	if err != nil {
+		t.Fatalf("ScriptHash: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte("#!/bin/sh\necho two\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	after, err := ScriptHash("devtools", "alpine")
+	if err != nil {
+		t.Fatalf("ScriptHash: %v", err)
+	}
+	if before == after {
+		t.Errorf("ScriptHash unchanged after the script body changed: %q", before)
+	}
+}

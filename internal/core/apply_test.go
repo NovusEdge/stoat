@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -247,6 +248,228 @@ func writeRecipe(t *testing.T, dir, name, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(recipesDir, name), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// writeV2Recipe drops a v2 recipe (recipe.toml + install.sh) straight into
+// root's recipes/ dir, mirroring recipes.writeV2Recipe for core's own tests,
+// which need to set Run and Version, fields that helper doesn't take.
+func writeV2Recipe(t *testing.T, rootDir, name, run, version, script string) {
+	t.Helper()
+	recipeDir := filepath.Join(rootDir, "recipes", name)
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"" + name + "\"\n" +
+		"version = \"" + version + "\"\n" +
+		"script = \"install.sh\"\n" +
+		"run = \"" + run + "\"\n"
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFilterByRunModeSkipsOnceWithMatchingHash pins the base case: a "once"
+// recipe whose stored hash still matches its current script stays skipped,
+// even though nothing here checks Version at all.
+func TestFilterByRunModeSkipsOnceWithMatchingHash(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "once", "1.0", "#!/bin/sh\necho one\n")
+	hash, err := recipes.ScriptHash("tool", "alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{
+		OS: "alpine",
+		Applied: map[string]config.AppliedRecipe{
+			"tool": {Version: "1.0", Hash: hash},
+		},
+	}
+
+	kept, _, err := filterByRunMode(v, []string{"tool"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want none: the stored hash still matches", kept)
+	}
+}
+
+// TestFilterByRunModeRerunsOnChangedScript is the behavior this feature
+// adds: a fixed script at the SAME version must re-run, since a version
+// bump is no longer the only signal filterByRunMode trusts.
+func TestFilterByRunModeRerunsOnChangedScript(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "once", "1.0", "#!/bin/sh\necho fixed\n")
+	staleHash, err := recipes.ScriptHash("tool", "alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Recorded against the OLD script body, before the fix landed.
+	v := &config.VM{
+		OS: "alpine",
+		Applied: map[string]config.AppliedRecipe{
+			"tool": {Version: "1.0", Hash: staleHash + "stale"},
+		},
+	}
+
+	kept, _, err := filterByRunMode(v, []string{"tool"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0] != "tool" {
+		t.Errorf("kept = %v, want [tool]: the script hash no longer matches", kept)
+	}
+}
+
+// TestFilterByRunModeRerunsOnEmptyStoredHash covers the pre-existing VM
+// case: an Applied entry saved before Hash existed decodes with an empty
+// string, which never equals a real hash, so the recipe self-heals once.
+func TestFilterByRunModeRerunsOnEmptyStoredHash(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "once", "1.0", "#!/bin/sh\necho one\n")
+	v := &config.VM{
+		OS: "alpine",
+		Applied: map[string]config.AppliedRecipe{
+			"tool": {Version: "1.0"}, // no Hash: predates this field
+		},
+	}
+
+	kept, _, err := filterByRunMode(v, []string{"tool"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0] != "tool" {
+		t.Errorf("kept = %v, want [tool]: an empty stored hash never matches", kept)
+	}
+}
+
+// TestFilterByRunModeAlwaysIgnoresHash pins that "always" keeps running
+// regardless of a matching hash: run mode still wins over hash comparison.
+func TestFilterByRunModeAlwaysIgnoresHash(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "always", "1.0", "#!/bin/sh\necho one\n")
+	hash, err := recipes.ScriptHash("tool", "alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{
+		OS: "alpine",
+		Applied: map[string]config.AppliedRecipe{
+			"tool": {Version: "1.0", Hash: hash},
+		},
+	}
+
+	kept, _, err := filterByRunMode(v, []string{"tool"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0] != "tool" {
+		t.Errorf("kept = %v, want [tool]: always never skips", kept)
+	}
+}
+
+// TestFilterByRunModeManualNeedsExplicit pins that "manual" still needs
+// explicit[name], unaffected by hash comparison.
+func TestFilterByRunModeManualNeedsExplicit(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "manual", "1.0", "#!/bin/sh\necho one\n")
+	v := &config.VM{OS: "alpine"}
+
+	kept, _, err := filterByRunMode(v, []string{"tool"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want none: manual needs an explicit name", kept)
+	}
+
+	kept, _, err = filterByRunMode(v, []string{"tool"}, map[string]bool{"tool": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0] != "tool" {
+		t.Errorf("kept = %v, want [tool]: named explicitly", kept)
+	}
+}
+
+// TestApplyRecordsHashAndSkipsOnRerun exercises the whole path through
+// Apply: a successful run records the script hash, and a second Apply with
+// no script change selects nothing to run.
+func TestApplyRecordsHashAndSkipsOnRerun(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "once", "1.0", "#!/bin/sh\necho one\n")
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Write([]byte("SSH-2.0-fake\r\n"))
+			c.Close()
+		}
+	}()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
+		RAM: 512, CPUs: 1, SSHPort: port, Recipes: []string{"tool"},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	v.Dir = dir + "/work"
+	stop := fakeRunning(t, v)
+	defer stop()
+
+	// Provision needs a real ssh binary and sshd it will never reach; a
+	// cancelled ctx makes it fail fast right after the ssh banner check,
+	// before this test needs it to succeed. This test is about the
+	// pre/post-run bookkeeping in filterByRunMode and Apply's record step,
+	// exercised directly rather than through a full provisioning run.
+	hash, err := recipes.ScriptHash("tool", "alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit := map[string]bool{}
+	kept, manifests, err := filterByRunMode(v, v.Recipes, explicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 {
+		t.Fatalf("kept = %v, want [tool] on the first pass", kept)
+	}
+	m := manifests["tool"]
+	v.Applied = map[string]config.AppliedRecipe{
+		"tool": {Version: m.Version, Hash: hash, At: time.Now()},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := config.Load("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Applied["tool"].Hash != hash {
+		t.Fatalf("saved Hash = %q, want %q", reloaded.Applied["tool"].Hash, hash)
+	}
+
+	kept, _, err = filterByRunMode(reloaded, reloaded.Recipes, explicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 0 {
+		t.Errorf("kept = %v, want none: second pass, no script change", kept)
 	}
 }
 

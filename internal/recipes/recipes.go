@@ -338,3 +338,15 @@ func ScriptBody(name, osName string) (string, error) {
 	}
 	return m.ScriptContent(osName)
 }
+
+// ScriptHash returns the hex sha256 of ScriptBody(name, osName). A caller
+// compares it against a stored AppliedRecipe.Hash to tell whether a "once"
+// recipe's script changed since it last ran, even at the same manifest
+// version.
+func ScriptHash(name, osName string) (string, error) {
+	body, err := ScriptBody(name, osName)
+	if err != nil {
+		return "", err
+	}
+	return sum([]byte(body)), nil
+}
