@@ -3,19 +3,17 @@ package tui
 import (
 	"context"
 	"os"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
-// After a VM with recipes starts, stoat watches for sshd. It then offers to
-// provision the VM. It does not provision without asking.
-//
-// An unasked shell script inside a guest looks like a bug the first time it
-// runs. A recipe can take minutes and install hundreds of packages.
+// After a VM starts, stoat watches for sshd and provisions it once it is
+// reachable, with no keypress. A cloud VM never reaches this path: cloud-init
+// applies its recipes from the seed at first boot instead.
 
 // sshReadyMsg says a VM that was just started is now accepting ssh.
 type sshReadyMsg struct{ name string }
@@ -44,71 +42,56 @@ func awaitSSH(v core.VM) tea.Cmd {
 	}
 }
 
-// wantsAutoProvisionPrompt reports whether stoat should offer to provision v
-// once it is reachable.
+// needsAutoProvision reports whether stoat should provision v once it is
+// reachable.
 //
-// The answer differs by mode because the filesystem differs by mode:
-//
-//   - live: the root is a tmpfs overlay. A previous run is gone after
-//     reboot, so stoat offers every time.
-//   - disk/cloud: packages persist. Stoat offers again only after a failed
-//     run, not a successful one.
-func wantsAutoProvisionPrompt(v core.VM) bool {
-	if len(v.Recipes) == 0 {
-		return false
-	}
-	// cloud-init applies a cloud VM's recipes at first boot; there is nothing
-	// for ssh provisioning to do, and startProvision refuses it anyway.
+//   - A cloud VM never needs it: cloud-init already ran the recipes from the
+//     seed, before ssh was even reachable.
+//   - An uninstalled disk VM's sshd belongs to its own installer, running on
+//     a tmpfs root the install later replaces; reachability alone cannot
+//     tell that apart from the real system, so it is excluded up front.
+//   - A live VM's root is a tmpfs overlay: every reboot erases whatever a
+//     previous run installed, so core.NeedsProvision's Applied bookkeeping
+//     (which persists on the host, across reboots) cannot answer for it. Any
+//     recipe at all means there is work to redo.
+//   - Everything else defers to core.NeedsProvision.
+func needsAutoProvision(v core.VM) bool {
 	if v.Mode == "cloud" {
 		return false
 	}
-	// An uninstalled disk VM runs its own installer on a tmpfs root that the
-	// install later replaces. Its sshd may already answer, so this check
-	// cannot rely on reachability alone.
-	// Once installed, stoat offers only when the last run did not succeed.
 	if v.Mode == "disk" && !v.Installed {
 		return false
 	}
-	if v.Mode != "live" && lastProvisionSucceeded(v) {
-		return false
+	if v.Mode == "live" {
+		return len(v.Recipes) > 0
 	}
-	return true
+	needs, err := core.NeedsProvision(toConfigVM(v))
+	return err == nil && needs
 }
 
-// lastProvisionSucceeded reports whether the VM's most recent provision run
-// finished cleanly. sshx.Provision writes "done" as the final line, and
-// truncates the file at the start of every run, so the tail is unambiguous.
-func lastProvisionSucceeded(v core.VM) bool {
-	b := tailBytes(v.Paths.ApplyLog, provTailBytes)
-	if len(b) == 0 {
-		return false
-	}
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); l != "" {
-			return l == "done"
+// toConfigVM carries the fields core.NeedsProvision reads: the OS and
+// backend the recipe run mode logic checks, and the Applied record it
+// compares script hashes against. It is a narrower relative of app.go's
+// cfgVM, built for this one call instead of sshx's identity fields.
+func toConfigVM(v core.VM) *config.VM {
+	var applied map[string]config.AppliedRecipe
+	if len(v.Applied) > 0 {
+		applied = make(map[string]config.AppliedRecipe, len(v.Applied))
+		for name, a := range v.Applied {
+			applied[name] = config.AppliedRecipe{Version: a.Version, Hash: a.Hash, At: a.At}
 		}
 	}
-	return false
-}
-
-// autoProvisionPrompt is the y/N line shown when a started VM becomes
-// reachable. It names the recipes so the answer is informed: "provision
-// work?" says nothing about what is about to run.
-func autoProvisionPrompt(v core.VM) string {
-	names := make([]string, len(v.Recipes))
-	for i, r := range v.Recipes {
-		names[i] = recipeLabel(r)
+	return &config.VM{
+		OS: v.OS, Mode: v.Mode, Share: v.Share, Recipes: v.Recipes, Applied: applied,
 	}
-	return v.Name + " is up, run " + strings.Join(names, ", ") + " now? y/N"
 }
 
 // ensureNoStaleLog removes a provision log left by a previous boot of a live
 // VM.
 //
 // The log lives on the host and survives the reboot; nothing else does.
-// Without removing it, lastProvisionSucceeded and the detail pane's tail
-// both describe a run whose effects the reboot already wiped.
+// Without removing it, the detail pane's tail describes a run whose effects
+// the reboot already wiped.
 func ensureNoStaleLog(v core.VM) {
 	if v.Mode != "live" {
 		return

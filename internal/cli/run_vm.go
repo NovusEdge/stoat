@@ -2,13 +2,16 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 func runLS(a *Args, stdout, stderr io.Writer) int {
@@ -86,8 +89,50 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	// installed, and that flip is exactly what moves the screen off the qemu
 	// window. The pre-Start copy would announce a window that is not there.
 	if started, err := core.Get(a.VM); err == nil {
-		printDisplay(stdout, core.DisplayFor(started, core.GraphicalSession()))
+		v = started
 	}
+	printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+	return afterStart(a, v, stdout, stderr)
+}
+
+// afterStart runs v's pending recipes once it answers ssh, the same
+// core.Apply path `stoat provision` uses (run_access.go's runProvision).
+// --no-provision, or a VM with nothing pending, returns immediately: `up`
+// does not block a VM that has no work waiting.
+func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
+	if a.NoProvision {
+		return ExitOK
+	}
+	cfg, err := config.Load(v.Name)
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	needs, err := core.NeedsProvision(cfg)
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	if !needs {
+		return ExitOK
+	}
+
+	if !a.Quiet {
+		fmt.Fprintf(stdout, "waiting for ssh on %s...\n", a.VM)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sshx.WaitTimeout)
+	defer cancel()
+	if err := core.Wait(ctx, a.VM, core.UntilReachable); err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+
+	if !a.Quiet {
+		fmt.Fprintf(stdout, "provisioning %s...\n", a.VM)
+	}
+	done := make(chan error, 1)
+	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{}) }()
+	if err := streamFile(v.Paths.ApplyLog, stdout, done); err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	fmt.Fprintf(stdout, "%s provisioned\n", a.VM)
 	return ExitOK
 }
 
