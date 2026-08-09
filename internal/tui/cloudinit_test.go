@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,25 @@ func TestDecodeCloudInitStatus(t *testing.T) {
 				t.Errorf("decodeCloudInitStatus(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestCloudInitBarSuppressedOnTerminalFailure pins the fix for a full bar
+// rendering next to a red "failed" label. "error", "disabled" and "not-run"
+// are terminal states that never reach 100% install; cloudInitBar must draw
+// nothing for them. "running" still gets a bar, so the suppression is
+// specific to the non-success terminal states, not to every status.
+func TestCloudInitBarSuppressedOnTerminalFailure(t *testing.T) {
+	p := newCloudInitProgress()
+
+	for _, status := range []string{"error", "disabled", "not-run"} {
+		if got := cloudInitBar(p, status); got != "" {
+			t.Errorf("cloudInitBar(%q) = %q, want no bar", status, got)
+		}
+	}
+
+	if got := cloudInitBar(p, "running"); !strings.Contains(got, "█") {
+		t.Errorf("cloudInitBar(%q) = %q, want a bar", "running", got)
 	}
 }
 

@@ -142,13 +142,17 @@ func cloudInitFraction(status string) float64 {
 // hand-rolled track. ViewAs draws a fixed computed value, so none of the
 // component's animation machinery runs. The gradient and width handling
 // still come free.
+//
+// "error", "disabled" and "not-run" draw no bar. A bar reads as progress
+// toward completion, and none of those three states is heading there; a full
+// bar next to a red "failed" label previously said the opposite of the
+// label.
 func cloudInitBar(p progress.Model, status string) string {
-	if status == "" || cloudInitDone(status) && status != "running" {
-		if status == "done" {
-			return p.ViewAs(1)
-		}
+	switch status {
+	case "waiting", "running", "done":
+		return p.ViewAs(cloudInitFraction(status))
 	}
-	return p.ViewAs(cloudInitFraction(status))
+	return ""
 }
 
 // newCloudInitProgress is the bar used for cloud-init staging.

@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/core"
 )
@@ -242,10 +243,7 @@ func brokenReason(s string) string {
 		s = s[:i]
 	}
 	const max = 60
-	if len(s) > max {
-		s = s[:max-1] + "…"
-	}
-	return s
+	return ansi.Truncate(s, max, "…")
 }
 
 // viewList renders the list screen's body: everything below the banner.
