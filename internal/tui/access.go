@@ -102,5 +102,5 @@ func joinAccess(pane, access string, termWidth int) string {
 	if access == "" || termWidth < accessMinTerminal {
 		return pane
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, pane, "  ", access)
+	return lipgloss.JoinHorizontal(lipgloss.Top, pane, lipgloss.NewStyle().MarginLeft(2).Render(access))
 }
