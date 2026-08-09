@@ -302,12 +302,19 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 		}
 	}
 	// The blank-disk guard must precede setup-alpine, or re-baking the overlay
-	// on an already-installed disk (installed toggled off) wipes it.
-	if !strings.Contains(script, "blkid /dev/vda") {
-		t.Errorf("stoat-install.start missing the blank-disk guard:\n%s", script)
+	// on an already-installed disk (installed toggled off) wipes it. The gate
+	// is the success marker, never blkid: busybox blkid reports success on
+	// every disk in the live environment, which skipped the install forever.
+	if !strings.Contains(script, "/mnt/work/.installed") {
+		t.Errorf("stoat-install.start missing the marker gate:\n%s", script)
 	}
-	if strings.Index(script, "blkid") > strings.Index(script, "setup-alpine") {
-		t.Errorf("blank-disk guard must run before setup-alpine:\n%s", script)
+	if strings.Contains(script, "blkid") {
+		t.Errorf("stoat-install.start uses blkid, which is unreliable under busybox:\n%s", script)
+	}
+	// The marker must be written only on setup-alpine success, or a failed
+	// install marks itself done and the VM never retries.
+	if !strings.Contains(script, "if setup-alpine") {
+		t.Errorf("setup-alpine must be gated so the marker is written only on success:\n%s", script)
 	}
 	// Install output goes to the serial port stoat captures, or the detail
 	// screen's console pager shows nothing during the install.
