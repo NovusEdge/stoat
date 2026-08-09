@@ -138,6 +138,51 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	}
 }
 
+// TestDisplayKeyCyclesAndPersists proves "d" cycles auto -> window -> vnc ->
+// auto, saves each step through core.Update, and toasts the new value.
+func TestDisplayKeyCyclesAndPersists(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	cv := &config.VM{Name: "cycle-test", Mode: "cloud"}
+	if err := cv.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
+	}
+	v, err := core.Get(cv.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := model{screen: screenDetail, detail: detailModel{vm: v}}
+
+	for _, want := range []string{"window", "vnc", "auto"} {
+		newM, _ := m.updateDetail(keyMsg("d"))
+		m = newM.(model)
+		if m.detail.vm.Display != wantDisplay(want) {
+			t.Fatalf("Display = %q, want %q", m.detail.vm.Display, wantDisplay(want))
+		}
+		if !strings.Contains(m.toast.text, "display: "+want) {
+			t.Fatalf("toast = %q, want it to mention display: %s", m.toast.text, want)
+		}
+		if m.toast.err {
+			t.Fatalf("toast marked as error for a successful cycle: %+v", m.toast)
+		}
+		reloaded, err := config.Load(cv.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reloaded.Display != wantDisplay(want) {
+			t.Fatalf("not persisted: Display = %q, want %q", reloaded.Display, wantDisplay(want))
+		}
+	}
+}
+
+// wantDisplay maps a cycle step's label to the value core.Patch actually
+// writes: "auto" round-trips to "", config.VM.Display's own default.
+func wantDisplay(label string) string {
+	if label == "auto" {
+		return ""
+	}
+	return label
+}
+
 // TestTypeConsolePasswordKeyOnlyOfferedWhenAvailable proves the footer
 // advertises "t" (type console password into guest) only when the VM has
 // one to send. A stopped VM, or one with no console password set, must not

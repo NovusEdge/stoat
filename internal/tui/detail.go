@@ -200,6 +200,29 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.vm = updated
 			cmd := m.showToast(fmt.Sprintf("%s installed=%v", updated.Name, updated.Installed), false)
 			return m, tea.Batch(loadVMs, cmd)
+		case "d":
+			v := m.detail.vm
+			// "auto" writes back as "", config.VM.Display's own default for a
+			// vm.toml that never set a preference.
+			next := nextDisplayPref(v.Display)
+			stored := next
+			if stored == "auto" {
+				stored = ""
+			}
+			updated, err := core.Update(v.Name, core.Patch{Display: &stored})
+			if err != nil {
+				cmd := m.showToast(err.Error(), true)
+				return m, cmd
+			}
+			m.detail.vm = updated
+			note := "display: " + displayPrefLabel(updated.Display) + " (applies at next start)"
+			if v.State == core.StateRunning {
+				// Matches edit.go's saveEdit note for a running VM: this pane
+				// builds no restart flow of its own.
+				note += "; restart to apply"
+			}
+			cmd := m.showToast(note, false)
+			return m, cmd
 		case "s":
 			v, err := m.detail.coreVM()
 			if err != nil {
@@ -370,9 +393,10 @@ func (m model) viewDetail() string {
 		}
 		facts.row("", "", effect)
 	}
-	// qemu.DisplayKind takes mode, installed, and host graphical directly, not
-	// a *config.VM, so a core.VM caller can call it without going through
-	// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
+	line("display", displayPrefLabel(v.Display))
+	// qemu.DisplayKind takes pref, mode, installed, and host graphical
+	// directly, not a *config.VM, so a core.VM caller can call it without
+	// going through qemu.NeedsWindow/WantsWindow, which need a *config.VM.
 	//
 	// A bare socket path is not enough: the user needs the actual command
 	// that opens it, so this prints one for a viewer installed on this host.
@@ -380,8 +404,8 @@ func (m model) viewDetail() string {
 	// With no graphical session, the install console also lands on this
 	// socket. That is the case where the user needs the explanation most,
 	// since the VM would otherwise look like it refused to start.
-	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Mode, v.Installed, graphical) != qemu.DisplayWindow {
-		if !graphical && qemu.DisplayKind(v.Mode, v.Installed, true) == qemu.DisplayWindow {
+	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, v.Mode, v.Installed, graphical) != qemu.DisplayWindow {
+		if !graphical && qemu.DisplayKind(v.Display, v.Mode, v.Installed, true) == qemu.DisplayWindow {
 			facts.row("", "", warnStyle.Render("no usable graphical session on this host: the installer console is on vnc"))
 		}
 		line("vnc", v.Paths.VNCSocket)

@@ -275,6 +275,43 @@ func TestEditBuildPatchDoesNotMutateVM(t *testing.T) {
 	}
 }
 
+// TestEditDisplayPatchAndPersist checks that newEdit seeds display from the
+// VM ("" reads as "auto"), that an unchanged display carries no patch, and
+// that cycling to "window" writes it through core.Update.
+func TestEditDisplayPatchAndPersist(t *testing.T) {
+	e := editFixture(t) // Display unset in editFixture's vm.toml
+	if e.display != "auto" {
+		t.Fatalf("display = %q, want auto", e.display)
+	}
+
+	p, err := e.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if p.Display != nil {
+		t.Fatalf("Display patch = %v, want nil for an unchanged auto", *p.Display)
+	}
+
+	e.display = "window"
+	p, err = e.buildPatch()
+	if err != nil {
+		t.Fatalf("buildPatch: %v", err)
+	}
+	if p.Display == nil || *p.Display != "window" {
+		t.Fatalf("Display patch = %v, want \"window\"", p.Display)
+	}
+	if _, errText := saveEdit(e.name(), p, false); errText != "" {
+		t.Fatalf("saveEdit: %s", errText)
+	}
+	reloaded, err := config.Load(e.name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Display != "window" {
+		t.Fatalf("not persisted: Display = %q", reloaded.Display)
+	}
+}
+
 // TestEditTabOrderSkipsDiskInLiveMode mirrors the create form's rule: focus
 // must never land on a row viewEdit does not draw. Otherwise keystrokes
 // silently edit an invisible field. Mode is immutable, so this test reads

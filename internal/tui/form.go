@@ -233,6 +233,7 @@ type formModel struct {
 	byoBackend  string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
 	byoOS       string // override for the selected BYO image's OS; "" means "use iso.Infer's guess"
 	mode        string // "live" | "disk"; meaningful only while the selected image's backend is apkovl
+	display     string // one of displayChoices; "auto" by default
 	err         string
 	fetching    bool
 	fetchingOS  string
@@ -279,6 +280,7 @@ const (
 	fOS
 	fRecipes
 	fPassword
+	fDisplay
 )
 
 // focusOrder is the tab-traversal order of focus positions, which must match
@@ -308,7 +310,7 @@ func (f formModel) order() focusOrder {
 	if m := f.effectiveMode(); m == "disk" || m == "cloud" {
 		o = append(o, fDisk)
 	}
-	o = append(o, fShare, fRecipes)
+	o = append(o, fShare, fDisplay, fRecipes)
 	// The console password row is only meaningful for a cloud image; the
 	// other backends never set one.
 	if f.resolvedBackend() == "cloudinit" {
@@ -435,7 +437,7 @@ func (f *formModel) selectImage(idx int) {
 }
 
 func newForm() formModel {
-	f := formModel{mode: "live", recipeSel: map[string]bool{}}
+	f := formModel{mode: "live", display: "auto", recipeSel: map[string]bool{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
 		ti := theme.TextInput()
@@ -641,6 +643,13 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.form.mode = "live"
 				}
 				return m, nil
+			case fDisplay:
+				d := 1
+				if msg.String() == "left" {
+					d = -1
+				}
+				m.form.display = cycle(displayChoices, m.form.display, d)
+				return m, nil
 			case fPassword:
 				m.form.randomPassword = !m.form.randomPassword
 				return m, nil
@@ -791,6 +800,9 @@ func (f formModel) spec() (core.Spec, error) {
 		Share:   strings.TrimSpace(f.inputs[fShare].Value()),
 		Recipes: selected,
 	}
+	if f.display != "auto" {
+		s.Display = f.display
+	}
 	if f.randomPassword {
 		s.ConsolePassword = "random"
 	}
@@ -882,6 +894,11 @@ func (m model) viewForm() string {
 	group()
 
 	row(fShare, "share", f.inputs[fShare].View())
+
+	displayRow := radio("auto", f.display == "auto") + "  " +
+		radio("window", f.display == "window") + "  " +
+		radio("vnc", f.display == "vnc")
+	row(fDisplay, "display", displayRow)
 
 	recipesMarker := "  "
 	if f.focus == fRecipes {

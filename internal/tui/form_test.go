@@ -21,8 +21,9 @@ import (
 )
 
 // TestFormTabOrder pins tab focus to the order viewForm renders fields in
-// (name, iso, mode, ram, cpus, [disk], share), not the field constants'
-// declaration order (name, ram, cpus, disk, share, iso, mode). In live mode,
+// (name, iso, mode, ram, cpus, [disk], share, display), not the field
+// constants' declaration order (name, ram, cpus, disk, share, iso, mode). In
+// live mode,
 // tab must not land on fDisk: viewForm renders no disk row, and no "❯"
 // marker, in that mode, so a keystroke there would silently edit an
 // invisible field. The test checks the exact visited sequence, forward and
@@ -33,8 +34,8 @@ func TestFormTabOrder(t *testing.T) {
 		mode  string
 		order []int // visual/traversal order, starting from the initial focus (fName)
 	}{
-		{"live", "live", []int{fName, fISO, fMode, fRAM, fCPUs, fShare, fRecipes}},
-		{"disk", "disk", []int{fName, fISO, fMode, fRAM, fCPUs, fDisk, fShare, fRecipes}},
+		{"live", "live", []int{fName, fISO, fMode, fRAM, fCPUs, fShare, fDisplay, fRecipes}},
+		{"disk", "disk", []int{fName, fISO, fMode, fRAM, fCPUs, fDisk, fShare, fDisplay, fRecipes}},
 	}
 
 	for _, c := range cases {
@@ -179,6 +180,51 @@ func TestBuildAssignsSelectedRecipes(t *testing.T) {
 			t.Fatalf("Recipes = %v, want empty", vm.Recipes)
 		}
 	})
+}
+
+// TestBuildDisplayDefaultsToAutoAndCyclesRight checks that the create form
+// leaves Display empty (auto) unless the user changes it, and that "right"
+// on fDisplay cycles auto -> window -> vnc -> auto, carrying the choice into
+// the built VM.
+func TestBuildDisplayDefaultsToAutoAndCyclesRight(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	f := newForm()
+	f.inputs[fName].SetValue("displaytest")
+	f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
+	f.imgIdx = 0
+
+	vm, err := f.build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if vm.Display != "" {
+		t.Fatalf("Display = %q, want empty (auto) by default", vm.Display)
+	}
+
+	m := model{form: f}
+	for _, want := range []string{"window", "vnc", "auto"} {
+		m.form.focus = fDisplay
+		mm, _ := m.updateForm(keyMsg("right"))
+		m = mm.(model)
+		if m.form.display != want {
+			t.Fatalf("after cycling, display = %q, want %q", m.form.display, want)
+		}
+	}
+
+	m.form.inputs[fName].SetValue("displaytest2")
+	m.form.focus = fDisplay
+	mm, _ := m.updateForm(keyMsg("left"))
+	m = mm.(model)
+	if m.form.display != "vnc" {
+		t.Fatalf("left from auto: display = %q, want vnc", m.form.display)
+	}
+	vm2, err := m.form.build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if vm2.Display != "vnc" {
+		t.Fatalf("Display = %q, want vnc", vm2.Display)
+	}
 }
 
 // TestBuildRejectsRelativeDiskSize checks that build() refuses a relative
