@@ -35,9 +35,8 @@ const tmpName = ".stoat-ovl.tmp"
 const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 
 // installScript is the local.d script that drives an unattended disk
-// install: refuse a disk that already holds data, then run setup-alpine
-// against the baked answerfile, mark success on the 9p work share
-// (docs/recipe-spec-v2.md's "Install stage signaling" decision), and reboot
+// install: skip if a previous run already finished, else run setup-alpine
+// against the baked answerfile, mark success on the 9p work share, and reboot
 // into the newly installed disk.
 //
 // Output goes to /dev/ttyS0, the serial port stoat captures to console.log, so
@@ -45,23 +44,30 @@ const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 // live puts its own console on the VGA tty, which stoat does not capture, so
 // without this redirect the install ran with no visible log at all.
 //
-// The blank-disk check is the safety gate, not the !Installed flag. `i` on the
-// detail screen can set installed off on a VM whose disk is already installed
-// (a half-failed install that tripped the byte heuristic), and the overlay is
-// rebuilt every uninstalled-disk start. Without this check, setup-alpine would
-// repartition and wipe /dev/vda on that boot. blkid finds a partition table or
-// filesystem on any non-blank disk; a fresh qcow2 has neither.
+// The skip gate is the /mnt/work/.installed marker, written only when
+// setup-alpine SUCCEEDS. It is not blkid: busybox blkid in the live environment
+// does not honor a single-device argument the way util-linux does, so it finds
+// the vfat apkovl overlay (/dev/vdb) and the iso9660 CD and reports success on
+// every disk, blank or not, which skipped the install forever. The marker also
+// distinguishes the two reasons a disk VM boots uninstalled: a finished install
+// (marker present, `i` toggled off, or diskWritten not yet seen) is left alone,
+// while a failed or partial install (no marker) is retried rather than left
+// stuck. On failure setup-alpine's own error stays on screen and the VM does
+// not reboot or mark itself done.
 const installScript = `#!/bin/sh
 [ -c /dev/ttyS0 ] && exec >/dev/ttyS0 2>&1
-if blkid /dev/vda >/dev/null 2>&1 || [ -e /dev/vda1 ]; then
-	echo "stoat: /dev/vda already holds data, skipping install"
+if [ -f /mnt/work/.installed ]; then
+	echo "stoat: install already recorded on the work share, skipping"
 	exit 0
 fi
 echo "stoat: installing Alpine unattended, this takes a few minutes..."
-setup-alpine -f /etc/stoat/answerfile
-echo "$(date -Iseconds)" > /mnt/work/.installed
-echo "stoat: install complete, rebooting into the disk"
-reboot
+if setup-alpine -f /etc/stoat/answerfile; then
+	echo "$(date -Iseconds)" > /mnt/work/.installed
+	echo "stoat: install complete, rebooting into the disk"
+	reboot
+else
+	echo "stoat: setup-alpine FAILED; leaving the installer up so you can inspect it (see the log above)"
+fi
 `
 
 // installIssue is the getty banner (/etc/issue) shown on the VGA console while
