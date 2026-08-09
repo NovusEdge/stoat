@@ -326,3 +326,49 @@ func TestBookkeepingFilesNotListedAsRecipes(t *testing.T) {
 		}
 	}
 }
+
+// TestScriptBodyResolvesV2Directory pins the fix for the "is a directory"
+// provision failure. A v2 recipe is a directory; reading the name as a file
+// returns that error. ScriptBody resolves through the manifest to install.sh.
+func TestScriptBodyResolvesV2Directory(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	rd := filepath.Join(dir(), "devtools")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"devtools\"\nscript = \"install.sh\"\n"
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := "#!/bin/sh\necho devtools\n"
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte(want), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ScriptBody("devtools", "alpine")
+	if err != nil {
+		t.Fatalf("ScriptBody: %v", err)
+	}
+	if got != want {
+		t.Errorf("ScriptBody = %q, want the install.sh body %q", got, want)
+	}
+}
+
+// TestScriptBodyReadsV1FlatFile keeps the old format working: a name with no
+// recipe.toml is a v1 flat file, read as-is.
+func TestScriptBodyReadsV1FlatFile(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := "# v1 legacy\n"
+	if err := os.WriteFile(filepath.Join(dir(), "legacy.sh"), []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ScriptBody("legacy.sh", "alpine")
+	if err != nil {
+		t.Fatalf("ScriptBody: %v", err)
+	}
+	if got != want {
+		t.Errorf("ScriptBody = %q, want %q", got, want)
+	}
+}

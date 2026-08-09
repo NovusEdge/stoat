@@ -240,7 +240,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			return err
 		}
 
-		body, err := recipes.Read(name)
+		body, err := recipes.ScriptBody(name, v.OS)
 		if err != nil {
 			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
