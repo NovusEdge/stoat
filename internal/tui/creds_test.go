@@ -7,6 +7,7 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
+	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // TestDetailShowsConsoleCredentials covers the reported problem: an Ubuntu
@@ -17,6 +18,7 @@ import (
 // The seed sets ssh_pwauth: false. Without a password there is no valid
 // answer to the prompt.
 func TestDetailShowsConsoleCredentials(t *testing.T) {
+	t.Setenv(qemu.GraphicalEnv, "0")
 	withPassword := core.VM{
 		Name: "ubuntu-1", Mode: "cloud", OS: "ubuntu", Backend: "cloudinit",
 		RAM: 4096, CPUs: 4, SSHPort: 2202, Paths: core.Paths{Dir: t.TempDir()},
@@ -34,13 +36,14 @@ func TestDetailShowsConsoleCredentials(t *testing.T) {
 	}
 	// The password is not an ssh credential: the seed refuses password auth
 	// over the forwarded port.
-	// Cloud VMs never get a qemu window (qemu.NeedsWindow). The row must
-	// point at the vnc socket the detail screen also surfaces.
+	// This test runs with no graphical session, so qemu.DisplayKind falls
+	// back to vnc regardless of mode. The row must point at the socket the
+	// detail screen also surfaces.
 	if !strings.Contains(out, "vnc") {
 		t.Error("detail pane does not say the password is reached over vnc")
 	}
 	if strings.Contains(out, "qemu window only") {
-		t.Error("cloud VMs never get a qemu window; the console row must not claim one")
+		t.Error("the console row must not claim a surface no code ever prints")
 	}
 
 	// A cloud VM without one (created before this existed) must say so

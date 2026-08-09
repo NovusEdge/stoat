@@ -31,18 +31,20 @@ func TestDisplayKind(t *testing.T) {
 		graphical bool
 		want      string
 	}{
-		// pref "" and "auto" both run the installer-console default.
+		// pref "" and "auto" both resolve to a window on a graphical host,
+		// for every mode and installed state.
 		{"", "disk", false, true, DisplayWindow},
 		{"auto", "disk", false, true, DisplayWindow},
-		// The same VM on a host with no display server. qemu would exit 1 on
-		// the window rather than fall back, so stoat falls back for it.
+		{"", "disk", true, true, DisplayWindow},
+		{"", "live", false, true, DisplayWindow},
+		{"", "live", true, true, DisplayWindow},
+		{"", "cloud", false, true, DisplayWindow},
+		{"", "cloud", true, true, DisplayWindow},
+
+		// The same VMs on a host with no display server. qemu would exit 1
+		// on the window rather than fall back, so stoat falls back for them.
 		{"", "disk", false, false, DisplayVNC},
 		{"auto", "disk", false, false, DisplayVNC},
-		{"", "disk", true, true, DisplayVNC},
-		{"", "live", false, true, DisplayVNC},
-		{"", "live", true, true, DisplayVNC},
-		{"", "cloud", false, true, DisplayVNC},
-		{"", "cloud", true, true, DisplayVNC},
 		{"", "cloud", false, false, DisplayVNC},
 
 		// "window" pins the surface, on every mode/installed combination,
@@ -50,8 +52,8 @@ func TestDisplayKind(t *testing.T) {
 		{"window", "live", false, true, DisplayWindow},
 		{"window", "disk", true, true, DisplayWindow},
 		{"window", "cloud", false, true, DisplayWindow},
-		// "vnc" pins the other way, including the installer-console case
-		// the auto default would have given a window.
+		// "vnc" pins the other way, including the disk-mode case the auto
+		// default would have given a window.
 		{"vnc", "disk", false, true, DisplayVNC},
 		{"vnc", "live", true, true, DisplayVNC},
 
@@ -60,8 +62,8 @@ func TestDisplayKind(t *testing.T) {
 		{"window", "disk", false, false, DisplayVNC},
 		{"window", "live", true, false, DisplayVNC},
 	} {
-		if got := DisplayKind(c.pref, c.mode, c.installed, c.graphical); got != c.want {
-			t.Errorf("DisplayKind(%q, %q, %v, graphical=%v) = %q, want %q", c.pref, c.mode, c.installed, c.graphical, got, c.want)
+		if got := DisplayKind(c.pref, c.graphical); got != c.want {
+			t.Errorf("DisplayKind(%q, graphical=%v) = %q, want %q", c.pref, c.graphical, got, c.want)
 		}
 	}
 }
@@ -75,27 +77,26 @@ func TestDisplayKindReadsNoEnvironment(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "")
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	t.Setenv(GraphicalEnv, "0")
-	if got := DisplayKind("", "disk", false, true); got != DisplayWindow {
+	if got := DisplayKind("", true); got != DisplayWindow {
 		t.Errorf("DisplayKind = %q, want %q: the argument decides, not the environment", got, DisplayWindow)
 	}
 }
 
-// NeedsWindow is a wrapper over DisplayKind. It must still answer exactly what
-// it answered before on a host with a session, since qemu.Args and the TUI
-// both branch on it.
+// NeedsWindow is a wrapper over DisplayKind. Every mode and installed state
+// now wants a window on a graphical host, since qemu.Args and the TUI both
+// branch on it.
 func TestNeedsWindowMatchesDisplayKind(t *testing.T) {
 	for _, mode := range []string{"live", "disk", "cloud"} {
 		for _, installed := range []bool{false, true} {
 			v := &config.VM{Mode: mode, Installed: installed}
-			want := mode == "disk" && !installed
-			if got := NeedsWindow(v, true); got != want {
-				t.Errorf("NeedsWindow(mode=%q installed=%v) = %v, want %v", mode, installed, got, want)
+			if got := NeedsWindow(v, true); !got {
+				t.Errorf("NeedsWindow(mode=%q installed=%v, graphical=true) = %v, want true", mode, installed, got)
 			}
 			// WantsWindow is the same question with the host taken out of it,
 			// which is what separates "this VM never gets a window" from "this
 			// host could not give it one".
-			if got := WantsWindow(v); got != want {
-				t.Errorf("WantsWindow(mode=%q installed=%v) = %v, want %v", mode, installed, got, want)
+			if got := WantsWindow(v); !got {
+				t.Errorf("WantsWindow(mode=%q installed=%v) = %v, want true", mode, installed, got)
 			}
 			if NeedsWindow(v, false) {
 				t.Errorf("no host session, yet NeedsWindow(mode=%q installed=%v) said yes", mode, installed)
@@ -136,11 +137,12 @@ func TestFreshDiskVMStillGetsARealWindow(t *testing.T) {
 		t.Errorf("the install console must not be headless:\n%s", got)
 	}
 
-	// ...and the moment it is installed, the same VM goes to the socket.
+	// ...and after install, the same VM still opens a window: "auto" no
+	// longer singles out the installer console.
 	v.Installed = true
 	got = joined(Args(v, GraphicalSession()))
-	if !strings.Contains(got, "-display none -vnc unix:/data/alpinedisk/vnc.sock") {
-		t.Errorf("an installed disk VM must bind VNC at launch:\n%s", got)
+	if !strings.Contains(got, "-display gtk,gl=on") {
+		t.Errorf("an installed disk VM on a graphical host must still open a window:\n%s", got)
 	}
 }
 

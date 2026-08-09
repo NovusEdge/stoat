@@ -50,9 +50,9 @@ sudo usermod -aG kvm "$USER"   # then log out and back in
 
 ### GPU/display
 
-One kind of VM opens a real QEMU window: a disk-mode VM that has not been installed yet, whose OS installer has to be driven by a human. That window is `-display gtk,gl=on`, so your QEMU build needs GTK and OpenGL support (the `qemu-full`/`qemu-desktop` Arch packages and the Debian/Ubuntu packages above provide this). Every other VM is headless with its screen on a VNC socket, and needs none of it.
+A VM opens a real QEMU window by default. That window is `-display gtk,gl=on`, so your QEMU build needs GTK and OpenGL support (the `qemu-full`/`qemu-desktop` Arch packages and the Debian/Ubuntu packages above provide this). Set `display = "vnc"` on a VM to keep it headless with its screen on a VNC socket instead.
 
-**On a host with no graphical session** (a server, an ssh session with no forwarding) stoat does not ask for that window at all: it puts the install console on the VNC socket too and prints how to attach, so a disk VM can be installed from another machine. It detects this from `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0`.
+**On a host with no graphical session** (a server, an ssh session with no forwarding) stoat does not ask for a window at all: every VM's screen goes to a VNC socket and stoat prints how to attach, so a disk VM can still be installed from another machine. It detects this from `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0`.
 
 If a VM still fails to start with a display or GL error, your host has a session QEMU cannot draw on. Set `STOAT_GRAPHICAL=0` to take the window out of play; see [troubleshooting](../troubleshooting.md). No source edit and no rebuild.
 

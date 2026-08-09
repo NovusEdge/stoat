@@ -60,11 +60,11 @@ func DisplayKind(v VM, graphical bool) string {
 	if v.State == StateBroken {
 		return ""
 	}
-	return qemu.DisplayKind(v.Display, v.Mode, v.Installed, graphical)
+	return qemu.DisplayKind(v.Display, graphical)
 }
 
 // validateDisplay checks a config.VM.Display candidate. "" and "auto" both
-// mean the installer-console default; anything but those two and "window"/
+// mean a window on a graphical host; anything but those two and "window"/
 // "vnc" is rejected so a typo in vm.toml or an MCP call fails loudly instead
 // of silently falling back to auto.
 func validateDisplay(pref string) error {

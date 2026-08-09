@@ -19,16 +19,11 @@ const (
 	DisplayVNC    = "vnc"
 )
 
-// DisplayKind is the rule, stated over the four facts it actually depends on
-// rather than over a *config.VM: core.VM is a different type that carries
-// pref/mode/installed, and it must ask this question rather than restate it.
+// DisplayKind is the rule, stated over the two facts it actually depends on.
 //
-// pref is config.VM.Display: "window" or "vnc" pins the surface outright,
-// "" or "auto" runs the installer-console default below. Only an uninstalled
-// disk-mode VM wants a window under that default, because its OS installer
-// draws to VGA rather than the serial console and a human has to drive it.
-// live, cloud and installed disk VMs reach ssh with no console interaction,
-// so their screen goes to the VNC socket unless pref overrides it.
+// pref is config.VM.Display: "window" pins a window, "vnc" pins the socket,
+// "" or "auto" defaults to a window. Every mode and installed state defaults
+// the same way; a VM opts into VNC by setting display="vnc", not by its mode.
 //
 // graphical is the host's veto, checked before pref and unconditional: even
 // a "window" preference falls back to VNC on a host with no display server.
@@ -41,21 +36,14 @@ const (
 // same VGA framebuffer over a socket the user can reach from a machine that
 // does have a screen. Whoever answers this must answer it for the host, not
 // for the VM: see GraphicalSession.
-func DisplayKind(pref, mode string, installed, graphical bool) string {
+func DisplayKind(pref string, graphical bool) string {
 	if !graphical {
 		return DisplayVNC
 	}
-	switch pref {
-	case DisplayWindow:
-		return DisplayWindow
-	case DisplayVNC:
-		return DisplayVNC
-	default:
-		if mode == "disk" && !installed {
-			return DisplayWindow
-		}
+	if pref == DisplayVNC {
 		return DisplayVNC
 	}
+	return DisplayWindow
 }
 
 // NeedsWindow reports whether this VM gets a real qemu window on a host whose
@@ -64,7 +52,7 @@ func DisplayKind(pref, mode string, installed, graphical bool) string {
 // Exported so the TUI can describe the right escape hatch (a GTK window vs.
 // the VNC socket) without duplicating this rule.
 func NeedsWindow(v *config.VM, graphical bool) bool {
-	return DisplayKind(v.Display, v.Mode, v.Installed, graphical) == DisplayWindow
+	return DisplayKind(v.Display, graphical) == DisplayWindow
 }
 
 // WantsWindow reports whether this VM would use a window if the host could

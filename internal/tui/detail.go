@@ -391,19 +391,20 @@ func (m model) viewDetail() string {
 		facts.row("", "", effect)
 	}
 	line("display", displayPrefLabel(v.Display))
-	// qemu.DisplayKind takes pref, mode, installed, and host graphical
-	// directly, not a *config.VM, so a core.VM caller can call it without
-	// going through qemu.NeedsWindow/WantsWindow, which need a *config.VM.
+	// qemu.DisplayKind takes pref and host graphical directly, not a
+	// *config.VM, so a core.VM caller can call it without going through
+	// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
 	//
 	// A bare socket path is not enough: the user needs the actual command
 	// that opens it, so this prints one for a viewer installed on this host.
 	//
-	// With no graphical session, the install console also lands on this
-	// socket. That is the case where the user needs the explanation most,
-	// since the VM would otherwise look like it refused to start.
-	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, v.Mode, v.Installed, graphical) != qemu.DisplayWindow {
-		if !graphical && qemu.DisplayKind(v.Display, v.Mode, v.Installed, true) == qemu.DisplayWindow {
-			facts.row("", "", warnStyle.Render("no usable graphical session on this host: the installer console is on vnc"))
+	// With no graphical session, a VM that would otherwise get a window also
+	// lands on this socket. That is the case where the user needs the
+	// explanation most, since the VM would otherwise look like it refused
+	// to start.
+	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, graphical) != qemu.DisplayWindow {
+		if !graphical && qemu.DisplayKind(v.Display, true) == qemu.DisplayWindow {
+			facts.row("", "", warnStyle.Render("no usable graphical session on this host: falling back to vnc"))
 		}
 		line("vnc", v.Paths.VNCSocket)
 		att := qemu.AttachVNC(v.Paths.VNCSocket)
@@ -420,10 +421,14 @@ func (m model) viewDetail() string {
 	// every account, so without a password the console shows a login prompt
 	// with no valid answer. The moment a user needs it is the moment ssh has
 	// failed. This password is set only by the cloudinit backend (form.go),
-	// which is always cloud mode, so it is always reached over VNC, never a
-	// qemu window.
+	// which is always cloud mode; the surface it is typed at is whichever one
+	// is shown above, a qemu window or the VNC socket.
 	if v.ConsolePassword != "" {
-		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (over vnc, above)"))
+		surface := "the qemu window"
+		if qemu.DisplayKind(v.Display, qemu.GraphicalSession()) == qemu.DisplayVNC {
+			surface = "vnc, above"
+		}
+		line("console", sshUser+" / "+v.ConsolePassword+dimStyle.Render("  (over "+surface+")"))
 	} else if v.Mode == "cloud" {
 		line("console", warnStyle.Render("no password set: console login is not possible"))
 	}

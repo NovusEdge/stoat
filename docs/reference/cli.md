@@ -85,8 +85,7 @@ ssh port: 2222
 ssh user: root
 recipes: xfce
 forwards: 8080:80
-display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
-  attach with: gvncviewer /home/user/.stoat/work/vnc.sock
+display: a qemu window
 ```
 
 `display` is the only line here that is not a `vm.toml` field. See [`stoat up`](#stoat-up-name) for what it means and why the answer changes. It is omitted entirely for a broken VM, whose `vm.toml` supplies neither of the facts the answer depends on.
@@ -153,15 +152,15 @@ display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
 
 ### Where the screen is
 
-Exactly one kind of VM gets a real QEMU window: a **disk-mode VM that is not yet installed**, on a host with a graphical session. Its OS installer draws to VGA and a human has to drive it, so `up` says so:
+A VM gets a real QEMU window by default, on a host with a graphical session. Set `display = "vnc"` in `vm.toml` (or cycle it with the `d` key in the TUI) to keep a VM headless instead. QEMU then starts with `-display none` and a VNC server bound to a unix socket in the VM's directory; `-display none` cannot be undone on a running QEMU, so binding VNC at launch keeps a misbehaving guest recoverable.
 
 ```
-display: a qemu window, for the OS installer's console
+$ stoat up work
+starting work...
+work started (ssh :2222)
+display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
+  attach with: gvncviewer /home/user/.stoat/work/vnc.sock
 ```
-
-Every other VM is headless. QEMU is started with `-display none` and a VNC server bound to a unix socket in the VM's directory, because `-display none` cannot be undone on a running QEMU and binding VNC at launch keeps a misbehaving guest recoverable.
-
-**This includes a disk VM the moment its install finishes.** `setup-alpine` completes, stoat records `installed = true`, and the next start has no window. That is not a failure; the screen moved to the socket. It surprises people who provisioned a desktop onto a disk VM and expected the window to keep coming back.
 
 The attach command names a viewer that is actually installed on your machine:
 
@@ -169,18 +168,16 @@ The attach command names a viewer that is actually installed on your machine:
 - Otherwise `socat TCP-LISTEN:5900,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:<socket>` republishes it on loopback, and any VNC client connects to `127.0.0.1:5900`.
 - If neither is installed, `up` says so and names them rather than printing a command that would fail.
 
-There is currently no way to ask for a QEMU window on an installed disk VM. `-display gtk` needs a graphical session on the host, so granting one by default would make `stoat up` fail outright over SSH or from a script rather than merely come up headless.
-
 ### On a host with no graphical session
 
-`-display gtk` does not degrade when there is no display server: QEMU exits 1. So the install console goes to VNC there too, and `up` says why before it says where:
+`-display gtk` does not degrade when there is no display server: QEMU exits 1. So every VM's screen goes to VNC there instead, and `up` says why before it says where:
 
 ```
 $ stoat up alpinedisk
 starting alpinedisk...
 alpinedisk started (ssh :2200)
-display: no usable graphical session on this host, so the OS installer's
-  console is on VNC instead; drive it from a machine with a screen
+display: no usable graphical session on this host, so the screen
+  is on VNC instead; attach to watch it
 display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
   attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
 ```

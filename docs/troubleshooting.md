@@ -2,19 +2,12 @@
 
 Symptom-first. Find the error text you're seeing and jump to it.
 
-## No QEMU window appears any more
+## No QEMU window appears
 
-You created a disk VM, let it install itself, maybe provisioned a desktop onto
-it, and now no window opens on start. There is no error because nothing failed.
-
-Exactly one kind of VM gets a real QEMU window: a disk-mode VM that is **not
-yet installed**, on a host with a graphical session. That window shows the
-unattended `setup-alpine` install as it runs, which draws to VGA. The moment
-stoat records `installed = true`,
-the next start uses `-display none` with a VNC server bound to a unix socket in
-the VM's directory (`internal/qemu/args.go`). `-display none` cannot be undone
-on a running QEMU, so binding VNC at launch is what keeps a guest that has
-locked up or lost its network still reachable.
+A VM with `display = "vnc"` in its `vm.toml`, or one started on a host with no
+graphical session, puts its screen on a VNC socket instead of a window. Every
+other VM opens a real QEMU window by default (`internal/qemu/args.go`), whether
+it is live, cloud, or an installed or uninstalled disk VM.
 
 **Fix:** ask stoat where the screen went. Both `stoat up` and `stoat get` print
 it, with a command for a VNC viewer that is actually installed on your machine:
@@ -31,10 +24,9 @@ installed, stoat names what to install rather than printing a command that
 would fail. With only `socat`, the command bridges the socket to loopback and
 any VNC client connects to `127.0.0.1:5900`.
 
-There is no way to ask for a QEMU window on an installed disk VM. `-display
-gtk` needs a graphical session on the host, so granting one by default would
-make `stoat up` fail outright over SSH or from a script instead of merely
-coming up headless.
+Set `display = "vnc"` (or cycle it with the `d` key in the TUI) to keep a VM
+headless on purpose: `-display none` binds a VNC server at launch instead of a
+window, which stays reachable even if the guest locks up or loses its network.
 
 ## `OpenGL is not supported by display backend 'gtk'`
 
@@ -43,10 +35,10 @@ stoat: up: qemu failed to start: qemu-system-x86_64: OpenGL is not supported by 
 ```
 
 This one is not about OpenGL, and mesa and your GPU drivers are not the place
-to look. stoat starts an uninstalled disk VM with `-display gtk,gl=on`, and
-`gl=on` is simply the first option QEMU rejects when it cannot open a window at
-all. With the same window and no `gl=on`, the same host says `gtk
-initialization failed` instead.
+to look. stoat starts a VM with `-display gtk,gl=on` by default, and `gl=on`
+is simply the first option QEMU rejects when it cannot open a window at all.
+With the same window and no `gl=on`, the same host says `gtk initialization
+failed` instead.
 
 If stoat prints this, it found a graphical session on the host and QEMU still
 could not use it: usually a QEMU or GTK build without working GL. The message
@@ -92,7 +84,7 @@ directions, for every command and for the TUI:
 
 | value | effect |
 | --- | --- |
-| `STOAT_GRAPHICAL=0` | never open a window; the install console goes to VNC |
+| `STOAT_GRAPHICAL=0` | never open a window; every VM's screen goes to VNC |
 | `STOAT_GRAPHICAL=1` | open the window; use this if stoat did not recognize your session |
 | unset | detect (the default) |
 

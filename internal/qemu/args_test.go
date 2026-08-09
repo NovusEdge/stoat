@@ -171,10 +171,11 @@ func TestOnlyManualInstallsGetAWindow(t *testing.T) {
 		vm          config.VM
 		wantsWindow bool
 	}{
-		{"live is automated", config.VM{Mode: "live"}, false},
-		{"cloud is automated", config.VM{Mode: "cloud"}, false},
-		{"installed disk boots like the others", config.VM{Mode: "disk", Installed: true}, false},
+		{"live gets a window on a graphical host", config.VM{Mode: "live"}, true},
+		{"cloud gets a window on a graphical host", config.VM{Mode: "cloud"}, true},
+		{"installed disk boots like the others", config.VM{Mode: "disk", Installed: true}, true},
 		{"uninstalled disk is a manual install", config.VM{Mode: "disk"}, true},
+		{"vnc opts a mode out of the window", config.VM{Mode: "live", Display: "vnc"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := tc.vm
