@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
@@ -128,11 +129,7 @@ func provLine(spin spinner.Model, name string, st provState, now time.Time) stri
 	case st.hasProg:
 		out += " " + progressLabel(st.prog, provBarWidth)
 	case st.last != "":
-		l := st.last
-		if len(l) > provMaxLast {
-			l = l[:provMaxLast-1] + "…"
-		}
-		out += dimStyle.Render(" · " + l)
+		out += dimStyle.Render(" · " + ansi.Truncate(st.last, provMaxLast, "…"))
 	}
 	return out + dimStyle.Render(" · "+provElapsed(now.Sub(st.start)))
 }

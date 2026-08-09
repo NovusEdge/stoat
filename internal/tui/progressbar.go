@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/novusedge/stoat/internal/core"
 )
 
@@ -26,10 +28,7 @@ func progressLabel(p Progress, width int) string {
 	}
 	out := bar(p.Frac, width) + " " + dimStyle.Render(num)
 	if l := p.Label; l != "" {
-		if len(l) > provLabelMax {
-			l = l[:provLabelMax-1] + "…"
-		}
-		out += dimStyle.Render(" · " + l)
+		out += dimStyle.Render(" · " + ansi.Truncate(l, provLabelMax, "…"))
 	}
 	return out
 }
