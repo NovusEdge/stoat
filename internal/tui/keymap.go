@@ -95,7 +95,7 @@ func (h listHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"enter"}, "↵", "start/stop"),
 		plainKey([]string{"right", "l"}, "→/l", "details"),
 		h.ssh(),
-		plainKey([]string{"p"}, "p", "provision"),
+		plainKey([]string{"p"}, "p", "apply"),
 		plainKey([]string{"/"}, "/", "search"),
 		plainKey([]string{"n"}, "n", "new"),
 		plainKey([]string{"r"}, "r", "recipes"),
@@ -109,7 +109,7 @@ func (h listHelp) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{plainKey([]string{"k", "up"}, "k/↑", "up"), plainKey([]string{"j", "down"}, "j/↓", "down")},
 		{plainKey([]string{"enter"}, "↵", "start/stop"), plainKey([]string{"right", "l"}, "→/l", "details")},
-		{h.ssh(), plainKey([]string{"p"}, "p", "provision")},
+		{h.ssh(), plainKey([]string{"p"}, "p", "apply")},
 		{plainKey([]string{"/"}, "/", "search by name"), plainKey([]string{"esc"}, "esc", "clear search")},
 		{plainKey([]string{"n"}, "n", "new"), plainKey([]string{"d"}, "d", "delete")},
 		{plainKey([]string{"r"}, "r", "edit recipes in $EDITOR")},
@@ -138,7 +138,7 @@ func (h detailHelp) ShortHelp() []key.Binding {
 		plainKey([]string{"i"}, "i", "installed"),
 		plainKey([]string{"d"}, "d", "display"),
 		h.ssh(),
-		plainKey([]string{"p"}, "p", "provision"),
+		plainKey([]string{"p"}, "p", "apply"),
 		plainKey([]string{"S"}, "S", "snapshots"),
 	}
 	if h.consolePassword {
@@ -158,7 +158,7 @@ func (h detailHelp) FullHelp() [][]key.Binding {
 		{plainKey([]string{"e"}, "e", "edit form"), plainKey([]string{"E"}, "E", "raw vm.toml in $EDITOR")},
 		{plainKey([]string{"i"}, "i", "installed"), plainKey([]string{"d"}, "d", "cycle display: auto/window/vnc")},
 		{h.ssh()},
-		{plainKey([]string{"p"}, "p", "provision"), plainKey([]string{"L"}, "L", "console log")},
+		{plainKey([]string{"p"}, "p", "apply"), plainKey([]string{"L"}, "L", "console log")},
 		{plainKey([]string{"S"}, "S", "snapshots")},
 	}
 	if h.consolePassword {

@@ -3,12 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -119,84 +117,6 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 		return ExitFail
 	}
 	return ExitOK // unreachable on success: the process image is gone
-}
-
-// runProvision runs sshx.Provision (which does the actual work and writes
-// last-provision.log) in the background while polling that same file and
-// copying new bytes to stdout, so the CLI shows live output without any
-// duplicated provisioning logic.
-func runProvision(a *Args, stdout, stderr io.Writer) int {
-	v, err := config.Load(a.VM)
-	if err != nil {
-		return a.fail(stdout, stderr, err)
-	}
-	if v.Mode == "cloud" {
-		// cloud-init's packages: list runs only at first boot, baked into
-		// the seed when the overlay was created. There is nothing left for
-		// ssh-based provisioning to do, and a cloud recipe is #cloud-config
-		// YAML, not a shell script, so piping it into `sh -s` would fail.
-		const reason = "cloud VM: recipes are applied by cloud-init at first boot; recreate the VM to change them"
-		if a.JSON {
-			// A consumer has to be able to tell "recipes ran" from "there was
-			// nothing to run" without reading English prose.
-			return a.ok(stdout, map[string]any{
-				"vm": a.VM, "provisioned": false, "skipped_reason": reason,
-			})
-		}
-		fmt.Fprintf(stdout, "%s is a cloud VM: recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.\n", a.VM)
-		return ExitOK
-	}
-	if !a.Quiet {
-		fmt.Fprintf(stdout, "provisioning %s...\n", a.VM)
-	}
-
-	// No cancellation source reaches here yet: runProvision has no signal
-	// handling of its own, so this is a call site noted for the caller to
-	// decide whether Ctrl-C should cancel an in-flight provision, not a
-	// design decision made here.
-	logPath := filepath.Join(v.Dir, "last-provision.log")
-	done := make(chan error, 1)
-	// core.WithProvisionLock, not core.Apply: this path drives sshx.Provision
-	// directly (its cloud-VM handling and JSON shape differ from Apply's), so
-	// it takes the same per-VM lock itself instead of going through Apply.
-	go func() {
-		done <- core.WithProvisionLock(v.Dir, func() error {
-			return sshx.Provision(context.Background(), v)
-		})
-	}()
-
-	// Under --json the recipe's raw bytes must not reach stdout: they would sit
-	// in the middle of the JSON Lines stream and every consumer's json.loads
-	// would fail on them. Each appended line becomes a "log" event instead.
-	out := stdout
-	var lw *jsonLogWriter
-	if a.JSON {
-		lw = &jsonLogWriter{em: wire.NewEmitter(stdout), cmd: a.Cmd}
-		out = lw
-	}
-	perr := streamFile(logPath, out, done)
-	if lw != nil {
-		lw.Flush()
-	}
-	if errors.Is(perr, core.ErrProvisionInProgress) {
-		// Another run already holds the VM's provision lock; that run owns
-		// the error, so this one exits clean instead of reporting it too.
-		if a.JSON {
-			return a.ok(stdout, map[string]any{"vm": a.VM, "provisioned": false, "skipped_reason": "provision already running"})
-		}
-		fmt.Fprintf(stdout, "%s: provision already running\n", a.VM)
-		return ExitOK
-	}
-	if perr != nil {
-		return a.fail(stdout, stderr, perr)
-	}
-	if a.JSON {
-		return a.ok(stdout, map[string]any{
-			"vm": a.VM, "provisioned": true, "skipped_reason": "",
-		})
-	}
-	fmt.Fprintf(stdout, "%s provisioned\n", a.VM)
-	return ExitOK
 }
 
 // jsonLogWriter wraps appended log bytes as one "log" event per line.

@@ -78,7 +78,7 @@ func (m *model) startProvision(v core.VM) tea.Cmd {
 		// core.Apply refuses the same state with ErrAppliedAtBoot. This check
 		// shows the user the refusal before anything starts, instead of
 		// after a failed attempt.
-		return m.showToast(v.Name+": cloud VMs provision at first boot via cloud-init. Recipes are applied automatically; recreate the VM to change them", true)
+		return m.showToast(v.Name+": cloud VMs apply recipes at first boot via cloud-init. Recreate the VM to change them", true)
 	}
 	// A disk VM still boots its installer ISO until its OS is on disk. sshd
 	// there belongs to the installer, not the system being built, so
@@ -88,13 +88,13 @@ func (m *model) startProvision(v core.VM) tea.Cmd {
 	if v.Mode == "disk" && !v.Installed {
 		if v.Backend == "apkovl" {
 			return m.showToast(v.Name+": installing itself; wait for it to finish and reboot, "+
-				"then stoat notices the install and offers to provision", true)
+				"then stoat notices the install and offers to apply recipes", true)
 		}
 		return m.showToast(v.Name+": not installed yet, run "+installerName(v.OS)+
 			" at the console, then stop and start it", true)
 	}
 	if len(v.Recipes) == 0 {
-		return m.showToast(v.Name+": no recipes selected, nothing to provision", true)
+		return m.showToast(v.Name+": no recipes selected, nothing to apply", true)
 	}
 	if _, running := m.provisioning[v.Name]; running {
 		return nil

@@ -46,10 +46,10 @@ type Args struct {
 	Yes   bool
 	N     int // logs -n
 
-	// NoProvision belongs to "up": it skips the automatic post-boot
-	// provision, leaving `up` returning as soon as the VM starts, as it did
-	// before that behavior existed.
-	NoProvision bool
+	// NoApply belongs to "up": it skips the automatic post-boot apply,
+	// leaving `up` returning as soon as the VM starts, as it did before that
+	// behavior existed.
+	NoApply bool
 
 	// JSON is set by Main from the pre-parse argv scan, never by Parse: the
 	// flag has to be recognized before any parser exists so a usage error
@@ -392,7 +392,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	case "ssh":
 		return runSSH(a, stdout, stderr)
 	case "provision":
-		return runProvision(a, stdout, stderr)
+		return runApply(a, stdout, stderr)
 	case "rm":
 		return runRM(a, stdin, stdout, stderr)
 	case "recipe":

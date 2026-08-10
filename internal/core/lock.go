@@ -24,9 +24,7 @@ var ErrProvisionInProgress = errors.New("provision already in progress")
 // when the kernel closes its file descriptors, so a lock file left on disk
 // after a crash never blocks the next run. The file itself is never removed.
 //
-// Apply is one caller. internal/cli's runProvision is the other: it drives
-// sshx.Provision directly rather than through Apply, so it takes this lock
-// itself around that call.
+// Apply is the only caller: it takes this lock itself around sshx.Provision.
 func WithProvisionLock(dir string, fn func() error) error {
 	path := filepath.Join(dir, "provision.lock")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)

@@ -52,7 +52,7 @@ type grammar struct {
 	Prune    pruneCmd    `cmd:"" help:"report, or with --apply remove, stale files"`
 
 	Apply        applyCmd        `cmd:"" help:"run the VM's recipes, streaming output"`
-	Provision    provisionCmd    `cmd:"" help:"run recipes, streaming output to stdout"`
+	Provision    applyCmd        `cmd:"" hidden:"" name:"provision" help:"alias of apply"`
 	Recipes      recipesCmd      `cmd:"" help:"list recipes, optionally only applicable ones"`
 	CheckRecipes checkRecipesCmd `cmd:"" help:"report why a recipe would not apply"`
 	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
@@ -75,8 +75,8 @@ type getCmd struct {
 }
 
 type upCmd struct {
-	VM          string `arg:"" help:"vm name"`
-	NoProvision bool   `name:"no-provision" help:"start only; skip the automatic post-boot provision"`
+	VM      string `arg:"" help:"vm name"`
+	NoApply bool   `name:"no-apply" aliases:"no-provision" help:"start only; skip the automatic post-boot apply"`
 }
 
 type downCmd struct {
@@ -88,10 +88,6 @@ type sshCmd struct {
 }
 
 type sshCmdCmd struct {
-	VM string `arg:"" help:"vm name"`
-}
-
-type provisionCmd struct {
 	VM string `arg:"" help:"vm name"`
 }
 
@@ -249,12 +245,12 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		// FLAG path gets it from kong's own buffer.
 		a.Help = helpText()
 
-	case "get", "down", "ssh", "ssh-command", "provision":
+	case "get", "down", "ssh", "ssh-command":
 		a.VM = g.vmFor(path)
 
 	case "up":
 		a.VM = g.Up.VM
-		a.NoProvision = g.Up.NoProvision
+		a.NoApply = g.Up.NoApply
 
 	case "rm":
 		a.VM, a.Yes = g.RM.VM, g.RM.Yes
@@ -389,6 +385,9 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "apply":
 		a.VM, a.Only = g.Apply.VM, trimList(g.Apply.Only)
 
+	case "provision":
+		a.VM, a.Only = g.Provision.VM, trimList(g.Provision.Only)
+
 	case "recipes":
 		a.OS, a.Backend = g.Recipes.OS, g.Recipes.Backend
 
@@ -480,8 +479,6 @@ func (g *grammar) vmFor(path string) string {
 		return g.SSH.VM
 	case "ssh-command":
 		return g.SSHCmd.VM
-	case "provision":
-		return g.Provision.VM
 	}
 	return ""
 }

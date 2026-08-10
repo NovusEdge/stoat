@@ -99,10 +99,10 @@ session exists but QEMU cannot draw on it.
 
 (`internal/sshx/sshx.go`'s `Wait`, with `WaitTimeout` set to 90 seconds.)
 
-**If this happens while provisioning a disk VM:** the VM is still installing
-itself off the ISO. Its guest OS is not on the disk yet, so there is nothing to
-provision, and `sshd` answering means the *installer's* sshd is up, not the
-system you are building.
+**If this happens while applying recipes to a disk VM:** the VM is still
+installing itself off the ISO. Its guest OS is not on the disk yet, so there
+are no recipes to apply, and `sshd` answering means the *installer's* sshd is
+up, not the system you are building.
 
 **Fix:** wait. The unattended `setup-alpine` finishes, reboots into the disk,
 and the next start notices the OS, marks the VM installed and drops the ISO from
@@ -110,7 +110,7 @@ the boot order. Pressing `p` before that is refused outright, rather than making
 you wait out the full timeout to find out:
 
 ```
-<name>: installing itself; wait for it to finish and reboot, then stoat notices the install and offers to provision
+<name>: installing itself; wait for it to finish and reboot, then stoat notices the install and offers to apply recipes
 ```
 
 `i` on the detail screen still toggles `installed` by hand, for when that
@@ -118,7 +118,7 @@ guess goes wrong in either direction: an install that died halfway leaves
 enough bytes on the disk to look finished (the threshold is `installedBytes`
 in `internal/qemu/run.go`), and `i` is how you get the ISO back.
 
-## Provisioning a disk VM fails with `Permission denied (publickey,...)`
+## Applying recipes to a disk VM fails with `Permission denied (publickey,...)`
 
 An Alpine disk VM gets the same apkovl a live one does
 (`internal/apkovl/apkovl.go`) while it is still uninstalled, precisely so
@@ -208,7 +208,8 @@ machine) or a **cloud** VM (a prebuilt image where cloud-init's `packages:`/
 A VM's directory exists under the data root but its `vm.toml` doesn't parse
 (`internal/config/config.go`'s `ListBroken`). stoat still shows it, rather
 than hiding a directory it can't fully understand, so you know it's there and
-can act on it, but it can't be started, edited, or provisioned in that state.
+can act on it, but it can't be started, edited, or have recipes applied in
+that state.
 Its reserved ssh port stays held (`FreePort` checks broken VMs' raw `vm.toml`
 port fields too), so a broken VM won't silently let a new VM reuse its port
 out from under it.

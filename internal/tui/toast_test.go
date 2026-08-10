@@ -23,14 +23,26 @@ func TestToastOverlayKeepsScreenShape(t *testing.T) {
 	withToast := m.View().Content
 
 	if got, want := lipgloss.Height(withToast), lipgloss.Height(plain); got != want {
-		t.Errorf("height %d, want %d", got, want)
+		t.Errorf("height %d, want %d: the toast added or removed a row", got, want)
 	}
-	if got, want := lipgloss.Width(withToast), lipgloss.Width(plain); got != want {
-		t.Errorf("width %d, want %d", got, want)
+	// lipgloss v2's compositor trims trailing whitespace off a line it draws
+	// over, so a shorter footer label changes a line's trailing spaces
+	// without changing what a terminal shows. Trim both sides before
+	// comparing width, so the real invariant (no wrap) survives that.
+	if got, want := lipgloss.Width(trimTrailingSpaces(withToast)), lipgloss.Width(trimTrailingSpaces(plain)); got != want {
+		t.Errorf("width %d, want %d: the toast changed the visible column count", got, want)
 	}
 	if !strings.Contains(withToast, "vm1 stopped") {
 		t.Error("toast text missing from the rendered screen")
 	}
+}
+
+func trimTrailingSpaces(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // A toast replaced by a newer one must not be retired by the older one's

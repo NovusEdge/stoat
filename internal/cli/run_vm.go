@@ -96,11 +96,11 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 }
 
 // afterStart runs v's pending recipes once it answers ssh, the same
-// core.Apply path `stoat provision` uses (run_access.go's runProvision).
-// --no-provision, or a VM with nothing pending, returns immediately: `up`
+// core.Apply path `stoat apply` uses (run_apply.go's runApply).
+// --no-apply, or a VM with nothing pending, returns immediately: `up`
 // does not block a VM that has no work waiting.
 func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
-	if a.NoProvision {
+	if a.NoApply {
 		return ExitOK
 	}
 	cfg, err := config.Load(v.Name)
@@ -125,21 +125,21 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	}
 
 	if !a.Quiet {
-		fmt.Fprintf(stdout, "provisioning %s...\n", a.VM)
+		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
 	done := make(chan error, 1)
 	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{}) }()
 	if err := streamFile(v.Paths.ApplyLog, stdout, done); err != nil {
 		if errors.Is(err, core.ErrProvisionInProgress) {
-			// A concurrent `apply` or `provision` already holds the lock; that
-			// run owns the error. `up` still started the VM, so this is not a
-			// failure of the up command.
-			fmt.Fprintf(stdout, "%s: provision already running\n", a.VM)
+			// A concurrent `apply` already holds the lock; that run owns the
+			// error. `up` still started the VM, so this is not a failure of
+			// the up command.
+			fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
 			return ExitOK
 		}
 		return a.fail(stdout, stderr, err)
 	}
-	fmt.Fprintf(stdout, "%s provisioned\n", a.VM)
+	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
 	return ExitOK
 }
 
