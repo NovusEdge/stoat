@@ -51,6 +51,11 @@ var ErrCannotReach = errors.New("vm cannot reach the requested state")
 // interactively (the TUI) does not visibly stall, slow enough not to spin.
 const pollInterval = 300 * time.Millisecond
 
+// InstallTimeout bounds how long AutoRestartAfterInstall waits for a disk
+// VM's unattended installer to power off. setup-alpine plus a package fetch
+// runs several minutes on a slow mirror.
+const InstallTimeout = 15 * time.Minute
+
 // Wait blocks until VM name reaches the state described by until, or ctx is
 // cancelled or hits its deadline, whichever comes first.
 //
