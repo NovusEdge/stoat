@@ -9,6 +9,12 @@ import (
 // matching docs/recipe-spec-v2.md's cloudinit execution model.
 const scriptDir = "/var/lib/stoat/recipes"
 
+// MarkerDir holds one empty file per recipe that ran successfully at first
+// boot. core.Apply reads it over ssh to rebuild v.Applied for a cloudinit VM,
+// which never populated it at create time. The name is the recipe's, with no
+// extension.
+const MarkerDir = "/var/lib/stoat/.applied"
+
 // Script pairs a recipe's Name with the body WrapScripts should run for it,
 // i.e. the manifest's Name and manifest.ScriptContent(osName) for the guest
 // being provisioned.
@@ -41,7 +47,12 @@ func WrapScripts(scripts []Script) string {
 		wf.WriteString("    permissions: '0755'\n")
 		wf.WriteString("    content: |\n")
 		wf.WriteString(indentBlock(s.Content))
-		rc.WriteString(fmt.Sprintf("  - %s\n", path))
+		// The script runs, then drops a marker on success. core.Apply reads
+		// MarkerDir over ssh to rebuild v.Applied post-boot. The && chain
+		// leaves no marker for a script that failed, so a failed recipe stays
+		// pending instead of being recorded as applied.
+		marker := fmt.Sprintf("%s/%s", MarkerDir, s.Name)
+		rc.WriteString(fmt.Sprintf("  - %s && mkdir -p %s && touch %s\n", path, MarkerDir, marker))
 	}
 
 	return "#cloud-config\n" + wf.String() + rc.String()

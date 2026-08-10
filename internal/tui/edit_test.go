@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -424,6 +426,77 @@ func TestEditChangeMarkers(t *testing.T) {
 	clean.recipeSel = map[string]bool{"x.alpine.sh": true}
 	if !clean.dirty() {
 		t.Error("selecting a recipe did not mark the form dirty")
+	}
+}
+
+// writeEditTestRecipe writes a v2 recipe under dir/recipes/name. depends is
+// written verbatim as a TOML string array, matching core's writeDepRecipe
+// fixture (internal/core/apply_test.go) for the same manifest shape.
+func writeEditTestRecipe(t *testing.T, dir, name string, depends []string) {
+	t.Helper()
+	recipeDir := filepath.Join(dir, "recipes", name)
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quoted := make([]string, len(depends))
+	for i, d := range depends {
+		quoted[i] = "\"" + d + "\""
+	}
+	toml := "name = \"" + name + "\"\n" +
+		"script = \"install.sh\"\n" +
+		"depends = [" + strings.Join(quoted, ", ") + "]\n"
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEditRecipeToggleAutoAddsDependency pins the auto-add rule from
+// docs/specs/2026-08-10-recipe-system-fixes-design.md §2 "TUI Behavior":
+// checking a recipe that depends on one not yet selected pulls the
+// dependency in and reports it as a toast.
+func TestEditRecipeToggleAutoAddsDependency(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("STOAT_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "isos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeEditTestRecipe(t, dir, "docker", nil)
+	writeEditTestRecipe(t, dir, "devtools", []string{"docker"})
+
+	v := &config.VM{
+		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl",
+		ISO: "isos/alpine-standard-3.24.1-x86_64.iso",
+		RAM: 4096, CPUs: 4, Disk: "8G", Share: "~/vms", SSHPort: 2200,
+	}
+	if err := v.Save(); err != nil {
+		t.Fatalf("save fixture vm: %v", err)
+	}
+	e := newEdit(v)
+	e.focus = eRecipes
+	for i, n := range e.recipeNames {
+		if n == "devtools" {
+			e.recipeIdx = i
+		}
+	}
+
+	m := model{screen: screenEdit, edit: e}
+	mm, cmd := m.updateEdit(keyMsg(keySpace))
+	m = mm.(model)
+
+	if !m.edit.recipeSel["devtools"] {
+		t.Error("devtools was not checked")
+	}
+	if !m.edit.recipeSel["docker"] {
+		t.Error("docker was not auto-added")
+	}
+	if cmd == nil {
+		t.Fatal("no toast Cmd returned")
+	}
+	if !strings.Contains(m.toast.text, "Added docker (required by devtools)") {
+		t.Errorf("toast = %q, want it to report the auto-added dependency", m.toast.text)
 	}
 }
 

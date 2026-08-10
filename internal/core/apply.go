@@ -10,22 +10,12 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/backend"
+	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/sshx"
 )
-
-// ErrAppliedAtBoot is returned by Apply for a VM whose backend already ran
-// its recipes at first boot: the cloudinit backend. Its recipes merge into
-// the cloud-init seed and run through the guest's own cloud-init service,
-// before sshd is even reachable (internal/backend/cloudinit.go's Prepare has
-// no matching Provision). Calling sshx.Provision on such a VM is not a
-// harmless no-op: v.Recipes holds "*.cloud.yaml" fragment names, and
-// Provision pipes whatever it's given to `sh -s` over ssh, so a cloud
-// fragment would run as a shell script. Apply refuses up front instead.
-var ErrAppliedAtBoot = errors.New("recipes for this backend already ran at first boot")
 
 // ApplyOpts controls one Apply call.
 type ApplyOpts struct {
@@ -82,13 +72,67 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	return err
 }
 
+// ApplyPlan is one recipe's entry in a dry-run: what Apply would do with it,
+// and why. Version is the recipe's applied version from v.Applied, empty when
+// it was never applied.
+type ApplyPlan struct {
+	Name    string `json:"name"`
+	Action  string `json:"action"` // "run" | "skip"
+	Reason  string `json:"reason"`
+	Version string `json:"version,omitempty"`
+}
+
+// PlanApply reports what Apply would do for VM name, without running anything.
+// It uses the same filtering as applyLocked (run mode, dependency order and
+// satisfaction), so a plan matches the run that would follow.
+//
+// The plan is host-side: it reads manifests and v.Applied, so the VM does not
+// need to be running. A cloudinit VM whose markers were never discovered still
+// has an empty v.Applied here, so its recipes read as "never applied" until a
+// real Apply populates it (docs/specs recipe-system-fixes §3 fallback).
+func PlanApply(name string, opts ApplyOpts) ([]ApplyPlan, error) {
+	v, err := load(name)
+	if err != nil {
+		return nil, err
+	}
+
+	targets := v.Recipes
+	if len(opts.Only) > 0 {
+		have := make(map[string]bool, len(v.Recipes))
+		for _, r := range v.Recipes {
+			have[r] = true
+		}
+		for _, o := range opts.Only {
+			if !have[o] {
+				return nil, fmt.Errorf("%w: recipe %q is not one of %s's recipes", ErrRecipeNotApplicable, o, v.Name)
+			}
+		}
+		targets = opts.Only
+	}
+	explicit := make(map[string]bool, len(opts.Only))
+	for _, o := range opts.Only {
+		explicit[o] = true
+	}
+
+	decisions, _, err := planRecipes(v, targets, explicit)
+	if err != nil {
+		return nil, err
+	}
+	plan := make([]ApplyPlan, 0, len(decisions))
+	for _, d := range decisions {
+		action := "skip"
+		if d.run {
+			action = "run"
+		}
+		plan = append(plan, ApplyPlan{Name: d.name, Action: action, Reason: d.reason, Version: v.Applied[d.name].Version})
+	}
+	return plan, nil
+}
+
 // applyLocked is Apply's body, run while Apply holds name's provision lock.
 func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	if !qemu.Running(v) {
 		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
-	}
-	if backend.For(v).Name() == "cloudinit" {
-		return fmt.Errorf("%w: %s", ErrAppliedAtBoot, v.Name)
 	}
 
 	targets := v.Recipes
@@ -122,6 +166,14 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	for _, o := range opts.Only {
 		explicit[o] = true
 	}
+
+	// A cloudinit VM ran its recipes from the seed at first boot and never
+	// populated v.Applied. Read the marker files cloud-init left behind, so
+	// filterByRunMode can skip a "once" recipe instead of re-running it.
+	if err := discoverCloudInitApplied(ctx, v); err != nil {
+		return err
+	}
+
 	runTargets, manifests, err := filterByRunMode(v, targets, explicit)
 	if err != nil {
 		return err
@@ -241,6 +293,50 @@ func appendProvisionLog(v *config.VM, s string) {
 	f.WriteString(s)
 }
 
+// discoverCloudInitApplied rebuilds v.Applied for a cloudinit VM from the
+// marker files cloud-init left after first boot. It runs over ssh, so the VM
+// must be reachable; applyLocked calls it only after the qemu.Running check.
+//
+// It no-ops unless the backend is cloudinit and v.Applied is still empty: once
+// a post-boot Apply has recorded state, that state is authoritative and this
+// must not overwrite it. A missing marker directory (an old VM, or cloud-init
+// that failed entirely) leaves v.Applied empty, so the next Apply re-runs
+// every recipe once, then tracks state from then on.
+//
+// The recorded Hash comes from the current script on disk, not from whatever
+// cloud-init ran at creation. That is benign: recipes are idempotent, and a
+// script that has since changed reruns on this same Apply anyway.
+func discoverCloudInitApplied(ctx context.Context, v *config.VM) error {
+	if backend.For(v).Name() != "cloudinit" || len(v.Applied) > 0 {
+		return nil
+	}
+	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, "ls -1 "+cloudinit.MarkerDir+" 2>/dev/null")...).Output()
+	if err != nil {
+		return nil // marker dir missing or a transient ssh error; discover nothing
+	}
+
+	var applied map[string]config.AppliedRecipe
+	for _, name := range strings.Fields(string(out)) {
+		hash, err := recipes.ScriptHash(name, v.OS)
+		if err != nil {
+			continue // a marker for a recipe no longer on disk
+		}
+		ver := ""
+		if m, ok, _ := recipes.ManifestFor(name); ok {
+			ver = m.Version
+		}
+		if applied == nil {
+			applied = make(map[string]config.AppliedRecipe)
+		}
+		applied[name] = config.AppliedRecipe{Version: ver, Hash: hash, At: time.Now()}
+	}
+	if applied == nil {
+		return nil
+	}
+	v.Applied = applied
+	return v.Save()
+}
+
 // filterByRunMode narrows targets to the recipes that should actually run,
 // given each recipe's declared run mode (recipes.Manifest.Run) and what v
 // has already recorded in Applied.
@@ -256,13 +352,47 @@ func appendProvisionLog(v *config.VM, s string) {
 // That never equals a real script hash, so an existing VM reruns its
 // "once" recipes exactly once, then carries a real hash from then on.
 //
-// A target with no recipe.toml (ManifestFor's ok=false) is a v1 flat-file
-// recipe. It has no run-mode concept and always stays in the result,
-// matching Apply's behavior before v2 recipes existed. The returned map
-// holds the manifest for every v2 recipe kept, so the caller does not have
+// A target with no recipe.toml (ManifestFor's ok=false) is a recipe that
+// went missing since the VM was created. It has no script to run, so this
+// errors rather than passing a name Provision cannot resolve. The returned
+// map holds the manifest for every recipe kept, so the caller does not have
 // to re-resolve it after the run succeeds.
+//
+// Targets run in dependency order, not v.Recipes order: a recipe with
+// depends = ["docker"] runs after docker regardless of array position. A
+// dependency cycle among the targets errors here, since a manifest edited on
+// disk after add-time can introduce one (docs/specs recipe-system-fixes §2).
+// A kept recipe's dependency must be satisfied: it ran earlier in this run,
+// or is already recorded in v.Applied. An unsatisfiable dependency errors
+// rather than run the dependent against an unmet one.
 func filterByRunMode(v *config.VM, targets []string, explicit map[string]bool) ([]string, map[string]recipes.Manifest, error) {
-	kept := make([]string, 0, len(targets))
+	decisions, manifests, err := planRecipes(v, targets, explicit)
+	if err != nil {
+		return nil, nil, err
+	}
+	kept := make([]string, 0, len(decisions))
+	for _, d := range decisions {
+		if d.run {
+			kept = append(kept, d.name)
+		}
+	}
+	return kept, manifests, nil
+}
+
+// recipeDecision is planRecipes' verdict for one target: whether it runs, and
+// the reason a reader (dry-run) can print. run==false is a skip.
+type recipeDecision struct {
+	name   string
+	run    bool
+	reason string
+}
+
+// planRecipes resolves, dependency-orders, and classifies targets. It returns
+// one decision per target in run order. It is the shared body behind both
+// filterByRunMode (which keeps the run==true names) and PlanApply (which
+// reports every decision). It raises the same errors either way: a missing
+// recipe.toml, a dependency cycle, or an unsatisfiable dependency.
+func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]recipeDecision, map[string]recipes.Manifest, error) {
 	manifests := make(map[string]recipes.Manifest, len(targets))
 	for _, name := range targets {
 		m, ok, err := recipes.ManifestFor(name)
@@ -270,15 +400,28 @@ func filterByRunMode(v *config.VM, targets []string, explicit map[string]bool) (
 			return nil, nil, err
 		}
 		if !ok {
-			kept = append(kept, name)
-			continue
+			return nil, nil, fmt.Errorf("%w: recipe %q has no recipe.toml", ErrRecipeNotApplicable, name)
 		}
 		manifests[name] = m
+	}
 
+	ordered, err := recipes.TopoSort(targets, manifests)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %v", ErrRecipeNotApplicable, err)
+	}
+
+	decisions := make([]recipeDecision, 0, len(ordered))
+	keptSet := make(map[string]bool, len(ordered))
+	for _, name := range ordered {
+		m := manifests[name]
+
+		run, reason := true, "runs every time"
 		switch m.Run {
 		case "manual":
-			if !explicit[name] {
-				continue
+			if explicit[name] {
+				reason = "named explicitly"
+			} else {
+				run, reason = false, "manual, not selected"
 			}
 		case "once":
 			if applied, done := v.Applied[name]; done {
@@ -287,13 +430,41 @@ func filterByRunMode(v *config.VM, targets []string, explicit map[string]bool) (
 					return nil, nil, err
 				}
 				if applied.Hash == hash {
-					continue
+					run, reason = false, "already applied"
+				} else {
+					reason = "script changed"
 				}
+			} else {
+				reason = "never applied"
 			}
 		}
-		kept = append(kept, name)
+
+		if run {
+			for _, dep := range m.Depends {
+				if keptSet[dep] {
+					continue // ran earlier in this run
+				}
+				if _, done := v.Applied[dep]; done {
+					continue // already applied on this VM
+				}
+				return nil, nil, dependencyError(name, dep, manifests, explicit)
+			}
+			keptSet[name] = true
+		}
+		decisions = append(decisions, recipeDecision{name: name, run: run, reason: reason})
 	}
-	return kept, manifests, nil
+	return decisions, manifests, nil
+}
+
+// dependencyError explains why dependent cannot run: its dependency dep is
+// neither running this pass nor already applied. A dep that is a configured
+// "manual" recipe was skipped because nobody named it; anything else is a dep
+// left out of this run (excluded by ApplyOpts.Only, or not on the VM).
+func dependencyError(dependent, dep string, manifests map[string]recipes.Manifest, explicit map[string]bool) error {
+	if m, ok := manifests[dep]; ok && m.Run == "manual" && !explicit[dep] {
+		return fmt.Errorf("%w: %s depends on %s, which has never been applied (run = manual)", ErrRecipeNotApplicable, dependent, dep)
+	}
+	return fmt.Errorf("%w: %s depends on %s; add it to --recipe or apply it first", ErrRecipeNotApplicable, dependent, dep)
 }
 
 // Recipe is one recipe resolved for a specific OS. In v2, recipes are
@@ -347,17 +518,10 @@ type RecipeIssue struct {
 // reports nothing, so a caller checking "will these work" reads an empty
 // result as a clean answer.
 //
-// The reasons below prefer a recipe's own declared front matter
-// (internal/recipes.ParseMetadata/UnsupportedReason) when it has any: "xfce
-// requires systemd, alpine uses openrc" is docs/design/core-api.md §4's
-// example. Where a recipe declares no metadata (every *.cloud.yaml fragment
-// today, by design; see recipeIssueReason) the reason falls back to a
-// structural one, derived from the requested file's name, from
-// guest.Lookup(osName), and from what else exists on disk (an OS-specific
-// override suppressing a shared fragment; see recipes.List's doc comment on
-// "overridden"). That still gives a true reason like "xfce.cloud.yaml is
-// not offered to alpine because alpine has its own xfce.alpine.cloud.yaml"
-// for recipes with no better reason to give.
+// backendName is ignored in v2: every recipe is a shell script, and the
+// backend determines how it runs, not whether it applies (see recipes.List).
+// The reason for an inapplicable recipe comes from recipes.MatchReason
+// against the recipe's manifest: "docker: built for alpine, not debian".
 func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, error) {
 	available, err := recipes.List(osName, backendName)
 	if err != nil {
@@ -370,82 +534,32 @@ func CheckRecipes(osName, backendName string, names []string) ([]RecipeIssue, er
 
 	var issues []RecipeIssue
 	for _, n := range names {
-		if ok[n] {
+		if !ok[n] {
+			issues = append(issues, RecipeIssue{Name: n, Reason: recipeIssueReason(n, osName)})
 			continue
 		}
-		issues = append(issues, RecipeIssue{Name: n, Reason: recipeIssueReason(n, osName, backendName)})
+		// Applicable, but an install-stage recipe cannot run yet.
+		if m, mok, err := recipes.ManifestFor(n); err == nil && mok && m.Stage == "install" {
+			issues = append(issues, RecipeIssue{Name: n, Reason: installStageUnsupported})
+		}
 	}
 	return issues, nil
 }
 
-// recipeIssueReason explains why name is not offered to osName/backendName.
-// It prefers a capability-based reason drawn from the recipe's own declared
-// front matter (internal/recipes.ParseMetadata/UnsupportedReason). When the
-// recipe declares no metadata, it falls back to one derived structurally,
-// from the filename, guest.Lookup, and whether other files exist on disk;
-// see CheckRecipes' doc comment for why that fallback exists.
-func recipeIssueReason(name, osName, backendName string) string {
-	if _, err := os.Stat(recipes.Path(name)); err != nil {
+// recipeIssueReason explains why name is not offered to osName. A name with no
+// recipe.toml is not a recipe. A recipe.toml that fails to parse reports the
+// parse error. Otherwise recipes.MatchReason explains the OS or capability
+// mismatch that MatchesVM (and so recipes.List) rejected it for.
+func recipeIssueReason(name, osName string) string {
+	m, ok, err := recipes.ManifestFor(name)
+	if err != nil {
+		return fmt.Sprintf("%s: %v", name, err)
+	}
+	if !ok {
 		return fmt.Sprintf("no such recipe %q", name)
 	}
-
-	isCloudFragment := strings.HasSuffix(name, ".cloud.yaml")
-	isShellRecipe := strings.HasSuffix(name, ".sh") && !isCloudFragment
-
-	// The backend mismatches below are checked before metadata and win
-	// outright: a shell recipe pushed to a cloudinit VM, or a cloud
-	// fragment offered to a backend with no cloud-init seed to merge it
-	// into. Both are about HOW a recipe gets applied, which no front-matter
-	// tag declares, so UnsupportedReason has nothing better to say.
-	switch {
-	case isCloudFragment && backendName != "cloudinit":
-		return fmt.Sprintf("%s is a cloud-init fragment; the %s backend applies recipes over ssh after boot, not from a cloud-init seed", name, backendName)
-	case isShellRecipe && backendName == "cloudinit":
-		return fmt.Sprintf("%s is a shell recipe pushed over ssh; the cloudinit backend applies its recipes from the seed at first boot instead", name)
+	if reason := recipes.MatchReason(&m, osName); reason != "" {
+		return fmt.Sprintf("%s: %s", name, reason)
 	}
-
-	// Backend is applicable. Whether name matches osName is answered by the
-	// recipe's own declared front matter, when present, with a real reason
-	// ("requires systemd, alpine uses openrc") instead of one guessed from
-	// the filename; that reason wins when both exist. A parse error or a
-	// recipe with no "# stoat:" block (every *.cloud.yaml fragment today;
-	// see docs/design/guest-subsystem.md §5's phase split) leaves m at its
-	// zero value. UnsupportedReason then returns "", and the structural
-	// switch below answers instead.
-	if m, err := recipes.ReadMetadata(name); err == nil {
-		if reason := recipes.UnsupportedReason(osName, m); reason != "" {
-			return fmt.Sprintf("%s: %s", name, reason)
-		}
-	}
-
-	switch {
-	case isCloudFragment:
-		base := strings.TrimSuffix(name, ".cloud.yaml")
-		if i := strings.LastIndex(base, "."); i >= 0 {
-			fileOS := base[i+1:]
-			return fmt.Sprintf("%s is built for %s, not %s", name, fileOS, osName)
-		}
-		g, isKnown := guest.Lookup(osName)
-		if !isKnown {
-			return fmt.Sprintf("%s: %q is not a recognised OS", name, osName)
-		}
-		if !g.CloudRecipes {
-			return fmt.Sprintf("%s: %s is not in the shared cloud-recipe set", name, osName)
-		}
-		if override := base + "." + osName + ".cloud.yaml"; fileExists(recipes.Path(override)) {
-			return fmt.Sprintf("%s: %s has its own override, %s; use that instead of the shared fragment", name, osName, override)
-		}
-		return fmt.Sprintf("%s is not offered to %s/%s", name, osName, backendName)
-	case isShellRecipe:
-		fields := strings.Split(strings.TrimSuffix(name, ".sh"), ".")
-		fileOS := fields[len(fields)-1]
-		return fmt.Sprintf("%s is built for %s, not %s", name, fileOS, osName)
-	default:
-		return fmt.Sprintf("%s is not offered to %s/%s", name, osName, backendName)
-	}
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	return fmt.Sprintf("%s is not offered to %s", name, osName)
 }

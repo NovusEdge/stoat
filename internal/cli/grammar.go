@@ -198,8 +198,9 @@ type waitCmd struct {
 }
 
 type applyCmd struct {
-	VM   string   `arg:"" help:"vm name"`
-	Only []string `help:"subset of the VM's own recipes"`
+	VM     string   `arg:"" help:"vm name"`
+	Only   []string `help:"subset of the VM's own recipes"`
+	DryRun bool     `name:"dry-run" help:"print what would run without running it"`
 }
 
 type recipesCmd struct {
@@ -383,10 +384,10 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.VM, a.Until, a.Timeout = w.VM, core.Until(w.Until), w.Timeout
 
 	case "apply":
-		a.VM, a.Only = g.Apply.VM, trimList(g.Apply.Only)
+		a.VM, a.Only, a.DryRun = g.Apply.VM, trimList(g.Apply.Only), g.Apply.DryRun
 
 	case "provision":
-		a.VM, a.Only = g.Provision.VM, trimList(g.Provision.Only)
+		a.VM, a.Only, a.DryRun = g.Provision.VM, trimList(g.Provision.Only), g.Provision.DryRun
 
 	case "recipes":
 		a.OS, a.Backend = g.Recipes.OS, g.Recipes.Backend

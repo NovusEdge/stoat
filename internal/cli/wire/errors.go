@@ -25,7 +25,6 @@ const (
 	CodeImmutableField       = "immutable_field"
 	CodeDiskShrink           = "disk_shrink"
 	CodeCannotReach          = "cannot_reach"
-	CodeAppliedAtBoot        = "applied_at_boot"
 	CodeUnknownLog           = "unknown_log"
 	CodeTimeout              = "timeout"
 	CodeCanceled             = "canceled"
@@ -65,7 +64,6 @@ var codeTable = []struct {
 	{CodeImmutableField, core.ErrImmutableField},
 	{CodeDiskShrink, core.ErrDiskShrink},
 	{CodeCannotReach, core.ErrCannotReach},
-	{CodeAppliedAtBoot, core.ErrAppliedAtBoot},
 	{CodeUnknownLog, core.ErrUnknownWhich},
 	{CodeTimeout, context.DeadlineExceeded},
 	{CodeCanceled, context.Canceled},

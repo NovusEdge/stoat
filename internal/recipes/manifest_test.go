@@ -74,6 +74,33 @@ alpine = "install-alpine.sh"
 	}
 }
 
+// TestParseManifestDependsField pins that depends parses into a string slice,
+// and defaults to empty when absent.
+func TestParseManifestDependsField(t *testing.T) {
+	dir := t.TempDir()
+	path := writeManifestFile(t, dir, `
+name = "devtools"
+script = "install.sh"
+depends = ["docker", "tailscale"]
+`)
+	m, err := ParseManifest(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !slices.Equal(m.Depends, []string{"docker", "tailscale"}) {
+		t.Errorf("Depends = %v, want [docker tailscale]", m.Depends)
+	}
+
+	bare := writeManifestFile(t, t.TempDir(), "name = \"solo\"\nscript = \"install.sh\"\n")
+	m, err = ParseManifest(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Depends) != 0 {
+		t.Errorf("Depends = %v, want empty when the field is absent", m.Depends)
+	}
+}
+
 func TestParseManifestDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := writeManifestFile(t, dir, `

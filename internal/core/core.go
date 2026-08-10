@@ -210,6 +210,9 @@ func plan(s Spec) (*config.VM, error) {
 	if err := checkRecipes(img.osName, img.backend, s.Recipes); err != nil {
 		return nil, err
 	}
+	if err := CheckDependencies(s.Recipes); err != nil {
+		return nil, err
+	}
 
 	if err := validateDisplay(s.Display); err != nil {
 		return nil, err
@@ -333,12 +336,11 @@ func ParseSize(s string) (int64, error) {
 // checkRecipes refuses a Spec naming a recipe this VM cannot run, at CREATE
 // time rather than at first start.
 //
-// recipes.List returns full filenames ("xfce.cloud.yaml"); recipes.Read
-// expects the same. The suffix separates ssh-pushed shell recipes from
-// cloud-init seed fragments, and a per-OS fragment from a shared one. Before
-// this check, `stoat create x --recipes xfce` was accepted and written to
-// vm.toml, then failed only on `stoat up` with "open .../recipes/xfce: no
-// such file or directory".
+// recipes.List returns the names offered for osName (recipe directory names
+// like "xfce"), filtered by each manifest's OS and Requires. Before this
+// check, `stoat create x --recipes xfce` was accepted and written to vm.toml,
+// then failed only on `stoat up` with "open .../recipes/xfce: no such file or
+// directory".
 //
 // The error names the recipes that are available. The failure is usually a
 // name that is close but not exact, and a caller cannot always read the
@@ -369,6 +371,15 @@ func checkRecipes(osName, backend string, names []string) error {
 			return fmt.Errorf("%w: recipe %q is not available for %s/%s; available: %s",
 				ErrRecipeNotApplicable, n, osName, backend, strings.Join(available, ", "))
 		}
+		if m, mok, err := recipes.ManifestFor(n); err == nil && mok && m.Stage == "install" {
+			return fmt.Errorf("%w: recipe %q: %s", ErrRecipeNotApplicable, n, installStageUnsupported)
+		}
 	}
 	return nil
 }
+
+// installStageUnsupported is the reason install-stage recipes are refused at
+// add time. The stage field parses and validates, but no backend runs an
+// install-stage body yet; BYO ISO support will add the hooks (docs/specs
+// recipe-system-fixes §6).
+const installStageUnsupported = "install-stage recipes are not yet supported"

@@ -22,10 +22,6 @@ var bundled embed.FS
 
 func dir() string { return filepath.Join(config.Root(), "recipes") }
 
-// Path is the on-disk location of a recipe. name is the full filename
-// (including its .sh or .yaml extension) as returned by List.
-func Path(name string) string { return filepath.Join(dir(), name) }
-
 // ManifestName is the file in the recipes directory recording the checksum
 // of every recipe stoat itself wrote there. It lets Install tell "this is
 // stoat's copy, from an older release" from "the user edited this", which a
@@ -176,11 +172,20 @@ func sweepV1() error {
 		return nil
 	}
 
+	man := readManifest()
 	attic := filepath.Join(dir(), v1AtticName)
 	if err := os.MkdirAll(attic, 0o755); err != nil {
 		return err
 	}
 	for _, name := range stale {
+		// A flat file whose contents still match what stoat recorded writing is
+		// stoat's own v1 copy, swept quietly. Anything else is a recipe the
+		// user wrote or edited; warn, so a swept recipe does not just vanish
+		// from the picker with no explanation.
+		if !sweptIsStoats(name, man) {
+			logx.L().Warn("moved a legacy recipe out of the recipes directory; convert it to the v2 format to keep using it",
+				"recipe", name, "moved_to", v1AtticName, "docs", "docs/writing-recipes.md")
+		}
 		// An existing attic entry from an earlier sweep wins: it is the older
 		// copy, and overwriting it with a file the user has since re-created
 		// would lose the thing worth keeping.
@@ -196,6 +201,21 @@ func sweepV1() error {
 		}
 	}
 	return nil
+}
+
+// sweptIsStoats reports whether the flat file name is stoat's own v1 copy: its
+// contents still match the checksum man recorded. A file man does not list, or
+// one whose contents changed, is treated as the user's.
+func sweptIsStoats(name string, man map[string]string) bool {
+	want, ok := man[name]
+	if !ok {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(dir(), name))
+	if err != nil {
+		return false
+	}
+	return sum(b) == want
 }
 
 // installDir installs every file under a v2 recipe directory (name), keyed
@@ -281,8 +301,7 @@ func List(osName, _ string) ([]string, error) {
 // ListManifests scans dir() for v2 recipes: subdirectories holding a
 // recipe.toml (docs/recipe-spec-v2.md). Unlike List, it does not filter by
 // OS or backend. A caller that needs that filters against the parsed
-// Manifest's OS/Requires fields, the way UnsupportedReason already does for
-// v1's front-matter Metadata.
+// Manifest's OS/Requires fields (see MatchesVM).
 //
 // A subdirectory with no recipe.toml, a stray directory or leftover .bak
 // territory, is silently skipped. A directory that is a recipe but fails to
@@ -317,38 +336,30 @@ func ListManifests() ([]Manifest, error) {
 	return out, nil
 }
 
-// Read returns a v1 flat-file recipe's body. name is a filename directly
-// under the recipes root. A v2 recipe is a directory, not a file, so callers
-// with a guest OS in hand use ScriptBody instead.
-func Read(name string) (string, error) {
-	b, err := os.ReadFile(Path(name))
-	return string(b), err
-}
-
-// ScriptBody returns the script a recipe runs on osName. A v2 recipe resolves
+// ScriptBody returns the script a recipe runs on osName. The recipe resolves
 // through its manifest to install.sh, or the per-OS override the manifest
-// declares. A name with no recipe.toml is a v1 flat file, read as-is.
+// declares. A name with no recipe.toml is not a recipe and returns an error.
 func ScriptBody(name, osName string) (string, error) {
 	m, ok, err := ManifestFor(name)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return Read(name)
+		return "", fmt.Errorf("no such recipe %q", name)
 	}
 	return m.ScriptContent(osName)
 }
 
 // RuntimeFor returns the interpreter that runs name's script: the manifest's
-// Runtime field, or "sh" for a v1 flat file, which has no manifest to
-// declare one.
+// Runtime field. A name with no recipe.toml is not a recipe and returns an
+// error.
 func RuntimeFor(name, osName string) (string, error) {
 	m, ok, err := ManifestFor(name)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "sh", nil
+		return "", fmt.Errorf("no such recipe %q", name)
 	}
 	return m.Runtime, nil
 }

@@ -65,8 +65,9 @@ func TestWrapScriptsSingleScript(t *testing.T) {
 	if len(f.Runcmd) != 1 {
 		t.Fatalf("runcmd has %d entries, want 1:\n%s", len(f.Runcmd), body)
 	}
-	if f.Runcmd[0] != "/var/lib/stoat/recipes/xfce.sh" {
-		t.Errorf("runcmd[0] = %q, want /var/lib/stoat/recipes/xfce.sh", f.Runcmd[0])
+	wantCmd := "/var/lib/stoat/recipes/xfce.sh && mkdir -p /var/lib/stoat/.applied && touch /var/lib/stoat/.applied/xfce"
+	if f.Runcmd[0] != wantCmd {
+		t.Errorf("runcmd[0] = %q, want %q", f.Runcmd[0], wantCmd)
 	}
 }
 
@@ -100,7 +101,9 @@ func TestWrapScriptsPreservesOrder(t *testing.T) {
 	if len(f.Runcmd) != len(wantPaths) {
 		t.Fatalf("runcmd has %d entries, want %d:\n%s", len(f.Runcmd), len(wantPaths), body)
 	}
-	for i, want := range wantPaths {
+	names := []string{"base", "docker", "xfce"}
+	for i, path := range wantPaths {
+		want := path + " && mkdir -p /var/lib/stoat/.applied && touch /var/lib/stoat/.applied/" + names[i]
 		if f.Runcmd[i] != want {
 			t.Errorf("runcmd[%d] = %q, want %q", i, f.Runcmd[i], want)
 		}

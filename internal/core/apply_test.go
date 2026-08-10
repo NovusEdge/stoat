@@ -62,15 +62,14 @@ func TestApplyRefusesWhileLockIsHeld(t *testing.T) {
 	}
 }
 
-// A cloudinit VM's recipes ran from the cloud-init seed at first boot;
-// there is no post-boot ssh step for Apply to drive, and running one would
-// mean piping a YAML fragment to `sh -s`. Apply must refuse this outright
-// rather than attempt it.
-func TestApplyRefusesCloudinitBackend(t *testing.T) {
+// A cloudinit VM no longer refuses Apply: item 3 lets it apply over ssh after
+// first boot. A cloudinit VM with no recipes is a plain no-op, which proves
+// the old ErrAppliedAtBoot refusal is gone and reaches no ssh step.
+func TestApplyCloudinitNoRecipesIsANoop(t *testing.T) {
 	dir := root(t)
 	v := &config.VM{
 		Name: "cl", Mode: "cloud", OS: "debian", Backend: "cloudinit",
-		RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"xfce"},
+		RAM: 1024, CPUs: 1, SSHPort: 2200,
 	}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
@@ -79,8 +78,8 @@ func TestApplyRefusesCloudinitBackend(t *testing.T) {
 	stop := fakeRunning(t, v)
 	defer stop()
 
-	if err := Apply(context.Background(), "cl", ApplyOpts{}); !errors.Is(err, ErrAppliedAtBoot) {
-		t.Fatalf("err = %v, want ErrAppliedAtBoot", err)
+	if err := Apply(context.Background(), "cl", ApplyOpts{}); err != nil {
+		t.Fatalf("err = %v, want nil (no recipes, no refusal)", err)
 	}
 }
 
@@ -135,6 +134,8 @@ func TestApplyOnlyRejectsANameNotOnTheVM(t *testing.T) {
 // ctx-aware cancellation.
 func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 	dir := root(t)
+	writeV2Recipe(t, dir, "a", "always", "1.0", "#!/bin/sh\necho a\n")
+	writeV2Recipe(t, dir, "b", "always", "1.0", "#!/bin/sh\necho b\n")
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -245,11 +246,8 @@ func TestCheckRecipesOKRecipeReportsNoIssue(t *testing.T) {
 }
 
 // A recipe requested for an OS its recipe.toml doesn't declare (docker is
-// alpine-only) falls back to the structural reason: ReadMetadata cannot
-// read a v2 recipe directory as a flat file, so it has nothing to say, and
-// CheckRecipes must still produce a real, useful reason rather than an
-// empty one.
-func TestCheckRecipesFallsBackToStructuralReason(t *testing.T) {
+// alpine-only) reports the OS mismatch from recipes.MatchReason.
+func TestCheckRecipesReportsOSMismatch(t *testing.T) {
 	root(t)
 	if err := recipes.Install(); err != nil {
 		t.Fatal(err)
@@ -262,23 +260,9 @@ func TestCheckRecipesFallsBackToStructuralReason(t *testing.T) {
 	if len(issues) != 1 {
 		t.Fatalf("issues = %+v, want exactly 1", issues)
 	}
-	want := "docker is not offered to debian/apkovl"
+	want := "docker: built for alpine, not debian"
 	if !strings.Contains(issues[0].Reason, want) {
-		t.Errorf("Reason = %q, want it to contain %q (the structural fallback)", issues[0].Reason, want)
-	}
-}
-
-// writeRecipe drops a recipe file straight into root's recipes/ dir,
-// bypassing recipes.Install/the bundled set, so a test can pin exact front
-// matter without editing a shipped recipe.
-func writeRecipe(t *testing.T, dir, name, body string) {
-	t.Helper()
-	recipesDir := filepath.Join(dir, "recipes")
-	if err := os.MkdirAll(recipesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(recipesDir, name), []byte(body), 0o755); err != nil {
-		t.Fatal(err)
+		t.Errorf("Reason = %q, want it to contain %q", issues[0].Reason, want)
 	}
 }
 
@@ -300,6 +284,161 @@ func writeV2Recipe(t *testing.T, rootDir, name, run, version, script string) {
 	}
 	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// writeDepRecipe writes a v2 recipe declaring depends, for the dependency
+// ordering tests. run sets the run mode; depends is written verbatim as a
+// TOML string array.
+func writeDepRecipe(t *testing.T, rootDir, name, run string, depends []string) {
+	t.Helper()
+	recipeDir := filepath.Join(rootDir, "recipes", name)
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quoted := make([]string, len(depends))
+	for i, d := range depends {
+		quoted[i] = "\"" + d + "\""
+	}
+	toml := "name = \"" + name + "\"\n" +
+		"script = \"install.sh\"\n" +
+		"run = \"" + run + "\"\n" +
+		"depends = [" + strings.Join(quoted, ", ") + "]\n"
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\necho "+name+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPlanApplyOnStoppedVM pins the dry-run plan: it is computed host-side, so
+// a stopped VM (never started here) still returns a correct run/skip plan. An
+// applied "once" recipe with a matching hash skips; an unapplied one runs.
+func TestPlanApplyOnStoppedVM(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "xfce", "once", "1.0", "#!/bin/sh\necho xfce\n")
+	writeV2Recipe(t, dir, "docker", "once", "2.0", "#!/bin/sh\necho docker\n")
+	xfceHash, err := recipes.ScriptHash("xfce", "alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
+		RAM: 512, CPUs: 1, SSHPort: 2200,
+		Recipes: []string{"xfce", "docker"},
+		Applied: map[string]config.AppliedRecipe{"xfce": {Version: "1.0", Hash: xfceHash}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := PlanApply("work", ApplyOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 2 {
+		t.Fatalf("plan = %+v, want 2 entries", plan)
+	}
+	byName := map[string]ApplyPlan{}
+	for _, p := range plan {
+		byName[p.Name] = p
+	}
+	if byName["xfce"].Action != "skip" || byName["xfce"].Reason != "already applied" || byName["xfce"].Version != "1.0" {
+		t.Errorf("xfce = %+v, want skip/already applied at 1.0", byName["xfce"])
+	}
+	if byName["docker"].Action != "run" || byName["docker"].Reason != "never applied" {
+		t.Errorf("docker = %+v, want run/never applied", byName["docker"])
+	}
+}
+
+// TestCheckRecipesRejectsInstallStage pins item 6: an install-stage recipe is
+// applicable but refused at add time, since no backend runs one yet.
+func TestCheckRecipesRejectsInstallStage(t *testing.T) {
+	dir := root(t)
+	rd := filepath.Join(dir, "recipes", "partitioner")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte("name = \"partitioner\"\nstage = \"install\"\nscript = \"install.sh\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := CheckRecipes("alpine", "apkovl", []string{"partitioner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0].Reason, "install-stage recipes are not yet supported") {
+		t.Fatalf("issues = %+v, want one install-stage rejection", issues)
+	}
+}
+
+// TestFilterByRunModeOrdersDependenciesFirst pins that a dependency runs
+// before its dependent regardless of the order in v.Recipes.
+func TestFilterByRunModeOrdersDependenciesFirst(t *testing.T) {
+	dir := root(t)
+	writeDepRecipe(t, dir, "docker", "always", nil)
+	writeDepRecipe(t, dir, "devtools", "always", []string{"docker"})
+
+	v := &config.VM{OS: "alpine"}
+	// devtools listed first, but docker must still run first.
+	kept, _, err := filterByRunMode(v, []string{"devtools", "docker"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 2 || kept[0] != "docker" || kept[1] != "devtools" {
+		t.Errorf("kept = %v, want [docker devtools]", kept)
+	}
+}
+
+// TestCycleDetectionAtApplyTime catches a cycle introduced by manifests edited
+// on disk after add-time: filterByRunMode must error, not fall back to array
+// order.
+func TestCycleDetectionAtApplyTime(t *testing.T) {
+	dir := root(t)
+	writeDepRecipe(t, dir, "a", "always", []string{"b"})
+	writeDepRecipe(t, dir, "b", "always", []string{"a"})
+
+	v := &config.VM{OS: "alpine"}
+	_, _, err := filterByRunMode(v, []string{"a", "b"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "cycle detected") {
+		t.Fatalf("err = %v, want a cycle error", err)
+	}
+}
+
+// TestDependencySatisfaction covers the three rules: a manual, never-applied
+// dependency errors; an already-applied dependency satisfies; a dependency
+// left out of the run (not on the VM here) errors with the "add it" message.
+func TestDependencySatisfaction(t *testing.T) {
+	dir := root(t)
+	writeDepRecipe(t, dir, "docker", "manual", nil)
+	writeDepRecipe(t, dir, "devtools", "always", []string{"docker"})
+
+	// docker is manual and never named, so it does not run; devtools cannot.
+	v := &config.VM{OS: "alpine"}
+	_, _, err := filterByRunMode(v, []string{"devtools", "docker"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "run = manual") {
+		t.Fatalf("err = %v, want the manual-dependency error", err)
+	}
+
+	// docker already applied: devtools' dependency is satisfied.
+	v.Applied = map[string]config.AppliedRecipe{"docker": {Version: "1.0"}}
+	kept, _, err := filterByRunMode(v, []string{"devtools", "docker"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0] != "devtools" {
+		t.Errorf("kept = %v, want [devtools] (docker manual+applied stays skipped)", kept)
+	}
+
+	// docker is not on the VM at all and not applied: the "add it" error.
+	v2 := &config.VM{OS: "alpine"}
+	_, _, err = filterByRunMode(v2, []string{"devtools"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "add it to --recipe or apply it first") {
+		t.Fatalf("err = %v, want the missing-dependency error", err)
 	}
 }
 
@@ -504,30 +643,33 @@ func TestApplyRecordsHashAndSkipsOnRerun(t *testing.T) {
 	}
 }
 
-// TestCheckRecipesUsesDeclaredCapabilityReason pins that a recipe declaring
-// "requires: systemd" with no "os" restriction produces
-// docs/design/core-api.md §4's exact example, "requires systemd, alpine
-// uses openrc", from recipes.UnsupportedReason against the recipe's OWN
-// declared metadata, not the generic "not offered to alpine/apkovl" the
-// structural fallback would give for the same file.
-//
-// The filename still pins gizmo.debian.sh to debian, so recipes.List
-// excludes it for alpine like any other recipe. The front matter omits
-// "stoat:os" deliberately, isolating the capability check from the OS
-// check UnsupportedReason also makes: this proves the reason came from
-// "requires", not from the filename.
-func TestCheckRecipesUsesDeclaredCapabilityReason(t *testing.T) {
+// TestCheckRecipesReportsCapabilityMismatch pins that a recipe declaring
+// "requires = [systemd]" with no "os" restriction reports the capability that
+// alpine lacks, from recipes.MatchReason. The manifest omits "os"
+// deliberately, isolating the capability check from the OS check MatchReason
+// makes first: this proves the reason came from "requires", not from "os".
+func TestCheckRecipesReportsCapabilityMismatch(t *testing.T) {
 	dir := root(t)
-	writeRecipe(t, dir, "gizmo.debian.sh", "#!/bin/sh\n# stoat:name        gizmo\n# stoat:requires    systemd\nset -e\necho hi\n")
+	rd := filepath.Join(dir, "recipes", "gizmo")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"gizmo\"\nrequires = [\"systemd\"]\nscript = \"install.sh\"\n"
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	issues, err := CheckRecipes("alpine", "apkovl", []string{"gizmo.debian.sh"})
+	issues, err := CheckRecipes("alpine", "apkovl", []string{"gizmo"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(issues) != 1 {
 		t.Fatalf("issues = %+v, want exactly 1", issues)
 	}
-	want := "requires systemd, alpine uses openrc"
+	want := "gizmo: requires systemd, which alpine does not have"
 	if !strings.Contains(issues[0].Reason, want) {
 		t.Errorf("Reason = %q, want it to contain %q", issues[0].Reason, want)
 	}
