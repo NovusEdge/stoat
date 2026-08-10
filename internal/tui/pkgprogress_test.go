@@ -14,6 +14,11 @@ func TestParseProgress(t *testing.T) {
 			Progress{Done: 147, Total: 263, Frac: 147.0 / 263, Label: "gtk+3.0-3.24.43-r0"},
 		},
 		{
+			"apk per-package, padded counter",
+			"(  1/263) Installing dbus-libs-1.16.2-r2",
+			Progress{Done: 1, Total: 263, Frac: 1.0 / 263, Label: "dbus-libs-1.16.2-r2"},
+		},
+		{
 			"apk percent bar, hashes",
 			"45% ####################",
 			Progress{Frac: 0.45},

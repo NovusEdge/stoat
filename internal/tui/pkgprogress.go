@@ -24,8 +24,11 @@ var ansiRe = regexp.MustCompile(`\x1b(?:\[[0-9;]*[A-Za-z]|[78])`)
 
 var (
 	// apkCountRe matches apk's per-package line: "(147/263) Installing
-	// gtk+3.0-3.24.43-r0". apk always capitalizes "Installing".
-	apkCountRe = regexp.MustCompile(`^\((\d+)/(\d+)\)\s+Installing\s+(\S+)`)
+	// gtk+3.0-3.24.43-r0". apk always capitalizes "Installing". It
+	// right-pads the done counter to the total's width, so early lines read
+	// "(  1/263)"; \s* after "(" absorbs that padding, else no bar draws
+	// until the counter reaches the total's digit count.
+	apkCountRe = regexp.MustCompile(`^\(\s*(\d+)/(\d+)\)\s+Installing\s+(\S+)`)
 	// pacmanCountRe matches pacman's per-package line: "(3/12) installing
 	// foo". pacman lowercases "installing", which is what tells the two
 	// apart.
