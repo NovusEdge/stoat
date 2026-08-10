@@ -68,22 +68,43 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	// v.Recipes only holds names the form offered for this VM's os/backend.
-	// recipes.List already filters by backend at selection time, so every
-	// entry here is already a cloud fragment. No extra backend check is
-	// needed before reading them.
-	var recipeBodies []string
-	for _, name := range v.Recipes {
-		body, err := recipes.Read(name)
-		if err != nil {
-			return fmt.Errorf("reading recipe %s: %w", name, err)
-		}
-		recipeBodies = append(recipeBodies, body)
+	scripts, err := recipeScripts(v)
+	if err != nil {
+		return err
 	}
-	if _, err := cloudinit.Seed(v, pub, recipeBodies); err != nil {
+	// WrapScripts renders every recipe into one write_files+runcmd fragment
+	// cloud-init runs in order at first boot. An empty selection wraps to "",
+	// which Seed must not carry as a document; pass no bodies instead.
+	var bodies []string
+	if frag := cloudinit.WrapScripts(scripts); frag != "" {
+		bodies = []string{frag}
+	}
+	if _, err := cloudinit.Seed(v, pub, bodies); err != nil {
 		return err
 	}
 	return nil
+}
+
+// recipeScripts resolves v.Recipes to the cloud-init scripts WrapScripts
+// renders: each recipe's manifest, then the script body for v.OS. A recipe
+// with no recipe.toml went missing since create time and errors here.
+func recipeScripts(v *config.VM) ([]cloudinit.Script, error) {
+	var scripts []cloudinit.Script
+	for _, name := range v.Recipes {
+		m, ok, err := recipes.ManifestFor(name)
+		if err != nil {
+			return nil, fmt.Errorf("reading recipe %s: %w", name, err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("reading recipe %s: no recipe.toml", name)
+		}
+		body, err := m.ScriptContent(v.OS)
+		if err != nil {
+			return nil, fmt.Errorf("reading recipe %s: %w", name, err)
+		}
+		scripts = append(scripts, cloudinit.Script{Name: name, Content: body})
+	}
+	return scripts, nil
 }
 
 // Args attaches the seed cdrom only in cloud mode; see the mode-guard note

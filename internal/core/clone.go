@@ -200,13 +200,24 @@ func cloneCloud(src, clone *config.VM) error {
 	if err != nil {
 		return err
 	}
-	var bodies []string
+	var scripts []cloudinit.Script
 	for _, name := range clone.Recipes {
-		body, err := recipes.Read(name)
+		m, ok, err := recipes.ManifestFor(name)
 		if err != nil {
 			return fmt.Errorf("clone: reading recipe %s: %w", name, err)
 		}
-		bodies = append(bodies, body)
+		if !ok {
+			return fmt.Errorf("clone: reading recipe %s: no recipe.toml", name)
+		}
+		body, err := m.ScriptContent(clone.OS)
+		if err != nil {
+			return fmt.Errorf("clone: reading recipe %s: %w", name, err)
+		}
+		scripts = append(scripts, cloudinit.Script{Name: name, Content: body})
+	}
+	var bodies []string
+	if frag := cloudinit.WrapScripts(scripts); frag != "" {
+		bodies = []string{frag}
 	}
 	_, err = cloudinit.Seed(clone, pub, bodies)
 	return err

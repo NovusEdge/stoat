@@ -51,6 +51,10 @@ type Args struct {
 	// behavior existed.
 	NoApply bool
 
+	// DryRun belongs to "apply": it prints the plan (core.PlanApply) and runs
+	// nothing.
+	DryRun bool
+
 	// JSON is set by Main from the pre-parse argv scan, never by Parse: the
 	// flag has to be recognized before any parser exists so a usage error
 	// can still produce an envelope. It implies Quiet, so every prose line

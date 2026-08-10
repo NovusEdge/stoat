@@ -473,10 +473,14 @@ func processAlive(pid int) bool {
 func TestProvisionCancelKillsTheSSHProcess(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
-	if err := os.MkdirAll(filepath.Join(root, "recipes"), 0o755); err != nil {
+	rd := filepath.Join(root, "recipes", "long")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "recipes", "long.sh"), []byte("sleep 30\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte("name = \"long\"\nscript = \"install.sh\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte("sleep 30\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -488,7 +492,7 @@ func TestProvisionCancelKillsTheSSHProcess(t *testing.T) {
 	// sshd, so Wait clears at once and Provision moves on to the recipe.
 	port := acceptOnly(t, "SSH-2.0-OpenSSH_9.6\r\n")
 
-	v := &config.VM{Name: "x", SSHPort: port, Dir: vmDir, Recipes: []string{"long.sh"}}
+	v := &config.VM{Name: "x", SSHPort: port, Dir: vmDir, OS: "alpine", Recipes: []string{"long"}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

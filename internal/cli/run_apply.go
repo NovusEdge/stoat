@@ -24,6 +24,10 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 
+	if a.DryRun {
+		return runApplyDryRun(a, stdout, stderr)
+	}
+
 	applied := a.Only
 	if len(applied) == 0 {
 		applied = v.Recipes
@@ -60,9 +64,6 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		return ExitOK
 	}
 	if aerr != nil {
-		// core.ErrAppliedAtBoot is a real outcome for a cloud VM, mapped to
-		// applied_at_boot by wire's error table; it is not special-cased into
-		// a success here.
 		return a.fail(stdout, stderr, aerr)
 	}
 
@@ -70,5 +71,26 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"vm": a.VM, "applied": applied})
 	}
 	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
+	return ExitOK
+}
+
+// runApplyDryRun prints core.PlanApply's plan and runs nothing. Human output
+// is one line per recipe ("xfce (run, never applied)"); --json emits the plan
+// array. The plan is computed host-side, so the VM need not be running.
+func runApplyDryRun(a *Args, stdout, stderr io.Writer) int {
+	plan, err := core.PlanApply(a.VM, core.ApplyOpts{Only: a.Only})
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	if a.JSON {
+		return a.ok(stdout, plan)
+	}
+	for _, p := range plan {
+		reason := p.Reason
+		if p.Version != "" {
+			reason = fmt.Sprintf("%s at %s", p.Reason, p.Version)
+		}
+		fmt.Fprintf(stdout, "%s (%s, %s)\n", p.Name, p.Action, reason)
+	}
 	return ExitOK
 }

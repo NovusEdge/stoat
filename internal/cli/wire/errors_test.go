@@ -26,7 +26,6 @@ func TestMapErrorEveryCoreSentinel(t *testing.T) {
 		{fmt.Errorf("%w: os", core.ErrImmutableField), CodeImmutableField},
 		{fmt.Errorf("%w: 8G -> 4G", core.ErrDiskShrink), CodeDiskShrink},
 		{fmt.Errorf("%w: work: not running", core.ErrCannotReach), CodeCannotReach},
-		{fmt.Errorf("%w: work", core.ErrAppliedAtBoot), CodeAppliedAtBoot},
 		{fmt.Errorf("%w: %q", core.ErrUnknownWhich, "bogus"), CodeUnknownLog},
 		{context.DeadlineExceeded, CodeTimeout},
 		{context.Canceled, CodeCanceled},

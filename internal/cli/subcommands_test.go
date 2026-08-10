@@ -283,29 +283,22 @@ func TestApplyMissingVMIsNotFound(t *testing.T) {
 	}
 }
 
-// A cloud VM's recipes ran at first boot, so apply has nothing to do and must
-// say which of the two it is, not report a generic failure.
-//
-// The VM has to look RUNNING to reach that check: core.Apply refuses a stopped
-// VM first, so a stopped cloud VM answers not_running, which is also true and
-// is not the answer this is about.
-func TestApplyOnACloudVMIsAppliedAtBoot(t *testing.T) {
+// A cloudinit VM applies over ssh after first boot (item 3), so apply no
+// longer refuses it. With no recipes there is nothing to run, so apply is a
+// clean no-op rather than the old applied_at_boot refusal.
+func TestApplyOnACloudVMIsNoLongerRefused(t *testing.T) {
 	dir := cliRoot(t)
 	v := saveVM(t, &config.VM{
 		Name: "cloudy", OS: "ubuntu", Mode: "cloud", Backend: "cloudinit",
-		RAM: 2048, CPUs: 2, SSHPort: 2201, Recipes: []string{"xfce"},
+		RAM: 2048, CPUs: 2, SSHPort: 2201,
 	})
 	v.Dir = filepath.Join(dir, "cloudy")
 	stop := fakeRunning(t, v)
 	defer stop()
 
 	code, objs := runJSON(t, "apply", "cloudy")
-	if code != ExitFail {
-		t.Fatalf("exit = %d, want %d: %v", code, ExitFail, objs)
-	}
-	errObj, _ := result(t, objs)["error"].(map[string]any)
-	if errObj["code"] != wire.CodeAppliedAtBoot {
-		t.Errorf("code = %v, want %q", errObj["code"], wire.CodeAppliedAtBoot)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d: %v", code, ExitOK, objs)
 	}
 }
 

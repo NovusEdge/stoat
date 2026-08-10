@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -9,8 +10,23 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 )
 
+// autoVM builds a VM fixture and installs a resolvable v2 "xfce" recipe under
+// a fresh STOAT_HOME, so core.NeedsProvision's filterByRunMode finds a real
+// recipe.toml for the "xfce" entry the fixtures use.
 func autoVM(t *testing.T, mode string, recipes []string) core.VM {
 	t.Helper()
+	home := t.TempDir()
+	t.Setenv("STOAT_HOME", home)
+	rd := filepath.Join(home, "recipes", "xfce")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte("name = \"xfce\"\nscript = \"install.sh\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "install.sh"), []byte("#!/bin/sh\necho xfce\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	return core.VM{
 		Name: "vm", Mode: mode, OS: "alpine", Installed: true,
@@ -25,7 +41,7 @@ func autoVM(t *testing.T, mode string, recipes []string) core.VM {
 // is a tmpfs overlay, so a previous run is genuinely gone after the reboot,
 // while a disk VM's packages persist and its Applied record can be trusted.
 func TestNeedsAutoProvision(t *testing.T) {
-	recipes := []string{"xfce.alpine.sh"}
+	recipes := []string{"xfce"}
 
 	cases := []struct {
 		name string
@@ -58,7 +74,7 @@ func TestNeedsAutoProvision(t *testing.T) {
 	// the host, survives, but it describes a filesystem that is gone; a live
 	// VM auto-applies every boot regardless of what Applied says.
 	live := autoVM(t, "live", recipes)
-	live.Applied = map[string]core.AppliedRecipe{"xfce.alpine.sh": {Version: "1.0", Hash: "whatever"}}
+	live.Applied = map[string]core.AppliedRecipe{"xfce": {Version: "1.0", Hash: "whatever"}}
 	if !needsAutoProvision(live) {
 		t.Error("a live VM must auto-provision every boot even with a stale Applied record")
 	}
@@ -75,7 +91,7 @@ func TestNeedsAutoProvision(t *testing.T) {
 // TestSSHReadyAutoProvisions is the sshReadyMsg handler's main path: it
 // starts a provision run itself, with no confirmation state in between.
 func TestSSHReadyAutoProvisions(t *testing.T) {
-	v := autoVM(t, "live", []string{"xfce.alpine.sh"})
+	v := autoVM(t, "live", []string{"xfce"})
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, vms: []core.VM{v}}
 
@@ -134,7 +150,7 @@ func batchLen(t *testing.T, cmd tea.Cmd) int {
 // already excludes this exact case, so a regression here would fall
 // through to the plain started+loadVMs batch instead).
 func TestVMStartedForUninstalledDiskVMAwaitsInstall(t *testing.T) {
-	v := autoVM(t, "disk", []string{"xfce.alpine.sh"})
+	v := autoVM(t, "disk", []string{"xfce"})
 	v.Installed = false
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, vms: []core.VM{v}}
@@ -173,7 +189,7 @@ func TestVMStartedForInstalledVMSkipsInstallWatch(t *testing.T) {
 // back up and installed, the handler must hand off into the same awaitSSH
 // watch a directly-installed VM gets from vmStartedMsg.
 func TestInstallRestartedChainsToAwaitSSH(t *testing.T) {
-	v := autoVM(t, "disk", []string{"xfce.alpine.sh"})
+	v := autoVM(t, "disk", []string{"xfce"})
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, vms: []core.VM{v}}
 
@@ -199,7 +215,7 @@ func TestInstallRestartedIgnoresStaleVM(t *testing.T) {
 // TestSSHReadyNeverPreemptsADeletePrompt: a pending delete confirmation is a
 // more consequential question than a background watch resuming.
 func TestInstallRestartedRespectsPendingDelete(t *testing.T) {
-	v := autoVM(t, "disk", []string{"xfce.alpine.sh"})
+	v := autoVM(t, "disk", []string{"xfce"})
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, vms: []core.VM{v},
 		pendingDelete: &v, status: "delete vm? y/N"}
@@ -219,7 +235,7 @@ func TestInstallRestartedRespectsPendingDelete(t *testing.T) {
 // timer must not clear the status line out from under a pending delete
 // confirmation, a more consequential question the user is mid-answer.
 func TestSSHReadyNeverPreemptsADeletePrompt(t *testing.T) {
-	v := autoVM(t, "live", []string{"xfce.alpine.sh"})
+	v := autoVM(t, "live", []string{"xfce"})
 	m := model{screen: screenList, list: newVMList(), spin: newSpinner(),
 		provisioning: map[string]provState{}, vms: []core.VM{v},
 		pendingDelete: &v, status: "delete vm? y/N"}

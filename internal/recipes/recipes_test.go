@@ -353,43 +353,6 @@ func TestScriptBodyResolvesV2Directory(t *testing.T) {
 	}
 }
 
-// TestScriptBodyReadsV1FlatFile keeps the old format working: a name with no
-// recipe.toml is a v1 flat file, read as-is.
-func TestScriptBodyReadsV1FlatFile(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if err := os.MkdirAll(dir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	want := "# v1 legacy\n"
-	if err := os.WriteFile(filepath.Join(dir(), "legacy.sh"), []byte(want), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ScriptBody("legacy.sh", "alpine")
-	if err != nil {
-		t.Fatalf("ScriptBody: %v", err)
-	}
-	if got != want {
-		t.Errorf("ScriptBody = %q, want %q", got, want)
-	}
-}
-
-func TestRuntimeForV1FlatFile(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if err := os.MkdirAll(dir(), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir(), "legacy.sh"), []byte("echo hi\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := RuntimeFor("legacy.sh", "alpine")
-	if err != nil {
-		t.Fatalf("RuntimeFor: %v", err)
-	}
-	if got != "sh" {
-		t.Errorf("RuntimeFor(legacy.sh) = %q, want sh", got)
-	}
-}
-
 func TestRuntimeForManifestPython3(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	rd := filepath.Join(dir(), "pyrecipe")

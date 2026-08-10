@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -24,6 +25,7 @@ type Manifest struct {
 	Run         string            `toml:"run"`     // "once" | "always" | "manual"
 	Reboot      bool              `toml:"reboot"`  // guest needs a reboot after this recipe to take effect
 	Runtime     string            `toml:"runtime"` // "sh" | "python3", the interpreter the script runs under
+	Depends     []string          `toml:"depends"` // recipe names that must run before this one
 
 	dir string // recipe directory, set by ParseManifest; scripts resolve against it
 }
@@ -74,14 +76,12 @@ func ParseManifest(path string) (Manifest, error) {
 }
 
 // ManifestFor resolves name (an entry in the recipes root, the same
-// identifier VM.Recipes/ApplyOpts.Only use) to its recipe.toml manifest, v2's
-// replacement for the old flat "<name>.<os>.sh" files (docs/recipe-spec-v2.md).
+// identifier VM.Recipes/ApplyOpts.Only use) to its recipe.toml manifest
+// (docs/recipe-spec-v2.md).
 //
-// ok is false with a nil error when name has no recipe.toml at all. That is
-// not a failure: name is a v1 flat-file recipe, or an unrelated, nonexistent
-// name that CheckRecipes/List already reject elsewhere. A caller uses ok to
-// fall back to the old "always run it, no version tracking" behaviour,
-// instead of treating absence as broken. A recipe.toml that exists but
+// ok is false with a nil error when name has no recipe.toml at all: an
+// unrelated or nonexistent name that CheckRecipes/List reject elsewhere. A
+// caller decides what absence means for it. A recipe.toml that exists but
 // fails to parse is a real problem, and comes back as err instead.
 func ManifestFor(name string) (m Manifest, ok bool, err error) {
 	path := filepath.Join(dir(), name, "recipe.toml")
@@ -141,6 +141,15 @@ func hasCapability(cap, vmOS string) bool {
 // must either be empty (no restriction) or list vmOS, and every capability
 // in m.Requires must resolve against vmOS per capabilityOSes.
 func MatchesVM(m *Manifest, vmOS string) bool {
+	return MatchReason(m, vmOS) == ""
+}
+
+// MatchReason explains why m's recipe does not apply to a VM running vmOS, or
+// returns "" if it does. It is the reason-string form of MatchesVM: the OS
+// restriction is checked first, then each capability in Requires in order,
+// stopping at the first failure. CheckRecipes turns the returned reason into
+// the message a caller reads.
+func MatchReason(m *Manifest, vmOS string) string {
 	if len(m.OS) > 0 {
 		ok := false
 		for _, o := range m.OS {
@@ -150,15 +159,15 @@ func MatchesVM(m *Manifest, vmOS string) bool {
 			}
 		}
 		if !ok {
-			return false
+			return fmt.Sprintf("built for %s, not %s", strings.Join(m.OS, ", "), vmOS)
 		}
 	}
 
 	for _, cap := range m.Requires {
 		if !hasCapability(cap, vmOS) {
-			return false
+			return fmt.Sprintf("requires %s, which %s does not have", cap, vmOS)
 		}
 	}
 
-	return true
+	return ""
 }

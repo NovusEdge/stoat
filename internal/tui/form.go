@@ -675,8 +675,24 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.form.recipeSel == nil {
 					m.form.recipeSel = map[string]bool{}
 				}
-				m.form.recipeSel[name] = !m.form.recipeSel[name]
-				return m, nil
+				if m.form.recipeSel[name] {
+					m.form.recipeSel[name] = false
+					return m, nil
+				}
+				// Checking a box can pull in a recipe it depends on. A
+				// dependency that doesn't apply to this image's OS refuses
+				// the check entirely rather than leaving a selection
+				// core.Plan would reject anyway.
+				pending := append(selectedNames(m.form.recipeNames, m.form.recipeSel), name)
+				added, err := resolveDeps(m.form.resolvedOS(), pending)
+				if err != nil {
+					return m, m.showToast(err.Error(), true)
+				}
+				m.form.recipeSel[name] = true
+				for _, a := range added {
+					m.form.recipeSel[a.Recipe] = true
+				}
+				return m, m.showToast(depMessage(added), false)
 			}
 			// space on the image row downloads the selected catalog entry.
 			// On an image that is already local it re-verifies the file and

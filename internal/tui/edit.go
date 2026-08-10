@@ -402,8 +402,22 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case keySpace:
 			if m.edit.focus == eRecipes && len(m.edit.recipeNames) > 0 {
 				n := m.edit.recipeNames[m.edit.recipeIdx]
-				m.edit.recipeSel[n] = !m.edit.recipeSel[n]
-				return m, nil
+				if m.edit.recipeSel[n] {
+					m.edit.recipeSel[n] = false
+					return m, nil
+				}
+				// Same auto-add rule as the create form: see form.go's
+				// fRecipes handler.
+				pending := append(selectedNames(m.edit.recipeNames, m.edit.recipeSel), n)
+				added, err := resolveDeps(m.edit.vm.OS, pending)
+				if err != nil {
+					return m, m.showToast(err.Error(), true)
+				}
+				m.edit.recipeSel[n] = true
+				for _, a := range added {
+					m.edit.recipeSel[a.Recipe] = true
+				}
+				return m, m.showToast(depMessage(added), false)
 			}
 		case "enter":
 			p, err := m.edit.buildPatch()

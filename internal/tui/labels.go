@@ -11,14 +11,10 @@ import (
 // Neither is something the user picked. Showing them raw made the UI read
 // like a config file.
 
-// recipeLabel is the display name for a recipe file. Recipes live on disk as
-// "<name>.<os>.sh" or "<name>.cloud.yaml". The suffix names the OS and
-// backend the file targets. The picker has already filtered on that suffix,
-// so repeating it in every row is noise. "xfce.alpine.sh" reads as "xfce".
-//
-// Only the display changes. VM.Recipes still stores the filename, since
-// recipes.Read opens it by that name. See the recipe-naming decision in
-// CHECKPOINT.md, where storing bare names was considered and rejected.
+// recipeLabel is the display name for a recipe. v2 recipes are bare directory
+// names ("xfce"), so the label is usually the name itself. The suffix
+// stripping stays for any legacy "<name>.<os>.sh" or "<name>.cloud.yaml" name
+// still recorded on an old VM, which reads as "xfce".
 func recipeLabel(file string) string {
 	name := strings.TrimSuffix(file, ".yaml")
 	name = strings.TrimSuffix(name, ".sh")

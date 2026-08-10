@@ -137,6 +137,14 @@ VM creation (disk mode)
   -> provision-stage recipes run
 ```
 
+## Reboot Behavior
+
+A recipe declares `reboot = true` in its manifest to mark that the guest needs a reboot before its changes take effect. Examples: switching init systems, loading a new kernel module.
+
+Stoat reboots the guest once, after every recipe in the apply run finishes. The reboot happens at the end of the run, not after the individual recipe that requested it. If several recipes in the run declare `reboot = true`, stoat still reboots only once.
+
+This reboot applies to disk-mode VMs only. Live-mode VMs run their root filesystem on tmpfs, so a reboot wipes it. A live recipe that needs to restart a session restarts it in place instead, for example with `kill -HUP 1`.
+
 ## State Tracking
 
 Add to `vm.toml`:

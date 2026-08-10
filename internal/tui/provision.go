@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
 )
@@ -46,11 +45,6 @@ func provision(v core.VM) tea.Cmd {
 		}
 		// No cancellation source reaches here: the TUI has no "abort
 		// provision" key.
-		//
-		// core.Apply refuses a cloudinit-backed VM with ErrAppliedAtBoot.
-		// startProvision's refusal below should catch that case first, but if
-		// it reaches here anyway, app.go's generic err.Error() toast still
-		// reports it.
 		return provisionDoneMsg{v.Name, core.Apply(context.Background(), v.Name, core.ApplyOpts{})}
 	}
 }
@@ -65,21 +59,6 @@ func provision(v core.VM) tea.Cmd {
 // touched, so it does not block a second real provision from starting right
 // after.
 func (m *model) startProvision(v core.VM) tea.Cmd {
-	if backend.For(cfgVM(v)).Name() == "cloudinit" {
-		// Keyed on the BACKEND, not v.Mode == "cloud". The edit screen's mode
-		// switch can produce mode="disk" with backend="cloudinit" (D9a), and
-		// this refusal must still catch that state.
-		//
-		// cloud-init's packages: list is baked into the seed and runs only at
-		// first boot. ssh-based provisioning has nothing to do there, and a
-		// cloud recipe is #cloud-config YAML, not a shell script, so piping
-		// it into `sh -s` fails.
-		//
-		// core.Apply refuses the same state with ErrAppliedAtBoot. This check
-		// shows the user the refusal before anything starts, instead of
-		// after a failed attempt.
-		return m.showToast(v.Name+": cloud VMs apply recipes at first boot via cloud-init. Recreate the VM to change them", true)
-	}
 	// A disk VM still boots its installer ISO until its OS is on disk. sshd
 	// there belongs to the installer, not the system being built, so
 	// provisioning it would run recipes against a tmpfs about to be thrown
