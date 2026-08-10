@@ -247,9 +247,32 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
 		}
+		runtime, err := recipes.RuntimeFor(name, v.OS)
+		if err != nil {
+			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			return err
+		}
 		fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
 
-		cmd := exec.CommandContext(ctx, "ssh", Args(v, "sh", "-s")...)
+		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
+			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
+			bs := exec.CommandContext(ctx, "ssh", Args(v, "sh", "-s")...)
+			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
+			bs.WaitDelay = recipeShutdownGrace
+			bs.Stdin = strings.NewReader(bootstrap)
+			bs.Stdout = log
+			bs.Stderr = log
+			if err := bs.Run(); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+					return ctxErr
+				}
+				fmt.Fprintf(log, "FAILED: recipe %s: installing %s: %v\n", name, runtime, err)
+				return fmt.Errorf("recipe %s: installing %s: %w", name, runtime, err)
+			}
+		}
+
+		cmd := exec.CommandContext(ctx, "ssh", Args(v, recipes.InterpreterArgs(runtime)...)...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = recipeShutdownGrace
 		cmd.Stdin = strings.NewReader(body)

@@ -135,6 +135,66 @@ func TestArgsExtraGoesAfterTarget(t *testing.T) {
 	}
 }
 
+// installArgvRecordingSSH puts a stand-in "ssh" on PATH ahead of the real
+// one. It appends its own argv, one invocation per line, to argvFile and
+// exits 0 without reading stdin. Multiple recipe/bootstrap ssh calls append
+// to the same file, so a test can assert the order and shape of each call
+// Provision made.
+func installArgvRecordingSSH(t *testing.T, argvFile string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho \"$*\" >> " + shellQuoteForTest(argvFile) + "\ncat >/dev/null\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+}
+
+// TestProvisionRunsPythonRecipeUnderPython3 pins the transport change: a
+// recipe whose manifest declares runtime = "python3" must run under
+// `python3 -` over ssh, not `sh -s`, and stoat must bootstrap python3 first.
+// Falsified by a Provision that keeps hardcoding "sh", "-s" regardless of
+// the recipe's declared runtime.
+func TestProvisionRunsPythonRecipeUnderPython3(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	rd := filepath.Join(root, "recipes", "pyrecipe")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"pyrecipe\"\nscript = \"install.py\"\nruntime = \"python3\"\n"
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rd, "install.py"), []byte("print('hi')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vmDir := t.TempDir()
+	argvFile := filepath.Join(vmDir, "ssh.argv")
+	installArgvRecordingSSH(t, argvFile)
+
+	port := acceptOnly(t, "SSH-2.0-OpenSSH_9.6\r\n")
+	v := &config.VM{Name: "x", SSHPort: port, Dir: vmDir, OS: "alpine", Recipes: []string{"pyrecipe"}}
+
+	if err := Provision(context.Background(), v); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	argv, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("reading recorded argv: %v", err)
+	}
+	// The bootstrap step legitimately runs under sh -s (it installs
+	// python3), so only the last ssh call, the recipe body itself, is
+	// checked for the runtime switch.
+	lines := strings.Split(strings.TrimRight(string(argv), "\n"), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "python3 -") {
+		t.Errorf("recipe body ssh call = %q, want it to end in python3 -", last)
+	}
+}
+
 func containsPair(argv []string, flag, val string) bool {
 	for i := 0; i+1 < len(argv); i++ {
 		if argv[i] == flag && argv[i+1] == val {
