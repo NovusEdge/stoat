@@ -92,6 +92,25 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		v = started
 	}
 	printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+
+	// An uninstalled disk VM's own installer is running now, not the system
+	// `apply` needs to reach. The CLI is a foreground process, so it blocks
+	// here rather than exiting and leaving the desktop half set up.
+	// --no-apply skips the recipe run below, not this: the disk must still
+	// boot the installed system either way.
+	if v.Mode == "disk" && !v.Installed {
+		if !a.Quiet {
+			fmt.Fprintf(stdout, "installing %s (a few minutes)...\n", a.VM)
+		}
+		restarted, err := core.AutoRestartAfterInstall(context.Background(), a.VM)
+		if err != nil || !restarted {
+			fmt.Fprintf(stdout, "install did not finish; inspect: stoat logs %s\n", a.VM)
+			return ExitOK
+		}
+		if started, err := core.Get(a.VM); err == nil {
+			v = started
+		}
+	}
 	return afterStart(a, v, stdout, stderr)
 }
 
