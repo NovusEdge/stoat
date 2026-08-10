@@ -71,11 +71,24 @@ func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// repairNetdevLine returns the sh fragment that strips _netdev from an
+// existing 9p line in fstabPath. A VM installed before the option was dropped
+// still carries _netdev on disk, and openrc's localmount skips such lines, so
+// the share stops mounting on every boot after the first. The sed is a no-op
+// on a line that never had it.
+func repairNetdevLine(fstabPath string) string {
+	return fmt.Sprintf("sed -i 's/,_netdev,nofail/,nofail/g' %s 2>/dev/null || true\n", fstabPath)
+}
+
 // shareMountScript returns the full sh script that idempotently mounts every
 // tag in tags, best-effort. fstabPath lets a test point at a scratch fstab;
 // production always passes guestFstabPath.
 func shareMountScript(tags []apkovl.Mount9p, fstabPath string) string {
+	if len(tags) == 0 {
+		return ""
+	}
 	var b strings.Builder
+	b.WriteString(repairNetdevLine(fstabPath))
 	for _, m := range tags {
 		b.WriteString(fstabEnsureLine(m, fstabPath))
 		b.WriteString(mountIfNeeded(m))
