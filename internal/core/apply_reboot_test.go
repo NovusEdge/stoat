@@ -65,7 +65,7 @@ func TestApplyRebootsAfterARecipeThatDeclaresIt(t *testing.T) {
 	defer stop()
 
 	v := &config.VM{
-		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
+		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl", Installed: true,
 		RAM: 512, CPUs: 1, SSHPort: port, Recipes: []string{"xfce"},
 	}
 	if err := v.Save(); err != nil {
@@ -85,6 +85,41 @@ func TestApplyRebootsAfterARecipeThatDeclaresIt(t *testing.T) {
 	}
 	if !strings.Contains(string(log), "rebooting work to finish xfce") {
 		t.Errorf("provision log = %q, want a rebooting line naming xfce", log)
+	}
+}
+
+// TestApplyDoesNotRebootALiveVM pins the mode gate: a live VM's root is a
+// tmpfs the reboot wipes, and a live VM re-applies every boot, so a reboot
+// here would loop. A reboot=true recipe on a live VM reboots nothing.
+func TestApplyDoesNotRebootALiveVM(t *testing.T) {
+	dir := root(t)
+	writeV2RecipeWithReboot(t, dir, "xfce")
+	installFakeSSHClient(t)
+
+	port, stop := fakeSSHD(t, 0)
+	defer stop()
+
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl",
+		RAM: 512, CPUs: 1, SSHPort: port, Recipes: []string{"xfce"},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	v.Dir = dir + "/work"
+	stopRunning := fakeRunning(t, v)
+	defer stopRunning()
+
+	if err := Apply(context.Background(), "work", ApplyOpts{}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	log, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), "rebooting") {
+		t.Errorf("a live VM rebooted: %q", log)
 	}
 }
 
