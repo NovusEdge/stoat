@@ -146,8 +146,8 @@ func TestBuildFstabMountOptions(t *testing.T) {
 	}
 	content, _ := entries(t, filepath.Join(v.OvlDir(), "stoat.apkovl.tar.gz"))
 	for _, want := range []string{
-		"host /mnt/host 9p trans=virtio,version=9p2000.L,ro,_netdev,nofail 0 0",
-		"work /mnt/work 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0",
+		"host /mnt/host 9p trans=virtio,version=9p2000.L,ro,nofail 0 0",
+		"work /mnt/work 9p trans=virtio,version=9p2000.L,rw,nofail 0 0",
 	} {
 		if !strings.Contains(content["etc/fstab"], want) {
 			t.Errorf("fstab missing %q, got:\n%s", want, content["etc/fstab"])

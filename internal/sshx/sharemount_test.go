@@ -65,7 +65,7 @@ func TestFstabEnsureLineAppendsWhenAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "host /mnt/host 9p trans=virtio,version=9p2000.L,ro,_netdev,nofail 0 0"
+	want := "host /mnt/host 9p trans=virtio,version=9p2000.L,ro,nofail 0 0"
 	if !strings.Contains(string(got), want) {
 		t.Errorf("fstab = %q, missing %q", got, want)
 	}
@@ -73,7 +73,7 @@ func TestFstabEnsureLineAppendsWhenAbsent(t *testing.T) {
 
 func TestFstabEnsureLineNoopsWhenPresent(t *testing.T) {
 	fstab := filepath.Join(t.TempDir(), "fstab")
-	initial := "work /mnt/work 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0\n"
+	initial := "work /mnt/work 9p trans=virtio,version=9p2000.L,rw,nofail 0 0\n"
 	if err := os.WriteFile(fstab, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +115,29 @@ func TestShareMountScriptCoversEveryTag(t *testing.T) {
 		if !strings.Contains(script, "mount "+shQuote(m.Dir)) {
 			t.Errorf("script missing mount call for %q:\n%s", m.Dir, script)
 		}
+	}
+}
+
+func TestShareMountScriptRepairsStaleNetdev(t *testing.T) {
+	fstab := filepath.Join(t.TempDir(), "fstab")
+	stale := "host /mnt/host 9p trans=virtio,version=9p2000.L,ro,_netdev,nofail 0 0\n" +
+		"work /mnt/work 9p trans=virtio,version=9p2000.L,rw,_netdev,nofail 0 0\n"
+	if err := os.WriteFile(fstab, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := shareMountScript([]apkovl.Mount9p{apkovl.HostMount9p, apkovl.WorkMount9p}, fstab)
+	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
+		t.Logf("script output (mount calls fail off-guest, expected):\n%s", out)
+	}
+	got, err := os.ReadFile(fstab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "_netdev") {
+		t.Errorf("fstab still carries _netdev after repair:\n%s", got)
+	}
+	if n := strings.Count(string(got), "/mnt/host"); n != 1 {
+		t.Errorf("host line count = %d after repair, want 1 (no duplicate appended):\n%s", n, got)
 	}
 }
 
