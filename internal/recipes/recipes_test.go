@@ -373,6 +373,42 @@ func TestScriptBodyReadsV1FlatFile(t *testing.T) {
 	}
 }
 
+func TestRuntimeForV1FlatFile(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir(), "legacy.sh"), []byte("echo hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RuntimeFor("legacy.sh", "alpine")
+	if err != nil {
+		t.Fatalf("RuntimeFor: %v", err)
+	}
+	if got != "sh" {
+		t.Errorf("RuntimeFor(legacy.sh) = %q, want sh", got)
+	}
+}
+
+func TestRuntimeForManifestPython3(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	rd := filepath.Join(dir(), "pyrecipe")
+	if err := os.MkdirAll(rd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"pyrecipe\"\nscript = \"install.py\"\nruntime = \"python3\"\n"
+	if err := os.WriteFile(filepath.Join(rd, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RuntimeFor("pyrecipe", "alpine")
+	if err != nil {
+		t.Fatalf("RuntimeFor: %v", err)
+	}
+	if got != "python3" {
+		t.Errorf("RuntimeFor(pyrecipe) = %q, want python3", got)
+	}
+}
+
 // TestScriptHashMatchesScriptBody pins ScriptHash to the sha256 of the exact
 // bytes ScriptBody resolves, so a caller can compare it against a stored
 // AppliedRecipe.Hash without re-deriving the sum itself.

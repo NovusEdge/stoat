@@ -21,8 +21,9 @@ type Manifest struct {
 	Script      string            `toml:"script"`
 	Scripts     map[string]string `toml:"scripts"` // OS-specific overrides
 	Auto        bool              `toml:"auto"`
-	Run         string            `toml:"run"`    // "once" | "always" | "manual"
-	Reboot      bool              `toml:"reboot"` // guest needs a reboot after this recipe to take effect
+	Run         string            `toml:"run"`     // "once" | "always" | "manual"
+	Reboot      bool              `toml:"reboot"`  // guest needs a reboot after this recipe to take effect
+	Runtime     string            `toml:"runtime"` // "sh" | "python3", the interpreter the script runs under
 
 	dir string // recipe directory, set by ParseManifest; scripts resolve against it
 }
@@ -30,6 +31,8 @@ type Manifest struct {
 var validStages = map[string]bool{"install": true, "provision": true}
 
 var validRuns = map[string]bool{"once": true, "always": true, "manual": true}
+
+var validRuntimes = map[string]bool{"sh": true, "python3": true}
 
 // ParseManifest reads and validates a recipe.toml at path. Defaults are
 // applied before validation: Stage defaults to "provision" (the common
@@ -47,6 +50,9 @@ func ParseManifest(path string) (Manifest, error) {
 	if m.Run == "" {
 		m.Run = "once"
 	}
+	if m.Runtime == "" {
+		m.Runtime = "sh"
+	}
 
 	if m.Name == "" {
 		return Manifest{}, fmt.Errorf("%s: missing required field %q", path, "name")
@@ -59,6 +65,9 @@ func ParseManifest(path string) (Manifest, error) {
 	}
 	if !validRuns[m.Run] {
 		return Manifest{}, fmt.Errorf("%s: invalid run %q, want %q, %q, or %q", path, m.Run, "once", "always", "manual")
+	}
+	if !validRuntimes[m.Runtime] {
+		return Manifest{}, fmt.Errorf("%s: invalid runtime %q, want %q or %q", path, m.Runtime, "sh", "python3")
 	}
 
 	return m, nil

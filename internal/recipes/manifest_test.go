@@ -96,6 +96,38 @@ script = "install.sh"
 	if m.Reboot {
 		t.Error("Reboot = true, want default false")
 	}
+	if m.Runtime != "sh" {
+		t.Errorf("Runtime = %q, want default sh", m.Runtime)
+	}
+}
+
+func TestParseManifestRuntimePython3(t *testing.T) {
+	dir := t.TempDir()
+	path := writeManifestFile(t, dir, `
+name = "pyrecipe"
+script = "install.py"
+runtime = "python3"
+`)
+	m, err := ParseManifest(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Runtime != "python3" {
+		t.Errorf("Runtime = %q, want python3", m.Runtime)
+	}
+}
+
+func TestParseManifestBadRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeManifestFile(t, dir, `
+name = "docker"
+script = "install.sh"
+runtime = "perl"
+`)
+	_, err := ParseManifest(path)
+	if err == nil || !strings.Contains(err.Error(), `invalid runtime "perl"`) {
+		t.Errorf("err = %v, want an invalid-runtime error", err)
+	}
 }
 
 func TestParseManifestMissingName(t *testing.T) {

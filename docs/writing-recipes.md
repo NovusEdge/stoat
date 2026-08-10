@@ -65,6 +65,7 @@ arch = "install-arch.sh"
 | `scripts` | table | no | | Per-OS script overrides; unlisted OSes fall back to `script` |
 | `run` | string | no | `"once"` | `"once"`, `"always"`, or `"manual"` |
 | `auto` | bool | no | `false` | Run automatically the first time the VM becomes reachable |
+| `runtime` | string | no | `"sh"` | Interpreter the script runs under: `"sh"` or `"python3"` |
 
 `name` and `script` are the only required fields; a manifest missing either
 fails to parse (`internal/recipes/manifest.go`).
@@ -100,10 +101,39 @@ this against `guest.OS` at list/check time, before ssh is even involved.
 Runs after the VM has booted and is reachable over ssh. This is the common
 case: install packages, enable services, write config.
 
-- **apkovl/ssh backends**: the script is piped into `sh -s` over ssh, same as
-  the current bundled recipes.
+- **apkovl/ssh backends**: the script is piped into the declared runtime over
+  ssh, `sh -s` by default.
 - **cloudinit backend**: the script is wrapped into the cloud-config
   `runcmd` block at VM creation and runs at first boot.
+
+## Runtime
+
+`runtime` picks the interpreter a `provision`-stage script runs under. It
+defaults to `"sh"`, always present in a POSIX guest. Setting it to
+`"python3"` lets a recipe write a real Python script instead of shell.
+
+Before running a `python3` recipe, stoat checks the guest for `python3` and
+installs it with the guest's package manager if missing (`apk`, `apt-get`,
+`pacman`, or `dnf`, matching the `requires` capability table above). The
+check and install happen once, over ssh, right before the recipe body itself
+runs, piped into `python3 -`.
+
+A minimal Python recipe, `recipe.toml`:
+
+```toml
+name = "hello-py"
+description = "prints the guest hostname with a Python script"
+os = ["alpine", "ubuntu"]
+runtime = "python3"
+script = "install.py"
+```
+
+and `install.py`:
+
+```python
+import socket
+print("hello from", socket.gethostname())
+```
 
 ### `install`
 

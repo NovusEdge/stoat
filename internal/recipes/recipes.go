@@ -339,6 +339,20 @@ func ScriptBody(name, osName string) (string, error) {
 	return m.ScriptContent(osName)
 }
 
+// RuntimeFor returns the interpreter that runs name's script: the manifest's
+// Runtime field, or "sh" for a v1 flat file, which has no manifest to
+// declare one.
+func RuntimeFor(name, osName string) (string, error) {
+	m, ok, err := ManifestFor(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "sh", nil
+	}
+	return m.Runtime, nil
+}
+
 // ScriptHash returns the hex sha256 of ScriptBody(name, osName). A caller
 // compares it against a stored AppliedRecipe.Hash to tell whether a "once"
 // recipe's script changed since it last ran, even at the same manifest
