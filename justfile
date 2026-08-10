@@ -68,6 +68,12 @@ test-pkg pkg:
 race:
     go test -race ./...
 
+# full lifecycle check on a real disk VM: install -> apply -> reboot -> mouse
+# works. Needs KVM and network, ~15 min. Set STOAT_HOME to isolate it.
+[group('test')]
+e2e:
+    ./scripts/e2e.sh
+
 # coverage summary per package
 [group('test')]
 cover:
