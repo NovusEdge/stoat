@@ -2,12 +2,15 @@
 # Installs XFCE and starts it. Runs as root over ssh, on a booted Alpine live VM.
 set -e
 
-# setup-apkrepos -c -1 already refreshes the indexes ("Updating repository
-# indexes... done"), so a separate `apk update` here is redundant work that
-# only widens the window for a transient ssh/network drop under `set -e` to
-# kill the whole provision. Don't add retries either: a real apk failure
-# should still fail loudly.
-setup-apkrepos -c -1
+# setup-apkrepos -c -1 refreshes the indexes, so no separate `apk update` runs
+# here. It runs apk update with no lock-wait, so another apk that holds the
+# database lock fails it with exit 99. Retry until the lock frees, up to ~60s.
+n=0
+until setup-apkrepos -c -1; do
+    n=$((n + 1))
+    [ "$n" -ge 30 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
+    sleep 2
+done
 
 setup-xorg-base
 # --wait 60 makes apk wait up to 60s for the lock instead of failing with

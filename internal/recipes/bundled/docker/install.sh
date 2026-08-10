@@ -7,7 +7,15 @@ set -e
 # no docker package at all). -1 picks the fastest mirror and refreshes the
 # indexes, so a separate `apk update` would be redundant work that only widens
 # the window for a transient network drop to kill the run under `set -e`.
-setup-apkrepos -c -1
+# setup-apkrepos runs apk update with no lock-wait, so another apk that holds
+# the database lock fails it with exit 99. Retry until the lock frees, up to
+# ~60s.
+n=0
+until setup-apkrepos -c -1; do
+    n=$((n + 1))
+    [ "$n" -ge 30 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
+    sleep 2
+done
 
 # Verified against pkgs.alpinelinux.org: both are in community, and compose is
 # a SEPARATE package from docker (docker alone gives you no `docker compose`).
