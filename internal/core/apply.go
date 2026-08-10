@@ -62,16 +62,32 @@ type ApplyOpts struct {
 // cancellation in the gap between two recipes does not start one more ssh
 // process just to kill it. Apply passes ctx straight through and adds no
 // second cancellation layer of its own.
+//
+// Apply holds an exclusive flock on v.Dir/provision.lock for the whole run.
+// Two concurrent runs against the same VM would each start apk (or the
+// guest's own package manager) and race on its database lock; the second
+// Apply sees the lock held and returns ErrProvisionInProgress instead.
 func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 	v, err := load(name)
 	if err != nil {
 		return err
 	}
+	err = WithProvisionLock(v.Dir, func() error {
+		return applyLocked(ctx, v, opts)
+	})
+	if errors.Is(err, ErrProvisionInProgress) {
+		return fmt.Errorf("%w: %s", ErrProvisionInProgress, name)
+	}
+	return err
+}
+
+// applyLocked is Apply's body, run while Apply holds name's provision lock.
+func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	if !qemu.Running(v) {
-		return fmt.Errorf("%w: %s", ErrNotRunning, name)
+		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
 	}
 	if backend.For(v).Name() == "cloudinit" {
-		return fmt.Errorf("%w: %s", ErrAppliedAtBoot, name)
+		return fmt.Errorf("%w: %s", ErrAppliedAtBoot, v.Name)
 	}
 
 	targets := v.Recipes
@@ -82,7 +98,7 @@ func Apply(ctx context.Context, name string, opts ApplyOpts) error {
 		}
 		for _, o := range opts.Only {
 			if !have[o] {
-				return fmt.Errorf("%w: recipe %q is not one of %s's recipes", ErrRecipeNotApplicable, o, name)
+				return fmt.Errorf("%w: recipe %q is not one of %s's recipes", ErrRecipeNotApplicable, o, v.Name)
 			}
 		}
 		targets = opts.Only

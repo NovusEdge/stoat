@@ -31,6 +31,37 @@ func TestApplyStoppedVMIsRefused(t *testing.T) {
 	}
 }
 
+// A second Apply against a VM another run already holds the provision lock
+// for must refuse before it reaches ssh, so it never races the first run's
+// apk (or other package manager) invocation on the guest.
+func TestApplyRefusesWhileLockIsHeld(t *testing.T) {
+	dir := root(t)
+	v := &config.VM{Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl", RAM: 512, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	v.Dir = filepath.Join(dir, "work")
+	stop := fakeRunning(t, v)
+	defer stop()
+
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		WithProvisionLock(v.Dir, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer close(release)
+
+	err := Apply(context.Background(), "work", ApplyOpts{})
+	if !errors.Is(err, ErrProvisionInProgress) {
+		t.Fatalf("err = %v, want ErrProvisionInProgress", err)
+	}
+}
+
 // A cloudinit VM's recipes ran from the cloud-init seed at first boot;
 // there is no post-boot ssh step for Apply to drive, and running one would
 // mean piping a YAML fragment to `sh -s`. Apply must refuse this outright
