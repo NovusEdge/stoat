@@ -73,7 +73,8 @@ func TestParse(t *testing.T) {
 		{"up missing name", []string{"up"}, nil, true},
 		{"up too many args", []string{"up", "a", "b"}, nil, true},
 		{"up quiet", []string{"up", "-q", "alpine"}, &Args{Cmd: "up", VM: "alpine", Quiet: true}, false},
-		{"up --no-provision", []string{"up", "--no-provision", "alpine"}, &Args{Cmd: "up", VM: "alpine", NoProvision: true}, false},
+		{"up --no-apply", []string{"up", "--no-apply", "alpine"}, &Args{Cmd: "up", VM: "alpine", NoApply: true}, false},
+		{"up --no-provision (hidden alias)", []string{"up", "--no-provision", "alpine"}, &Args{Cmd: "up", VM: "alpine", NoApply: true}, false},
 
 		{"down", []string{"down", "alpine"}, &Args{Cmd: "down", VM: "alpine"}, false},
 		{"down missing name", []string{"down"}, nil, true},

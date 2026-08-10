@@ -358,14 +358,14 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// process. This is the cross-process case: another stoat process (a
 			// second TUI, or the CLI) holds the VM's lock. Not an error toast,
 			// since the user did nothing wrong.
-			cmd := m.showToast("provision already running for "+msg.name, false)
+			cmd := m.showToast(msg.name+": recipes already applying", false)
 			return m, cmd
 		}
 		if msg.err != nil {
 			cmd := m.showToast(msg.name+": "+msg.err.Error(), true)
 			return m, cmd
 		}
-		cmd := m.showToast(msg.name+" provisioned", false)
+		cmd := m.showToast(msg.name+": recipes applied", false)
 		return m, cmd
 	case vmSavedMsg:
 		// Adopt the saved VM only now. saveEdit returns a statusMsg on

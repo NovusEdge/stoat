@@ -10,9 +10,9 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 )
 
-// runApply runs a VM's recipes and streams their output live, the same
-// pattern as runProvision (run_access.go): the work happens in a goroutine
-// while the apply log file is tailed and copied out as it grows.
+// runApply runs a VM's recipes and streams their output live: the work
+// happens in a goroutine while the apply log file is tailed and copied out
+// as it grows. It also serves the "provision" alias (cli.go's dispatch).
 //
 // core.Get, not config.Load: the load is only here for the log path to tail
 // and the VM's recipe list, but config.Load returns an untyped error, so a
@@ -38,7 +38,7 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 
 	// Under --json, raw log bytes must not reach stdout: they would sit
 	// inside the JSON Lines stream and break every consumer's parse. Each
-	// appended line becomes a "log" event instead, same as runProvision.
+	// appended line becomes a "log" event instead.
 	out := stdout
 	var lw *jsonLogWriter
 	if a.JSON {
@@ -54,9 +54,9 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		// caller owns the error; this one exits clean rather than reporting
 		// somebody else's concurrent apply as its own failure.
 		if a.JSON {
-			return a.ok(stdout, map[string]any{"vm": a.VM, "applied": false, "skipped_reason": "provision already running"})
+			return a.ok(stdout, map[string]any{"vm": a.VM, "applied": false, "skipped_reason": "an apply is already running"})
 		}
-		fmt.Fprintf(stdout, "%s: provision already running\n", a.VM)
+		fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
 		return ExitOK
 	}
 	if aerr != nil {

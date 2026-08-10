@@ -470,7 +470,7 @@ func (m model) viewDetail() string {
 	if m.detail.log != "" {
 		// lipgloss re-applies the style on every line of a multi-line string,
 		// so the log needs no per-line loop of its own.
-		parts = append(parts, "", paneAt("last provision", dimStyle.Render(m.detail.log), appContentWidth, m.width))
+		parts = append(parts, "", paneAt("last apply", dimStyle.Render(m.detail.log), appContentWidth, m.width))
 	}
 
 	if panel := progressPanel(m); panel != "" {

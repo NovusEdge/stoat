@@ -103,6 +103,15 @@ func TestTrimListAcrossCommands(t *testing.T) {
 		t.Errorf("apply --only with trailing comma = %v, want %v", a.Only, want)
 	}
 
+	// provision is a hidden alias of apply and takes the same --only flag.
+	a, err = Parse([]string{"provision", "work", "--only", "a.sh, b.sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a.Only, want) {
+		t.Errorf("provision --only = %v, want %v", a.Only, want)
+	}
+
 	// check-recipes' Names is a positional []string (arg:""). Kong's Sep tag
 	// only splits a FLAG's value, never a positional, so kong alone hands
 	// "a.sh,b.sh" back as one element containing a comma. trimList splits
@@ -262,12 +271,14 @@ func TestSnapshotXor(t *testing.T) {
 // small spot-check to the full command surface: every leaf command kong
 // generates a line for must be named here, so adding a subcommand to
 // grammar.go without it appearing in the generated help fails this build
-// rather than silently shipping an undocumented command.
+// rather than silently shipping an undocumented command. "provision" is
+// deliberately absent: it is a hidden alias of "apply", so kong omits it
+// from the generated help by design (see TestProvisionIsHiddenFromHelp).
 func TestHelpListsEverySubcommand(t *testing.T) {
 	want := []string{
 		"ls", "get", "create", "update", "up", "down", "wait", "rm", "clone",
 		"exec", "ssh", "ssh-command", "cp", "forward", "images", "pull",
-		"snapshot", "prune", "apply", "provision", "recipes", "check-recipes",
+		"snapshot", "prune", "apply", "recipes", "check-recipes",
 		"recipe list", "recipe new", "logs", "doctor", "version", "help",
 	}
 	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}} {
@@ -279,6 +290,23 @@ func TestHelpListsEverySubcommand(t *testing.T) {
 			if !strings.Contains(a.Help, name) {
 				t.Errorf("Parse(%v) help omits subcommand %q", args, name)
 			}
+		}
+	}
+}
+
+// TestProvisionIsHiddenFromHelp pins that the "provision" alias still parses
+// (TestParse's "provision" cases) while staying out of the command list a
+// user reads with --help, so the help surface names only the one spelling
+// ("apply") a new user should reach for.
+func TestProvisionIsHiddenFromHelp(t *testing.T) {
+	a, err := Parse([]string{"--help"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(a.Help, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "provision" {
+			t.Errorf("help lists the hidden provision alias: %q", line)
 		}
 	}
 }
