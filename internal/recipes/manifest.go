@@ -21,7 +21,8 @@ type Manifest struct {
 	Script      string            `toml:"script"`
 	Scripts     map[string]string `toml:"scripts"` // OS-specific overrides
 	Auto        bool              `toml:"auto"`
-	Run         string            `toml:"run"` // "once" | "always" | "manual"
+	Run         string            `toml:"run"`    // "once" | "always" | "manual"
+	Reboot      bool              `toml:"reboot"` // guest needs a reboot after this recipe to take effect
 
 	dir string // recipe directory, set by ParseManifest; scripts resolve against it
 }

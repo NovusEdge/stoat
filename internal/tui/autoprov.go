@@ -18,6 +18,32 @@ import (
 // sshReadyMsg says a VM that was just started is now accepting ssh.
 type sshReadyMsg struct{ name string }
 
+// installRestartedMsg says an uninstalled disk VM's installer powered off
+// and stoat restarted it to boot the disk. A nil-error timeout produces no
+// message at all, mirroring awaitSSH.
+type installRestartedMsg struct{ name string }
+
+// awaitInstall waits for an uninstalled disk VM's installer to power off,
+// then restarts the VM, the same sequence internal/cli/run_vm.go's runUp
+// runs synchronously. The TUI runs it as a background watch instead, since
+// blocking the whole program for up to core.InstallTimeout would freeze
+// every other VM's controls. AutoRestartAfterInstall applies InstallTimeout
+// itself, so no ctx here needs its own deadline.
+//
+// A failure stays silent, matching awaitSSH: the user did not ask for this
+// watch, and a failed or still-running installer is visible in the list
+// already.
+func awaitInstall(v core.VM) tea.Cmd {
+	name := v.Name
+	return func() tea.Msg {
+		restarted, err := core.AutoRestartAfterInstall(context.Background(), name)
+		if err != nil || !restarted {
+			return nil
+		}
+		return installRestartedMsg{name}
+	}
+}
+
 // awaitSSH waits for sshd on a freshly started VM.
 //
 // A failure stays silent. The user did not ask for this watch. A VM that
