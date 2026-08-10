@@ -327,12 +327,30 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cloudInit[msg.vm.Name] = "waiting"
 			return m, tea.Batch(started, loadVMs, checkCloudInit(msg.vm))
 		}
+		if msg.vm.Mode == "disk" && !msg.vm.Installed {
+			// The installer is running now, not the system `apply` needs to
+			// reach. Watch for it to power off and restart into the disk;
+			// the spinner tick keeps the "installing" line animating while
+			// that happens.
+			return m, tea.Batch(started, loadVMs, awaitInstall(msg.vm), m.spin.Tick)
+		}
 		if !needsAutoProvision(msg.vm) {
 			return m, tea.Batch(started, loadVMs)
 		}
 		// Watch for sshd in the background. The user keeps full use of the UI
 		// meanwhile: provisioning starts on its own once the VM is reachable.
 		return m, tea.Batch(started, loadVMs, awaitSSH(msg.vm))
+	case installRestartedMsg:
+		v := m.vmByName(msg.name)
+		// Re-check on arrival: the restart itself just happened, but the
+		// user could have stopped or deleted the VM in the meantime.
+		if v == nil || v.State != core.StateRunning || !v.Installed {
+			return m, nil
+		}
+		if m.pendingDelete != nil {
+			return m, nil
+		}
+		return m, awaitSSH(*v)
 	case sshReadyMsg:
 		v := m.vmByName(msg.name)
 		// Re-check on arrival: up to 90 seconds have passed, in which the VM
