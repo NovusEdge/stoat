@@ -30,6 +30,7 @@ stage = "install"
 script = "install.sh"
 auto = true
 run = "always"
+reboot = true
 
 [scripts]
 alpine = "install-alpine.sh"
@@ -68,6 +69,9 @@ alpine = "install-alpine.sh"
 	if m.Scripts["alpine"] != "install-alpine.sh" {
 		t.Errorf("Scripts[alpine] = %q, want install-alpine.sh", m.Scripts["alpine"])
 	}
+	if !m.Reboot {
+		t.Error("Reboot = false, want true")
+	}
 }
 
 func TestParseManifestDefaults(t *testing.T) {
@@ -88,6 +92,9 @@ script = "install.sh"
 	}
 	if m.Auto {
 		t.Error("Auto = true, want default false")
+	}
+	if m.Reboot {
+		t.Error("Reboot = true, want default false")
 	}
 }
 

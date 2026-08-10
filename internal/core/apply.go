@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -154,6 +155,7 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	// recorded. A v1 recipe has no version to record and stays out of
 	// Applied, as it always has.
 	var changed bool
+	rebootRecipe, needsReboot := "", false
 	for _, name := range runTargets {
 		m, ok := manifests[name]
 		if !ok {
@@ -168,11 +170,71 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		}
 		v.Applied[name] = config.AppliedRecipe{Version: m.Version, Hash: hash, At: time.Now()}
 		changed = true
+		if m.Reboot && !needsReboot {
+			rebootRecipe, needsReboot = name, true
+		}
 	}
+
+	// One recipe declaring reboot=true is enough: the guest reboots once,
+	// not once per such recipe, so the first one found names the reboot in
+	// the log.
+	if needsReboot {
+		if err := rebootAndWait(ctx, v, rebootRecipe); err != nil {
+			return err
+		}
+	}
+
 	if !changed {
 		return nil
 	}
 	return v.Save()
+}
+
+// rebootAndWait reboots v's guest over ssh and waits for it to come back.
+//
+// Some recipes change something the running kernel or init system only
+// picks up at boot (xfce's setup-devd switches Alpine's device manager from
+// mdev to udev, which Xorg needs for its mouse and keyboard to work). Their
+// manifest declares reboot=true so Apply reboots the guest once, here,
+// after every recipe in the run has already succeeded.
+func rebootAndWait(ctx context.Context, v *config.VM, recipe string) error {
+	appendProvisionLog(v, fmt.Sprintf("rebooting %s to finish %s...\n", v.Name, recipe))
+
+	// `reboot` tears down the ssh session before the process can report an
+	// exit status back to this host, so cmd.Run() returning an error here is
+	// expected and not a failure signal; only the wait below is.
+	cmd := exec.CommandContext(ctx, "ssh", sshx.Args(v, "reboot")...)
+	_ = cmd.Run()
+
+	// The pre-reboot sshd can keep answering for a moment after the reboot
+	// command returns. This settle avoids waitReachable's first check
+	// catching that dying instance and returning before the guest has
+	// actually gone down.
+	select {
+	case <-time.After(rebootSettle):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	return waitReachable(ctx, v)
+}
+
+// rebootSettle is a guess, not a measurement: real hardware or CI timing
+// could need longer for sshd to actually stop answering after `reboot`
+// returns control to the caller.
+const rebootSettle = 2 * time.Second
+
+// appendProvisionLog appends s to v's apply log, the same file
+// sshx.Provision just wrote to and closed. A failure to open it is not
+// fatal to the reboot itself, so this drops the error rather than aborting
+// an otherwise successful apply over a log write.
+func appendProvisionLog(v *config.VM, s string) {
+	f, err := os.OpenFile(v.ProvisionLogPath(), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(s)
 }
 
 // filterByRunMode narrows targets to the recipes that should actually run,
