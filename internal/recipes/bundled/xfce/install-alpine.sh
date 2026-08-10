@@ -10,7 +10,9 @@ set -e
 setup-apkrepos -c -1
 
 setup-xorg-base
-apk add xfce4 xfce4-terminal dbus-x11
+# --wait 60 makes apk wait up to 60s for the lock instead of failing with
+# exit 99 when another apk run holds it.
+apk --wait 60 add xfce4 xfce4-terminal dbus-x11
 
 # Xorg reads its input devices from udev. Alpine boots mdev by default, which
 # never feeds Xorg, so libinput finds no mouse or keyboard and the desktop

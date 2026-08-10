@@ -13,7 +13,9 @@ set -e
 # indexes, so no separate `apk update`.
 setup-apkrepos -c -1
 
-apk add tailscale
+# --wait 60 makes apk wait up to 60s for the lock instead of failing with
+# exit 99 when another apk run holds it.
+apk --wait 60 add tailscale
 
 rc-update add tailscale default
 rc-service tailscale start
