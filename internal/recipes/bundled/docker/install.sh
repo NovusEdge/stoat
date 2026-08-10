@@ -11,7 +11,9 @@ setup-apkrepos -c -1
 
 # Verified against pkgs.alpinelinux.org: both are in community, and compose is
 # a SEPARATE package from docker (docker alone gives you no `docker compose`).
-apk add docker docker-cli-compose
+# --wait 60 makes apk wait up to 60s for the lock instead of failing with
+# exit 99 when another apk run holds it.
+apk --wait 60 add docker docker-cli-compose
 
 rc-update add docker default
 rc-service docker start

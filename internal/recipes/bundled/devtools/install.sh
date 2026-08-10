@@ -10,11 +10,13 @@ setup-apkrepos -c -1
 
 # build-base is Alpine's meta-package for gcc/make/libc-dev: the equivalent of
 # Debian's build-essential. Alpine has no package called "build-essential".
-apk add git curl ca-certificates build-base vim tmux less
+# --wait 60 makes apk wait up to 60s for the lock instead of failing with
+# exit 99 when another apk run holds it.
+apk --wait 60 add git curl ca-certificates build-base vim tmux less
 
 # Alpine's default shell is ash and there is no bash unless asked for; scripts
 # copied in from elsewhere routinely assume it, so it is part of a baseline.
-apk add bash
+apk --wait 60 add bash
 
 git --version
 echo "devtools installed: git, curl, build-base (gcc/make), vim, tmux, less, bash"
