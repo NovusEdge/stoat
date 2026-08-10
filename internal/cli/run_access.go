@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -155,7 +156,14 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 	// design decision made here.
 	logPath := filepath.Join(v.Dir, "last-provision.log")
 	done := make(chan error, 1)
-	go func() { done <- sshx.Provision(context.Background(), v) }()
+	// core.WithProvisionLock, not core.Apply: this path drives sshx.Provision
+	// directly (its cloud-VM handling and JSON shape differ from Apply's), so
+	// it takes the same per-VM lock itself instead of going through Apply.
+	go func() {
+		done <- core.WithProvisionLock(v.Dir, func() error {
+			return sshx.Provision(context.Background(), v)
+		})
+	}()
 
 	// Under --json the recipe's raw bytes must not reach stdout: they would sit
 	// in the middle of the JSON Lines stream and every consumer's json.loads
@@ -169,6 +177,15 @@ func runProvision(a *Args, stdout, stderr io.Writer) int {
 	perr := streamFile(logPath, out, done)
 	if lw != nil {
 		lw.Flush()
+	}
+	if errors.Is(perr, core.ErrProvisionInProgress) {
+		// Another run already holds the VM's provision lock; that run owns
+		// the error, so this one exits clean instead of reporting it too.
+		if a.JSON {
+			return a.ok(stdout, map[string]any{"vm": a.VM, "provisioned": false, "skipped_reason": "provision already running"})
+		}
+		fmt.Fprintf(stdout, "%s: provision already running\n", a.VM)
+		return ExitOK
 	}
 	if perr != nil {
 		return a.fail(stdout, stderr, perr)

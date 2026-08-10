@@ -130,6 +130,13 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	done := make(chan error, 1)
 	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{}) }()
 	if err := streamFile(v.Paths.ApplyLog, stdout, done); err != nil {
+		if errors.Is(err, core.ErrProvisionInProgress) {
+			// A concurrent `apply` or `provision` already holds the lock; that
+			// run owns the error. `up` still started the VM, so this is not a
+			// failure of the up command.
+			fmt.Fprintf(stdout, "%s: provision already running\n", a.VM)
+			return ExitOK
+		}
 		return a.fail(stdout, stderr, err)
 	}
 	fmt.Fprintf(stdout, "%s provisioned\n", a.VM)

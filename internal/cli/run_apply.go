@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -47,6 +48,16 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 	aerr := streamFile(v.Paths.ApplyLog, out, done)
 	if lw != nil {
 		lw.Flush()
+	}
+	if errors.Is(aerr, core.ErrProvisionInProgress) {
+		// Another run already holds the VM's provision lock. That run's
+		// caller owns the error; this one exits clean rather than reporting
+		// somebody else's concurrent apply as its own failure.
+		if a.JSON {
+			return a.ok(stdout, map[string]any{"vm": a.VM, "applied": false, "skipped_reason": "provision already running"})
+		}
+		fmt.Fprintf(stdout, "%s: provision already running\n", a.VM)
+		return ExitOK
 	}
 	if aerr != nil {
 		// core.ErrAppliedAtBoot is a real outcome for a cloud VM, mapped to
