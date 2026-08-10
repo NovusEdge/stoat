@@ -178,7 +178,11 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	// One recipe declaring reboot=true is enough: the guest reboots once,
 	// not once per such recipe, so the first one found names the reboot in
 	// the log.
-	if needsReboot {
+	//
+	// Disk only: a live VM's root is a tmpfs the reboot wipes, and a live VM
+	// re-applies every boot, so a reboot here would loop. A live desktop
+	// recipe restarts its session in place instead (xfce's kill -HUP 1).
+	if needsReboot && v.Mode == "disk" {
 		if err := rebootAndWait(ctx, v, rebootRecipe); err != nil {
 			return err
 		}

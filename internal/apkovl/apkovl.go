@@ -59,6 +59,14 @@ const legacyTmpName = "stoat.apkovl.tar.gz.tmp"
 // not power off or mark itself done.
 const installScript = `#!/bin/sh
 [ -c /dev/ttyS0 ] && exec >/dev/ttyS0 2>&1
+# setup-disk -m sys copies the live system, including this /etc/local.d
+# script, onto the installed disk. A real disk root means the install already
+# ran, so exit before setup-alpine reruns and its apk fights the recipe apply
+# for the database lock. Only the installer environment has a tmpfs root.
+case "$(awk '$2 == "/" { print $3 }' /proc/mounts)" in
+tmpfs | overlay) ;;
+*) exit 0 ;;
+esac
 if [ -f /mnt/work/.installed ]; then
 	echo "stoat: install already recorded on the work share, skipping"
 	exit 0
