@@ -39,6 +39,7 @@ requires = ["systemd"]                        # capabilities: systemd, apt, apk,
 # Execution
 stage = "provision"  # "install" | "provision" (see Stages below)
 script = "install.sh"  # relative path to the script
+runtime = "sh"  # "sh" | "python3", interpreter the script runs under. Default: "sh"
 
 # Optional: OS-specific script overrides
 [scripts]
@@ -58,6 +59,7 @@ fedora = "install-fedora.sh"
 | `stage` | string | no | When to run: `install` or `provision`. Default: `provision` |
 | `script` | string | yes | Default script path, relative to recipe dir |
 | `scripts` | table | no | Per-OS script overrides |
+| `runtime` | string | no | Interpreter to run the script under: `sh` or `python3`. Default: `sh` |
 
 ### Capabilities
 
@@ -80,7 +82,8 @@ A recipe declaring `requires = ["systemd"]` is not offered to Alpine. Stoat reso
 
 Runs after the VM is booted and reachable over SSH. This is the common case: install packages, configure services, etc.
 
-- **apkovl/ssh backend**: Pushed over SSH via `sh -s`, same as today.
+- **apkovl/ssh backend**: Pushed over SSH via the recipe's `runtime` (`sh -s` by default, `python3 -` for `runtime = "python3"`).
+  A non-`sh` runtime is bootstrapped first: stoat checks the guest for it and installs it with the guest's package manager if missing, over a separate SSH call, before piping the recipe body.
 - **cloudinit backend**: Wrapped into a cloud-config `runcmd` block at VM creation, runs at first boot.
 
 ### `install`
