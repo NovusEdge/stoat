@@ -52,7 +52,8 @@ func TestNeedsAutoProvision(t *testing.T) {
 		{"live, no recipes", autoVM(t, "live", nil), false},
 		{"disk, never provisioned", autoVM(t, "disk", recipes), true},
 		{"disk, no recipes, no share", autoVM(t, "disk", nil), false},
-		{"cloud, cloud-init already did it", autoVM(t, "cloud", recipes), false},
+		{"cloud, unapplied recipes", autoVM(t, "cloud", recipes), true},
+		{"cloud, no recipes", autoVM(t, "cloud", nil), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

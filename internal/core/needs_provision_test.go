@@ -89,17 +89,42 @@ func TestNeedsProvisionDiskWithShareEvenWhenApplied(t *testing.T) {
 	}
 }
 
-// TestNeedsProvisionCloud: cloud-init applies a cloud VM's recipes at first
-// boot, so there is never anything left for an ssh-based provision run.
-func TestNeedsProvisionCloud(t *testing.T) {
-	root(t)
-	v := &config.VM{Mode: "cloud", OS: "debian", Recipes: []string{"xfce"}}
+// TestNeedsProvisionCloudUnapplied: a cloud VM with recipes not yet in Applied
+// returns true. On first boot this triggers a no-op pass (discoverCloudInitApplied
+// finds the markers); for recipes added after creation it runs them.
+func TestNeedsProvisionCloudUnapplied(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "once", "1.0", "#!/bin/sh\necho one\n")
+	v := &config.VM{Mode: "cloud", OS: "alpine", Recipes: []string{"tool"}}
+
+	got, err := NeedsProvision(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Error("got false, want true: the recipe has never run (or markers not yet discovered)")
+	}
+}
+
+// TestNeedsProvisionCloudAllApplied: a cloud VM with all recipes already in
+// Applied (markers discovered, or added and run) returns false.
+func TestNeedsProvisionCloudAllApplied(t *testing.T) {
+	dir := root(t)
+	writeV2Recipe(t, dir, "tool", "once", "1.0", "#!/bin/sh\necho one\n")
+	hash, err := recipes.ScriptHash("tool", "alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{
+		Mode: "cloud", OS: "alpine", Recipes: []string{"tool"},
+		Applied: map[string]config.AppliedRecipe{"tool": {Version: "1.0", Hash: hash}},
+	}
 
 	got, err := NeedsProvision(v)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got {
-		t.Error("got true, want false: a cloud VM provisions through cloud-init")
+		t.Error("got true, want false: all recipes already applied")
 	}
 }

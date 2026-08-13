@@ -12,8 +12,7 @@ import (
 )
 
 // After a VM starts, stoat watches for sshd and provisions it once it is
-// reachable, with no keypress. A cloud VM never reaches this path: cloud-init
-// applies its recipes from the seed at first boot instead.
+// reachable, with no keypress.
 
 // sshReadyMsg says a VM that was just started is now accepting ssh.
 type sshReadyMsg struct{ name string }
@@ -71,8 +70,6 @@ func awaitSSH(v core.VM) tea.Cmd {
 // needsAutoProvision reports whether stoat should provision v once it is
 // reachable.
 //
-//   - A cloud VM never needs it: cloud-init already ran the recipes from the
-//     seed, before ssh was even reachable.
 //   - An uninstalled disk VM's sshd belongs to its own installer, running on
 //     a tmpfs root the install later replaces; reachability alone cannot
 //     tell that apart from the real system, so it is excluded up front.
@@ -80,11 +77,10 @@ func awaitSSH(v core.VM) tea.Cmd {
 //     previous run installed, so core.NeedsProvision's Applied bookkeeping
 //     (which persists on the host, across reboots) cannot answer for it. Any
 //     recipe at all means there is work to redo.
-//   - Everything else defers to core.NeedsProvision.
+//   - Everything else (including cloud VMs) defers to core.NeedsProvision.
+//     Cloud-init runs the seed's recipes at first boot; core.Apply discovers
+//     those via marker files and only runs new or changed recipes.
 func needsAutoProvision(v core.VM) bool {
-	if v.Mode == "cloud" {
-		return false
-	}
 	if v.Mode == "disk" && !v.Installed {
 		return false
 	}
