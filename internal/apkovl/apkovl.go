@@ -90,9 +90,16 @@ fi
 // here (see installScript's ttyS0 redirect), so the window would otherwise show
 // only a bare login prompt with no sign that an unattended install is running.
 const installIssue = `
-    stoat is installing Alpine on this VM.
-    It runs unattended and powers off when done. Do not log in.
-    Watch progress from the host:  stoat logs <vm>
+    ┌───────────────────────────────────────────────────────┐
+    │                                                       │
+    │                  Installing Alpine.                   │
+    │                                                       │
+    │   (◕  ᴥ  ◕)      Unattended. Powers off when done.    │
+    │                  Do not log in.                       │
+    │                                                       │
+    │                  Watch progress:  stoat logs <vm>     │
+    │                                                       │
+    └───────────────────────────────────────────────────────┘
 
 `
 
