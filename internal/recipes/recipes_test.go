@@ -220,18 +220,14 @@ func TestListFiltersbyOS(t *testing.T) {
 		}
 	}
 
-	// Ubuntu should get xfce (has ubuntu in OS list) but not alpine-only recipes
+	// Ubuntu should get xfce, devtools, docker, tailscale (all have ubuntu in OS list)
 	ubuntuRecipes, err := List("ubuntu", "ssh")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(ubuntuRecipes, "xfce") {
-		t.Errorf("List(ubuntu) missing xfce, got %v", ubuntuRecipes)
-	}
-	// docker/devtools/tailscale are alpine-only
-	for _, notWant := range []string{"docker", "devtools", "tailscale"} {
-		if contains(ubuntuRecipes, notWant) {
-			t.Errorf("List(ubuntu) should not contain %q (alpine-only)", notWant)
+	for _, want := range []string{"xfce", "devtools", "docker", "tailscale"} {
+		if !contains(ubuntuRecipes, want) {
+			t.Errorf("List(ubuntu) missing %s, got %v", want, ubuntuRecipes)
 		}
 	}
 }

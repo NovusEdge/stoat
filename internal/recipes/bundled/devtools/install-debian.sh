@@ -1,6 +1,6 @@
 #!/bin/sh
-# git, a compiler, an editor and basic fetch tools. Default script for OSes not
-# explicitly listed in [scripts]. Assumes apt-get (Debian-family).
+# git, a compiler, an editor and basic fetch tools. Runs as root over ssh on a
+# booted Ubuntu or Debian VM.
 set -e
 
 export DEBIAN_FRONTEND=noninteractive

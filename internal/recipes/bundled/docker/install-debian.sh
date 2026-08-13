@@ -1,18 +1,21 @@
 #!/bin/sh
-# Installs Docker and the compose plugin. Default script for OSes not explicitly
-# listed in [scripts]. Assumes apt-get and systemd (Debian-family).
+# Installs Docker and the compose plugin. Runs as root over ssh on a booted
+# Ubuntu or Debian VM.
 set -e
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Install prerequisites
 apt-get update
 apt-get install -y ca-certificates curl gnupg
 
+# Add Docker's official GPG key
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | \
     gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 
+# Add the repository
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
@@ -24,6 +27,7 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable docker
 systemctl start docker
 
+# Wait for daemon
 i=0
 while [ $i -lt 30 ]; do
     docker info >/dev/null 2>&1 && break
