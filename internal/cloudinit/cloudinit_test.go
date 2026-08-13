@@ -17,10 +17,11 @@ import (
 // tests can inspect individual documents instead of grepping the whole
 // rendered file.
 
-// withoutMounts returns the archive's documents minus the 9p mounts document,
-// and fails if there isn't exactly one. Every VM gets a mounts document, so
-// tests about the base and recipe documents filter it out instead of counting
-// around it.
+// withoutMounts returns the archive's documents minus the 9p mounts document.
+// Every VM except debian gets one mounts document; debian's cloud kernel has
+// no 9p module, so it gets none. The helper accepts zero or one and fails on
+// more, so tests about the base and recipe documents filter it out instead of
+// counting around it.
 func withoutMounts(t *testing.T, ud string) []archiveDoc {
 	t.Helper()
 	var rest []archiveDoc
@@ -32,8 +33,8 @@ func withoutMounts(t *testing.T, ud string) []archiveDoc {
 		}
 		rest = append(rest, d)
 	}
-	if found != 1 {
-		t.Fatalf("want exactly one mounts document, got %d:\n%s", found, ud)
+	if found > 1 {
+		t.Fatalf("want at most one mounts document, got %d:\n%s", found, ud)
 	}
 	return rest
 }
@@ -442,6 +443,27 @@ func TestSeedInstallsSudoWhereItIsMissing(t *testing.T) {
 	}
 	if strings.Contains(u, "packages:") && strings.Contains(u, "sudo") {
 		t.Errorf("ubuntu seed installs sudo it already has:\n%s", u)
+	}
+}
+
+// debian's cloud kernel has no 9p module, so the seed omits the mounts
+// document. A present-but-unmountable 9p entry made cloud-init report the
+// whole seed as errored on every boot. A 9p-capable OS still gets the mounts.
+func TestSeedSkipsMountsOnDebian(t *testing.T) {
+	deb, err := userData(&config.VM{Name: "vm", OS: "debian"}, testPubkey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(deb, "mounts:") {
+		t.Errorf("debian seed carries a 9p mounts document:\n%s", deb)
+	}
+
+	arch, err := userData(&config.VM{Name: "vm", OS: "arch"}, testPubkey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(arch, "mounts:") {
+		t.Errorf("arch seed is missing its 9p mounts document:\n%s", arch)
 	}
 }
 

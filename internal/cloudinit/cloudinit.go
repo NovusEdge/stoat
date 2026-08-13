@@ -103,7 +103,10 @@ func extraPackages(osName string) string {
 func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
 
-	docs := []string{base, mountsDoc(v)}
+	docs := []string{base}
+	if m := mountsDoc(v); m != "" {
+		docs = append(docs, m)
+	}
 	if extra := extraPackages(v.OS); extra != "" {
 		docs = append(docs, extra)
 	}
@@ -116,11 +119,20 @@ func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error
 // QEMU command line with nothing to mount them, so the share silently did
 // nothing.
 //
-// nofail is required: some cloud kernels ship no 9p module (Debian's does
-// not), and without nofail an unmountable share holds up boot. The host
-// mount is ro, matching what QEMU enforces, so a write fails immediately
+// debian's cloud kernel (deb13-cloud) ships no 9p module, so the mount can
+// never succeed and cloud-init's mounts module marks the whole seed as
+// errored on every boot. Skip the mounts for debian; the 9p share does not
+// work there.
+// ponytail: keyed on the one bundled image without 9p. Add another OS here if
+// the catalog gains a second 9p-less image.
+//
+// nofail keeps a share that drops out at runtime from holding up boot. The
+// host mount is ro, matching what QEMU enforces, so a write fails immediately
 // instead of after a remount that appears to succeed.
 func mountsDoc(v *config.VM) string {
+	if v.OS == "debian" {
+		return ""
+	}
 	const opts = "trans=virtio,version=9p2000.L,%s,_netdev,nofail"
 	var b strings.Builder
 	b.WriteString("#cloud-config\nmounts:\n")

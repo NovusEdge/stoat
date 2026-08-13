@@ -3,9 +3,10 @@
 # Fedora VM.
 set -e
 
-# Add Docker's official repository
-dnf -y install dnf-plugins-core
-dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+# dnf5 (Fedora 41+) dropped `config-manager --add-repo`. Write the repo file
+# directly; that works on both dnf4 and dnf5.
+curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
+    -o /etc/yum.repos.d/docker-ce.repo
 
 dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
