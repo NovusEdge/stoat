@@ -327,7 +327,7 @@ func TestBuildIncludesInstallStageForDiskMode(t *testing.T) {
 		t.Errorf("stoat-install.start does not redirect to the captured serial port:\n%s", script)
 	}
 	// The VGA console shows a splash instead of a bare login prompt.
-	if !strings.Contains(content["etc/issue"], "installing") {
+	if !strings.Contains(content["etc/issue"], "Installing") {
 		t.Errorf("etc/issue missing the install banner: %q", content["etc/issue"])
 	}
 	if m := hdrs["etc/local.d/stoat-install.start"].Mode; m&0o111 == 0 {

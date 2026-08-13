@@ -1,6 +1,12 @@
 name = "tailscale"
 description = "Tailscale daemon, installed and started (join manually)"
-os = ["alpine"]
-requires = ["apk", "openrc"]
+os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
 stage = "provision"
 script = "install.sh"
+
+[scripts]
+alpine = "install-alpine.sh"
+ubuntu = "install-debian.sh"
+debian = "install-debian.sh"
+fedora = "install-fedora.sh"
+arch = "install-arch.sh"

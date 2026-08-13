@@ -245,22 +245,21 @@ func TestCheckRecipesOKRecipeReportsNoIssue(t *testing.T) {
 	}
 }
 
-// A recipe requested for an OS its recipe.toml doesn't declare (docker is
-// alpine-only) reports the OS mismatch from recipes.MatchReason.
+// A recipe requested for an OS its recipe.toml doesn't declare reports the OS
+// mismatch from recipes.MatchReason. The bundled recipes now ship for every OS,
+// so this pins a synthetic alpine-only recipe.
 func TestCheckRecipesReportsOSMismatch(t *testing.T) {
-	root(t)
-	if err := recipes.Install(); err != nil {
-		t.Fatal(err)
-	}
+	dir := root(t)
+	writeV2RecipeWithOS(t, dir, "alpineonly", "once", "1.0", []string{"alpine"}, "#!/bin/sh\necho test\n")
 
-	issues, err := CheckRecipes("debian", "apkovl", []string{"docker"})
+	issues, err := CheckRecipes("debian", "apkovl", []string{"alpineonly"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(issues) != 1 {
 		t.Fatalf("issues = %+v, want exactly 1", issues)
 	}
-	want := "docker: built for alpine, not debian"
+	want := "alpineonly: built for alpine, not debian"
 	if !strings.Contains(issues[0].Reason, want) {
 		t.Errorf("Reason = %q, want it to contain %q", issues[0].Reason, want)
 	}
@@ -308,6 +307,30 @@ func writeDepRecipe(t *testing.T, rootDir, name, run string, depends []string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\necho "+name+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeV2RecipeWithOS is like writeV2Recipe but also sets the os field.
+func writeV2RecipeWithOS(t *testing.T, rootDir, name, run, version string, oses []string, script string) {
+	t.Helper()
+	recipeDir := filepath.Join(rootDir, "recipes", name)
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	osLine := ""
+	if len(oses) > 0 {
+		osLine = "os = [\"" + strings.Join(oses, "\", \"") + "\"]\n"
+	}
+	toml := "name = \"" + name + "\"\n" +
+		"version = \"" + version + "\"\n" +
+		osLine +
+		"script = \"install.sh\"\n" +
+		"run = \"" + run + "\"\n"
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

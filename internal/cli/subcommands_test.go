@@ -171,23 +171,22 @@ func TestRecipesListsAndFilters(t *testing.T) {
 		t.Fatal("recipes returned nothing with no filter")
 	}
 
-	// debian only satisfies xfce's OS list (the other bundled recipes all
-	// require alpine-only capabilities like apk/openrc), so filtering to it
-	// is strictly narrower than the full catalog.
+	// debian satisfies xfce, devtools, docker, and tailscale OS lists.
 	_, only := runJSON(t, "recipes", "--os", "debian", "--backend", "cloudinit")
 	debian, _ := dataOf(t, only)["recipes"].([]any)
 	if len(debian) == 0 {
 		t.Fatal("recipes --os debian --backend cloudinit returned nothing")
 	}
-	if len(debian) >= len(every) {
-		t.Errorf("filtered %d is not narrower than unfiltered %d", len(debian), len(every))
-	}
+	want := map[string]bool{"xfce": true, "devtools": true, "docker": true, "tailscale": true}
 	for _, r := range debian {
 		m, _ := r.(map[string]any)
 		name, _ := m["name"].(string)
-		if name != "xfce" {
-			t.Errorf("debian/cloudinit offered %q, want only xfce", name)
+		if !want[name] {
+			t.Errorf("debian/cloudinit offered unexpected recipe %q", name)
 		}
+	}
+	if len(debian) != len(want) {
+		t.Errorf("debian/cloudinit offered %d recipes, want %d", len(debian), len(want))
 	}
 }
 
@@ -223,8 +222,8 @@ func TestCheckRecipesApplicableAndNot(t *testing.T) {
 		t.Errorf("issues = %v, want empty", issues)
 	}
 
-	// docker requires alpine's apk/openrc; debian cannot run it.
-	code, objs = runJSON(t, "check-recipes", "docker", "--os", "debian", "--backend", "cloudinit")
+	// A non-existent recipe is inapplicable to any OS.
+	code, objs = runJSON(t, "check-recipes", "nosuchrecipe", "--os", "debian", "--backend", "cloudinit")
 	if code != ExitOK {
 		t.Fatalf("inapplicable: exit = %d, want 0: checking SUCCEEDED", code)
 	}
