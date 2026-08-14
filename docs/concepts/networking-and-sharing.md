@@ -63,9 +63,6 @@ Whether the share actually gets *mounted* inside the guest depends on mode:
 
 ## Sharing a binary built on the host: the musl/glibc trap
 
-This is the single most confusing failure mode around the share feature, so
-it gets called out explicitly.
-
 If you build a binary on a typical glibc-based Linux host (Arch, Fedora,
 Ubuntu, Debian) and drop it into your shared directory expecting to run it
 straight from `/mnt/host` inside an **Alpine** guest (the default for `live`

@@ -13,7 +13,6 @@ dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable docker
 systemctl start docker
 
-# Wait for daemon
 i=0
 while [ $i -lt 30 ]; do
     docker info >/dev/null 2>&1 && break

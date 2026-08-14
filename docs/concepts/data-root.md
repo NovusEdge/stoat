@@ -40,7 +40,7 @@ than an error.
             └── meta-data
 ```
 
-A couple of things worth calling out about that tree:
+Two facts about that tree:
 
 - `isos/` holds both plain ISOs (Alpine) and downloaded cloud images
   (Ubuntu/Debian/Fedora/Arch `.qcow2`/`.img` files). A `cloud` VM's
@@ -81,8 +81,7 @@ Each VM directory holds one `vm.toml`. Every field:
 
 `vm.toml` is a plain TOML file and nothing stops you from editing it directly
 while the VM is stopped: stoat re-reads it fresh every time, there's no
-cache to invalidate. That said, some fields are much safer to touch than
-others:
+cache to invalidate. Some fields are safer to edit than others:
 
 - **Safe-ish**: `ram`, `cpus`, `share`, `recipes` (as long as the filenames
   still exist under `recipes/`), `sshuser`.

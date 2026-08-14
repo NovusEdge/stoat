@@ -48,8 +48,7 @@ Four rules make it work:
 Rule 3 is not a preference. A consumer that must merge two pipes to
 reconstruct one result will eventually interleave them wrong, and a naive
 `subprocess` read of two pipes in sequence deadlocks when either buffer fills.
-The error envelope is the answer to the question that was asked, not a
-diagnostic.
+The error envelope answers the question that was asked.
 
 ## The envelope
 

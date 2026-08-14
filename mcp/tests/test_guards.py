@@ -299,8 +299,8 @@ def test_rate_limiter_allows_up_to_capacity():
     # A tiny nonzero refill rate, not 0.0: RateLimiter.check divides by
     # refill_per_second when it needs to report a wait time, so an actual
     # 0.0 raises ZeroDivisionError instead of GuardRejection once the bucket
-    # is empty. See the report for this finding; a still-positive rate this
-    # small is effectively "never refills" within any of these tests.
+    # is empty. A still-positive rate this small is effectively "never
+    # refills" within any of these tests.
     rl = RateLimiter(capacity=3, refill_per_second=1e-9)
     rl.check("create", now=0.0)
     rl.check("create", now=0.0)

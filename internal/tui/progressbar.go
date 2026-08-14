@@ -17,16 +17,20 @@ const (
 	provLabelMax = 18
 )
 
-// progressLabel renders p as the bar plus a number: "N/M" when the source
-// counted packages, "NN%" when it only gave a fraction. bar() already draws
-// the track with the theme's colors; this adds the number and, when there
-// is room, the package name.
-func progressLabel(p Progress, width int) string {
-	num := fmt.Sprintf("%3.0f%%", p.Frac*100)
+// progressNum renders p's count as "N/M" when the source counted packages,
+// "NN%" when it only gave a fraction.
+func progressNum(p Progress) string {
 	if p.Total > 0 {
-		num = fmt.Sprintf("%d/%d", p.Done, p.Total)
+		return fmt.Sprintf("%d/%d", p.Done, p.Total)
 	}
-	out := bar(p.Frac, width) + " " + dimStyle.Render(num)
+	return fmt.Sprintf("%3.0f%%", p.Frac*100)
+}
+
+// progressLabel renders p as the bar plus a number. bar() already draws the
+// track with the theme's colors; this adds the number and, when there is
+// room, the package name.
+func progressLabel(p Progress, width int) string {
+	out := bar(p.Frac, width) + " " + dimStyle.Render(progressNum(p))
 	if l := p.Label; l != "" {
 		out += dimStyle.Render(" · " + ansi.Truncate(l, provLabelMax, "…"))
 	}
@@ -66,11 +70,7 @@ func renderProgressPanel(phase string, p Progress, hasProg bool, elapsed time.Du
 	var f fields
 	f.row("", "phase", dimStyle.Render(phase))
 	if hasProg {
-		num := fmt.Sprintf("%3.0f%%", p.Frac*100)
-		if p.Total > 0 {
-			num = fmt.Sprintf("%d/%d", p.Done, p.Total)
-		}
-		f.row("", "", bar(p.Frac, detailBarWidth)+" "+dimStyle.Render(num))
+		f.row("", "", bar(p.Frac, detailBarWidth)+" "+dimStyle.Render(progressNum(p)))
 		if p.Label != "" {
 			f.row("", "package", p.Label)
 		}

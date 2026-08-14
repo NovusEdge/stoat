@@ -7,7 +7,6 @@
 # you the one command to run yourself.
 set -e
 
-# Use Tailscale's official install script
 curl -fsSL https://tailscale.com/install.sh | sh
 
 systemctl enable tailscaled

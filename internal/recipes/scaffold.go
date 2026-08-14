@@ -90,13 +90,11 @@ func New(name, osName, _ string) (string, error) {
 		return "", err
 	}
 
-	// Write recipe.toml
 	manifest := fmt.Sprintf(manifestTemplate, name, osName)
 	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
 		return "", err
 	}
 
-	// Write install.sh
 	setup, install := osSetup(osName)
 	script := fmt.Sprintf(shellTemplate, name, osName, setup, install)
 	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte(script), 0o755); err != nil {

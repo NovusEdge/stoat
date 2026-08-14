@@ -10,13 +10,10 @@ related but not the same thing:
   what its start logic checks before launching a VM.
 - **Backend** (`vm.toml`'s `backend` field) records how the create form
   picked recipes and provisioning at creation time. Once the VM exists,
-  nothing at runtime dispatches on this field: it's informational, not
-  load-bearing.
+  nothing at runtime dispatches on this field: it's informational.
 
-If you only remember one thing from this page: **`disk` mode gives you no
-SSH access until you install an OS yourself and tell stoat so.** That single
-fact trips up more people than everything else in this tool combined, so it
-gets its own section below.
+**`disk` mode gives you no SSH access until you install an OS yourself and
+tell stoat so.** See the section below.
 
 ## The three modes
 
@@ -27,7 +24,7 @@ into RAM: the root filesystem is an Alpine initramfs overlay, and nothing
 about it is written anywhere persistent. Stop or reboot the VM and you get a
 clean slate next time.
 
-What makes `live` mode useful rather than just a toy: every time you start
+What makes `live` mode useful: every time you start
 one, stoat builds a small Alpine overlay tarball (an "apkovl") and hands it to
 the guest as a fake FAT disk over `-virtfs`/vvfat. That overlay bakes in:
 
