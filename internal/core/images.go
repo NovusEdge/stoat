@@ -60,7 +60,10 @@ func fileSize(file string) (int64, bool) {
 // resolveImage, so Images can never disagree with what a Spec naming a catalog
 // ID resolves to.
 func Images() ([]CatalogImage, error) {
-	files := LocalImages()
+	files, err := LocalImages()
+	if err != nil {
+		return nil, err
+	}
 	matched := map[string]bool{}
 
 	var out []CatalogImage

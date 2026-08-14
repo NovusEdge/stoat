@@ -145,35 +145,31 @@ func (q *qmp) hmpChecked(cmd string) error {
 	return nil
 }
 
-// SnapshotSave takes a live snapshot of a RUNNING VM, capturing RAM as well as
-// disk, so restoring resumes execution rather than rebooting.
-func SnapshotSave(v *config.VM, tag string) error {
+// snapshotCmd dials QMP, runs an HMP command that prints nothing on success,
+// and closes the session. savevm, loadvm and delvm all share this shape.
+func snapshotCmd(v *config.VM, hmp string) error {
 	q, err := dialQMP(v)
 	if err != nil {
 		return err
 	}
 	defer q.Close()
-	return q.hmpChecked("savevm " + tag)
+	return q.hmpChecked(hmp)
+}
+
+// SnapshotSave takes a live snapshot of a RUNNING VM, capturing RAM as well as
+// disk, so restoring resumes execution rather than rebooting.
+func SnapshotSave(v *config.VM, tag string) error {
+	return snapshotCmd(v, "savevm "+tag)
 }
 
 // SnapshotLoad restores a RUNNING VM to a snapshot.
 func SnapshotLoad(v *config.VM, tag string) error {
-	q, err := dialQMP(v)
-	if err != nil {
-		return err
-	}
-	defer q.Close()
-	return q.hmpChecked("loadvm " + tag)
+	return snapshotCmd(v, "loadvm "+tag)
 }
 
 // SnapshotDelete removes a snapshot from a RUNNING VM's disk.
 func SnapshotDelete(v *config.VM, tag string) error {
-	q, err := dialQMP(v)
-	if err != nil {
-		return err
-	}
-	defer q.Close()
-	return q.hmpChecked("delvm " + tag)
+	return snapshotCmd(v, "delvm "+tag)
 }
 
 // SnapshotInfo returns the raw "info snapshots" text from a RUNNING VM.

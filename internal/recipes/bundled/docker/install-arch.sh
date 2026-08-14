@@ -8,7 +8,6 @@ pacman -Sy --noconfirm docker docker-compose
 systemctl enable docker
 systemctl start docker
 
-# Wait for daemon
 i=0
 while [ $i -lt 30 ]; do
     docker info >/dev/null 2>&1 && break

@@ -274,6 +274,7 @@ func (m model) viewList() string {
 		ci = m.cloudInit[cur.Name]
 	}
 	box = joinAccess(box, accessBox(cur, ci, m.ciProg, m.width), m.width)
+	sshAvailable := cur != nil && cur.State == core.StateRunning
 
 	// column holds every piece to appContentWidth and stacks them left-
 	// aligned. Without it, the box, the status line, and the footer would
@@ -291,8 +292,6 @@ func (m model) viewList() string {
 		parts = append(parts, l)
 	}
 	parts = append(parts, warnStyle.Render(m.status))
-	v := m.current()
-	sshAvailable := v != nil && v.State == core.StateRunning
 	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
 	return column(appContentWidth, parts...)
 }

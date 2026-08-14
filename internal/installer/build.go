@@ -62,12 +62,6 @@ func (e *BuildError) Error() string {
 
 func (e *BuildError) Unwrap() error { return e.Err }
 
-// Install copies srcPath into destDir as an executable, creating destDir if
-// needed.
-//
-// It writes to a temp file and renames, rather than opening the destination
-// for write. Replacing a running binary that way is atomic and avoids
-// ETXTBSY, the error a reinstall over a running stoat would otherwise hit.
 // InstallData creates ~/.stoat subdirectories and copies bundled recipes from
 // the repo. Safe to call on reinstall: existing user files are not overwritten.
 func InstallData(repoDir, home string) error {

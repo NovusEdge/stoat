@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -165,18 +166,7 @@ func commandPath(ctx *kong.Context) string {
 			parts = append(parts, t.Command.Name)
 		}
 	}
-	return joinSpace(parts)
-}
-
-func joinSpace(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += " "
-		}
-		out += p
-	}
-	return out
+	return strings.Join(parts, " ")
 }
 
 // Parse turns argv (excluding the "stoat" program name) into an Args, or a

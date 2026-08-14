@@ -302,8 +302,13 @@ func pruneImages(dryRun bool) ([]PruneItem, error) {
 		return nil, err
 	}
 
+	files, err := LocalImages()
+	if err != nil {
+		return nil, err
+	}
+
 	var out []PruneItem
-	for _, f := range LocalImages() {
+	for _, f := range files {
 		abs, err := filepath.Abs(filepath.Join(config.Root(), "isos", f))
 		if err != nil {
 			continue

@@ -163,8 +163,8 @@ var matchLocalImage = core.MatchLocal
 // core.CatalogImage carries an ID but not the richer iso.Entry fields
 // (Variant, SSHUser) the picker's rows and resolvedSSHUser need, so each row
 // is paired with its iso.Entry by ID here. The error core.Images returns is
-// not surfaced: LocalImages, underneath it, already treats an unreadable
-// isos/ dir as "no local files" rather than an error.
+// discarded: the picker has no error channel, so a failed isos/ read shows an
+// empty list, not a message.
 func buildImages() []imageOption {
 	imgs, _ := core.Images()
 	catalog := map[string]iso.Entry{}
