@@ -358,11 +358,11 @@ These are requirements the TUI never forced, and each one is a real change:
 
 **Declarative creation.** One `Create(Spec)` call, no multi-step form state. Everything the form asks for either has a default or is in the `Spec`.
 
-**Recipe metadata becomes load-bearing.** §5's `# stoat:os` / `# stoat:requires`, enforced at selection, is *optional politeness* for a human who can read a black screen and *mandatory* for an agent that cannot. `Create` returns `ErrRecipeNotApplicable` rather than producing a VM that boots broken. This is the strongest argument for the departure from prior art in §2.
+**Recipe metadata now gates VM creation.** §5's `# stoat:os` / `# stoat:requires`, enforced at selection, is *optional politeness* for a human who can read a black screen and *mandatory* for an agent that cannot. `Create` returns `ErrRecipeNotApplicable` rather than producing a VM that boots broken. This is the strongest argument for the departure from prior art in §2.
 
 **Cancellation.** Every operation takes a `context.Context`. Downloads and boot-waits are long; an agent that abandons a task must be able to stop them. Today `esc` leaves a download goroutine running (a known open item).
 
-### 9.5 Concurrency: new, and load-bearing
+### 9.5 Concurrency: new, and required once a second caller exists
 
 A TUI has one user doing one thing. An MCP server plus a TUI plus a CLI can act **at the same time**, and two current mechanisms are not safe under that:
 
@@ -407,6 +407,6 @@ If any of these needs logic that is not already in `core`, the layering is wrong
 ## 10. Risks
 
 - **This is a real refactor**, touching `qemu`, `cloudinit`, `apkovl`, `recipes`, `iso` and `tui`. The mitigation is that behaviour must not change except where a bug is named here: existing tests are the contract, and any test that needs updating is a signal to stop and check rather than to edit.
-- **`Backend.Prepare`'s call frequency differs by backend** (apkovl every boot; cloudinit once, ever). That asymmetry is load-bearing: a cloud VM whose seed is rebuilt would have its instance identity change under it. The interface hides it, which is right, but the implementations must be explicit about it and tested for it.
+- **`Backend.Prepare`'s call frequency differs by backend** (apkovl every boot; cloudinit once, ever). A cloud VM whose seed is rebuilt would have its instance identity change under it. The interface hides it, which is right, but the implementations must be explicit about it and tested for it.
 - **`cloud-init schema` may be absent** on the host (Arch does not install cloud-init by default). Validation must degrade to "not checked", never to "assumed valid".
 - **The merge-semantics change is silent when wrong.** Packages that quietly stop being installed look like a recipe bug, not a merge bug. Needs a direct test.

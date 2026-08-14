@@ -85,20 +85,19 @@ builds a very similar argument list: same host-key options, same
 `-i id_stoat`, same `root@127.0.0.1` target for live VMs, but deliberately
 **omits `BatchMode=yes`**. `Args` (used for unattended provisioning) needs SSH
 to fail immediately rather than block waiting for input that will never come.
-The interactive path hands the terminal to a real, attended `ssh` process, so
-if key auth doesn't work, for instance a disk-mode VM that was installed
+The interactive path hands the terminal to a real, attended `ssh` process.
+If key auth doesn't work, for instance a disk-mode VM that was installed
 manually and never had the key provisioned, SSH is free to fall back to
 prompting for a password at the terminal, the same as running `ssh` by hand.
 
 ## Why host key checking is off
 
 Both paths set `StrictHostKeyChecking=no` and `UserKnownHostsFile=/dev/null`.
-This is deliberate, not a shortcut: live Alpine VMs are rebuilt by stoat
+This is deliberate. live Alpine VMs are rebuilt by stoat
 constantly, and even with the stable guest host key described above, disk and
 cloud VMs generate their own host keys independently. Strict checking would
 mean a stale or mismatched `known_hosts` entry breaking a connection to a VM
-stoat just built, the kind of false alarm host-key checking exists to avoid,
-not the kind it's meant to catch.
+stoat just built: a false alarm, not an actual key mismatch.
 
 ## Passwords: console only, never over SSH
 
@@ -136,7 +135,7 @@ the detail screen:
 and in the log line written when the VM starts, which you can read with
 `stoat logs`.
 
-### Why a fixed default is not a compromise
+### Why a fixed default is safe
 
 You end up at that console precisely when SSH *isn't* working, which is the
 worst possible moment to go and look a credential up. And it is no weaker

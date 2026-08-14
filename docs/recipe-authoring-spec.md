@@ -20,9 +20,8 @@ and survives upgrades.
 named `mything.alpine.sh` and it appears in the picker for Alpine VMs. No code
 required. Any "creator" competes with `$EDITOR` on a path that already works.
 
-So the question is not "can we add a creator" but "what does a creator do that
-`vim ~/.stoat/recipes/x.alpine.sh` doesn't". Three honest candidates below,
-smallest first.
+The question is what a creator does that `vim ~/.stoat/recipes/x.alpine.sh`
+doesn't. Candidates below, smallest first.
 
 ---
 

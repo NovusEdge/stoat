@@ -399,7 +399,7 @@ broken vm: /home/user/.stoat/vms/oldvm
 partial download: /home/user/.stoat/isos/ubuntu-24.04.iso.part
 ```
 
-`--broken` additionally considers VMs whose `vm.toml` won't parse for removal; `--images` additionally considers downloaded images no VM refers to. Without either, `prune` only reports partial downloads by default (broken VMs and orphaned images need to be asked for explicitly). Printing an identical list for the dry run and the real run is deliberate: the two are meant to be readable as the same thing, one with the deletions actually applied.
+`--broken` also considers VMs whose `vm.toml` won't parse for removal; `--images` also considers downloaded images no VM refers to. Without either, `prune` only reports partial downloads by default (broken VMs and orphaned images need to be asked for explicitly). Printing an identical list for the dry run and the real run is deliberate: the two are meant to be readable as the same thing, one with the deletions actually applied.
 
 **Exit codes:** 0 on success, including "nothing to prune"; 1 if pruning fails.
 
@@ -567,7 +567,7 @@ A usage error (2) always prints both the specific complaint and the full usage t
 ## Scripting
 
 - **`-q`, `--quiet`, `--no-interactive`** are three names for the same flag, present on every subcommand. Where it has an effect, it suppresses the "in-progress" chatter (`starting work...`, `provisioning work...`, ...); final results and all errors print regardless of this flag.
-- **`rm`** additionally treats `--no-interactive`/`-q`/`--json` as "there is no one to answer a confirmation prompt": without `-y` it refuses rather than blocking on stdin.
+- **`rm`** also treats `--no-interactive`/`-q`/`--json` as "there is no one to answer a confirmation prompt": without `-y` it refuses rather than blocking on stdin.
 - **`--json`** is the machine-readable mode: one JSON object per line on stdout, errors included, implying `--quiet` and never prompting. See [json.md](json.md) for the wire format.
 - **`NO_COLOR`** (any non-empty value) disables ANSI color in `ls`'s output.
 - Color is also **disabled automatically whenever stdout is not a terminal** (checked via `os.ModeCharDevice`), so piping `stoat ls` into `awk`, `grep`, or a file never carries escape codes even without setting `NO_COLOR`. Only `ls`'s `STATE` column is ever colored.
