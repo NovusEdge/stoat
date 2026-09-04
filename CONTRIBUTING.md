@@ -11,7 +11,7 @@ just dev        # runs the TUI against a scratch STOAT_HOME
 
 Go 1.26 (pinned in `go.mod`), `just`, and for anything that boots a VM:
 KVM, `qemu-system-x86_64`, `qemu-img`, `ssh`. `stoat doctor` lists what is
-missing.
+missing. `just lint` also needs `golangci-lint` v2 and `shellcheck`.
 
 ## Branches and pull requests
 
@@ -76,6 +76,11 @@ review.
 A change to a subsystem or an interface another package depends on
 starts as an issue that states the design, discussed before the
 implementation PR. Settled decisions go in `docs/design/`.
+
+`docs/design/core-api.md` §12 holds the conventions a new CLI command
+follows: the `wire` struct behind `--json`, `fail` against `failMsg`, the
+shared `confirm` helper, kong aliases, and `tomlx` for a TOML file. A
+reviewer rejects a PR that ignores them.
 
 ## Recipes
 
