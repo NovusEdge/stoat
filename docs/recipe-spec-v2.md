@@ -63,16 +63,8 @@ fedora = "install-fedora.sh"
 
 ### Capabilities
 
-Capabilities are facts about a guest that a recipe can require:
-
-| Capability | Meaning | OSes |
-|------------|---------|------|
-| `systemd` | Uses systemd init | ubuntu, debian, arch, fedora |
-| `openrc` | Uses OpenRC init | alpine |
-| `apt` | Has apt package manager | ubuntu, debian |
-| `apk` | Has apk package manager | alpine |
-| `dnf` | Has dnf package manager | fedora |
-| `pacman` | Has pacman | arch |
+Capabilities are facts about a guest that a recipe can require: every
+`capabilities` entry and `init` of a loaded guest; see `stoat guest show`.
 
 A recipe declaring `requires = ["systemd"]` is not offered to Alpine. Stoat resolves these against `guest.OS` at list/check time.
 
