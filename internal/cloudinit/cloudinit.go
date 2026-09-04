@@ -121,23 +121,26 @@ func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error
 //
 // debian's cloud kernel (deb13-cloud) ships no 9p module, so the mount can
 // never succeed and cloud-init's mounts module marks the whole seed as
-// errored on every boot. Skip the mounts for debian; the 9p share does not
-// work there.
-// ponytail: keyed on the one bundled image without 9p. Add another OS here if
-// the catalog gains a second 9p-less image.
+// errored on every boot. SkipShares reads guest.toml's backend.cloudinit
+// skip_9p for the guest and skips the mounts document there.
 //
 // nofail keeps a share that drops out at runtime from holding up boot. The
 // host mount is ro, matching what QEMU enforces, so a write fails immediately
 // instead of after a remount that appears to succeed.
+
 // SkipShares reports whether osName's guest.toml sets backend.cloudinit's
-// skip_9p. Stub: Task 6 reads the guest table; mountsDoc still hardcodes
-// "debian" until then.
+// skip_9p.
 func SkipShares(osName string) bool {
-	return false
+	o, ok := guest.Lookup(osName)
+	if !ok {
+		return false
+	}
+	skip, _ := o.Backends["cloudinit"]["skip_9p"].(bool)
+	return skip
 }
 
 func mountsDoc(v *config.VM) string {
-	if v.OS == "debian" {
+	if SkipShares(v.OS) {
 		return ""
 	}
 	const opts = "trans=virtio,version=9p2000.L,%s,_netdev,nofail"
