@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // --- golden-file style: marshal each DTO and pin the exact JSON shape. ---
@@ -247,6 +248,22 @@ func TestExecResultInvalidUTF8UsesBase64(t *testing.T) {
 	got := marshal(t, r)
 	if strings.Contains(got, `"stdout":`) {
 		t.Errorf("plain stdout field must be omitted when base64 is used: %s", got)
+	}
+}
+
+func TestGuestGolden(t *testing.T) {
+	o, ok := guest.Lookup("fedora")
+	if !ok {
+		t.Fatal("no bundled fedora guest")
+	}
+	got := marshal(t, FromGuest(o))
+	for _, want := range []string{`"name":"fedora"`, `"init":"systemd"`, `"default_backend":"cloudinit"`, `"escalate":["sudo","-n"]`, `"capabilities":["dnf","systemd"]`, `"aliases":["rpm-family"]`, `"pkg":{"setup":"","install":["dnf","install","-y"]`, `"source":"bundled"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s in %s", want, got)
+		}
+	}
+	if strings.Contains(got, "null") {
+		t.Errorf("null in %s", got)
 	}
 }
 
