@@ -102,6 +102,21 @@ func validate(o OS) error {
 			return fmt.Errorf("guest.toml: %s: capabilities lists init %q but init is %q", o.Name, c, o.Init)
 		}
 	}
+	// preludePython embeds each template in a single-quoted Python literal.
+	// A quote inside the template closes that literal and the recipe fails
+	// at run time with a SyntaxError, so reject it at load.
+	tmpls := map[string]string{
+		"svc.enable": o.Svc.Enable, "svc.start": o.Svc.Start, "svc.stop": o.Svc.Stop,
+		"svc.restart": o.Svc.Restart, "svc.status": o.Svc.Status,
+	}
+	for name, t := range o.Cmd {
+		tmpls["cmd."+name] = t
+	}
+	for _, name := range sortedKeys(tmpls) {
+		if strings.Contains(tmpls[name], "'") {
+			return fmt.Errorf("guest.toml: %s: %s contains a single quote, which the python prelude cannot render", o.Name, name)
+		}
+	}
 	return nil
 }
 

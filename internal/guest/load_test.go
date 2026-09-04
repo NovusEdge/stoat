@@ -48,6 +48,23 @@ func TestValidateRejectsForeignInit(t *testing.T) {
 	}
 }
 
+// A quote in a template survives the sh prelude but breaks the python one,
+// where the template goes inside a single-quoted literal. Rejecting it at
+// load turns a SyntaxError mid-recipe into a message about the file.
+func TestValidateRejectsQuoteInTemplate(t *testing.T) {
+	o := loadBundled()["fedora"]
+	o.Svc.Enable = "systemctl enable 'x' {name}"
+	err := validate(o)
+	if err == nil || !strings.Contains(err.Error(), "svc.enable contains a single quote") {
+		t.Errorf("err = %v", err)
+	}
+	o = loadBundled()["fedora"]
+	o.Cmd = map[string]string{"reboot": "shutdown -r 'now'"}
+	if err := validate(o); err == nil || !strings.Contains(err.Error(), "cmd.reboot contains a single quote") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestParseFileRejectsUnknownKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "x.toml")
 	body := "schema = 1\nname = \"x\"\n[pkg]\ninstal = [\"apk\"]\n"
