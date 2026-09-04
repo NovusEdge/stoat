@@ -11,4 +11,4 @@ const (
 )
 
 // Healths returns every declared health value.
-func Healths() []Health { return nil }
+func Healths() []Health { return []Health{HealthOK, HealthFailed, HealthUnknown} }

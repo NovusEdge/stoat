@@ -36,8 +36,9 @@ const (
 	StateBroken  State = "broken"
 )
 
-// States returns every State this package produces.
-func States() []State { return nil }
+// States returns every State this package produces. Three of the design
+// doc's six; see State's own comment for why the other three are absent.
+func States() []State { return []State{StateStopped, StateRunning, StateBroken} }
 
 // ErrNotRunning is returned by Stop (and by Destroy, transitively) for a VM
 // that is not running. qemu.Stop itself treats "already stopped" as a
