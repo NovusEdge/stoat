@@ -51,9 +51,13 @@ func loadBundled() map[string]OS {
 		if _, err := tmp.Write(b); err != nil {
 			panic(err)
 		}
-		tmp.Close()
+		if err := tmp.Close(); err != nil {
+			panic(err)
+		}
 		o, err := parseFile(tmp.Name())
-		os.Remove(tmp.Name())
+		if rmErr := os.Remove(tmp.Name()); rmErr != nil {
+			panic(rmErr)
+		}
 		if err != nil {
 			panic(fmt.Sprintf("bundled guest %s: %v", e.Name(), err))
 		}

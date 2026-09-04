@@ -16,8 +16,12 @@ func TestLoadWarnsUnknownKeyToStderr(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 	dir := filepath.Join(root, "w")
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "vm.toml"), []byte("name = \"w\"\nmode = \"live\"\ncpus_ = 2\n"), 0o644)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vm.toml"), []byte("name = \"w\"\nmode = \"live\"\ncpus_ = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var w bytes.Buffer
 	UnknownKeyWriter = &w
 	t.Cleanup(func() { UnknownKeyWriter = os.Stderr })
