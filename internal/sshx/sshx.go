@@ -233,12 +233,12 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	}
 	defer func() { _ = log.Close() }()
 
-	_, _ = fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
+	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
 	if err := Wait(ctx, v, WaitTimeout); err != nil {
 		if ctx.Err() != nil {
-			_, _ = fmt.Fprintf(log, "CANCELLED: %v\n", err)
+			fmt.Fprintf(log, "CANCELLED: %v\n", err)
 		} else {
-			_, _ = fmt.Fprintf(log, "FAILED: %v\n", err)
+			fmt.Fprintf(log, "FAILED: %v\n", err)
 		}
 		return err
 	}
@@ -251,7 +251,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	// cloud-init failure surfaces when the recipe itself runs. apkovl and BYO
 	// images ship no cloud-init and skip this.
 	if v.Backend == "cloudinit" {
-		_, _ = fmt.Fprintln(log, "waiting for cloud-init to finish…")
+		fmt.Fprintln(log, "waiting for cloud-init to finish…")
 		ci := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"cloud-init", "status", "--wait"})...)...)
 		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
 		ci.WaitDelay = recipeShutdownGrace
@@ -267,24 +267,24 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 		// cancelled between recipes must stop here rather than start one more
 		// ssh process it will only have to kill.
 		if err := ctx.Err(); err != nil {
-			_, _ = fmt.Fprintf(log, "CANCELLED: %v\n", err)
+			fmt.Fprintf(log, "CANCELLED: %v\n", err)
 			return err
 		}
 
 		body, err := recipes.ScriptBody(name, v.OS)
 		if err != nil {
-			_, _ = fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
 		}
 		runtime, err := recipes.RuntimeFor(name, v.OS)
 		if err != nil {
-			_, _ = fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
 		}
-		_, _ = fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
+		fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
-			_, _ = fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
+			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
 			bs := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"sh", "-s"})...)...)
 			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
 			bs.WaitDelay = recipeShutdownGrace
@@ -293,10 +293,10 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			bs.Stderr = log
 			if err := bs.Run(); err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
-					_, _ = fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+					fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
 					return ctxErr
 				}
-				_, _ = fmt.Fprintf(log, "FAILED: recipe %s: installing %s: %v\n", name, runtime, err)
+				fmt.Fprintf(log, "FAILED: recipe %s: installing %s: %v\n", name, runtime, err)
 				return fmt.Errorf("recipe %s: installing %s: %w", name, runtime, err)
 			}
 		}
@@ -315,13 +315,13 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			// caller sniffing Logs' text, must not read a cancellation as if
 			// the recipe itself had failed.
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				_, _ = fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+				fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
 				return ctxErr
 			}
-			_, _ = fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return fmt.Errorf("recipe %s: %w", name, err)
 		}
 	}
-	_, _ = fmt.Fprintln(log, "\ndone")
+	fmt.Fprintln(log, "\ndone")
 	return nil
 }

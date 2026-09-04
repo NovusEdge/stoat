@@ -266,7 +266,7 @@ func (a *Args) fail(stdout, stderr io.Writer, err error) int {
 		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.MapError(err))
 		return ExitFail
 	}
-	_, _ = fmt.Fprintf(stderr, "stoat: %s: %v\n", a.Cmd, err)
+	fmt.Fprintf(stderr, "stoat: %s: %v\n", a.Cmd, err)
 	return ExitFail
 }
 
@@ -278,7 +278,7 @@ func (a *Args) failMsg(stdout, stderr io.Writer, sentinel error, msg string) int
 		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.MapError(fmt.Errorf("%w: %s", sentinel, msg)))
 		return ExitFail
 	}
-	_, _ = fmt.Fprintf(stderr, "stoat: %s: %s\n", a.Cmd, msg)
+	fmt.Fprintf(stderr, "stoat: %s: %s\n", a.Cmd, msg)
 	return ExitFail
 }
 
@@ -298,7 +298,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		// or a dead process, never a silent exit with neither.
 		defer func() {
 			if r := recover(); r != nil {
-				_, _ = fmt.Fprintf(stderr, "panic: %v\n", r)
+				fmt.Fprintf(stderr, "panic: %v\n", r)
 				_ = wire.NewEmitter(stdout).ResultErr(cmd, wire.InternalError(fmt.Sprintf("panic: %v", r)))
 				code = ExitFail
 			}
@@ -311,8 +311,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 			_ = wire.NewEmitter(stdout).ResultErr(cmd, wire.UsageError(err.Error()))
 			return ExitUsage
 		}
-		_, _ = fmt.Fprintln(stderr, "stoat:", err)
-		_, _ = fmt.Fprintln(stderr, helpText())
+		fmt.Fprintln(stderr, "stoat:", err)
+		fmt.Fprintln(stderr, helpText())
 		return ExitUsage
 	}
 	a.JSON = jsonMode
@@ -328,13 +328,13 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		if a.JSON {
 			return a.ok(stdout, map[string]any{"usage": a.Help})
 		}
-		_, _ = fmt.Fprintln(stdout, a.Help)
+		fmt.Fprintln(stdout, a.Help)
 		return ExitOK
 	case "version":
 		if a.JSON {
 			return a.ok(stdout, map[string]any{"version": version, "contract": wire.ContractVersion})
 		}
-		_, _ = fmt.Fprintln(stdout, "stoat", version)
+		fmt.Fprintln(stdout, "stoat", version)
 		return ExitOK
 	}
 
@@ -347,7 +347,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 				_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.MapError(err))
 				return ExitFail
 			}
-			_, _ = fmt.Fprintln(stderr, "stoat:", err)
+			fmt.Fprintln(stderr, "stoat:", err)
 			return ExitFail
 		}
 	}
@@ -411,7 +411,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDoctor(a, stdout, stderr)
 	default:
 		// Unreachable: Parse already rejected anything not handled above.
-		_, _ = fmt.Fprintln(stderr, "stoat: unknown subcommand", a.Cmd)
+		fmt.Fprintln(stderr, "stoat: unknown subcommand", a.Cmd)
 		return ExitUsage
 	}
 }

@@ -36,7 +36,7 @@ const consoleKeyDelay = 50 * time.Millisecond
 func passwordKeys(password string) ([]string, error) {
 	keys := make([]string, 0, len(password))
 	for _, r := range password {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'z') {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'z')) {
 			return nil, fmt.Errorf(
 				"console password contains %q, which can't be typed reliably over the qemu monitor: enter it manually at the console",
 				string(r))

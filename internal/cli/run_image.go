@@ -22,7 +22,7 @@ func runImages(a *Args, stdout, stderr io.Writer) int {
 	if a.JSON {
 		return a.ok(stdout, map[string]any{"images": wire.FromCatalogImages(imgs)})
 	}
-	_, _ = fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", "ID", "OS", "VARIANT", "SIZE", "STATE")
+	fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", "ID", "OS", "VARIANT", "SIZE", "STATE")
 	for _, i := range imgs {
 		size := humanSize(i.Bytes)
 		if !i.Exact {
@@ -37,7 +37,7 @@ func runImages(a *Args, stdout, stderr io.Writer) int {
 			id = i.File // a byo file has no catalog id
 			state = "byo"
 		}
-		_, _ = fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", id, i.OS, i.Variant, size, state)
+		fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", id, i.OS, i.Variant, size, state)
 	}
 	return ExitOK
 }
@@ -68,7 +68,7 @@ func runPull(a *Args, stdout, stderr io.Writer) int {
 				"id": a.VM, "done": done, "total": total, "percent": pct,
 			})
 		case !a.Quiet:
-			_, _ = fmt.Fprintf(stdout, "\r%s  %3d%%  %s / %s", a.VM, pct, humanSize(done), humanSize(total))
+			fmt.Fprintf(stdout, "\r%s  %3d%%  %s / %s", a.VM, pct, humanSize(done), humanSize(total))
 		}
 	}
 	res, err := core.DownloadImage(context.Background(), a.VM, progress)
@@ -76,7 +76,7 @@ func runPull(a *Args, stdout, stderr io.Writer) int {
 		if a.JSON {
 			return a.fail(stdout, stderr, err)
 		}
-		_, _ = fmt.Fprintln(stderr, "\nstoat: pull:", err)
+		fmt.Fprintln(stderr, "\nstoat: pull:", err)
 		return ExitFail
 	}
 	if a.JSON {
@@ -96,7 +96,7 @@ func runPull(a *Args, stdout, stderr io.Writer) int {
 		if !res.ChecksumAvailable {
 			note = ": UNVERIFIED (no published checksum)"
 		}
-		_, _ = fmt.Fprintf(stdout, "\r%s downloaded%s%s\n", a.VM, note, strings.Repeat(" ", 30))
+		fmt.Fprintf(stdout, "\r%s downloaded%s%s\n", a.VM, note, strings.Repeat(" ", 30))
 	}
 	return ExitOK
 }

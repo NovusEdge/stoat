@@ -23,7 +23,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
-	_, _ = fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
+	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
 	// core.List() sorts every VM, broken ones included, together by name,
 	// so a broken VM can interleave alphabetically with good ones. The
 	// original two calls (config.List then config.ListBroken) printed every
@@ -39,7 +39,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State == core.StateRunning {
 			state = "running"
 		}
-		_, _ = fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %d\n",
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %d\n",
 			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort)
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
@@ -49,7 +49,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State != core.StateBroken {
 			continue
 		}
-		_, _ = fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %s\n",
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %s\n",
 			v.Name, "-", colorState("broken", 8), "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
@@ -71,7 +71,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "starting %s...\n", a.VM)
+		fmt.Fprintf(stdout, "starting %s...\n", a.VM)
 	}
 	if err := core.Start(a.VM); err != nil {
 		return a.fail(stdout, stderr, err)
@@ -84,7 +84,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		}
 		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
-	_, _ = fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
+	fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
 	// Re-read for the display line too: Start is what flips a disk VM to
 	// installed, and that flip is exactly what moves the screen off the qemu
 	// window. The pre-Start copy would announce a window that is not there.
@@ -100,11 +100,11 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	// boot the installed system either way.
 	if v.Mode == "disk" && !v.Installed {
 		if !a.Quiet {
-			_, _ = fmt.Fprintf(stdout, "installing %s (a few minutes)...\n", a.VM)
+			fmt.Fprintf(stdout, "installing %s (a few minutes)...\n", a.VM)
 		}
 		restarted, err := core.AutoRestartAfterInstall(context.Background(), a.VM)
 		if err != nil || !restarted {
-			_, _ = fmt.Fprintf(stdout, "install did not finish; inspect: stoat logs %s\n", a.VM)
+			fmt.Fprintf(stdout, "install did not finish; inspect: stoat logs %s\n", a.VM)
 			return ExitOK
 		}
 		if started, err := core.Get(a.VM); err == nil {
@@ -135,7 +135,7 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	}
 
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "waiting for ssh on %s...\n", a.VM)
+		fmt.Fprintf(stdout, "waiting for ssh on %s...\n", a.VM)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sshx.WaitTimeout)
 	defer cancel()
@@ -144,7 +144,7 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	}
 
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
+		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
 	done := make(chan error, 1)
 	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{}) }()
@@ -153,12 +153,12 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 			// A concurrent `apply` already holds the lock; that run owns the
 			// error. `up` still started the VM, so this is not a failure of
 			// the up command.
-			_, _ = fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
+			fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
 			return ExitOK
 		}
 		return a.fail(stdout, stderr, err)
 	}
-	_, _ = fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
+	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
 	return ExitOK
 }
 
@@ -172,7 +172,7 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 func printDisplay(w io.Writer, d core.Display) {
 	switch d.Kind {
 	case core.DisplayWindow:
-		_, _ = fmt.Fprintln(w, "display: a qemu window")
+		fmt.Fprintln(w, "display: a qemu window")
 	case core.DisplayVNC:
 		if d.NoSession {
 			// Said before the socket line, because without it "no qemu window"
@@ -180,17 +180,17 @@ func printDisplay(w io.Writer, d core.Display) {
 			// "no usable session" rather than "no session": the same line
 			// prints when the user set STOAT_GRAPHICAL=0 on a host that plainly
 			// has one, because its GTK cannot draw on it.
-			_, _ = fmt.Fprintln(w, "display: no usable graphical session on this host, so the screen")
-			_, _ = fmt.Fprintln(w, "  is on VNC instead; attach to watch it")
+			fmt.Fprintln(w, "display: no usable graphical session on this host, so the screen")
+			fmt.Fprintln(w, "  is on VNC instead; attach to watch it")
 		}
-		_, _ = fmt.Fprintf(w, "display: no qemu window; the screen is on %s\n", d.Socket)
+		fmt.Fprintf(w, "display: no qemu window; the screen is on %s\n", d.Socket)
 		if d.Attach.Command == "" {
-			_, _ = fmt.Fprintf(w, "  no VNC viewer found; install one of: %s\n", strings.Join(d.Attach.Missing, ", "))
+			fmt.Fprintf(w, "  no VNC viewer found; install one of: %s\n", strings.Join(d.Attach.Missing, ", "))
 			return
 		}
-		_, _ = fmt.Fprintf(w, "  attach with: %s\n", d.Attach.Command)
+		fmt.Fprintf(w, "  attach with: %s\n", d.Attach.Command)
 		if d.Attach.Then != "" {
-			_, _ = fmt.Fprintf(w, "  %s\n", d.Attach.Then)
+			fmt.Fprintf(w, "  %s\n", d.Attach.Then)
 		}
 	}
 }
@@ -209,7 +209,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
 	}
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "stopping %s...\n", a.VM)
+		fmt.Fprintf(stdout, "stopping %s...\n", a.VM)
 	}
 	if err := core.Stop(a.VM); err != nil {
 		// The State check above catches the common case before any output
@@ -226,7 +226,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		}
 		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
-	_, _ = fmt.Fprintf(stdout, "%s stopped\n", a.VM)
+	fmt.Fprintf(stdout, "%s stopped\n", a.VM)
 	return ExitOK
 }
 
@@ -245,13 +245,13 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 			return a.fail(stdout, stderr, fmt.Errorf("%w: %s", wire.ErrConfirmationRequired, a.VM))
 		}
 		if a.Quiet {
-			_, _ = fmt.Fprintln(stderr, "stoat: rm: refusing to delete without -y in non-interactive mode")
+			fmt.Fprintln(stderr, "stoat: rm: refusing to delete without -y in non-interactive mode")
 			return ExitFail
 		}
-		_, _ = fmt.Fprintf(stdout, "delete VM %s? [y/N] ", a.VM)
+		fmt.Fprintf(stdout, "delete VM %s? [y/N] ", a.VM)
 		line, _ := bufio.NewReader(stdin).ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(line)) != "y" {
-			_, _ = fmt.Fprintln(stdout, "aborted")
+			fmt.Fprintln(stdout, "aborted")
 			return ExitFail
 		}
 	}
@@ -267,7 +267,7 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if a.JSON {
 		return a.ok(stdout, map[string]any{"name": a.VM, "deleted": true})
 	}
-	_, _ = fmt.Fprintf(stdout, "%s deleted\n", a.VM)
+	fmt.Fprintf(stdout, "%s deleted\n", a.VM)
 	return ExitOK
 }
 
@@ -280,9 +280,9 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 		if a.JSON {
 			return a.fail(stdout, stderr, err)
 		}
-		_, _ = fmt.Fprintln(stderr, "stoat: create:", err)
+		fmt.Fprintln(stderr, "stoat: create:", err)
 		if errors.Is(err, core.ErrImageNotDownloaded) {
-			_, _ = fmt.Fprintln(stderr, "stoat: download it from the TUI's image picker first")
+			fmt.Fprintln(stderr, "stoat: download it from the TUI's image picker first")
 		}
 		return ExitFail
 	}
@@ -290,8 +290,8 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 	}
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
-		_, _ = fmt.Fprintf(stdout, "start it with: stoat up %s\n", v.Name)
+		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
+		fmt.Fprintf(stdout, "start it with: stoat up %s\n", v.Name)
 	}
 	return ExitOK
 }
@@ -314,8 +314,8 @@ func runClone(a *Args, stdout, stderr io.Writer) int {
 		})
 	}
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "cloned %s to %s (ssh :%d)\n", a.VM, v.Name, v.SSHPort)
-		_, _ = fmt.Fprintf(stdout, "port forwards were not copied; set them with: stoat forward %s ...\n", v.Name)
+		fmt.Fprintf(stdout, "cloned %s to %s (ssh :%d)\n", a.VM, v.Name, v.SSHPort)
+		fmt.Fprintf(stdout, "port forwards were not copied; set them with: stoat forward %s ...\n", v.Name)
 	}
 	return ExitOK
 }

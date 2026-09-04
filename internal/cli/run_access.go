@@ -40,9 +40,9 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !a.Quiet {
 		if a.ToRemote {
-			_, _ = fmt.Fprintf(stdout, "copied %s to %s:%s\n", a.Local, a.VM, a.Remote)
+			fmt.Fprintf(stdout, "copied %s to %s:%s\n", a.Local, a.VM, a.Remote)
 		} else {
-			_, _ = fmt.Fprintf(stdout, "copied %s:%s to %s\n", a.VM, a.Remote, a.Local)
+			fmt.Fprintf(stdout, "copied %s:%s to %s\n", a.VM, a.Remote, a.Local)
 		}
 	}
 	return ExitOK
@@ -83,8 +83,8 @@ func runExec(a *Args, stdout, stderr io.Writer) int {
 	}
 	// Streamed through verbatim, on the matching stream, so a caller can pipe
 	// stdout without stderr contaminating it.
-	_, _ = fmt.Fprint(stdout, res.Stdout)
-	_, _ = fmt.Fprint(stderr, res.Stderr)
+	fmt.Fprint(stdout, res.Stdout)
+	fmt.Fprint(stderr, res.Stderr)
 	return res.ExitCode
 }
 
@@ -103,17 +103,17 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 	}
 	v, err := config.Load(a.VM)
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "stoat: ssh:", err)
+		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
 	path, err := exec.LookPath("ssh")
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "stoat: ssh:", err)
+		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
 	argv := append([]string{"ssh"}, sshx.Args(v)...)
 	if err := syscall.Exec(path, argv, os.Environ()); err != nil {
-		_, _ = fmt.Fprintln(stderr, "stoat: ssh:", err)
+		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
 	return ExitOK // unreachable on success: the process image is gone

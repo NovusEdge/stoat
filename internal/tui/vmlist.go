@@ -92,7 +92,7 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		} else {
 			reason = downStyle.Render(reason)
 		}
-		_, _ = fmt.Fprint(w, lipgloss.JoinHorizontal(lipgloss.Top, glyph, reason))
+		fmt.Fprint(w, lipgloss.JoinHorizontal(lipgloss.Top, glyph, reason))
 		return
 	}
 
@@ -132,7 +132,7 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	if selected {
 		label = selStyle.Render(label)
 	}
-	_, _ = fmt.Fprint(w, cursor+dotStyle.Render(dot)+" "+label+state)
+	fmt.Fprint(w, cursor+dotStyle.Render(dot)+" "+label+state)
 }
 
 // listWidth and listVisibleRows size the VM list. Fixed rather than derived

@@ -34,7 +34,7 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 	}
 
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
+		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
 
 	done := make(chan error, 1)
@@ -63,7 +63,7 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 			// bool. skipped_reason is what distinguishes the two.
 			return a.ok(stdout, map[string]any{"vm": a.VM, "applied": []string{}, "skipped_reason": "an apply is already running"})
 		}
-		_, _ = fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
+		fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
 		return ExitOK
 	}
 	if aerr != nil {
@@ -76,7 +76,7 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		}
 		return a.ok(stdout, map[string]any{"vm": a.VM, "applied": applied, "skipped_reason": ""})
 	}
-	_, _ = fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
+	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
 	return ExitOK
 }
 
@@ -103,7 +103,7 @@ func runApplyDryRun(a *Args, stdout, stderr io.Writer) int {
 		if p.Version != "" {
 			reason = fmt.Sprintf("%s at %s", p.Reason, p.Version)
 		}
-		_, _ = fmt.Fprintf(stdout, "%s (%s, %s)\n", p.Name, p.Action, reason)
+		fmt.Fprintf(stdout, "%s (%s, %s)\n", p.Name, p.Action, reason)
 	}
 	return ExitOK
 }

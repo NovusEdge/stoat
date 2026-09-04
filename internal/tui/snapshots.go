@@ -356,5 +356,5 @@ func (d snapshotDelegate) Render(w io.Writer, m list.Model, index int, item list
 		state = upStyle.Render("disk+ram")
 	}
 	size := dimStyle.Render(fmt.Sprintf("%-9s", it.snap.Size))
-	_, _ = fmt.Fprint(w, cursor+label+size+state+"  "+dimStyle.Render(it.snap.Created))
+	fmt.Fprint(w, cursor+label+size+state+"  "+dimStyle.Render(it.snap.Created))
 }

@@ -33,7 +33,7 @@ func runWait(a *Args, stdout, stderr io.Writer) int {
 		})
 	}
 	if !a.Quiet {
-		_, _ = fmt.Fprintf(stdout, "%s reached %s (%dms)\n", a.VM, a.Until, waited.Milliseconds())
+		fmt.Fprintf(stdout, "%s reached %s (%dms)\n", a.VM, a.Until, waited.Milliseconds())
 	}
 	return ExitOK
 }

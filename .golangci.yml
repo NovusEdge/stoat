@@ -6,3 +6,15 @@ linters:
     - govet
     - unused
     - misspell
+  settings:
+    errcheck:
+      # A CLI cannot act on a failed write to its own stdout or stderr. The
+      # exclusion keeps every print site free of a two-token discard.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    staticcheck:
+      # ST and QF rewrite working code for taste. QF1001 turned an allowlist
+      # test into its De Morgan form and broke the comment above it.
+      checks: ["all", "-ST*", "-QF*"]

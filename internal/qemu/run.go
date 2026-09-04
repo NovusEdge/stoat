@@ -202,7 +202,7 @@ func Stop(v *config.VM) error {
 		return nil
 	}
 	if c, err := dialMonitor(v); err == nil {
-		_, _ = fmt.Fprintln(c, "system_powerdown")
+		fmt.Fprintln(c, "system_powerdown")
 		_ = c.Close()
 		for i := 0; i < 100; i++ {
 			if !Running(v) {
