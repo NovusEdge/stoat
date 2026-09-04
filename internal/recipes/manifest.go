@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
 	"github.com/novusedge/stoat/internal/guest"
+	"github.com/novusedge/stoat/internal/tomlx"
 )
 
 // Manifest is a recipe.toml, the v2 recipe format
@@ -42,8 +42,8 @@ var validRuntimes = map[string]bool{"sh": true, "python3": true}
 // case, docs/recipe-spec-v2.md's Stages section), Run defaults to "once".
 func ParseManifest(path string) (Manifest, error) {
 	var m Manifest
-	if _, err := toml.DecodeFile(path, &m); err != nil {
-		return Manifest{}, fmt.Errorf("parse %s: %w", path, err)
+	if err := tomlx.Decode(path, &m, tomlx.Reject); err != nil {
+		return Manifest{}, err
 	}
 	m.dir = filepath.Dir(path)
 

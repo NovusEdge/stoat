@@ -51,8 +51,7 @@ type grammar struct {
 	Snapshot snapshotCmd `cmd:"" help:"list, save, restore or delete a snapshot"`
 	Prune    pruneCmd    `cmd:"" help:"report, or with --apply remove, stale files"`
 
-	Apply        applyCmd        `cmd:"" help:"run the VM's recipes, streaming output"`
-	Provision    applyCmd        `cmd:"" hidden:"" name:"provision" help:"alias of apply"`
+	Apply        applyCmd        `cmd:"" aliases:"provision" help:"run the VM's recipes, streaming output"`
 	Recipes      recipesCmd      `cmd:"" help:"list recipes, optionally only applicable ones"`
 	CheckRecipes checkRecipesCmd `cmd:"" help:"report why a recipe would not apply"`
 	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
@@ -397,9 +396,6 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "apply":
 		a.VM, a.Only, a.DryRun = g.Apply.VM, trimList(g.Apply.Only), g.Apply.DryRun
-
-	case "provision":
-		a.VM, a.Only, a.DryRun = g.Provision.VM, trimList(g.Provision.Only), g.Provision.DryRun
 
 	case "recipes":
 		a.OS, a.Backend = g.Recipes.OS, g.Recipes.Backend

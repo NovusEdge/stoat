@@ -38,7 +38,6 @@ usage: stoat <command> [flags]
 | [`snapshot`](#stoat-snapshot-name-tag) | List, save, restore or delete a snapshot | 0, 1, 2 |
 | [`prune`](#stoat-prune) | Report, or with `--apply` remove, stale files | 0, 1 |
 | [`apply`](#stoat-apply-name) | Run the VM's recipes, streaming output | 0, 1 |
-| [`provision`](#stoat-provision-name) | Run recipes, streaming output to stdout | 0, 1 |
 | [`recipes`](#stoat-recipes) | List recipes, optionally only applicable ones | 0, 1 |
 | [`check-recipes`](#stoat-check-recipes-names---osos) | Report why a recipe would not apply | 0, 1, 2 |
 | [`recipe list`](#stoat-recipe-list) | List installed recipes and where they live | 0, 1 |
@@ -420,29 +419,7 @@ work: recipes applied
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded, the run fails, or (for a cloud-mode VM) recipes were already applied at boot rather than by this command.
 
-## `stoat provision <name>`
-
-Runs the VM's recipes over ssh, streaming `last-provision.log` to stdout as it's written (polled every 150ms), the same log the TUI's detail screen tails, so there is no separate provisioning path to keep in sync.
-
-```
-$ stoat provision work
-provisioning work...
-=== recipe xfce ===
-Unpacking libx11-data...
-...
-work provisioned
-```
-
-A **cloud-mode VM short-circuits**: cloud-init applies its recipes once, automatically, at first boot, baked into the seed when the VM's overlay was created, there is nothing left for ssh-based provisioning to do, and piping a cloud recipe (`#cloud-config` YAML, not a shell script) into `sh -s` would just fail. Instead it prints an explanatory line and exits 0 without touching ssh:
-
-```
-$ stoat provision cloudvm
-cloudvm is a cloud VM: recipes are applied automatically via cloud-init at first boot; recreate the VM to change them.
-```
-
-`-q` suppresses the `provisioning <name>...` line only; the streamed log and the final line still print.
-
-**Exit codes:** 0 on success (including the cloud short-circuit); 1 if the VM can't be loaded or the provision run itself fails.
+`provision` is a hidden alias of `apply`: `stoat provision work` behaves exactly like `stoat apply work`, and reports `"cmd":"apply"` under `--json`.
 
 ## `stoat recipes`
 

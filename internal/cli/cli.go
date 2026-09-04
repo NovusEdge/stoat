@@ -396,8 +396,6 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDown(a, stdout, stderr)
 	case "ssh":
 		return runSSH(a, stdout, stderr)
-	case "provision":
-		return runApply(a, stdout, stderr)
 	case "rm":
 		return runRM(a, stdin, stdout, stderr)
 	case "recipe":
