@@ -195,6 +195,17 @@ RecipeIssue {"name":"docker","reason":"docker is not offered to debian/cloudinit
 
 ApplyPlan   {"name":"xfce","action":"run","reason":"never applied",
              "version":"1.2"}
+
+Guest       {"name":"fedora","init":"systemd","shell":"/bin/bash",
+             "installer":"","default_backend":"cloudinit",
+             "default_ssh_user":"stoat","escalate":["sudo","-n"],
+             "capabilities":["dnf","systemd"],"aliases":["rpm-family"],
+             "filename_hints":["fedora"],"seed_packages":[],
+             "pkg":{"setup":"","install":["dnf","install","-y"],
+             "env":{},"runtime_packages":{"python3":"python3"}},
+             "svc":{"enable":"systemctl enable {name}", ...},
+             "cmd":{},"backend":{"cloudinit":{"skip_9p":false}},
+             "source":"bundled"}
 ```
 
 `state` is one of `stopped`, `running`, `broken`. `error` appears only on a
@@ -261,6 +272,13 @@ agent cannot run a GUI viewer anyway. A consumer that needs to tell a human
 where to look runs `stoat get <name>` without `--json`, which prints the
 socket and an attach command for a viewer installed on that machine.
 
+`Guest.source` is `"bundled"`, `"user"`, or `"bundled+user"` for a user file
+merged over a bundled one. `Guest.svc` and `Guest.cmd` are template strings,
+not commands to run directly: `{name}` renders to the service/argument, see
+`docs/reference/guest.md`. `Guest.backend` passes each `[backend.<name>]`
+table through opaque; only the backend package that owns `<name>` defines its
+keys.
+
 ### What is deliberately absent
 
 - **Host paths.** `core.VM` carries six absolute host paths (its disk, console
@@ -302,11 +320,14 @@ so a leak fails the build rather than shipping.
 | `apply --dry-run` | `{"vm":"work","dry_run":true,"plan":[ApplyPlan,...]}` |
 | `recipes` | `{"recipes":[Recipe,...]}` |
 | `check-recipes` | `{"applicable":false,"issues":[RecipeIssue,...]}` |
+| `guest ls` | `{"guests":[Guest,...]}` |
+| `guest show` | `{"guest":Guest}` |
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
 | `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
 
-Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`.
-Distinguish them by which fields `data` carries.
+Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`,
+and both `guest` subcommands report `"cmd":"guest"`. Distinguish them by which
+fields `data` carries.
 
 `recipe list` is "every file in the recipes directory", which is not the same
 as "every recipe you can use": it currently includes the `.bak` files the

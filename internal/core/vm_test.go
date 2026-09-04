@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,33 @@ func TestGetUnknownVM(t *testing.T) {
 	root(t)
 	if _, err := Get("nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUnknownGuestIsBroken(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "x", Mode: "cloud", OS: "plan9", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Get("x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != StateBroken || !strings.Contains(got.Error, `unknown guest "plan9"`) {
+		t.Errorf("state %q error %q", got.State, got.Error)
+	}
+}
+
+func TestEmptyOSIsNotBroken(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "y", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Get("y")
+	if err != nil || got.State == StateBroken {
+		t.Errorf("empty os must keep its fallbacks: %v %v", got.State, err)
 	}
 }
 

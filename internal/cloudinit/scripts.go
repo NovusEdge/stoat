@@ -3,6 +3,8 @@ package cloudinit
 import (
 	"fmt"
 	"strings"
+
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // scriptDir is where WrapScripts places each script inside the guest,
@@ -33,7 +35,10 @@ type Script struct {
 // meant to be handed to Seed alongside other recipe bodies, like any other
 // cloud recipe fragment (see userData in cloudinit.go). It goes through
 // withMergeHow and buildArchive the same way every other document does.
-func WrapScripts(scripts []Script) string {
+// prelude is prepended to each script's content and, when non-empty, run
+// once via stoat_pkg_setup as the first runcmd entry, so the package index
+// is refreshed before any script that installs a package runs.
+func WrapScripts(scripts []Script, prelude string) string {
 	if len(scripts) == 0 {
 		return ""
 	}
@@ -41,12 +46,15 @@ func WrapScripts(scripts []Script) string {
 	var wf, rc strings.Builder
 	wf.WriteString("write_files:\n")
 	rc.WriteString("runcmd:\n")
+	if prelude != "" {
+		rc.WriteString(fmt.Sprintf("  - sh -c %s\n", guest.ShQuote(prelude+"stoat_pkg_setup")))
+	}
 	for _, s := range scripts {
 		path := fmt.Sprintf("%s/%s.sh", scriptDir, s.Name)
 		fmt.Fprintf(&wf, "  - path: %s\n", path)
 		wf.WriteString("    permissions: '0755'\n")
 		wf.WriteString("    content: |\n")
-		wf.WriteString(indentBlock(s.Content))
+		wf.WriteString(indentBlock(guest.WithPrelude(s.Content, prelude)))
 		// The script runs, then drops a marker on success. core.Apply reads
 		// MarkerDir over ssh to rebuild v.Applied post-boot. The && chain
 		// leaves no marker for a script that failed, so a failed recipe stays

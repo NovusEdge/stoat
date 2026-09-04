@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -358,6 +360,15 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	defer func() { _ = logx.Close() }()
 	logx.L().Debug("cli", "cmd", a.Cmd, "vm", a.VM)
 
+	if err := guest.Load(filepath.Join(config.Root(), "guests")); err != nil {
+		if a.JSON {
+			_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.UsageError(err.Error()))
+			return ExitUsage
+		}
+		fmt.Fprintln(stderr, "stoat:", err)
+		return ExitUsage
+	}
+
 	switch a.Cmd {
 	case "ls":
 		return runLS(a, stdout, stderr)
@@ -385,12 +396,12 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDown(a, stdout, stderr)
 	case "ssh":
 		return runSSH(a, stdout, stderr)
-	case "provision":
-		return runApply(a, stdout, stderr)
 	case "rm":
 		return runRM(a, stdin, stdout, stderr)
 	case "recipe":
 		return runRecipe(a, stdout, stderr)
+	case "guest":
+		return runGuest(a, stdout, stderr)
 	case "logs":
 		return runLogs(a, stdout, stderr)
 	case "get":

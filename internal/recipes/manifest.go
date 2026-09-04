@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/novusedge/stoat/internal/guest"
+	"github.com/novusedge/stoat/internal/tomlx"
 )
 
 // Manifest is a recipe.toml, the v2 recipe format
@@ -41,8 +42,8 @@ var validRuntimes = map[string]bool{"sh": true, "python3": true}
 // case, docs/recipe-spec-v2.md's Stages section), Run defaults to "once".
 func ParseManifest(path string) (Manifest, error) {
 	var m Manifest
-	if _, err := toml.DecodeFile(path, &m); err != nil {
-		return Manifest{}, fmt.Errorf("parse %s: %w", path, err)
+	if err := tomlx.Decode(path, &m, tomlx.Reject); err != nil {
+		return Manifest{}, err
 	}
 	m.dir = filepath.Dir(path)
 
@@ -96,11 +97,17 @@ func ManifestFor(name string) (m Manifest, ok bool, err error) {
 }
 
 // ScriptFor returns the absolute path to the script osName runs: the
-// Scripts override for osName if one is declared, otherwise the manifest's
-// default Script.
+// Scripts override for osName, then for each of the guest's aliases in
+// order, then the manifest's default Script.
 func (m Manifest) ScriptFor(osName string) string {
-	if s, ok := m.Scripts[osName]; ok {
-		return filepath.Join(m.dir, s)
+	keys := []string{osName}
+	if o, ok := guest.Lookup(osName); ok {
+		keys = append(keys, o.Aliases...)
+	}
+	for _, k := range keys {
+		if s, ok := m.Scripts[k]; ok {
+			return filepath.Join(m.dir, s)
+		}
 	}
 	return filepath.Join(m.dir, m.Script)
 }
@@ -114,22 +121,11 @@ func (m Manifest) ScriptContent(osName string) (string, error) {
 	return string(b), nil
 }
 
-// capabilityOSes maps each recipe.toml "requires" capability to the guest
-// OSes that have it (docs/recipe-spec-v2.md's Capabilities table). An
-// unrecognised capability satisfies no OS, so MatchesVM rejects it rather
-// than silently letting the recipe through.
-var capabilityOSes = map[string][]string{
-	"systemd": {"ubuntu", "debian", "arch", "fedora"},
-	"openrc":  {"alpine"},
-	"apt":     {"ubuntu", "debian"},
-	"apk":     {"alpine"},
-	"dnf":     {"fedora"},
-	"pacman":  {"arch"},
-}
-
-// hasCapability reports whether cap resolves against vmOS.
+// hasCapability reports whether cap resolves against vmOS. The table comes
+// from the loaded guests, so a new guest file adds capabilities without a
+// Go edit.
 func hasCapability(cap, vmOS string) bool {
-	for _, o := range capabilityOSes[cap] {
+	for _, o := range guest.Capabilities()[cap] {
 		if o == vmOS {
 			return true
 		}

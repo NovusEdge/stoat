@@ -9,6 +9,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -75,8 +76,16 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 	// WrapScripts renders every recipe into one write_files+runcmd fragment
 	// cloud-init runs in order at first boot. An empty selection wraps to "",
 	// which Seed must not carry as a document; pass no bodies instead.
+	//
+	// prelude is sh only: the cloud-init path has no runtime bootstrap step
+	// (that is sshx.Provision's job), so a non-sh recipe here runs with a
+	// bare body, same as before this feature.
+	var prelude string
+	if o, ok := guest.Lookup(v.OS); ok {
+		prelude = guest.Prelude(o, "sh")
+	}
 	var bodies []string
-	if frag := cloudinit.WrapScripts(scripts); frag != "" {
+	if frag := cloudinit.WrapScripts(scripts, prelude); frag != "" {
 		bodies = []string{frag}
 	}
 	if _, err := cloudinit.Seed(v, pub, bodies); err != nil {

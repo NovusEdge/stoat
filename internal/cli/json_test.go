@@ -73,6 +73,9 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		{name: "prune", argv: []string{"prune"}, ok: true, exit: ExitOK},
 		{name: "logs", argv: []string{"logs"}, ok: true, exit: ExitOK},
 		{name: "recipe list", argv: []string{"recipe", "list"}, ok: true, exit: ExitOK},
+		{name: "guest ls", argv: []string{"guest", "ls"}, ok: true, exit: ExitOK},
+		{name: "guest show", argv: []string{"guest", "show", "alpine"}, ok: true, exit: ExitOK},
+		{name: "guest show unknown", argv: []string{"guest", "show", "plan9"}, code: wire.CodeNotFound, exit: ExitFail},
 		{name: "forward show", argv: []string{"forward", "work"}, ok: true, exit: ExitOK},
 		// The fixture is a live VM, which has no qcow2 to snapshot; the point
 		// here is the envelope, and no_disk is the honest answer for it.

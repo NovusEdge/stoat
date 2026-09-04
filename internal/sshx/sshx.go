@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -72,16 +73,30 @@ func Args(v *config.VM, extra ...string) []string {
 	return append(a, extra...)
 }
 
-// sudoWrap prefixes remote with "sudo" for a non-root ssh user. Recipe bodies
-// install packages, so they need root. Cloud images log in as an unprivileged
-// account; cloudinit grants it passwordless sudo ("ALL=(ALL) NOPASSWD:ALL").
-// An apkovl or BYO-root image connects as root and gets no prefix. sudo reads
-// the piped script body on stdin the same way the bare interpreter does.
-func sudoWrap(v *config.VM, remote []string) []string {
+// escalate prefixes remote with the guest's escalate argv for a non-root ssh
+// user. Cloud images log in as an unprivileged account with passwordless
+// sudo from the seed; apkovl and BYO-root images connect as root and get no
+// prefix. An unknown guest falls back to sudo, the only answer that has ever
+// been right for a cloud image.
+func escalate(v *config.VM, remote []string) []string {
 	if User(v) == "root" {
 		return remote
 	}
-	return append([]string{"sudo"}, remote...)
+	prefix := []string{"sudo", "-n"}
+	if o, ok := guest.Lookup(v.OS); ok && len(o.Escalate) > 0 {
+		prefix = o.Escalate
+	}
+	return append(append([]string{}, prefix...), remote...)
+}
+
+// preludeFor renders the guest prelude for v, or "" for a guest stoat does
+// not know, in which case a recipe runs bare as it always did.
+func preludeFor(v *config.VM, runtime string) string {
+	o, ok := guest.Lookup(v.OS)
+	if !ok {
+		return ""
+	}
+	return guest.Prelude(o, runtime)
 }
 
 // CopyArgs returns the argv (excluding argv[0]) for scp between the host and
@@ -252,7 +267,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	// images ship no cloud-init and skip this.
 	if v.Backend == "cloudinit" {
 		fmt.Fprintln(log, "waiting for cloud-init to finish…")
-		ci := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"cloud-init", "status", "--wait"})...)...)
+		ci := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"cloud-init", "status", "--wait"})...)...)
 		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
 		ci.WaitDelay = recipeShutdownGrace
 		ci.Stdout = io.Discard
@@ -261,6 +276,24 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	}
 
 	mountShares(ctx, v, log)
+
+	if o, ok := guest.Lookup(v.OS); ok && strings.TrimSpace(o.Pkg.Setup) != "" {
+		fmt.Fprintln(log, "refreshing the package index...")
+		st := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
+		st.Cancel = func() error { return st.Process.Signal(syscall.SIGTERM) }
+		st.WaitDelay = recipeShutdownGrace
+		st.Stdin = strings.NewReader(guest.Prelude(o, "sh") + "stoat_pkg_setup\n")
+		st.Stdout = log
+		st.Stderr = log
+		if err := st.Run(); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				fmt.Fprintf(log, "CANCELLED: %v\n", ctxErr)
+				return ctxErr
+			}
+			fmt.Fprintf(log, "FAILED: package index refresh: %v\n", err)
+			return fmt.Errorf("package index refresh: %w", err)
+		}
+	}
 
 	for _, name := range v.Recipes {
 		// Checked before each recipe, not left to cmd.Run below alone: a ctx
@@ -285,10 +318,10 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
 			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
-			bs := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"sh", "-s"})...)...)
+			bs := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
 			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
 			bs.WaitDelay = recipeShutdownGrace
-			bs.Stdin = strings.NewReader(bootstrap)
+			bs.Stdin = strings.NewReader(guest.WithPrelude(bootstrap, preludeFor(v, "sh")))
 			bs.Stdout = log
 			bs.Stderr = log
 			if err := bs.Run(); err != nil {
@@ -301,10 +334,10 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, recipes.InterpreterArgs(runtime))...)...)
+		cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, recipes.InterpreterArgs(runtime))...)...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = recipeShutdownGrace
-		cmd.Stdin = strings.NewReader(body)
+		cmd.Stdin = strings.NewReader(guest.WithPrelude(body, preludeFor(v, runtime)))
 		cmd.Stdout = log
 		cmd.Stderr = log
 		if err := cmd.Run(); err != nil {

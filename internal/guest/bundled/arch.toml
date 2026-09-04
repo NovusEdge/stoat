@@ -1,0 +1,30 @@
+schema = 1
+name = "arch"
+init = "systemd"
+shell = "/bin/bash"
+installer = ""
+default_backend = "cloudinit"
+default_ssh_user = "stoat"
+escalate = ["sudo", "-n"]
+capabilities = ["pacman"]
+aliases = []
+filename_hints = ["arch"]
+seed_packages = []
+
+[pkg]
+setup = "pacman -Sy --noconfirm"
+install = ["pacman", "-S", "--noconfirm"]
+scaffold_setup = "pacman -Sy --noconfirm\n"
+scaffold_install = "pacman -S --noconfirm "
+# Arch names its Python 3 package "python".
+runtime_packages = { python3 = "python" }
+
+[svc]
+enable = "systemctl enable {name}"
+start = "systemctl start {name}"
+stop = "systemctl stop {name}"
+restart = "systemctl restart {name}"
+status = "systemctl status {name}"
+
+[backend.cloudinit]
+skip_9p = false

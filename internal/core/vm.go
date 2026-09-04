@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 )
@@ -188,7 +189,24 @@ func load(name string) (*config.VM, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrBroken, name, err)
 	}
+	if err := checkGuest(v); err != nil {
+		return nil, err
+	}
 	return v, nil
+}
+
+// checkGuest reports ErrUnknownGuest, wrapped in ErrBroken, when v.OS names
+// no loaded guest. An empty OS (a live/disk VM predating the OS field, or one
+// that never set it) is not checked: emptiness has its own fallbacks
+// elsewhere and is not a broken state.
+func checkGuest(v *config.VM) error {
+	if v.OS == "" {
+		return nil
+	}
+	if _, ok := guest.Lookup(v.OS); !ok {
+		return fmt.Errorf("%w: %s: %w %q; run stoat guest ls", ErrBroken, filepath.Base(v.Dir), ErrUnknownGuest, v.OS)
+	}
+	return nil
 }
 
 // fromConfig builds the point-in-time view for a VM that parsed cleanly.
@@ -307,6 +325,10 @@ func List() ([]VM, error) {
 	}
 	var out []VM
 	for _, cv := range cvms {
+		if err := checkGuest(cv); err != nil {
+			out = append(out, VM{Name: filepath.Base(cv.Dir), State: StateBroken, Error: err.Error()})
+			continue
+		}
 		out = append(out, fromConfig(cv))
 	}
 

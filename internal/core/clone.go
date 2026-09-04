@@ -9,6 +9,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -215,8 +216,12 @@ func cloneCloud(src, clone *config.VM) error {
 		}
 		scripts = append(scripts, cloudinit.Script{Name: name, Content: body})
 	}
+	var prelude string
+	if o, ok := guest.Lookup(clone.OS); ok {
+		prelude = guest.Prelude(o, "sh")
+	}
 	var bodies []string
-	if frag := cloudinit.WrapScripts(scripts); frag != "" {
+	if frag := cloudinit.WrapScripts(scripts, prelude); frag != "" {
 		bodies = []string{frag}
 	}
 	_, err = cloudinit.Seed(clone, pub, bodies)

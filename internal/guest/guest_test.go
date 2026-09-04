@@ -80,8 +80,8 @@ func TestEveryDeclarationIsComplete(t *testing.T) {
 		if o.Shell == "" {
 			t.Errorf("%s has no Shell", o.Name)
 		}
-		if o.Backend == "" {
-			t.Errorf("%s has no Backend", o.Name)
+		if o.DefaultBackend == "" {
+			t.Errorf("%s has no DefaultBackend", o.Name)
 		}
 		if o.Init == "" {
 			t.Errorf("%s has no Init", o.Name)
@@ -89,8 +89,8 @@ func TestEveryDeclarationIsComplete(t *testing.T) {
 		if o.DefaultSSHUser == "" {
 			t.Errorf("%s has no DefaultSSHUser", o.Name)
 		}
-		if o.PkgInstall == "" {
-			t.Errorf("%s has no PkgInstall", o.Name)
+		if o.Pkg.ScaffoldInstall == "" {
+			t.Errorf("%s has no Pkg.ScaffoldInstall", o.Name)
 		}
 		if len(o.FilenameHints) == 0 {
 			t.Errorf("%s has no FilenameHints, so a BYO image of it can never be recognised", o.Name)

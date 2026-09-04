@@ -1,14 +1,34 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestLoadWarnsUnknownKeyToStderr(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	dir := filepath.Join(root, "w")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "vm.toml"), []byte("name = \"w\"\nmode = \"live\"\ncpus_ = 2\n"), 0o644)
+	var w bytes.Buffer
+	UnknownKeyWriter = &w
+	t.Cleanup(func() { UnknownKeyWriter = os.Stderr })
+	v, err := Load("w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Name != "w" || !strings.Contains(w.String(), `unknown key "cpus_"`) {
+		t.Errorf("v=%+v warn=%q", v, w.String())
+	}
+}
 
 func TestSaveLoadRoundtrip(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())

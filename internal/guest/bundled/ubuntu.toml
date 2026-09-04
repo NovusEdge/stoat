@@ -1,0 +1,33 @@
+schema = 1
+name = "ubuntu"
+init = "systemd"
+shell = "/bin/bash"
+installer = ""
+default_backend = "cloudinit"
+default_ssh_user = "stoat"
+escalate = ["sudo", "-n"]
+capabilities = ["apt"]
+aliases = ["debian-family"]
+filename_hints = ["ubuntu"]
+seed_packages = []
+
+[pkg]
+setup = "apt-get update"
+install = ["apt-get", "install", "-y"]
+env = { DEBIAN_FRONTEND = "noninteractive" }
+scaffold_setup = """
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+"""
+scaffold_install = "apt-get install -y "
+runtime_packages = { python3 = "python3" }
+
+[svc]
+enable = "systemctl enable {name}"
+start = "systemctl start {name}"
+stop = "systemctl stop {name}"
+restart = "systemctl restart {name}"
+status = "systemctl status {name}"
+
+[backend.cloudinit]
+skip_9p = false

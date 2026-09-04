@@ -106,7 +106,7 @@ func mountShares(ctx context.Context, v *config.VM, log io.Writer) {
 		return
 	}
 	fmt.Fprintln(log, "\n=== mounting 9p shares ===")
-	cmd := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"sh", "-s"})...)...)
+	cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = recipeShutdownGrace
 	cmd.Stdin = strings.NewReader(shareMountScript(tags, guestFstabPath))

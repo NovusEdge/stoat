@@ -58,7 +58,7 @@ esac
 // osSetup is the package-manager preamble per OS, or "" where none is needed.
 func osSetup(osName string) (setup, install string) {
 	if os, ok := guest.Lookup(osName); ok {
-		return os.PkgSetup, os.PkgInstall
+		return os.Pkg.ScaffoldSetup, os.Pkg.ScaffoldInstall
 	}
 	return "", "# install: "
 }

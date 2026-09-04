@@ -13,6 +13,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -134,6 +135,7 @@ func Run() error {
 	if err := keys.Ensure(); err != nil {
 		return err
 	}
+	guestErr := guest.Load(filepath.Join(config.Root(), "guests"))
 	// ponytail: a log we can't open is not worth refusing to start over.
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
@@ -146,6 +148,10 @@ func Run() error {
 		spin:         newSpinner(),
 	}
 	m.preflight = preflightReport(core.Doctor())
+	if guestErr != nil {
+		// A toast would expire; the preflight block stays until the user acts.
+		m.preflight += "\n" + guestErr.Error()
+	}
 	_, err := tea.NewProgram(m).Run()
 	return err
 }

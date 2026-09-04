@@ -31,10 +31,10 @@ func parseWrapped(t *testing.T, body string) wrappedFragment {
 }
 
 func TestWrapScriptsEmpty(t *testing.T) {
-	if got := WrapScripts(nil); got != "" {
+	if got := WrapScripts(nil, ""); got != "" {
 		t.Errorf("WrapScripts(nil) = %q, want empty string", got)
 	}
-	if got := WrapScripts([]Script{}); got != "" {
+	if got := WrapScripts([]Script{}, ""); got != "" {
 		t.Errorf("WrapScripts([]Script{}) = %q, want empty string", got)
 	}
 }
@@ -42,7 +42,7 @@ func TestWrapScriptsEmpty(t *testing.T) {
 func TestWrapScriptsSingleScript(t *testing.T) {
 	body := WrapScripts([]Script{
 		{Name: "xfce", Content: "#!/bin/sh\napt-get install -y xfce4\n"},
-	})
+	}, "")
 
 	f := parseWrapped(t, body)
 	if len(f.WriteFiles) != 1 {
@@ -80,7 +80,7 @@ func TestWrapScriptsPreservesOrder(t *testing.T) {
 		{Name: "base", Content: "echo base\n"},
 		{Name: "docker", Content: "echo docker\n"},
 		{Name: "xfce", Content: "echo xfce\n"},
-	})
+	}, "")
 
 	f := parseWrapped(t, body)
 	wantPaths := []string{
@@ -118,7 +118,7 @@ func TestWrapScriptsPreservesOrder(t *testing.T) {
 // no useful error.
 func TestWrapScriptsMultilineContentSurvives(t *testing.T) {
 	script := "#!/bin/sh\nset -e\n\nif true; then\n  echo indented\nfi"
-	body := WrapScripts([]Script{{Name: "multi", Content: script}})
+	body := WrapScripts([]Script{{Name: "multi", Content: script}}, "")
 
 	f := parseWrapped(t, body)
 	if len(f.WriteFiles) != 1 {
@@ -136,7 +136,7 @@ func TestWrapScriptsMultilineContentSurvives(t *testing.T) {
 // way (see TestArchiveWriteFilesSurvives for the same contract on a
 // hand-written fragment).
 func TestWrapScriptsFragmentMergesIntoSeed(t *testing.T) {
-	fragment := WrapScripts([]Script{{Name: "xfce", Content: "echo hi\n"}})
+	fragment := WrapScripts([]Script{{Name: "xfce", Content: "echo hi\n"}}, "")
 
 	got := withMergeHow(fragment)
 	if !strings.HasPrefix(got, "#cloud-config\n") {
@@ -147,5 +147,19 @@ func TestWrapScriptsFragmentMergesIntoSeed(t *testing.T) {
 	}
 	if !strings.Contains(got, "merge_how:") {
 		t.Errorf("merged fragment missing merge_how directive:\n%s", got)
+	}
+}
+
+// A non-empty prelude runs once as the first runcmd entry, via
+// stoat_pkg_setup, and is prepended to every script's own content. This is
+// how the cloudinit path keeps the package index refresh and the recipe
+// verbs behaving the same as the ssh path.
+func TestWrapScriptsRunsSetupFirst(t *testing.T) {
+	got := WrapScripts([]Script{{Name: "x", Content: "#!/bin/sh\necho hi\n"}}, "P\n")
+	if !strings.Contains(got, "runcmd:\n  - sh -c 'P\nstoat_pkg_setup'\n") {
+		t.Errorf("setup not first in runcmd:\n%s", got)
+	}
+	if !strings.Contains(got, "      #!/bin/sh\n      P\n      echo hi\n") {
+		t.Errorf("prelude not after the shebang:\n%s", got)
 	}
 }

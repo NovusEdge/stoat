@@ -1,5 +1,10 @@
 # Guest Subsystem: Design
 
+**Update, 2026-09-05:** the guest registry this document designs is now data,
+not Go: `internal/guest/bundled/*.toml` plus `~/.stoat/guests/*.toml` merged
+over it, loaded through `internal/tomlx`. See `docs/reference/guest.md` for
+the file format.
+
 **Status:** accepted design, not yet a plan. Written 2026-08-02. The operation surface built on this layer is specified in [`core-api.md`](core-api.md).
 
 **Why this exists:** guest-OS knowledge is scattered across 25 sites as ad-hoc string comparisons, provisioning has no contract at all, and the logic that creates a VM lives inside a Bubbletea form. Adding Alpine cloud support missed three of those sites and the feature silently did not work. This document defines the subsystem that makes that class of failure structural rather than a matter of remembering, and the API layer that lets something other than a keyboard drive stoat.

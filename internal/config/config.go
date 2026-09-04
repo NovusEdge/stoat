@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,7 +14,12 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/novusedge/stoat/internal/tomlx"
 )
+
+// UnknownKeyWriter receives one line per unknown vm.toml key that Load
+// tolerates. A test overrides it to capture the warning.
+var UnknownKeyWriter io.Writer = os.Stderr
 
 // PortForward is one user-declared host->guest TCP forward, additional to
 // the SSHPort forward every VM already gets. Validation (range, collisions
@@ -201,18 +207,11 @@ func (v *VM) Save() error {
 // Load reads one VM by name.
 func Load(name string) (*VM, error) {
 	dir := filepath.Join(Root(), name)
-	v := &VM{}
-	meta, err := toml.DecodeFile(filepath.Join(dir, "vm.toml"), v)
-	if err != nil {
+	// Absent allow_exec means true; the seed survives the decode, a written
+	// false overrides it.
+	v := &VM{AllowExec: true}
+	if err := tomlx.Decode(filepath.Join(dir, "vm.toml"), v, tomlx.Warn(UnknownKeyWriter)); err != nil {
 		return nil, err
-	}
-	// A vm.toml written before AllowExec existed has no "allow_exec" key.
-	// toml.Decode leaves that as Go's bool zero value: false. That would
-	// silently disable exec on every VM that predates the field, the
-	// opposite of the documented default. An absent key is corrected to
-	// true here instead of trusted as a real false.
-	if !meta.IsDefined("allow_exec") {
-		v.AllowExec = true
 	}
 	v.Dir = dir
 	v.Share = Expand(v.Share)

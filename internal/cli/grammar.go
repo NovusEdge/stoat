@@ -51,11 +51,11 @@ type grammar struct {
 	Snapshot snapshotCmd `cmd:"" help:"list, save, restore or delete a snapshot"`
 	Prune    pruneCmd    `cmd:"" help:"report, or with --apply remove, stale files"`
 
-	Apply        applyCmd        `cmd:"" help:"run the VM's recipes, streaming output"`
-	Provision    applyCmd        `cmd:"" hidden:"" name:"provision" help:"alias of apply"`
+	Apply        applyCmd        `cmd:"" aliases:"provision" help:"run the VM's recipes, streaming output"`
 	Recipes      recipesCmd      `cmd:"" help:"list recipes, optionally only applicable ones"`
 	CheckRecipes checkRecipesCmd `cmd:"" help:"report why a recipe would not apply"`
 	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
+	Guest        recipeGuestCmd  `cmd:"" help:"list or show guest OS definitions"`
 
 	Logs    logsCmd    `cmd:"" help:"tail a VM's log, or stoat's own"`
 	Doctor  doctorCmd  `cmd:"" help:"check host prerequisites"`
@@ -227,6 +227,17 @@ type recipeNewCmd struct {
 	Backend string `help:"\"cloudinit\" for a cloud-init fragment; shell otherwise"`
 }
 
+type recipeGuestCmd struct {
+	LS   guestLsCmd   `cmd:"" name:"ls" help:"one line per guest: name, init, package manager, backend, source"`
+	Show guestShowCmd `cmd:"" help:"the merged definition of one guest"`
+}
+
+type guestLsCmd struct{}
+
+type guestShowCmd struct {
+	Name string `arg:"" help:"guest name (see guest ls)"`
+}
+
 type logsCmd struct {
 	VM    string `arg:"" optional:"" help:"vm name; omit to tail stoat's own log"`
 	N     int    `short:"n" default:"50" help:"number of lines to tail"`
@@ -386,9 +397,6 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "apply":
 		a.VM, a.Only, a.DryRun = g.Apply.VM, trimList(g.Apply.Only), g.Apply.DryRun
 
-	case "provision":
-		a.VM, a.Only, a.DryRun = g.Provision.VM, trimList(g.Provision.Only), g.Provision.DryRun
-
 	case "recipes":
 		a.OS, a.Backend = g.Recipes.OS, g.Recipes.Backend
 
@@ -405,6 +413,13 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		n := g.Recipe.New
 		a.Cmd, a.Sub = "recipe", "new"
 		a.VM, a.OS, a.Backend = n.Name, n.OS, n.Backend
+
+	case "guest ls":
+		a.Cmd, a.Sub = "guest", "ls"
+
+	case "guest show":
+		a.Cmd, a.Sub = "guest", "show"
+		a.VM = g.Guest.Show.Name
 
 	case "logs":
 		l := g.Logs

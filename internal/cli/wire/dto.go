@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/guest"
 )
 
 // DTOs, not json tags on core types (§3.1). Reasons, in order of weight:
@@ -361,4 +362,72 @@ func FromExecResult(r core.ExecResult) ExecResult {
 		out.StderrEncoding = "base64"
 	}
 	return out
+}
+
+// Guest is guest.OS for the wire.
+type Guest struct {
+	Name           string                    `json:"name"`
+	Init           string                    `json:"init"`
+	Shell          string                    `json:"shell"`
+	Installer      string                    `json:"installer"`
+	DefaultBackend string                    `json:"default_backend"`
+	DefaultSSHUser string                    `json:"default_ssh_user"`
+	Escalate       []string                  `json:"escalate"`
+	Capabilities   []string                  `json:"capabilities"`
+	Aliases        []string                  `json:"aliases"`
+	FilenameHints  []string                  `json:"filename_hints"`
+	SeedPackages   []string                  `json:"seed_packages"`
+	Pkg            GuestPkg                  `json:"pkg"`
+	Svc            map[string]string         `json:"svc"`
+	Cmd            map[string]string         `json:"cmd"`
+	Backend        map[string]map[string]any `json:"backend"`
+	Source         string                    `json:"source"`
+}
+
+type GuestPkg struct {
+	Setup           string            `json:"setup"`
+	Install         []string          `json:"install"`
+	Env             map[string]string `json:"env"`
+	RuntimePackages map[string]string `json:"runtime_packages"`
+}
+
+func FromGuest(o guest.OS) Guest {
+	nonNilMap := func(m map[string]string) map[string]string {
+		if m == nil {
+			return map[string]string{}
+		}
+		return m
+	}
+	backend := o.Backends
+	if backend == nil {
+		backend = map[string]map[string]any{}
+	}
+	return Guest{
+		Name: o.Name, Init: string(o.Init), Shell: o.Shell, Installer: o.Installer,
+		DefaultBackend: o.DefaultBackend, DefaultSSHUser: o.DefaultSSHUser,
+		Escalate: nonNil(o.Escalate), Capabilities: nonNil(o.Capabilities),
+		Aliases: nonNil(o.Aliases), FilenameHints: nonNil(o.FilenameHints),
+		SeedPackages: nonNil(o.SeedPackages),
+		Pkg:          GuestPkg{Setup: o.Pkg.Setup, Install: nonNil(o.Pkg.Install), Env: nonNilMap(o.Pkg.Env), RuntimePackages: nonNilMap(o.Pkg.RuntimePackages)},
+		Svc:          map[string]string{"enable": o.Svc.Enable, "start": o.Svc.Start, "stop": o.Svc.Stop, "restart": o.Svc.Restart, "status": o.Svc.Status},
+		Cmd:          nonNilMap(o.Cmd), Backend: backend, Source: o.Source,
+	}
+}
+
+func FromGuests(os []guest.OS) []Guest {
+	out := make([]Guest, len(os))
+	for i, o := range os {
+		out[i] = FromGuest(o)
+	}
+	return nonNil(out)
+}
+
+// GuestList is `guest ls` data.
+type GuestList struct {
+	Guests []Guest `json:"guests"`
+}
+
+// GuestShow is `guest show` data.
+type GuestShow struct {
+	Guest Guest `json:"guest"`
 }
