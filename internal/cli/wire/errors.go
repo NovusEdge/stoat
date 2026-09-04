@@ -3,6 +3,7 @@ package wire
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/novusedge/stoat/internal/core"
 )
@@ -52,8 +53,25 @@ const (
 // promise). A consumer MUST treat an unrecognized code as a generic failure.
 type Code string
 
-// Codes returns every declared code, sorted.
-func Codes() []Code { return []Code{"STUB"} }
+// Codes returns every declared code, sorted. Built from the same string
+// constants codeTable and ErrorInfo.Code use, so a code added to one and
+// forgotten here fails TestCodesCoversTheTable.
+func Codes() []Code {
+	out := []Code{
+		CodeNotFound, CodeBroken, CodeNameTaken, CodeInvalidSpec,
+		CodeImageNotDownloaded, CodeRecipeNotApplicable, CodeNotRunning,
+		CodeAlreadyRunning, CodeNoDisk, CodeImmutableField, CodeDiskShrink,
+		CodeCannotReach, CodeUnknownLog, CodeTimeout, CodeCanceled,
+		CodeUsage, CodeConfirmationRequired, CodeInternal,
+		CodeQemuMissing, CodeKVMUnusable, CodeQemuStartFailed,
+		CodeMonitorUnreachable, CodeMonitorRejected, CodeNoConsolePassword,
+		CodeShareInvalid, CodeNoXattr,
+		CodeDownloadFailed, CodeDownloadStalled, CodeChecksumMismatch,
+		CodeNoSuchImage,
+	}
+	slices.Sort(out)
+	return out
+}
 
 // ErrConfirmationRequired is confirmation_required's sentinel (§2: "new,
 // CLI-only"). core has no equivalent; --json never prompts (§1), so `rm`
