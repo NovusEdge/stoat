@@ -67,13 +67,46 @@ Additions from specs 1 to 3:
 
 `vm_status` gains `recipes[]` through `wire.VMStatus`.
 
+## Agent access levels
+
+`allow_exec` in `vm.toml` becomes `agent_access`, one of four levels. Each
+level includes the ones below it.
+
+| level | tools |
+|---|---|
+| `none` | host-side only: status, start, stop, snapshot, restore, logs, forward, update |
+| `observe` | `read_file`, `list_dir`, `stat`, `ps`, `svc_status`, `tail_log` |
+| `manage` (default) | `write_file`, `copy_to`, `copy_from`, `pkg_install`, `svc`, `useradd`, `apply_recipes` |
+| `exec` | `exec`, `exec_bg`, `job_status`, `job_output`, `job_kill`, `list_jobs` |
+
+- `stoat new --allow-exec` stays as an alias for `--agent-access exec`;
+  `--allow-exec=false` maps to `manage`. An existing `vm.toml` with
+  `allow_exec = true` loads as `exec`, `false` as `manage`.
+- MCP `update` may lower the level and never raise it. Raising is CLI or
+  TUI only.
+- `requireAccess(level)` replaces `requireExecAllowed`. A refusal names
+  the level: `vm "dev" has agent_access = observe; write_file needs
+  manage`.
+
+The `manage` tools are fixed argv rendered from the guest file's verbs
+(spec 1), so an agent at `manage` can install a package, restart a
+service, read its log, and write a config file without an open shell:
+
+| Tool | Guest command |
+|---|---|
+| `pkg_install(vm, packages)` | `pkg.setup` once, then `pkg.install` + packages |
+| `svc(vm, name, action)` | `svc.<action>` with `action` in enable, start, stop, restart |
+| `svc_status(vm, name)` | `svc.status` |
+| `tail_log(vm, unit?, path?, lines?)` | `journalctl -u` on systemd, `tail` on the init's log path otherwise, or `tail` on `path`; `lines` clamped to 2000 |
+| `useradd(vm, name)` | `cmd.useradd` (spec 2) |
+
 ## In-VM tools over ssh
 
 Every tool here is a wrapper over the VM's ssh connection through
-`sshx.Args`, needs no software in the guest, and is gated by
-`requireExecAllowed`. All are class Execution (`destructiveHint`,
-`openWorldHint`) except the reads, which are read-only but still gated,
-since reading a guest file is guest access.
+`sshx.Args` and needs no software in the guest. Reads are annotated
+read-only; everything else is class Execution (`destructiveHint`,
+`openWorldHint`). All are gated by `requireAccess` at the level in the
+table above.
 
 | Tool | Guest command | Notes |
 |---|---|---|
@@ -124,9 +157,8 @@ the top of each handler:
 - New: `checkIndexName` (index name grammar, no `/`, `:`, `@` beyond one
   `@ref`, no traversal), `checkParamName` (spec 2's regex).
 
-`requireExecAllowed` stays in the server, since `core.Exec` does not
-enforce it. It gates `exec`, `copy_to`, `copy_from`, `apply_recipes`, and
-every in-VM tool above.
+`requireAccess` stays in the server, since `core.Exec` does not enforce
+it. It gates every guest-touching tool at the level in the access table.
 
 Rate limiting is receiving middleware: a per-tool bucket (30, 0.5/s) and a
 shared bucket (60, 2/s), both checked before either is charged. The
@@ -196,8 +228,9 @@ the same text the CLI prints. A guard failure names the guard:
   across tools; neither bucket charged on refusal.
 - Redaction: a fixture VM with a sentinel secret; every tool's output is
   scanned for it.
-- `requireExecAllowed` refuses the four tools and every in-VM tool on
-  `allow_exec = false`.
+- `requireAccess`: a table of every guest-touching tool against the four
+  levels; each cell asserted. `update` lowering succeeds, raising is
+  refused. Legacy `allow_exec` values map as documented.
 - In-VM tools against a fake ssh: relative path refused, `max_bytes`
   clamp, `write_file` mode, `exec_bg` then `job_status` then
   `job_output` round trip, `job_kill`, `ps` cap, argv never shell-joined
