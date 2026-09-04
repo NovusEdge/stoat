@@ -24,8 +24,10 @@ Out, with a reason each:
 - OpenBSD: no cloud-init in base; needs an `autoinstall(8)` backend.
 - Windows: no `sh`; needs an unattend backend, PowerShell prelude, elevation
   as a token.
-- Verbs that are flows: repo add, reboot, wait-ready. These go to the recipe
-  contract spec.
+- Verbs that are flows or have no consumer here: third-party repo add,
+  reboot, wait-ready, download, useradd. These go to the recipe contract
+  spec. `pkg.setup` stays: it is the distro's own index refresh
+  (`apk update`, `setup-apkrepos -c -1`), which every install needs first.
 - Image catalog (`internal/iso`): stays in Go. Moving it inverts the
   `iso -> guest` import and drops catalog fields (`Flavor`, `Variant`,
   `Size`, `ChecksumURL`, `Notes`).
@@ -44,19 +46,20 @@ name    = "freebsd"
 init    = "rc"                          # systemd | openrc | rc
 shell   = "/bin/sh"
 installer = ""                          # tui/provision.go reads it
-default_backend  = "cloudinit"          # iso.Entry.Backend overrides it
-default_ssh_user = "freebsd"            # iso.Entry.SSHUser overrides it
+default_backend  = "cloudinit"          # the VM field, set at create time, wins
+default_ssh_user = "freebsd"            # same; the TUI form reads this default
 escalate = ["sudo", "-n"]               # argv; applied only when ssh user != root
-capabilities = ["rc", "pkg"]            # feeds recipe `requires` matching
+capabilities = ["pkg"]                  # feeds recipe `requires`; loader appends init
 aliases  = ["bsd"]                      # recipe [scripts] lookup: name, aliases, script
 filename_hints = ["FreeBSD-"]
 seed_packages  = ["sudo"]
 
 [pkg]
-setup   = "pkg update"
+setup   = "pkg update"                  # prelude command; Provision runs it once
 install = ["pkg", "install", "-y"]      # argv; apk carries "--wait 60"
+scaffold_setup   = ""                   # comment text for `recipe new`; alpine's is 3 lines
 scaffold_install = "pkg install -y "    # display text for `recipe new`
-runtime_packages = { python3 = "python3" }
+runtime_packages = { python3 = "python3" }   # arch maps python3 = "python" here
 
 [svc]
 enable  = "sysrc {name}_enable=YES"
@@ -65,28 +68,33 @@ stop    = "service {name} stop"
 restart = "service {name} restart"
 status  = "service {name} status"
 
-[cmd]
-download = "fetch -o"                   # curl is absent from FreeBSD and Alpine base
-useradd  = "pw useradd -n {name} -m"
-
-[backend.cloudinit]                     # opaque to the loader; backend.For validates
+[backend.cloudinit]                     # opaque to the loader; the cloudinit package decodes it
 skip_9p = true
 ```
 
 Field rules:
 
 - Required: every top-level scalar and list except `installer`, `aliases`,
-  `filename_hints`; every `[pkg]`, `[svc]`, `[cmd]` key. The loader reports
-  `guest.toml: <name>: missing <field>`.
+  `filename_hints`; every `[pkg]` and `[svc]` key except `scaffold_setup`.
+  The loader reports `guest.toml: <name>: missing <field>`.
 - Unknown keys are an error, with the key name and line.
 - `schema` is required and must equal 1.
-- `[backend.*]` loads as `map[string]map[string]any`. `guest` stays a
-  zero-import leaf; `backend.For` reads and validates its own table.
-- `default_backend` and `default_ssh_user` are defaults. `iso.Entry` keeps
-  precedence (`internal/backend/backend.go:56-62`).
+- The loader appends `init` to `capabilities`. A file whose `capabilities`
+  lists a different init name (`systemd`, `openrc`, `rc`) is rejected.
+- `[backend.*]` loads as `OS.Backends map[string]map[string]any`. Each
+  backend package decodes its own table from `Backends[name]` with `tomlx`
+  rules (unknown key is an error). `backend.For` only dispatches.
+- `guest` imports nothing from `internal/` except `tomlx`.
+- `default_backend` and `default_ssh_user` seed the VM fields `Backend` and
+  `SSHUser` at create time; the TUI form and `stoat new` read them. Code
+  paths keep reading the VM fields (`internal/backend/backend.go:63-69`,
+  `internal/sshx/sshx.go:39-44`).
 - `escalate` is an OS fact (Alpine and OpenBSD ship `doas`). `sshx` applies it
-  when `sshx.User(v) != "root"`.
-- `{name}` in a `[svc]` or `[cmd]` template renders to the first argument.
+  when `sshx.User(v) != "root"`, to recipe bodies, the runtime bootstrap, the
+  share-mount script, and `cloud-init status --wait`.
+- Every `[svc]` value is a template. `{name}` renders to `"$1"`. A template
+  without `{name}` gets `"$@"` appended.
+- `STOAT_PKGMGR` is the basename of `pkg.install[0]`.
 
 Dropped from the first draft: `backend` and `ssh_user` (per-image facts),
 `transport` (per-VM fact; Windows Server ships OpenSSH), `family`
@@ -95,23 +103,32 @@ Dropped from the first draft: `backend` and `ssh_user` (per-image facts),
 
 ## Loading
 
-`internal/guest` gains a loader:
+`internal/guest` gains `Load(dir string) error`, called once at CLI and TUI
+startup with `filepath.Join(config.Root(), "guests")`. Before `Load`,
+`Lookup` sees bundled guests only, so a broken user file cannot take the
+bundled set down.
 
-1. Read every bundled file.
-2. Read every `~/.stoat/guests/*.toml`.
-3. A user file whose `name` matches a bundled one merges over it per field.
-   A field set in the user file wins; an absent field keeps the bundled
-   value. A user file with a new `name` must carry every required field.
-4. Validate. Build `capabilityOSes` from every loaded guest's `capabilities`.
+1. Parse every bundled file at init; a bundled parse failure is a panic,
+   since it is a build error.
+2. Parse every `<dir>/*.toml`. The first bad file is `Load`'s error; the
+   CLI prints it and exits 2, the TUI shows it in the status line and
+   continues with bundled guests.
+3. A user file whose `name` matches a bundled one merges over it: scalars
+   and lists replace; `[pkg]` and `[svc]` merge per key; each `[backend.x]`
+   table replaces whole. A user file with a new `name` must carry every
+   required field.
+4. Validate. Build the capability map from every loaded guest's
+   `capabilities`.
 
-`Lookup(name) (OS, bool)` keeps its signature. Callers that degrade on
-`false` today return an error instead:
-
-- `internal/cloudinit/cloudinit.go:65` (falls back to `/bin/bash`)
-- `internal/sshx/sshx.go:43` (falls back to `root`)
-
-`stoat ls` shows a VM with an unknown `os` as `broken: unknown guest <os>`,
-the same path a `vm.toml` parse error takes today.
+`Lookup(name) (OS, bool)` keeps its signature. An empty `os` keeps today's
+fallbacks (`/bin/bash`, backend from the VM field), since a BYO image
+`iso.Infer` cannot name has one. A non-empty unknown `os` is an error raised
+in `core.load` next to the TOML parse check (`internal/core/vm.go:54`), so
+`stoat ls` shows `broken: unknown guest "freebsd"; run stoat guest ls`.
+The three call sites that degrade on `false` today
+(`internal/cloudinit/cloudinit.go:62`, `internal/backend/backend.go:66`,
+`internal/cli/run_recipes.go:38`) keep their empty-`os` branch and lose the
+unknown-name branch.
 
 ### `internal/tomlx`
 
@@ -125,10 +142,14 @@ func Decode(path string, v any) error
 - Rejects undecoded keys via `md.Undecoded()`, naming the key and line.
 - Reads a `schema` field when the target type declares one; absence means 1
   for `vm.toml` and `recipe.toml`, since existing files have none.
+- Takes an option for unknown keys: `Reject` (error) or `Warn` (write
+  `<path>:<line>: unknown key "x"` to a writer and continue).
 
-`vm.toml` (`internal/config/config.go:205`) and `recipe.toml`
-(`internal/recipes/manifest.go:44`) move to it in the same change. Neither
-checks `Undecoded()` today, so a typo'd key is dropped silently.
+`recipe.toml` (`internal/recipes/manifest.go:44`) moves to it with `Reject`:
+recipes are hand-authored and a typo is the author's bug. `vm.toml`
+(`internal/config/config.go:205`) moves to it with `Warn`: an older stoat
+may have written a key a newer one dropped, and that must not mark the VM
+broken. `guest.toml` uses `Reject`.
 
 Library: BurntSushi/toml v1.6.0 stays. go-toml/v2 releases more often and has
 `DisallowUnknownFields` built in; the helper isolates the choice to one file,
@@ -143,8 +164,9 @@ is a loop.
 | `recipes/manifest.go:121` `capabilityOSes` | built from `capabilities` |
 | `sshx.sudoWrap` hardcoded `sudo` | `escalate` |
 | `cloudinit.go:83` seed packages | `seed_packages` |
-| `cloudinit.go:133` `v.OS == "debian"` | `backend.cloudinit.skip_9p` |
-| `scaffold.go:59` `PkgInstall` | `pkg.scaffold_install` |
+| `cloudinit.go:133` `v.OS == "debian"` | `backend.cloudinit.skip_9p`, decoded in `cloudinit` |
+| `scaffold.go:59-61` `PkgSetup`, `PkgInstall` | `pkg.scaffold_setup`, `pkg.scaffold_install` |
+| `runtime.go` arch `python` special case | `arch.toml` `runtime_packages = { python3 = "python" }` |
 | `guest.go` literal | five bundled TOML files; the literal is deleted |
 
 ## Verbs in recipes
@@ -160,21 +182,23 @@ stoat_svc_start()   { service "$1" start; }
 stoat_svc_stop()    { service "$1" stop; }
 stoat_svc_restart() { service "$1" restart; }
 stoat_svc_status()  { service "$1" status; }
-stoat_download()    { fetch -o "$@"; }
-stoat_useradd()     { pw useradd -n "$1" -m; }
 STOAT_OS=freebsd; STOAT_INIT=rc; STOAT_PKGMGR=pkg
 export STOAT_OS STOAT_INIT STOAT_PKGMGR
 ```
 
-- Argv fields render as shell-quoted words. `{name}` renders as `"$1"`.
-- The python3 runtime gets the three variables in the environment and a
-  `stoat` module whose functions of the same names call `subprocess.run`.
+- Argv fields render as shell-quoted words.
+- `stoat_pkg_setup` is defined for recipes that need a second refresh after
+  adding a repo. `Provision` runs `pkg.setup` itself once before the first
+  recipe, and `BootstrapScript` runs it before installing an interpreter.
+  `WrapScripts` puts it first in `runcmd`.
+- If the body starts with a `#!` line, the prelude goes after that line.
+- The python3 runtime gets a Python prelude that defines the same function
+  names over `subprocess.run` and sets the three variables in `os.environ`.
+  No module is shipped to the guest.
 - `cloudinit.WrapScripts` emits the identical prelude, so a recipe behaves
   the same over ssh and in `runcmd`.
 - `[scripts]` override lookup order: exact `name`, then each `alias` in
   order, then `script`.
-- `STOAT_PKGMGR` is the first entry in `capabilities` that names a package
-  manager (`apk`, `apt`, `dnf`, `pacman`, `zypper`, `pkg`).
 
 Bundled recipes: `docker`, `devtools`, `tailscale` keep their per-OS scripts.
 `xfce` moves to one portable script over the verbs as the proof.
@@ -183,10 +207,13 @@ Bundled recipes: `docker`, `devtools`, `tailscale` keep their per-OS scripts.
 
 New subcommand group:
 
-- `stoat guest ls`: name, init, package manager, default backend, source
-  (bundled or user).
-- `stoat guest show <name>`: the merged definition. `--json` emits it as
-  `wire.Guest`.
+- `stoat guest ls`: name, init, package manager, default backend, source.
+  Source is `bundled`, `user`, or `bundled+user` for a merged guest.
+- `stoat guest show <name>`: the merged definition. `--json` emits
+  `wire.Guest`: `name, init, shell, installer, default_backend,
+  default_ssh_user, escalate[], capabilities[], aliases[], filename_hints[],
+  seed_packages[], pkg{setup, install[], runtime_packages{}}, svc{},
+  backend{}, source`. Lists are never null.
 
 Both join `TestJSONEnvelopeEveryCommand`. The MCP layer adds `list_guests`
 in spec 4 on top of `guest ls --json`.
@@ -220,12 +247,16 @@ destructive commands (`run_vm.go:241-257`).
 | Missing required field | loader | `guest.toml: freebsd: missing pkg.install` |
 | Unknown key | tomlx | `~/.stoat/guests/freebsd.toml:12: unknown key "pkg.instal"` |
 | `schema` != 1 | tomlx | `...: schema 2 is newer than this stoat (1)` |
-| `vm.toml.os` unknown | config | `unknown guest "freebsd"; run stoat guest ls` |
-| `[backend.x]` bad key | backend.For | `guest freebsd: backend cloudinit: unknown key skip9p` |
+| `vm.toml.os` unknown | core.load | `unknown guest "freebsd"; run stoat guest ls` |
+| `[backend.x]` bad key | the backend package | `guest freebsd: backend cloudinit: unknown key skip9p` |
+| `vm.toml` unknown key | tomlx (Warn) | stderr: `~/.stoat/vms/x/vm.toml:7: unknown key "cpus_"` |
+| bad user guest file | guest.Load | CLI exit 2; TUI status line, bundled guests still load |
 
 ## Testing
 
-- Golden: the five bundled files reproduce today's `OS` values exactly.
+- Golden: for each of the five bundled files, the projection `{Name, Shell,
+  Init, Installer, DefaultBackend, DefaultSSHUser, SeedPackages,
+  FilenameHints, PkgInstall, RuntimePackages}` equals today's literal.
   Written before the literal is deleted, run against both.
 - Loader: missing field, unknown key, wrong schema, per-field merge, new
   user guest with all fields, user guest missing a field.
@@ -240,4 +271,5 @@ destructive commands (`run_vm.go:241-257`).
 ## Non-goals restated
 
 No new backends. No image catalog change. No recipe format change beyond
-`requires` values and the prelude. No Windows, NixOS, OpenBSD.
+`requires` values and the prelude. No Windows, NixOS, OpenBSD. No `[cmd]`
+table; download and useradd verbs arrive with the recipe contract spec.
