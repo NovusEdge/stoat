@@ -1,0 +1,29 @@
+schema = 1
+name = "fedora"
+init = "systemd"
+shell = "/bin/bash"
+installer = ""
+default_backend = "cloudinit"
+default_ssh_user = "stoat"
+escalate = ["sudo", "-n"]
+capabilities = ["dnf"]
+aliases = ["rpm-family"]
+filename_hints = ["fedora"]
+seed_packages = []
+
+[pkg]
+setup = ""
+install = ["dnf", "install", "-y"]
+scaffold_setup = ""
+scaffold_install = "dnf install -y "
+runtime_packages = { python3 = "python3" }
+
+[svc]
+enable = "systemctl enable {name}"
+start = "systemctl start {name}"
+stop = "systemctl stop {name}"
+restart = "systemctl restart {name}"
+status = "systemctl status {name}"
+
+[backend.cloudinit]
+skip_9p = false

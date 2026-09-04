@@ -1,0 +1,35 @@
+schema = 1
+name = "debian"
+init = "systemd"
+shell = "/bin/bash"
+installer = ""
+default_backend = "cloudinit"
+default_ssh_user = "stoat"
+escalate = ["sudo", "-n"]
+capabilities = ["apt"]
+aliases = ["debian-family"]
+filename_hints = ["debian"]
+seed_packages = []
+
+[pkg]
+setup = "apt-get update"
+install = ["apt-get", "install", "-y"]
+env = { DEBIAN_FRONTEND = "noninteractive" }
+scaffold_setup = """
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+"""
+scaffold_install = "apt-get install -y "
+runtime_packages = { python3 = "python3" }
+
+[svc]
+enable = "systemctl enable {name}"
+start = "systemctl start {name}"
+stop = "systemctl stop {name}"
+restart = "systemctl restart {name}"
+status = "systemctl status {name}"
+
+# Debian's cloud kernel ships no 9p module; the cloudinit backend must not
+# rely on a 9p share mount for this guest.
+[backend.cloudinit]
+skip_9p = true

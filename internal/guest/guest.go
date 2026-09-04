@@ -21,79 +21,97 @@ type InitSystem string
 const (
 	InitSystemd InitSystem = "systemd"
 	InitOpenRC  InitSystem = "openrc"
+	InitRC      InitSystem = "rc"
 )
 
-// OS is one guest operating system's facts, gathered from the sites that
-// used to decide them ad hoc (see docs/design/guest-subsystem.md §4 for the
-// full inventory of call sites this replaces).
+// OS is one guest operating system's facts, loaded from a guest.toml. See
+// docs/reference/guest.md for the file.
 type OS struct {
-	Name string // canonical identity, matches vm.toml's os field
+	Schema int    `toml:"schema"`
+	Name   string `toml:"name"`
 
 	// Shell is the login shell for a seeded account. It must exist in the
 	// image. cloud-init's user module fails outright on a missing shell,
 	// leaving no account and no authorized_keys. The only symptom is
 	// "Permission denied (publickey)".
-	Shell string
+	Shell string `toml:"shell"`
 
-	// SeedPackages are packages the base seed assumes are present but the
-	// image does not ship. Alpine needs sudo: the users: sudo key writes a
-	// sudoers fragment, but Alpine's cloud-init aport ships doas, not sudo.
-	SeedPackages []string
-
-	// Backend names how this OS is provisioned: "apkovl", "cloudinit", or
-	// "ssh". It stays a string here, not the Backend interface itself.
-	// Package guest holds OS data only and stays a zero-import leaf; the
-	// interface lives in internal/backend, one level up. See
-	// docs/design/guest-subsystem.md §3.2.
-	Backend string
-
-	// Init is the guest's init system. It is a separate field, not derived
-	// from Backend. Today apkovl and OpenRC both mean Alpine, but the two
-	// facts are independent: a BYO cloudinit image could run OpenRC, or a
-	// future apkovl-based distro could run systemd. A recipe's "requires
-	// systemd" needs the real answer, not a Backend guess.
-	Init InitSystem
+	// Init is the guest's init system, a fact independent of the backend: a
+	// BYO cloudinit image can run OpenRC. A recipe's "requires systemd"
+	// needs the real answer.
+	Init InitSystem `toml:"init"`
 
 	// Installer is the interactive install command named in UI hints.
-	// Empty means "the installer" generically.
-	Installer string
+	// Empty means "the installer".
+	Installer string `toml:"installer"`
 
-	// DefaultSSHUser is who to connect as when nothing overrides it.
-	DefaultSSHUser string
+	// DefaultBackend and DefaultSSHUser seed the VM fields at create time.
+	// A catalog entry overrides both (iso.Entry), and every code path reads
+	// the VM field, never these.
+	DefaultBackend string `toml:"default_backend"`
+	DefaultSSHUser string `toml:"default_ssh_user"`
 
-	// PkgSetup is the package-manager preamble a scaffolded recipe needs
-	// before it can install anything: enabling a repository, refreshing
-	// indexes, or nothing if the OS needs neither.
-	PkgSetup string
+	// Escalate is the argv that runs a command as root for a non-root ssh
+	// user. sshx applies it only when the VM's ssh user is not root.
+	Escalate []string `toml:"escalate"`
 
-	// PkgInstall is the install verb a scaffolded recipe appends package
-	// names to, e.g. "apk add ".
-	PkgInstall string
+	// Capabilities feed recipe.toml's `requires`. The loader appends Init.
+	Capabilities []string `toml:"capabilities"`
 
-	// FilenameHints recognise this OS in a BYO image filename. An empty OS
-	// on a BYO image is dangerous: it silently selects every default, which
-	// is how an Alpine image ends up asked for /bin/bash.
-	FilenameHints []string
+	// Aliases are extra keys a recipe's [scripts] map may use for this OS,
+	// tried after Name.
+	Aliases []string `toml:"aliases"`
 
-	// CloudRecipes reports whether an OS is offered the shared
-	// "*.cloud.yaml" fragment set. True does not mean every shared fragment
-	// applies. cloud-init's packages: list has no per-distro syntax, so
-	// devtools.cloud.yaml's names work for Alpine's apk too, but
-	// xfce.cloud.yaml's systemd runcmd does not, since Alpine runs OpenRC.
-	// Alpine gets devtools.cloud.yaml from the shared set plus its own
-	// xfce.alpine.cloud.yaml, the same way Fedora gets its own
-	// xfce.fedora.cloud.yaml. See recipes/recipes.go's List doc comment for
-	// how a per-OS fragment and the shared set combine.
-	CloudRecipes bool
+	// FilenameHints recognise this OS in a BYO image filename.
+	FilenameHints []string `toml:"filename_hints"`
 
-	Capabilities []string
-	Pkg          Pkg
-	Source       string
+	// SeedPackages are packages the cloud-init seed assumes but the image
+	// does not ship. Alpine needs sudo: its cloud-init aport ships doas.
+	SeedPackages []string `toml:"seed_packages"`
+
+	Pkg Pkg               `toml:"pkg"`
+	Svc Svc               `toml:"svc"`
+	Cmd map[string]string `toml:"cmd"`
+
+	// Backends holds one opaque table per backend name. The backend package
+	// that owns the name decodes it; this package never reads inside.
+	Backends map[string]map[string]any `toml:"backend"`
+
+	// Source is where the definition came from: "bundled", "user", or
+	// "bundled+user" for a user file merged over a bundled one.
+	Source string `toml:"-"`
+
+	// Kept until Task 3 deletes the literal.
+	Backend      string `toml:"-"`
+	PkgSetup     string `toml:"-"`
+	PkgInstall   string `toml:"-"`
+	CloudRecipes bool   `toml:"-"`
 }
 
 // Pkg is the package-manager surface.
 type Pkg struct {
-	Install []string
+	// Setup refreshes the index. Provision runs it once before the first
+	// recipe. Empty means the manager needs no refresh (dnf).
+	Setup string `toml:"setup"`
+	// Install is argv; apk carries "--wait 60" for the lock race.
+	Install []string `toml:"install"`
+	// Env is exported in the prelude (DEBIAN_FRONTEND).
+	Env map[string]string `toml:"env"`
+	// ScaffoldSetup and ScaffoldInstall are display text for `recipe new`.
+	ScaffoldSetup   string `toml:"scaffold_setup"`
+	ScaffoldInstall string `toml:"scaffold_install"`
+	// RuntimePackages maps a recipe runtime to the package that provides it.
+	RuntimePackages map[string]string `toml:"runtime_packages"`
+}
+
+// Svc is the service surface. Each value is a template: {name} renders to
+// the first argument, and a template without {name} gets "$@" appended.
+type Svc struct {
+	Enable  string `toml:"enable"`
+	Start   string `toml:"start"`
+	Stop    string `toml:"stop"`
+	Restart string `toml:"restart"`
+	Status  string `toml:"status"`
 }
 
 // registry is the single home for every guest-OS fact. See the package doc

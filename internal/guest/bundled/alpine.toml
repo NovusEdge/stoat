@@ -1,0 +1,36 @@
+# This file is one guest OS. Spec 1 covers sh-shaped guests with an
+# imperative package manager; NixOS, OpenBSD, and Windows need another model.
+schema = 1
+name = "alpine"
+init = "openrc"
+shell = "/bin/ash"
+installer = "setup-alpine"
+default_backend = "apkovl"
+default_ssh_user = "root"
+escalate = ["sudo", "-n"]
+capabilities = ["apk"]
+aliases = []
+filename_hints = ["alpine"]
+seed_packages = ["sudo"]
+
+[pkg]
+setup = "apk update"
+install = ["apk", "--wait", "60", "add"]
+scaffold_setup = """
+# -c enables the community repository (docker, tailscale and most of what
+# you would want live there, not in main); -1 picks a mirror and refreshes
+# the indexes, so a separate `apk update` is redundant.
+setup-apkrepos -c -1
+"""
+scaffold_install = "apk add "
+runtime_packages = { python3 = "python3" }
+
+[svc]
+enable = "rc-update add {name} default"
+start = "rc-service {name} start"
+stop = "rc-service {name} stop"
+restart = "rc-service {name} restart"
+status = "rc-service {name} status"
+
+[backend.cloudinit]
+skip_9p = false
