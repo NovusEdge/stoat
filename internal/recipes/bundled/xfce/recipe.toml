@@ -4,8 +4,3 @@ os = ["alpine", "ubuntu", "debian", "arch"]
 stage = "provision"
 script = "install.sh"
 reboot = true
-
-[scripts]
-alpine = "install-alpine.sh"
-debian = "install-debian.sh"
-arch = "install-arch.sh"

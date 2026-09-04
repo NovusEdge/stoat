@@ -12,12 +12,13 @@ depending on the guest and backend. This is the v2 format; see
   xfce/
     recipe.toml
     install.sh
-    install-alpine.sh
-    install-debian.sh
-    install-arch.sh
   docker/
     recipe.toml
     install.sh
+    install-alpine.sh
+    install-debian.sh
+    install-fedora.sh
+    install-arch.sh
 ```
 
 One directory per recipe, named after the recipe. `recipe.toml` is required;
@@ -36,7 +37,8 @@ stage = "provision"
 script = "install.sh"
 ```
 
-`internal/recipes/bundled/xfce/recipe.toml`, with per-OS overrides:
+`internal/recipes/bundled/xfce/recipe.toml`, one script covering every OS by
+branching on the guest verbs (see Verbs, below):
 
 ```toml
 name = "xfce"
@@ -44,11 +46,6 @@ description = "XFCE desktop with autologin startx on tty1"
 os = ["alpine", "ubuntu", "debian", "arch"]
 stage = "provision"
 script = "install.sh"
-
-[scripts]
-alpine = "install-alpine.sh"
-debian = "install-debian.sh"
-arch = "install-arch.sh"
 ```
 
 ### Fields
@@ -157,28 +154,62 @@ table in `vm.toml`:
 first time the VM becomes reachable, without waiting for an explicit
 `stoat apply`. Default is `false`.
 
+## Verbs
+
+A recipe script does not need to know each guest's package manager or init
+system by name: the prelude `stoat` renders in front of every script body
+defines a small set of shell functions and variables over the guest's
+`guest.toml` facts (`docs/reference/guest.md`), the same functions for every
+OS.
+
+| Name | What it does |
+|------|--------------|
+| `stoat_pkg_setup` | Refreshes the package index (a no-op where none is needed, e.g. dnf) |
+| `stoat_pkg_install <pkgs...>` | Installs packages with the guest's package manager |
+| `stoat_svc_enable <name>` | Enables a service to start at boot |
+| `stoat_svc_start`/`stop`/`restart`/`status` `<name>` | Controls a running service |
+| `STOAT_OS` | The guest name, e.g. `alpine` |
+| `STOAT_INIT` | `systemd`, `openrc`, or `rc` |
+| `STOAT_PKGMGR` | The package manager binary, e.g. `apk`, `apt-get`, `dnf`, `pacman` |
+
+`internal/recipes/bundled/xfce/install.sh` is one script for four OSes,
+branching on `STOAT_PKGMGR` for package names and `STOAT_INIT` for the
+autologin mechanism (systemd's `getty@.service` drop-in vs. Alpine's busybox
+`/etc/inittab`):
+
+```sh
+stoat_pkg_setup
+
+case "$STOAT_PKGMGR" in
+apk)     stoat_pkg_install xfce4 xfce4-terminal dbus-x11 ;;
+apt-get) stoat_pkg_install xfce4 xfce4-terminal dbus-x11 xinit xserver-xorg ;;
+pacman)  stoat_pkg_install xfce4 xfce4-terminal dbus xorg-xinit ;;
+esac
+
+stoat_svc_enable dbus
+```
+
+`[scripts]` per-OS overrides (below) still exist for a recipe whose install
+differs by more than package names and a service call, `docker`'s GPG key
+setup and repo URL being a different string per distro family.
+
 ## OS-specific script overrides
 
-`script` is the fallback every OS not listed in `[scripts]` uses. `xfce`
-needs different logic per init system and package manager, so it overrides
-three of its four supported OSes and leaves `ubuntu` on the default
-`install.sh`:
+`script` is the fallback every OS not listed in `[scripts]` uses. `docker`
+needs a different script per distro family (repo URL, GPG key path), so it
+overrides every OS it supports:
 
 ```toml
-os = ["alpine", "ubuntu", "debian", "arch"]
+os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
 script = "install.sh"
 
 [scripts]
 alpine = "install-alpine.sh"
+ubuntu = "install-debian.sh"
 debian = "install-debian.sh"
+fedora = "install-fedora.sh"
 arch = "install-arch.sh"
 ```
-
-Compare `install.sh` (ubuntu/debian, `apt-get` + systemd `getty@.service`
-override) against `install-alpine.sh` (`apk` + busybox `/etc/inittab`
-autologin, no systemd unit exists to override). The packages and init
-mechanism differ enough per OS that a single script branching internally
-would be harder to read than one script per OS family.
 
 Two conventions worth copying from the bundled scripts:
 
