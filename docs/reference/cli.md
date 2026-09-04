@@ -505,6 +505,47 @@ edit it, then pick it in the new-vm form for a matching vm
 
 **Exit codes:** 0 on success; 1 if the recipe can't be created (e.g. the name is already taken).
 
+## `stoat guest ls`
+
+Lists every loaded guest OS: bundled definitions from `internal/guest/bundled/*.toml`, plus any `~/.stoat/guests/*.toml` merged over them.
+
+```
+$ stoat guest ls
+NAME       INIT     PKG      BACKEND    SOURCE
+alpine     openrc   apk      apkovl     bundled
+arch       systemd  pacman   cloudinit  bundled
+debian     systemd  apt-get  cloudinit  bundled
+fedora     systemd  dnf      cloudinit  bundled
+ubuntu     systemd  apt-get  cloudinit  bundled
+```
+
+**Exit codes:** always 0.
+
+## `stoat guest show <name>`
+
+Prints one guest's merged definition: init system, shell, default backend and ssh user, escalate argv, capabilities, aliases, and the `pkg`/`svc` tables. See `docs/reference/guest.md` for what each field means.
+
+```
+$ stoat guest show alpine
+name:             alpine (bundled)
+init:             openrc
+shell:            /bin/ash
+default backend:  apkovl
+default ssh user: root
+escalate:         [sudo -n]
+capabilities:     [apk openrc]
+aliases:          []
+pkg setup:        apk update
+pkg install:      [apk --wait 60 add]
+svc enable:       rc-update add {name} default
+svc start:        rc-service {name} start
+svc stop:         rc-service {name} stop
+svc restart:      rc-service {name} restart
+svc status:       rc-service {name} status
+```
+
+**Exit codes:** 0 on success; 1 if no guest by that name is loaded.
+
 ## `stoat logs [name] [-n N]`
 
 With a VM name, tails that VM's own log (`--which console` for the qemu console, the default, or `--which apply` for its apply log). With no name, tails stoat's own log file.

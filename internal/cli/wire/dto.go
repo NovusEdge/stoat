@@ -391,7 +391,28 @@ type GuestPkg struct {
 	RuntimePackages map[string]string `json:"runtime_packages"`
 }
 
-func FromGuest(o guest.OS) Guest { return Guest{} }
+func FromGuest(o guest.OS) Guest {
+	nonNilMap := func(m map[string]string) map[string]string {
+		if m == nil {
+			return map[string]string{}
+		}
+		return m
+	}
+	backend := o.Backends
+	if backend == nil {
+		backend = map[string]map[string]any{}
+	}
+	return Guest{
+		Name: o.Name, Init: string(o.Init), Shell: o.Shell, Installer: o.Installer,
+		DefaultBackend: o.DefaultBackend, DefaultSSHUser: o.DefaultSSHUser,
+		Escalate: nonNil(o.Escalate), Capabilities: nonNil(o.Capabilities),
+		Aliases: nonNil(o.Aliases), FilenameHints: nonNil(o.FilenameHints),
+		SeedPackages: nonNil(o.SeedPackages),
+		Pkg:          GuestPkg{Setup: o.Pkg.Setup, Install: nonNil(o.Pkg.Install), Env: nonNilMap(o.Pkg.Env), RuntimePackages: nonNilMap(o.Pkg.RuntimePackages)},
+		Svc:          map[string]string{"enable": o.Svc.Enable, "start": o.Svc.Start, "stop": o.Svc.Stop, "restart": o.Svc.Restart, "status": o.Svc.Status},
+		Cmd:          nonNilMap(o.Cmd), Backend: backend, Source: o.Source,
+	}
+}
 
 func FromGuests(os []guest.OS) []Guest {
 	out := make([]Guest, len(os))

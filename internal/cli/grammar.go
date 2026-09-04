@@ -56,6 +56,7 @@ type grammar struct {
 	Recipes      recipesCmd      `cmd:"" help:"list recipes, optionally only applicable ones"`
 	CheckRecipes checkRecipesCmd `cmd:"" help:"report why a recipe would not apply"`
 	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
+	Guest        recipeGuestCmd  `cmd:"" help:"list or show guest OS definitions"`
 
 	Logs    logsCmd    `cmd:"" help:"tail a VM's log, or stoat's own"`
 	Doctor  doctorCmd  `cmd:"" help:"check host prerequisites"`
@@ -225,6 +226,17 @@ type recipeNewCmd struct {
 	Name    string `arg:"" help:"recipe name"`
 	OS      string `help:"target OS for a new shell recipe"`
 	Backend string `help:"\"cloudinit\" for a cloud-init fragment; shell otherwise"`
+}
+
+type recipeGuestCmd struct {
+	LS   guestLsCmd   `cmd:"" name:"ls" help:"one line per guest: name, init, package manager, backend, source"`
+	Show guestShowCmd `cmd:"" help:"the merged definition of one guest"`
+}
+
+type guestLsCmd struct{}
+
+type guestShowCmd struct {
+	Name string `arg:"" help:"guest name (see guest ls)"`
 }
 
 type logsCmd struct {
@@ -405,6 +417,13 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		n := g.Recipe.New
 		a.Cmd, a.Sub = "recipe", "new"
 		a.VM, a.OS, a.Backend = n.Name, n.OS, n.Backend
+
+	case "guest ls":
+		a.Cmd, a.Sub = "guest", "ls"
+
+	case "guest show":
+		a.Cmd, a.Sub = "guest", "show"
+		a.VM = g.Guest.Show.Name
 
 	case "logs":
 		l := g.Logs
