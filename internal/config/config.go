@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +15,10 @@ import (
 
 	"github.com/BurntSushi/toml"
 )
+
+// UnknownKeyWriter receives one line per unknown vm.toml key that Load
+// tolerates. A test overrides it to capture the warning.
+var UnknownKeyWriter io.Writer = os.Stderr
 
 // PortForward is one user-declared host->guest TCP forward, additional to
 // the SSHPort forward every VM already gets. Validation (range, collisions

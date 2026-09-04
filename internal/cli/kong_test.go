@@ -298,6 +298,19 @@ func TestHelpListsEverySubcommand(t *testing.T) {
 // (TestParse's "provision" cases) while staying out of the command list a
 // user reads with --help, so the help surface names only the one spelling
 // ("apply") a new user should reach for.
+// TestProvisionIsAnAliasOfApply pins that "provision" is a kong alias of
+// "apply", not a second command: a.Cmd must read "apply" so the JSON
+// envelope's cmd field and every downstream dispatch see one command.
+func TestProvisionIsAnAliasOfApply(t *testing.T) {
+	a, err := Parse([]string{"provision", "work", "--dry-run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Cmd != "apply" || a.VM != "work" || !a.DryRun {
+		t.Errorf("got %+v", a)
+	}
+}
+
 func TestProvisionIsHiddenFromHelp(t *testing.T) {
 	a, err := Parse([]string{"--help"})
 	if err != nil {

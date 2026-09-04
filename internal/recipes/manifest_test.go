@@ -8,6 +8,17 @@ import (
 	"testing"
 )
 
+func TestParseManifestRejectsUnknownKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "recipe.toml")
+	if err := os.WriteFile(p, []byte("name = \"x\"\nscript = \"i.sh\"\nrunn = \"once\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseManifest(p)
+	if err == nil || !strings.Contains(err.Error(), `unknown key "runn"`) {
+		t.Errorf("err = %v", err)
+	}
+}
+
 // writeManifestFile writes contents to <dir>/recipe.toml and returns its path.
 func writeManifestFile(t *testing.T, dir, contents string) string {
 	t.Helper()
