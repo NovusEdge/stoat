@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
@@ -155,6 +156,22 @@ func TestEveryQemuSentinelHasOneRow(t *testing.T) {
 		qemu.ErrNoConsolePassword:  CodeNoConsolePassword,
 		qemu.ErrShareInvalid:       CodeShareInvalid,
 		qemu.ErrNoXattr:            CodeNoXattr,
+	}
+	for sentinel, code := range want {
+		got := MapError(fmt.Errorf("%w: subject", sentinel))
+		if got.Code != code {
+			t.Errorf("MapError(%v).Code = %q, want %q", sentinel, got.Code, code)
+		}
+	}
+}
+
+// Each iso sentinel has exactly one row in codeTable.
+func TestEveryISOSentinelHasOneRow(t *testing.T) {
+	want := map[error]string{
+		iso.ErrDownloadFailed:   CodeDownloadFailed,
+		iso.ErrDownloadStalled:  CodeDownloadStalled,
+		iso.ErrChecksumMismatch: CodeChecksumMismatch,
+		iso.ErrNoSuchImage:      CodeNoSuchImage,
 	}
 	for sentinel, code := range want {
 		got := MapError(fmt.Errorf("%w: subject", sentinel))

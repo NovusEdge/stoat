@@ -40,6 +40,11 @@ const (
 	CodeNoConsolePassword  = "no_console_password"
 	CodeShareInvalid       = "share_invalid"
 	CodeNoXattr            = "no_xattr"
+
+	CodeDownloadFailed   = "download_failed"
+	CodeDownloadStalled  = "download_stalled"
+	CodeChecksumMismatch = "checksum_mismatch"
+	CodeNoSuchImage      = "no_such_image"
 )
 
 // Code is a stable, machine-readable error code. Codes are only ever ADDED:
