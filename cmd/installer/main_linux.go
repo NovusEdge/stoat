@@ -63,7 +63,7 @@ func runHeadless(repoDir, home string) int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	outPath := filepath.Join(tmp, "stoat")
 	if err := installer.Build(repoDir, version, outPath); err != nil {

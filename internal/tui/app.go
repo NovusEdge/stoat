@@ -137,7 +137,7 @@ func Run() error {
 	// ponytail: a log we can't open is not worth refusing to start over.
 	// logx.L() falls back to io.Discard, so the TUI just runs without a log.
 	_ = logx.Init()
-	defer logx.Close()
+	defer func() { _ = logx.Close() }()
 	m := model{
 		provisioning: map[string]provState{},
 		cloudInit:    map[string]string{},

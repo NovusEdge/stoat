@@ -72,7 +72,7 @@ func runLogs(a *Args, stdout, stderr io.Writer) int {
 			return a.ok(stdout, map[string]any{"vm": a.VM, "which": string(a.Which), "lines": lines})
 		}
 		for _, l := range lines {
-			fmt.Fprintln(stdout, l)
+			_, _ = fmt.Fprintln(stdout, l)
 		}
 		return ExitOK
 	}
@@ -91,7 +91,7 @@ func runLogs(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"lines": lines})
 	}
 	for _, l := range lines {
-		fmt.Fprintln(stdout, l)
+		_, _ = fmt.Fprintln(stdout, l)
 	}
 	return ExitOK
 }
@@ -141,13 +141,13 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 			}
 			return a.ok(stdout, map[string]any{"dir": recipes.Dir(), "recipes": names})
 		}
-		fmt.Fprintln(stdout, recipes.Dir())
+		_, _ = fmt.Fprintln(stdout, recipes.Dir())
 		if len(names) == 0 {
-			fmt.Fprintln(stdout, "  (none)")
+			_, _ = fmt.Fprintln(stdout, "  (none)")
 			return ExitOK
 		}
 		for _, n := range names {
-			fmt.Fprintln(stdout, "  "+n)
+			_, _ = fmt.Fprintln(stdout, "  "+n)
 		}
 		return ExitOK
 
@@ -159,9 +159,9 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 		if a.JSON {
 			return a.ok(stdout, map[string]any{"path": path})
 		}
-		fmt.Fprintln(stdout, path)
+		_, _ = fmt.Fprintln(stdout, path)
 		if !a.Quiet {
-			fmt.Fprintln(stdout, "edit it, then pick it in the new-vm form for a matching vm")
+			_, _ = fmt.Fprintln(stdout, "edit it, then pick it in the new-vm form for a matching vm")
 		}
 		return ExitOK
 	}
@@ -170,6 +170,6 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.UsageError("recipe: unknown action "+a.Sub))
 		return ExitUsage
 	}
-	fmt.Fprintln(stderr, "stoat: recipe: unknown action", a.Sub)
+	_, _ = fmt.Fprintln(stderr, "stoat: recipe: unknown action", a.Sub)
 	return ExitUsage
 }

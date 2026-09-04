@@ -140,7 +140,7 @@ func Wait(ctx context.Context, v *config.VM, timeout time.Duration) error {
 			if bannerReady(c, time.Until(deadline)) {
 				return nil
 			}
-			c.Close()
+			_ = c.Close()
 		} else if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -196,7 +196,7 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 	if budget < d {
 		d = budget
 	}
-	c.SetReadDeadline(time.Now().Add(d))
+	_ = c.SetReadDeadline(time.Now().Add(d))
 	buf := make([]byte, 4)
 	_, err := io.ReadFull(c, buf)
 	return err == nil && string(buf) == "SSH-"
@@ -231,14 +231,14 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	if err != nil {
 		return err
 	}
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
-	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
+	_, _ = fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
 	if err := Wait(ctx, v, WaitTimeout); err != nil {
 		if ctx.Err() != nil {
-			fmt.Fprintf(log, "CANCELLED: %v\n", err)
+			_, _ = fmt.Fprintf(log, "CANCELLED: %v\n", err)
 		} else {
-			fmt.Fprintf(log, "FAILED: %v\n", err)
+			_, _ = fmt.Fprintf(log, "FAILED: %v\n", err)
 		}
 		return err
 	}
@@ -251,7 +251,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	// cloud-init failure surfaces when the recipe itself runs. apkovl and BYO
 	// images ship no cloud-init and skip this.
 	if v.Backend == "cloudinit" {
-		fmt.Fprintln(log, "waiting for cloud-init to finish…")
+		_, _ = fmt.Fprintln(log, "waiting for cloud-init to finish…")
 		ci := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"cloud-init", "status", "--wait"})...)...)
 		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
 		ci.WaitDelay = recipeShutdownGrace
@@ -267,24 +267,24 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 		// cancelled between recipes must stop here rather than start one more
 		// ssh process it will only have to kill.
 		if err := ctx.Err(); err != nil {
-			fmt.Fprintf(log, "CANCELLED: %v\n", err)
+			_, _ = fmt.Fprintf(log, "CANCELLED: %v\n", err)
 			return err
 		}
 
 		body, err := recipes.ScriptBody(name, v.OS)
 		if err != nil {
-			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			_, _ = fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
 		}
 		runtime, err := recipes.RuntimeFor(name, v.OS)
 		if err != nil {
-			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			_, _ = fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return err
 		}
-		fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
+		_, _ = fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
-			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
+			_, _ = fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
 			bs := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"sh", "-s"})...)...)
 			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
 			bs.WaitDelay = recipeShutdownGrace
@@ -293,10 +293,10 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			bs.Stderr = log
 			if err := bs.Run(); err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
-					fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+					_, _ = fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
 					return ctxErr
 				}
-				fmt.Fprintf(log, "FAILED: recipe %s: installing %s: %v\n", name, runtime, err)
+				_, _ = fmt.Fprintf(log, "FAILED: recipe %s: installing %s: %v\n", name, runtime, err)
 				return fmt.Errorf("recipe %s: installing %s: %w", name, runtime, err)
 			}
 		}
@@ -315,13 +315,13 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			// caller sniffing Logs' text, must not read a cancellation as if
 			// the recipe itself had failed.
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+				_, _ = fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
 				return ctxErr
 			}
-			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			_, _ = fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
 			return fmt.Errorf("recipe %s: %w", name, err)
 		}
 	}
-	fmt.Fprintln(log, "\ndone")
+	_, _ = fmt.Fprintln(log, "\ndone")
 	return nil
 }

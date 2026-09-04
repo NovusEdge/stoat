@@ -291,8 +291,8 @@ func appendProvisionLog(v *config.VM, s string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	f.WriteString(s)
+	defer func() { _ = f.Close() }()
+	_, _ = f.WriteString(s)
 }
 
 // discoverCloudInitApplied rebuilds v.Applied for a cloudinit VM from the

@@ -30,15 +30,15 @@ func fakeSSHD(t *testing.T, port int) (int, func()) {
 				return
 			}
 			go func() {
-				c.Write([]byte("SSH-2.0-fake\r\n"))
+				_, _ = c.Write([]byte("SSH-2.0-fake\r\n"))
 				<-done
-				c.Close()
+				_ = c.Close()
 			}()
 		}
 	}()
 	return l.Addr().(*net.TCPAddr).Port, func() {
 		close(done)
-		l.Close()
+		_ = l.Close()
 	}
 }
 
@@ -94,7 +94,7 @@ func TestWaitReachablePollsUntilUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	_ = l.Close()
 
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: port}
 	if err := v.Save(); err != nil {

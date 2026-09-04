@@ -40,9 +40,9 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !a.Quiet {
 		if a.ToRemote {
-			fmt.Fprintf(stdout, "copied %s to %s:%s\n", a.Local, a.VM, a.Remote)
+			_, _ = fmt.Fprintf(stdout, "copied %s to %s:%s\n", a.Local, a.VM, a.Remote)
 		} else {
-			fmt.Fprintf(stdout, "copied %s:%s to %s\n", a.VM, a.Remote, a.Local)
+			_, _ = fmt.Fprintf(stdout, "copied %s:%s to %s\n", a.VM, a.Remote, a.Local)
 		}
 	}
 	return ExitOK
@@ -83,8 +83,8 @@ func runExec(a *Args, stdout, stderr io.Writer) int {
 	}
 	// Streamed through verbatim, on the matching stream, so a caller can pipe
 	// stdout without stderr contaminating it.
-	fmt.Fprint(stdout, res.Stdout)
-	fmt.Fprint(stderr, res.Stderr)
+	_, _ = fmt.Fprint(stdout, res.Stdout)
+	_, _ = fmt.Fprint(stderr, res.Stderr)
 	return res.ExitCode
 }
 
@@ -103,17 +103,17 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 	}
 	v, err := config.Load(a.VM)
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: ssh:", err)
+		_, _ = fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
 	path, err := exec.LookPath("ssh")
 	if err != nil {
-		fmt.Fprintln(stderr, "stoat: ssh:", err)
+		_, _ = fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
 	argv := append([]string{"ssh"}, sshx.Args(v)...)
 	if err := syscall.Exec(path, argv, os.Environ()); err != nil {
-		fmt.Fprintln(stderr, "stoat: ssh:", err)
+		_, _ = fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
 	return ExitOK // unreachable on success: the process image is gone
@@ -168,7 +168,7 @@ func streamFile(path string, out io.Writer, done <-chan error) error {
 	for {
 		select {
 		case err := <-done:
-			offset = copyNew(path, out, offset)
+			copyNew(path, out, offset)
 			return err
 		case <-ticker.C:
 			offset = copyNew(path, out, offset)
@@ -181,7 +181,7 @@ func copyNew(path string, out io.Writer, offset int64) int64 {
 	if err != nil {
 		return offset
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil || fi.Size() <= offset {
 		return offset
@@ -189,6 +189,6 @@ func copyNew(path string, out io.Writer, offset int64) int64 {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return offset
 	}
-	io.Copy(out, f)
+	_, _ = io.Copy(out, f)
 	return fi.Size()
 }

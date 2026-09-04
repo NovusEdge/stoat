@@ -106,8 +106,8 @@ func sshBannerUp(ctx context.Context, v *config.VM) bool {
 	if err != nil {
 		return false
 	}
-	defer c.Close()
-	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	defer func() { _ = c.Close() }()
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 4)
 	_, err = io.ReadFull(c, buf)
 	return err == nil && string(buf) == "SSH-"

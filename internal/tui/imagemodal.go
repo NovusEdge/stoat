@@ -138,7 +138,7 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		if index == m.Index() {
 			label = selStyle.Render(label)
 		}
-		fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
+		_, _ = fmt.Fprint(w, cursor+label+dimStyle.Render(trailer))
 	case variantItem:
 		if it.chooseImage {
 			// No size or status column: it isn't a file, it's a door to the
@@ -147,7 +147,7 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 			if index == m.Index() {
 				label = selStyle.Render(label)
 			}
-			fmt.Fprint(w, cursor+label+dimStyle.Render("search or paste"))
+			_, _ = fmt.Fprint(w, cursor+label+dimStyle.Render("search or paste"))
 			return
 		}
 		// A styled substring ends in \x1b[0m, which also resets the enclosing
@@ -162,9 +162,9 @@ func (d imageDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		// Size right-aligned so the digits line up column-wise; padded plain,
 		// then dimmed as a whole segment.
 		size := dimStyle.Render(fmt.Sprintf("%*s", modalSizeWidth, it.opt.sizeLabel()))
-		fmt.Fprint(w, cursor+label+size+"  "+it.opt.statusLabel())
+		_, _ = fmt.Fprint(w, cursor+label+size+"  "+it.opt.statusLabel())
 	case foundItem:
-		fmt.Fprint(w, cursor+foundRow(it.img, m.Width()-lipgloss.Width(cursor), index == m.Index()))
+		_, _ = fmt.Fprint(w, cursor+foundRow(it.img, m.Width()-lipgloss.Width(cursor), index == m.Index()))
 	}
 }
 

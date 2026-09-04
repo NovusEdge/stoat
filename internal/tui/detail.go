@@ -71,7 +71,7 @@ func tailLog(name string, n int) string {
 	if err != nil {
 		return ""
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		return ""
@@ -478,9 +478,7 @@ func (m model) viewDetail() string {
 	}
 
 	parts = append(parts, "")
-	for _, l := range provLinesExcept(m, v.Name) {
-		parts = append(parts, l)
-	}
+	parts = append(parts, provLinesExcept(m, v.Name)...)
 	// An always-present slot: an appearing status line replaces blank
 	// space instead of pushing the footer down.
 	parts = append(parts, warnStyle.Render(m.status))

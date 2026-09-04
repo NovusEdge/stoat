@@ -174,7 +174,7 @@ func TestDestroyRefusesWhileRunning(t *testing.T) {
 		t.Fatalf("VM directory should still exist after a refused destroy: %v", err)
 	}
 	stop()
-	os.Remove(v.PidPath())
+	_ = os.Remove(v.PidPath())
 
 	if err := Destroy("work"); err != nil {
 		t.Fatalf("Destroy after stopping: %v", err)

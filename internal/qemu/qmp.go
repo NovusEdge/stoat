@@ -38,7 +38,7 @@ func dialQMP(v *config.VM) (*qmp, error) {
 		return nil, fmt.Errorf("qmp: %w", err)
 	}
 	if err := c.SetDeadline(time.Now().Add(qmpTimeout)); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, err
 	}
 	q := &qmp{c: c, dec: json.NewDecoder(c)}
@@ -49,15 +49,15 @@ func dialQMP(v *config.VM) (*qmp, error) {
 		QMP json.RawMessage `json:"QMP"`
 	}
 	if err := q.dec.Decode(&greeting); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("qmp greeting: %w", err)
 	}
 	if greeting.QMP == nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("qmp: not a QMP socket (no greeting)")
 	}
 	if _, err := q.command("qmp_capabilities", nil); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, err
 	}
 	return q, nil
@@ -152,7 +152,7 @@ func snapshotCmd(v *config.VM, hmp string) error {
 	if err != nil {
 		return err
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 	return q.hmpChecked(hmp)
 }
 
@@ -183,6 +183,6 @@ func SnapshotInfo(v *config.VM) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 	return q.hmp("info snapshots")
 }

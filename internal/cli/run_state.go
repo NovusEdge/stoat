@@ -55,11 +55,11 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 			})
 		}
 		if len(v.Forwards) == 0 {
-			fmt.Fprintf(stdout, "%s has no port forwards\n", a.VM)
+			_, _ = fmt.Fprintf(stdout, "%s has no port forwards\n", a.VM)
 			return ExitOK
 		}
 		for _, f := range v.Forwards {
-			fmt.Fprintf(stdout, "%d:%d\n", f.HostPort, f.GuestPort)
+			_, _ = fmt.Fprintf(stdout, "%d:%d\n", f.HostPort, f.GuestPort)
 		}
 		return ExitOK
 	}
@@ -88,14 +88,14 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 	}
 	switch {
 	case a.Clear:
-		fmt.Fprintf(stdout, "cleared %s's port forwards\n", a.VM)
+		_, _ = fmt.Fprintf(stdout, "cleared %s's port forwards\n", a.VM)
 	default:
 		for _, f := range a.Forwards {
-			fmt.Fprintf(stdout, "%d:%d\n", f.HostPort, f.GuestPort)
+			_, _ = fmt.Fprintf(stdout, "%d:%d\n", f.HostPort, f.GuestPort)
 		}
 	}
 	if !active {
-		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
+		_, _ = fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
 	}
 	return ExitOK
 }
@@ -115,14 +115,14 @@ func runPrune(a *Args, stdout, stderr io.Writer) int {
 		})
 	}
 	if len(removed) == 0 {
-		fmt.Fprintln(stdout, "nothing to prune")
+		_, _ = fmt.Fprintln(stdout, "nothing to prune")
 		return ExitOK
 	}
 	for _, r := range removed {
-		fmt.Fprintln(stdout, prunePrefix(r.Class)+r.Path)
+		_, _ = fmt.Fprintln(stdout, prunePrefix(r.Class)+r.Path)
 	}
 	if a.Prune.DryRun {
-		fmt.Fprintln(stdout, "\n(dry run: nothing was deleted; re-run with --apply)")
+		_, _ = fmt.Fprintln(stdout, "\n(dry run: nothing was deleted; re-run with --apply)")
 	}
 	return ExitOK
 }
@@ -170,11 +170,11 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 		if !a.Quiet {
 			switch action {
 			case "restore":
-				fmt.Fprintf(stdout, "%s restored to %s\n", a.VM, a.Tag)
+				_, _ = fmt.Fprintf(stdout, "%s restored to %s\n", a.VM, a.Tag)
 			case "delete":
-				fmt.Fprintf(stdout, "deleted %s\n", a.Tag)
+				_, _ = fmt.Fprintf(stdout, "deleted %s\n", a.Tag)
 			case "save":
-				fmt.Fprintf(stdout, "saved %s\n", a.Tag)
+				_, _ = fmt.Fprintf(stdout, "saved %s\n", a.Tag)
 			}
 		}
 		return ExitOK
@@ -188,16 +188,16 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"vm": a.VM, "snapshots": wire.FromSnapshots(snaps)})
 	}
 	if len(snaps) == 0 {
-		fmt.Fprintf(stdout, "%s has no snapshots\n", a.VM)
+		_, _ = fmt.Fprintf(stdout, "%s has no snapshots\n", a.VM)
 		return ExitOK
 	}
-	fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", "TAG", "SIZE", "CREATED", "RAM")
+	_, _ = fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", "TAG", "SIZE", "CREATED", "RAM")
 	for _, s := range snaps {
 		ram := "no"
 		if s.VMState {
 			ram = "yes"
 		}
-		fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", s.Tag, s.Size, s.Created, ram)
+		_, _ = fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", s.Tag, s.Size, s.Created, ram)
 	}
 	return ExitOK
 }
@@ -227,13 +227,13 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 		})
 	}
 	if len(failed) == 0 {
-		fmt.Fprintln(stdout, "ok")
+		_, _ = fmt.Fprintln(stdout, "ok")
 		return ExitOK
 	}
 	for _, c := range failed {
-		fmt.Fprintf(stdout, "FAIL: %s: %s\n", c.Name, c.Detail)
+		_, _ = fmt.Fprintf(stdout, "FAIL: %s: %s\n", c.Name, c.Detail)
 		if len(c.Fix) > 0 {
-			fmt.Fprintf(stdout, "      try: %s\n", strings.Join(c.Fix, " "))
+			_, _ = fmt.Fprintf(stdout, "      try: %s\n", strings.Join(c.Fix, " "))
 		}
 	}
 	return ExitFail

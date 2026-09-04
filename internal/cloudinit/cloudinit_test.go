@@ -132,7 +132,7 @@ func TestSeedWritesUserDataAndMetaData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed.iso not written: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	label := make([]byte, 32)
 	if _, err := f.ReadAt(label, 0x8028); err != nil {

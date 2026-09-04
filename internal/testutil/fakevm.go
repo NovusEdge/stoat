@@ -67,8 +67,8 @@ func FakeRunning(t *testing.T, dir string) func() {
 			break
 		}
 		if time.Now().After(deadline) {
-			cmd.Process.Kill()
-			cmd.Wait()
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 			t.Fatalf("fake VM process never showed %q in its cmdline; qemu.Running would not match it", dir+"/")
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -76,12 +76,12 @@ func FakeRunning(t *testing.T, dir string) func() {
 
 	pidFile := filepath.Join(dir, "qemu.pid")
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		t.Fatal(err)
 	}
 	return func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}
 }

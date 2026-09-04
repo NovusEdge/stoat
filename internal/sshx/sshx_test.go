@@ -214,7 +214,7 @@ func acceptOnly(t *testing.T, body string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -222,7 +222,7 @@ func acceptOnly(t *testing.T, body string) int {
 				return
 			}
 			if body != "" {
-				c.Write([]byte(body))
+				_, _ = c.Write([]byte(body))
 			}
 		}
 	}()
@@ -274,14 +274,14 @@ func TestWaitSucceedsOnSlowBanner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	go func() {
 		c, err := l.Accept()
 		if err != nil {
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
-		c.Write([]byte("SSH-2.0-OpenSSH_9.6\r\n"))
+		_, _ = c.Write([]byte("SSH-2.0-OpenSSH_9.6\r\n"))
 	}()
 	port := l.Addr().(*net.TCPAddr).Port
 
@@ -323,14 +323,14 @@ func acceptAndClose(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	go func() {
 		for {
 			c, err := l.Accept()
 			if err != nil {
 				return
 			}
-			c.Close()
+			_ = c.Close()
 		}
 	}()
 	return l.Addr().(*net.TCPAddr).Port

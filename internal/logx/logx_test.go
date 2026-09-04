@@ -35,7 +35,7 @@ func TestInitCreatesLogAndAppends(t *testing.T) {
 		t.Fatal(err)
 	}
 	L().Info("second message")
-	Close()
+	_ = Close()
 	b, _ = os.ReadFile(Path())
 	if !strings.Contains(string(b), "first message") {
 		t.Error("Init truncated an existing log")

@@ -19,7 +19,7 @@ func entries(t *testing.T, path string) (map[string]string, map[string]*tar.Head
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestBuildFailureLeavesGoodOverlayIntact(t *testing.T) {
 	if err := os.Chmod(v.OvlDir(), 0o555); err != nil {
 		t.Fatalf("chmod ovl dir: %v", err)
 	}
-	defer os.Chmod(v.OvlDir(), 0o755)
+	defer func() { _ = os.Chmod(v.OvlDir(), 0o755) }()
 
 	if err := Build(v); err == nil {
 		t.Fatal("expected Build to fail when the ovl dir is read-only")

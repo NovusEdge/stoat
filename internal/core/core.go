@@ -126,7 +126,7 @@ func Create(s Spec) (VM, error) {
 		if err != nil {
 			// Leave no trace of a failed creation: otherwise the list shows a
 			// VM with no disk.qcow2 that can never boot.
-			os.RemoveAll(v.Dir)
+			_ = os.RemoveAll(v.Dir)
 			return VM{}, fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
 		}
 	}

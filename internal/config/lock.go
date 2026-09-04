@@ -71,14 +71,14 @@ func lockFile(name string) (func(), error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return func() {
 		// Unlock explicitly rather than relying on Close: the ordering is
 		// then visible to a reader, and Close alone would still be correct
 		// only because this fd is not shared.
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
 	}, nil
 }

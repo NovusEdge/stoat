@@ -36,7 +36,7 @@ func TestDownload_RenameFailureCleansUpPart(t *testing.T) {
 	sum := sha256.Sum256(body)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer srv.Close()
 
@@ -248,12 +248,12 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 	const filename = "example-cloudimg-amd64.qcow2"
 
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer fileSrv.Close()
 
 	sumsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		fmt.Fprintf(w, "%s  %s\nfeedface  some-other-file.qcow2\n", hex.EncodeToString(sum[:]), filename)
+		_, _ = fmt.Fprintf(w, "%s  %s\nfeedface  some-other-file.qcow2\n", hex.EncodeToString(sum[:]), filename)
 	}))
 	defer sumsSrv.Close()
 
@@ -323,7 +323,7 @@ func TestDownload_SHA512(t *testing.T) {
 	const filename = "example-genericcloud-amd64.qcow2"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer srv.Close()
 
@@ -355,7 +355,7 @@ func TestDownload_UnverifiedWhenNoChecksum(t *testing.T) {
 	const filename = "unverified-cloudimg-amd64.qcow2"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer srv.Close()
 
@@ -456,7 +456,7 @@ func TestCatalog_FedoraURLNotArchived(t *testing.T) {
 	if err != nil {
 		t.Skipf("network unreachable, skipping live fedora-cloud check: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusPartialContent:
@@ -497,7 +497,7 @@ func TestDownloadOutlastsMetadataTimeout(t *testing.T) {
 		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 		flusher, _ := w.(http.Flusher)
 		for i := 0; i < len(body); i += 64 {
-			w.Write(body[i:min(i+64, len(body))])
+			_, _ = w.Write(body[i:min(i+64, len(body))])
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -544,7 +544,7 @@ func TestResolve_AlpineDirectURLEntry(t *testing.T) {
 	const filename = "alpine-cloud.qcow2"
 
 	fileSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer fileSrv.Close()
 

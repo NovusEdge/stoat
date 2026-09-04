@@ -288,9 +288,7 @@ func (m model) viewList() string {
 	// In-flight provision runs sit above the status line: they are ongoing
 	// state, not a one-off message, and a run started from here keeps going
 	// while the user moves around the list.
-	for _, l := range provLines(m) {
-		parts = append(parts, l)
-	}
+	parts = append(parts, provLines(m)...)
 	parts = append(parts, warnStyle.Render(m.status))
 	parts = append(parts, renderFooter(listHelp{sshAvailable: sshAvailable}, m.width, m.showHelp))
 	return column(appContentWidth, parts...)

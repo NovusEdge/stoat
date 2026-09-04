@@ -70,8 +70,8 @@ func generate(path, comment string) error {
 	}
 	// ssh-keygen refuses to overwrite. A stale half of the pair, either the
 	// private key or its .pub, would wedge this, so clear both first.
-	os.Remove(path)
-	os.Remove(path + ".pub")
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".pub")
 	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", path)
 	// Extra safety alongside the lock above. ssh-keygen prompts on stdin
 	// when it finds a file it did not expect, and a background or

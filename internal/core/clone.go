@@ -102,7 +102,7 @@ func Clone(name, newName string) (VM, error) {
 		// Leave no trace of a failed clone, matching Create's own rule for a
 		// failed qemu-img call: otherwise List shows a VM with no disk that
 		// can never boot.
-		os.RemoveAll(clone.Dir)
+		_ = os.RemoveAll(clone.Dir)
 		return VM{}, err
 	}
 

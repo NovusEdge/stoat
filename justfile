@@ -86,6 +86,12 @@ check:
     go vet ./...
     go build ./...
 
+# exactly what the lint and shellcheck CI jobs run
+[group('dev')]
+lint:
+    golangci-lint run ./...
+    shellcheck -S warning $(git ls-files "internal/recipes/bundled/*.sh" "internal/recipes/bundled/*/*.sh" "scripts/*.sh" ".githooks/*")
+
 # format in place
 [group('dev')]
 fmt:

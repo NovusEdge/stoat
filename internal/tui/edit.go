@@ -107,12 +107,6 @@ func backendOf(v *config.VM) string {
 	return "ssh"
 }
 
-// parseSize is core.ParseSize under a local name. core.Update now owns disk
-// size validation, so edit.go no longer calls this. form.go's create-VM
-// disk field still needs it for its own presentational parse, the same
-// role buildPatch's RAM/CPUs/SSHPort checks play here.
-var parseSize = core.ParseSize
-
 // name is this VM's identity for core.Update and config.Load: the
 // directory, never the vm.toml `name` field, which can diverge from it (see
 // core.VM.Name's own comment on why the directory is authoritative).

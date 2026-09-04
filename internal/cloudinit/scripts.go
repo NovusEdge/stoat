@@ -43,7 +43,7 @@ func WrapScripts(scripts []Script) string {
 	rc.WriteString("runcmd:\n")
 	for _, s := range scripts {
 		path := fmt.Sprintf("%s/%s.sh", scriptDir, s.Name)
-		wf.WriteString(fmt.Sprintf("  - path: %s\n", path))
+		fmt.Fprintf(&wf, "  - path: %s\n", path)
 		wf.WriteString("    permissions: '0755'\n")
 		wf.WriteString("    content: |\n")
 		wf.WriteString(indentBlock(s.Content))
@@ -52,7 +52,7 @@ func WrapScripts(scripts []Script) string {
 		// leaves no marker for a script that failed, so a failed recipe stays
 		// pending instead of being recorded as applied.
 		marker := fmt.Sprintf("%s/%s", MarkerDir, s.Name)
-		rc.WriteString(fmt.Sprintf("  - %s && mkdir -p %s && touch %s\n", path, MarkerDir, marker))
+		fmt.Fprintf(&rc, "  - %s && mkdir -p %s && touch %s\n", path, MarkerDir, marker)
 	}
 
 	return "#cloud-config\n" + wf.String() + rc.String()

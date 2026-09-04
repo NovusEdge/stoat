@@ -79,12 +79,12 @@ func runRecipes(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{"recipes": wire.FromRecipes(rs)})
 	}
 	if len(rs) == 0 {
-		fmt.Fprintln(stdout, "no recipes")
+		_, _ = fmt.Fprintln(stdout, "no recipes")
 		return ExitOK
 	}
-	fmt.Fprintf(stdout, "%-30s %s\n", "NAME", "DESCRIPTION")
+	_, _ = fmt.Fprintf(stdout, "%-30s %s\n", "NAME", "DESCRIPTION")
 	for _, r := range rs {
-		fmt.Fprintf(stdout, "%-30s %s\n", r.Name, r.Description)
+		_, _ = fmt.Fprintf(stdout, "%-30s %s\n", r.Name, r.Description)
 	}
 	return ExitOK
 }
@@ -108,11 +108,11 @@ func runCheckRecipes(a *Args, stdout, stderr io.Writer) int {
 		})
 	}
 	if len(issues) == 0 {
-		fmt.Fprintln(stdout, "all applicable")
+		_, _ = fmt.Fprintln(stdout, "all applicable")
 		return ExitOK
 	}
 	for _, i := range issues {
-		fmt.Fprintf(stdout, "%s: %s\n", i.Name, i.Reason)
+		_, _ = fmt.Fprintf(stdout, "%s: %s\n", i.Name, i.Reason)
 	}
 	return ExitOK
 }

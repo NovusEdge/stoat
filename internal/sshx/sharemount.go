@@ -105,7 +105,7 @@ func mountShares(ctx context.Context, v *config.VM, log io.Writer) {
 	if len(tags) == 0 {
 		return
 	}
-	fmt.Fprintln(log, "\n=== mounting 9p shares ===")
+	_, _ = fmt.Fprintln(log, "\n=== mounting 9p shares ===")
 	cmd := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"sh", "-s"})...)...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = recipeShutdownGrace
@@ -113,6 +113,6 @@ func mountShares(ctx context.Context, v *config.VM, log io.Writer) {
 	cmd.Stdout = log
 	cmd.Stderr = log
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(log, "stoat: share mount step failed, continuing: %v\n", err)
+		_, _ = fmt.Fprintf(log, "stoat: share mount step failed, continuing: %v\n", err)
 	}
 }
