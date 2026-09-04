@@ -82,9 +82,10 @@ func TestParse(t *testing.T) {
 		{"ssh", []string{"ssh", "alpine"}, &Args{Cmd: "ssh", VM: "alpine"}, false},
 		{"ssh missing name", []string{"ssh"}, nil, true},
 
-		{"provision", []string{"provision", "alpine"}, &Args{Cmd: "provision", VM: "alpine"}, false},
+		// provision is a kong alias of apply, so it parses to Cmd "apply".
+		{"provision", []string{"provision", "alpine"}, &Args{Cmd: "apply", VM: "alpine"}, false},
 		{"provision missing name", []string{"provision"}, nil, true},
-		{"provision quiet alias", []string{"provision", "--no-interactive", "alpine"}, &Args{Cmd: "provision", VM: "alpine", Quiet: true}, false},
+		{"provision quiet alias", []string{"provision", "--no-interactive", "alpine"}, &Args{Cmd: "apply", VM: "alpine", Quiet: true}, false},
 
 		{"rm", []string{"rm", "alpine"}, &Args{Cmd: "rm", VM: "alpine"}, false},
 		{"rm -y", []string{"rm", "-y", "alpine"}, &Args{Cmd: "rm", VM: "alpine", Yes: true}, false},

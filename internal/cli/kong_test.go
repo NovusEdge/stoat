@@ -279,7 +279,8 @@ func TestHelpListsEverySubcommand(t *testing.T) {
 		"ls", "get", "create", "update", "up", "down", "wait", "rm", "clone",
 		"exec", "ssh", "ssh-command", "cp", "forward", "images", "pull",
 		"snapshot", "prune", "apply", "recipes", "check-recipes",
-		"recipe list", "recipe new", "logs", "doctor", "version", "help",
+		"recipe list", "recipe new", "guest ls", "guest show",
+		"logs", "doctor", "version", "help",
 	}
 	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}} {
 		a, err := Parse(args)
@@ -294,10 +295,6 @@ func TestHelpListsEverySubcommand(t *testing.T) {
 	}
 }
 
-// TestProvisionIsHiddenFromHelp pins that the "provision" alias still parses
-// (TestParse's "provision" cases) while staying out of the command list a
-// user reads with --help, so the help surface names only the one spelling
-// ("apply") a new user should reach for.
 // TestProvisionIsAnAliasOfApply pins that "provision" is a kong alias of
 // "apply", not a second command: a.Cmd must read "apply" so the JSON
 // envelope's cmd field and every downstream dispatch see one command.
@@ -311,6 +308,10 @@ func TestProvisionIsAnAliasOfApply(t *testing.T) {
 	}
 }
 
+// TestProvisionIsHiddenFromHelp pins that the "provision" alias still parses
+// (TestParse's "provision" cases) while staying out of the command list a
+// user reads with --help, so the help surface names only the one spelling
+// ("apply") a new user should reach for.
 func TestProvisionIsHiddenFromHelp(t *testing.T) {
 	a, err := Parse([]string{"--help"})
 	if err != nil {
