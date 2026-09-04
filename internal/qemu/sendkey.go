@@ -54,7 +54,7 @@ func passwordKeys(password string) ([]string, error) {
 // password to send.
 func TypeConsolePassword(v *config.VM) error {
 	if v.ConsolePassword == "" {
-		return fmt.Errorf("%s has no console password set", v.Name)
+		return fmt.Errorf("%w: %s has no console password set", ErrNoConsolePassword, v.Name)
 	}
 	keys, err := passwordKeys(v.ConsolePassword)
 	if err != nil {
@@ -62,12 +62,12 @@ func TypeConsolePassword(v *config.VM) error {
 	}
 	c, err := dialMonitor(v)
 	if err != nil {
-		return fmt.Errorf("qemu monitor: %w", err)
+		return fmt.Errorf("%w: qemu monitor: %w", ErrMonitorUnreachable, err)
 	}
 	defer func() { _ = c.Close() }()
 	for _, k := range keys {
 		if _, err := fmt.Fprintln(c, "sendkey "+k); err != nil {
-			return fmt.Errorf("qemu monitor: %w", err)
+			return fmt.Errorf("%w: qemu monitor: %w", ErrMonitorUnreachable, err)
 		}
 		time.Sleep(consoleKeyDelay)
 	}

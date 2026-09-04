@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // Stable snake_case error codes (§2), one per typed error in internal/core
@@ -108,6 +109,14 @@ var codeTable = []struct {
 	{CodeTimeout, context.DeadlineExceeded},
 	{CodeCanceled, context.Canceled},
 	{CodeConfirmationRequired, ErrConfirmationRequired},
+	{CodeQemuMissing, qemu.ErrBinaryMissing},
+	{CodeKVMUnusable, qemu.ErrKVMUnusable},
+	{CodeQemuStartFailed, qemu.ErrStartFailed},
+	{CodeMonitorUnreachable, qemu.ErrMonitorUnreachable},
+	{CodeMonitorRejected, qemu.ErrMonitorRejected},
+	{CodeNoConsolePassword, qemu.ErrNoConsolePassword},
+	{CodeShareInvalid, qemu.ErrShareInvalid},
+	{CodeNoXattr, qemu.ErrNoXattr},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking

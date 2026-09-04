@@ -35,7 +35,7 @@ type qmp struct {
 func dialQMP(v *config.VM) (*qmp, error) {
 	c, err := net.Dial("unix", v.QMPPath())
 	if err != nil {
-		return nil, fmt.Errorf("qmp: %w", err)
+		return nil, fmt.Errorf("%w: qmp: %w", ErrMonitorUnreachable, err)
 	}
 	if err := c.SetDeadline(time.Now().Add(qmpTimeout)); err != nil {
 		_ = c.Close()
@@ -50,11 +50,11 @@ func dialQMP(v *config.VM) (*qmp, error) {
 	}
 	if err := q.dec.Decode(&greeting); err != nil {
 		_ = c.Close()
-		return nil, fmt.Errorf("qmp greeting: %w", err)
+		return nil, fmt.Errorf("%w: qmp greeting: %w", ErrMonitorUnreachable, err)
 	}
 	if greeting.QMP == nil {
 		_ = c.Close()
-		return nil, fmt.Errorf("qmp: not a QMP socket (no greeting)")
+		return nil, fmt.Errorf("%w: qmp: not a QMP socket (no greeting)", ErrMonitorUnreachable)
 	}
 	if _, err := q.command("qmp_capabilities", nil); err != nil {
 		_ = c.Close()
@@ -97,7 +97,7 @@ func (q *qmp) command(name string, args map[string]any) (json.RawMessage, error)
 			continue // asynchronous event, not our reply
 		}
 		if resp.Error != nil {
-			return nil, fmt.Errorf("qmp %s: %s", name, resp.Error.Desc)
+			return nil, fmt.Errorf("%w: qmp %s: %s", ErrMonitorRejected, name, resp.Error.Desc)
 		}
 		return resp.Return, nil
 	}

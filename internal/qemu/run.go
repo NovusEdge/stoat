@@ -18,11 +18,11 @@ import (
 // Preflight reports why VMs cannot start, or nil if they can.
 func Preflight() error {
 	if _, err := exec.LookPath(Binary); err != nil {
-		return fmt.Errorf("%s not found in PATH", Binary)
+		return fmt.Errorf("%w: %s not found in PATH", ErrBinaryMissing, Binary)
 	}
 	f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
 	if err != nil {
-		return fmt.Errorf("/dev/kvm not usable: %w (are you in the kvm group?)", err)
+		return fmt.Errorf("%w: /dev/kvm not usable: %w (are you in the kvm group?)", ErrKVMUnusable, err)
 	}
 	_ = f.Close()
 	return nil
@@ -141,7 +141,7 @@ func Start(v *config.VM) error {
 			msg = err.Error()
 		}
 		logx.L().Error("start failed", "vm", v.Name, "err", msg)
-		return fmt.Errorf("qemu failed to start: %s%s", msg, explainDisplayFailure(msg))
+		return fmt.Errorf("%w: qemu failed to start: %s%s", ErrStartFailed, msg, explainDisplayFailure(msg))
 	}
 	// Log how to get in, not just that it started. This is the line someone
 	// greps for when a VM is up but unreachable.
