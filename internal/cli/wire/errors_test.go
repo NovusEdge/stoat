@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/qemu"
 )
 
 func TestMapErrorEveryCoreSentinel(t *testing.T) {
@@ -138,5 +139,27 @@ func TestCodesAreSnakeCaseUniqueAndSorted(t *testing.T) {
 	}
 	if !slices.IsSorted(codes) {
 		t.Errorf("Codes() = %v, want sorted", codes)
+	}
+}
+
+// Each qemu sentinel has exactly one row in codeTable. A sentinel with no row
+// reaches a consumer as "internal" with prose, which is the shape this whole
+// table exists to remove.
+func TestEveryQemuSentinelHasOneRow(t *testing.T) {
+	want := map[error]string{
+		qemu.ErrBinaryMissing:      CodeQemuMissing,
+		qemu.ErrKVMUnusable:        CodeKVMUnusable,
+		qemu.ErrStartFailed:        CodeQemuStartFailed,
+		qemu.ErrMonitorUnreachable: CodeMonitorUnreachable,
+		qemu.ErrMonitorRejected:    CodeMonitorRejected,
+		qemu.ErrNoConsolePassword:  CodeNoConsolePassword,
+		qemu.ErrShareInvalid:       CodeShareInvalid,
+		qemu.ErrNoXattr:            CodeNoXattr,
+	}
+	for sentinel, code := range want {
+		got := MapError(fmt.Errorf("%w: subject", sentinel))
+		if got.Code != code {
+			t.Errorf("MapError(%v).Code = %q, want %q", sentinel, got.Code, code)
+		}
 	}
 }

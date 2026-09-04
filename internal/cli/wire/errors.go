@@ -31,6 +31,15 @@ const (
 	CodeUsage                = "usage"
 	CodeConfirmationRequired = "confirmation_required"
 	CodeInternal             = "internal"
+
+	CodeQemuMissing        = "qemu_missing"
+	CodeKVMUnusable        = "kvm_unusable"
+	CodeQemuStartFailed    = "qemu_start_failed"
+	CodeMonitorUnreachable = "monitor_unreachable"
+	CodeMonitorRejected    = "monitor_rejected"
+	CodeNoConsolePassword  = "no_console_password"
+	CodeShareInvalid       = "share_invalid"
+	CodeNoXattr            = "no_xattr"
 )
 
 // Code is a stable, machine-readable error code. Codes are only ever ADDED:
