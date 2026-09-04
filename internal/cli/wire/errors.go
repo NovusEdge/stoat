@@ -33,6 +33,14 @@ const (
 	CodeInternal             = "internal"
 )
 
+// Code is a stable, machine-readable error code. Codes are only ever ADDED:
+// never renamed, never repurposed, never removed (§2's compatibility
+// promise). A consumer MUST treat an unrecognized code as a generic failure.
+type Code string
+
+// Codes returns every declared code, sorted.
+func Codes() []Code { return []Code{"STUB"} }
+
 // ErrConfirmationRequired is confirmation_required's sentinel (§2: "new,
 // CLI-only"). core has no equivalent; --json never prompts (§1), so `rm`
 // without -y wraps this instead of reading stdin. A future cli.go caller

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/core"
@@ -96,5 +98,45 @@ func TestErrorInfoWithSubject(t *testing.T) {
 	got := UsageError("ignored").WithSubject("os", "field")
 	if got.Subject != "os" || got.Kind != "field" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+// Every code in codeTable is declared by Codes(). A code that reaches a
+// consumer but is absent from the published list is a code no consumer can
+// generate a switch for.
+func TestCodesCoversTheTable(t *testing.T) {
+	declared := make(map[Code]bool, len(Codes()))
+	for _, c := range Codes() {
+		declared[c] = true
+	}
+	for _, row := range codeTable {
+		if !declared[Code(row.code)] {
+			t.Errorf("codeTable has %q, Codes() does not", row.code)
+		}
+	}
+	for _, c := range []Code{CodeUsage, CodeInternal} {
+		if !declared[c] {
+			t.Errorf("Codes() is missing the CLI-owned code %q", c)
+		}
+	}
+}
+
+// Codes are the machine-readable half of the contract: snake_case, unique,
+// and sorted, so a generated switch is stable between builds.
+func TestCodesAreSnakeCaseUniqueAndSorted(t *testing.T) {
+	valid := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	seen := make(map[Code]bool)
+	codes := Codes()
+	for _, c := range codes {
+		if !valid.MatchString(string(c)) {
+			t.Errorf("code %q is not snake_case", c)
+		}
+		if seen[c] {
+			t.Errorf("code %q is declared twice", c)
+		}
+		seen[c] = true
+	}
+	if !slices.IsSorted(codes) {
+		t.Errorf("Codes() = %v, want sorted", codes)
 	}
 }
