@@ -254,6 +254,29 @@ alpine = "install-alpine.sh"
 	}
 }
 
+// ubuntu's guest.toml declares the alias "debian-family". ScriptFor must
+// try it before falling back to the manifest's default script.
+func TestManifestScriptForTriesGuestAlias(t *testing.T) {
+	dir := t.TempDir()
+	path := writeManifestFile(t, dir, `
+name = "install"
+script = "install.sh"
+
+[scripts]
+debian-family = "install-deb.sh"
+`)
+	m, err := ParseManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "install-deb.sh"); m.ScriptFor("ubuntu") != want {
+		t.Errorf("ScriptFor(ubuntu) = %q, want %q via the debian-family alias", m.ScriptFor("ubuntu"), want)
+	}
+	if want := filepath.Join(dir, "install.sh"); m.ScriptFor("fedora") != want {
+		t.Errorf("ScriptFor(fedora) = %q, want the default, fedora has no matching alias", m.ScriptFor("fedora"))
+	}
+}
+
 func TestManifestScriptContent(t *testing.T) {
 	dir := t.TempDir()
 	path := writeManifestFile(t, dir, `
@@ -353,6 +376,29 @@ func TestMatchesVMOSAndCapabilityCombined(t *testing.T) {
 	}
 	if MatchesVM(m, "fedora") {
 		t.Error("MatchesVM(fedora) = true, want false, not in OS list")
+	}
+}
+
+// hasCapability now resolves against guest.Capabilities() instead of a
+// hardcoded map. Pin the per-package-manager capabilities the old map held,
+// since MatchesVM's tests above only exercise systemd/openrc/apt.
+func TestMatchesVMPackageManagerCapabilities(t *testing.T) {
+	cases := []struct {
+		cap, vmOS string
+		want      bool
+	}{
+		{"apk", "alpine", true},
+		{"apk", "ubuntu", false},
+		{"dnf", "fedora", true},
+		{"dnf", "arch", false},
+		{"pacman", "arch", true},
+		{"pacman", "fedora", false},
+	}
+	for _, c := range cases {
+		m := &Manifest{Name: "svc", Requires: []string{c.cap}}
+		if got := MatchesVM(m, c.vmOS); got != c.want {
+			t.Errorf("MatchesVM with requires=%q on %s = %v, want %v", c.cap, c.vmOS, got, c.want)
+		}
 	}
 }
 
