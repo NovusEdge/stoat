@@ -12,6 +12,7 @@
 # agent / planning cruft — local only. Task plans are throwaway; durable
 # architecture decisions belong in docs/design/, which IS tracked.
 docs/superpowers/
+docs/specs/
 context/
 CLAUDE.md
 CLAUDE.local.md

@@ -68,19 +68,18 @@ A comment in code carries a fact the reader cannot get from the code.
 Paraphrase, investigation history, and section banners are deleted in
 review.
 
-## Design specs
+## Design changes
 
 A change to a subsystem or an interface another package depends on
-starts as a spec in `docs/specs/`, reviewed and merged before the
-implementation PR. The current set is listed in `docs/SUMMARY.md`.
+starts as an issue that states the design, discussed before the
+implementation PR. Settled decisions go in `docs/design/`.
 
 ## Recipes
 
 Bundled recipes are `xfce`, `docker`, `devtools`, `tailscale`, and the set
 is closed. Write a new recipe in `~/.stoat/recipes/<name>/` from `stoat
 recipe new`; see `docs/recipes/writing-your-own.md`. A recipe index for
-sharing them is specified in `docs/specs/2026-09-04-remote-recipes-design.md`
-and not built yet. Every recipe script
+sharing them is planned and not built yet. Every recipe script
 starts with `set -e` and carries the live-vs-disk block that `stoat recipe
 new` scaffolds; `internal/recipes/recipes_test.go` checks both for the
 bundled set.
