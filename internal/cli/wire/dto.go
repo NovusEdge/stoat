@@ -258,19 +258,53 @@ func FromPruneItems(ps []core.PruneItem) []PruneItem {
 }
 
 // Recipe is core.Recipe for the wire.
+//
+// reboot is the field a machine caller needs most: it decides whether "wait
+// until reachable" after an apply answers about the guest before or after the
+// restart.
 type Recipe struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Reboot      bool     `json:"reboot"`
+	Depends     []string `json:"depends"`
+	Runtime     string   `json:"runtime"`
 }
 
 func FromRecipe(r core.Recipe) Recipe {
-	return Recipe{Name: r.Name, Description: r.Description}
+	return Recipe{
+		Name:        r.Name,
+		Description: r.Description,
+		Reboot:      r.Reboot,
+		Depends:     nonNil(r.Depends),
+		Runtime:     r.Runtime,
+	}
 }
 
 func FromRecipes(rs []core.Recipe) []Recipe {
 	out := make([]Recipe, len(rs))
 	for i, r := range rs {
 		out[i] = FromRecipe(r)
+	}
+	return nonNil(out)
+}
+
+// ApplyPlan is core.ApplyPlan for the wire: one recipe's entry in an
+// `apply --dry-run`.
+type ApplyPlan struct {
+	Name    string `json:"name"`
+	Action  string `json:"action"`
+	Reason  string `json:"reason"`
+	Version string `json:"version,omitempty"`
+}
+
+func FromApplyPlan(p core.ApplyPlan) ApplyPlan {
+	return ApplyPlan{Name: p.Name, Action: p.Action, Reason: p.Reason, Version: p.Version}
+}
+
+func FromApplyPlans(ps []core.ApplyPlan) []ApplyPlan {
+	out := make([]ApplyPlan, len(ps))
+	for i, p := range ps {
+		out[i] = FromApplyPlan(p)
 	}
 	return nonNil(out)
 }

@@ -72,6 +72,18 @@ func Args(v *config.VM, extra ...string) []string {
 	return append(a, extra...)
 }
 
+// sudoWrap prefixes remote with "sudo" for a non-root ssh user. Recipe bodies
+// install packages, so they need root. Cloud images log in as an unprivileged
+// account; cloudinit grants it passwordless sudo ("ALL=(ALL) NOPASSWD:ALL").
+// An apkovl or BYO-root image connects as root and gets no prefix. sudo reads
+// the piped script body on stdin the same way the bare interpreter does.
+func sudoWrap(v *config.VM, remote []string) []string {
+	if User(v) == "root" {
+		return remote
+	}
+	return append([]string{"sudo"}, remote...)
+}
+
 // CopyArgs returns the argv (excluding argv[0]) for scp between the host and
 // v's guest. It shares every connection setting Args does (see connOptions)
 // and differs only in the port flag, since scp's is capital -P.
@@ -231,6 +243,23 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 		return err
 	}
 
+	// A cloud image runs cloud-init at first boot; it may still be installing
+	// packages when sshd comes up. A recipe that calls apt or dnf then races
+	// cloud-init for the package-manager lock and fails. Wait for cloud-init
+	// to finish first. The exit code is ignored on purpose: Alpine reports
+	// "degraded" over a missing fingerprint helper (harmless), and a real
+	// cloud-init failure surfaces when the recipe itself runs. apkovl and BYO
+	// images ship no cloud-init and skip this.
+	if v.Backend == "cloudinit" {
+		fmt.Fprintln(log, "waiting for cloud-init to finish…")
+		ci := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"cloud-init", "status", "--wait"})...)...)
+		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
+		ci.WaitDelay = recipeShutdownGrace
+		ci.Stdout = io.Discard
+		ci.Stderr = log
+		_ = ci.Run()
+	}
+
 	mountShares(ctx, v, log)
 
 	for _, name := range v.Recipes {
@@ -256,7 +285,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
 			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
-			bs := exec.CommandContext(ctx, "ssh", Args(v, "sh", "-s")...)
+			bs := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, []string{"sh", "-s"})...)...)
 			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
 			bs.WaitDelay = recipeShutdownGrace
 			bs.Stdin = strings.NewReader(bootstrap)
@@ -272,7 +301,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, "ssh", Args(v, recipes.InterpreterArgs(runtime)...)...)
+		cmd := exec.CommandContext(ctx, "ssh", Args(v, sudoWrap(v, recipes.InterpreterArgs(runtime))...)...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = recipeShutdownGrace
 		cmd.Stdin = strings.NewReader(body)

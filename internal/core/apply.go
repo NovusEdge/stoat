@@ -475,6 +475,16 @@ func dependencyError(dependent, dep string, manifests map[string]recipes.Manifes
 type Recipe struct {
 	Name        string // recipe name, matches the directory name
 	Description string // from recipe.toml
+	// Reboot says the guest needs a restart before this recipe's effect is
+	// visible. A caller that waits for "reachable" after an apply sees the
+	// pre-reboot sshd and reads it as done.
+	Reboot bool
+	// Depends names recipes that run before this one. Apply orders the run
+	// itself, so this is for a caller that reports the plan, not one that
+	// sorts.
+	Depends []string
+	// Runtime is the interpreter the script runs under: "sh" or "python3".
+	Runtime string
 }
 
 // RecipeFilter selects the recipes Recipes returns: the set
@@ -498,7 +508,13 @@ func Recipes(f RecipeFilter) ([]Recipe, error) {
 	var out []Recipe
 	for _, m := range manifests {
 		if recipes.MatchesVM(&m, f.OS) {
-			out = append(out, Recipe{Name: m.Name, Description: m.Description})
+			out = append(out, Recipe{
+				Name:        m.Name,
+				Description: m.Description,
+				Reboot:      m.Reboot,
+				Depends:     m.Depends,
+				Runtime:     m.Runtime,
+			})
 		}
 	}
 	return out, nil

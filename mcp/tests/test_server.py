@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from stoat_mcp import server
 
@@ -24,18 +25,25 @@ EXPECTED_ANNOTATIONS = {
     "check_recipes": {"readOnlyHint": True, "destructiveHint": False},
     "logs": {"readOnlyHint": True, "destructiveHint": False},
     "doctor": {"readOnlyHint": True, "destructiveHint": False},
+    "plan_recipes": {"readOnlyHint": True, "destructiveHint": False},
     "create": {"readOnlyHint": False, "destructiveHint": False},
     "start": {"readOnlyHint": False, "destructiveHint": False},
     "stop": {"readOnlyHint": False, "destructiveHint": False},
-    "apply_recipes": {"readOnlyHint": False, "destructiveHint": False},
     "update": {"readOnlyHint": False, "destructiveHint": False},
     "clone": {"readOnlyHint": False, "destructiveHint": False},
     "snapshot": {"readOnlyHint": False, "destructiveHint": False},
-    "restore": {"readOnlyHint": False, "destructiveHint": False},
     "forward": {"readOnlyHint": False, "destructiveHint": False},
     "wait": {"readOnlyHint": False, "destructiveHint": False},
     "destroy": {"readOnlyHint": False, "destructiveHint": True},
     "prune": {"readOnlyHint": False, "destructiveHint": True},
+    "restore": {"readOnlyHint": False, "destructiveHint": True},
+    # A recipe body is arbitrary guest code, so apply_recipes carries exec's
+    # hints and exec's allow_exec check.
+    "apply_recipes": {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    },
     "exec": {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
     "copy_to": {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
     "copy_from": {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
@@ -124,3 +132,58 @@ def test_no_tool_description_contains_an_em_dash():
     tools = _tools()
     for name, tool in tools.items():
         assert "—" not in (tool.description or ""), name
+
+
+class _FakeClient:
+    """Records the argv each tool builds and answers from a fixed dict."""
+
+    def __init__(self, answers: dict[str, object] | None = None) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.answers = answers or {}
+
+    def run(self, *args: str, **_: object) -> dict[str, object]:
+        self.calls.append(args)
+        return dict(self.answers.get(args[0], {}))
+
+
+@pytest.fixture
+def fake_client(monkeypatch):
+    client = _FakeClient({"get": {"vm": {"allow_exec": True}}})
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    return client
+
+
+def test_apply_recipes_refuses_a_vm_with_allow_exec_false(monkeypatch):
+    # A recipe body is arbitrary guest code. allow_exec=false blocked exec
+    # and copy while apply ran scripts as root, which made the opt-out a
+    # partial one.
+    client = _FakeClient({"get": {"vm": {"allow_exec": False}}})
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    with pytest.raises(ToolError):
+        server.apply_recipes("work")
+    assert all(c[0] != "apply" for c in client.calls)
+
+
+def test_plan_recipes_runs_a_dry_run_and_needs_no_exec_permission(monkeypatch):
+    client = _FakeClient({"get": {"vm": {"allow_exec": False}}})
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    server.plan_recipes("work")
+    assert client.calls == [("apply", "work", "--dry-run")]
+
+
+def test_wait_clamps_the_timeout(fake_client):
+    server.wait("work", timeout_seconds=10**6)
+    argv = fake_client.calls[-1]
+    assert argv[argv.index("--timeout") + 1] == f"{server.MAX_WAIT_SECONDS}s"
+
+
+def test_logs_clamps_the_line_count(fake_client):
+    server.logs("work", n=10**6)
+    argv = fake_client.calls[-1]
+    assert argv[argv.index("-n") + 1] == str(server.MAX_LOG_LINES)
+
+
+def test_forward_refuses_a_pair_that_kong_reads_as_a_flag(fake_client):
+    with pytest.raises(ToolError):
+        server.forward("work", pairs=["--clear"])
+    assert fake_client.calls == []

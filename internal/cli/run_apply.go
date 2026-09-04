@@ -58,7 +58,10 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		// caller owns the error; this one exits clean rather than reporting
 		// somebody else's concurrent apply as its own failure.
 		if a.JSON {
-			return a.ok(stdout, map[string]any{"vm": a.VM, "applied": false, "skipped_reason": "an apply is already running"})
+			// applied stays a list here. It named the recipes on the success
+			// path and false on this one, so a consumer iterating it hit a
+			// bool. skipped_reason is what distinguishes the two.
+			return a.ok(stdout, map[string]any{"vm": a.VM, "applied": []string{}, "skipped_reason": "an apply is already running"})
 		}
 		fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
 		return ExitOK
@@ -68,22 +71,32 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 	}
 
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vm": a.VM, "applied": applied})
+		if applied == nil {
+			applied = []string{}
+		}
+		return a.ok(stdout, map[string]any{"vm": a.VM, "applied": applied, "skipped_reason": ""})
 	}
 	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
 	return ExitOK
 }
 
 // runApplyDryRun prints core.PlanApply's plan and runs nothing. Human output
-// is one line per recipe ("xfce (run, never applied)"); --json emits the plan
-// array. The plan is computed host-side, so the VM need not be running.
+// is one line per recipe ("xfce (run, never applied)"). The plan is computed
+// host-side, so the VM need not be running.
+//
+// The JSON plan is wrapped in an object. json.md §2 says every result's
+// `data` is an object, and a bare array broke that.
 func runApplyDryRun(a *Args, stdout, stderr io.Writer) int {
 	plan, err := core.PlanApply(a.VM, core.ApplyOpts{Only: a.Only})
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 	if a.JSON {
-		return a.ok(stdout, plan)
+		return a.ok(stdout, map[string]any{
+			"vm":      a.VM,
+			"dry_run": true,
+			"plan":    wire.FromApplyPlans(plan),
+		})
 	}
 	for _, p := range plan {
 		reason := p.Reason

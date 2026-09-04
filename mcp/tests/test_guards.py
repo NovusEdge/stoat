@@ -18,6 +18,7 @@ import pytest
 from stoat_mcp.errors import GuardRejection
 from stoat_mcp.guards import (
     RateLimiter,
+    check_flag_free,
     check_host_path,
     check_image_id,
     check_vm_name,
@@ -323,3 +324,52 @@ def test_rate_limiter_refills_over_time():
         rl.check("create", now=0.1)
     # A full second later, one token has refilled.
     rl.check("create", now=1.0)
+
+
+def test_rate_limiter_shared_bucket_bounds_every_tool_together():
+    # Per-tool buckets alone let a caller burst capacity times against each
+    # of ~20 tools. The shared bucket is what caps the server as a whole.
+    rl = RateLimiter(
+        capacity=10, refill_per_second=1e-9, total_capacity=2, total_refill_per_second=1e-9
+    )
+    rl.check("list_vms", now=0.0)
+    rl.check("vm_status", now=0.0)
+    with pytest.raises(GuardRejection):
+        rl.check("doctor", now=0.0)
+
+
+def test_rate_limiter_refused_tool_does_not_spend_a_shared_token():
+    # One hot tool hitting its own limit must not starve every other tool.
+    rl = RateLimiter(
+        capacity=1, refill_per_second=1e-9, total_capacity=5, total_refill_per_second=1e-9
+    )
+    rl.check("create", now=0.0)
+    for _ in range(3):
+        with pytest.raises(GuardRejection):
+            rl.check("create", now=0.0)
+    rl.check("destroy", now=0.0)
+    rl.check("doctor", now=0.0)
+
+
+# ---------------------------------------------------------------------------
+# check_flag_free
+# ---------------------------------------------------------------------------
+
+
+def test_check_flag_free_rejects_a_kong_flag():
+    # forward(pairs=["--clear"]) reached kong as the clear flag and wiped the
+    # VM's forwards, from a call that passed clear=False.
+    with pytest.raises(GuardRejection):
+        check_flag_free(["--clear"], "pairs")
+
+
+def test_check_flag_free_rejects_a_short_flag_and_empty_values():
+    with pytest.raises(GuardRejection):
+        check_flag_free(["-n"], "pairs")
+    with pytest.raises(GuardRejection):
+        check_flag_free(["  "], "pairs")
+
+
+def test_check_flag_free_passes_ordinary_values():
+    assert check_flag_free(["8080:80", "2222:22"], "pairs") == ["8080:80", "2222:22"]
+    assert check_flag_free([], "pairs") == []

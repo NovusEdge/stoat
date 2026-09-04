@@ -80,6 +80,8 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		// doctor exits 0 even when the host fails a check: it succeeded at
 		// checking, and exit 1 means stoat failed to answer.
 		{name: "doctor", argv: []string{"doctor"}, ok: true, exit: ExitOK},
+		// The plan is computed host-side, so a stopped fixture VM answers it.
+		{name: "apply dry-run", argv: []string{"apply", "work", "--dry-run"}, ok: true, exit: ExitOK},
 
 		{name: "up unknown", argv: []string{"up", "nope"}, code: wire.CodeNotFound, exit: ExitFail},
 		{name: "down stopped", argv: []string{"down", "work"}, code: wire.CodeNotRunning, exit: ExitFail},
@@ -119,6 +121,14 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 				// the presence of "error".
 				if _, bad := res["error"]; bad {
 					t.Errorf("ok result carries an error field: %v", res)
+				}
+				// json.md's envelope table types data as an object. apply
+				// --dry-run shipped a bare array here, which broke a consumer
+				// that indexes data by field name.
+				if d, present := res["data"]; present {
+					if _, obj := d.(map[string]any); !obj {
+						t.Errorf("data is %T, want an object: %v", d, res)
+					}
 				}
 				return
 			}

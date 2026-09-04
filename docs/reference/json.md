@@ -73,8 +73,8 @@ branching on `ok` and one branching on `"error" in obj` can never disagree.
 |---|---|---|
 | `result` | yes | the answer; exactly one per invocation, always last |
 | `progress` | no | a download's byte count (`pull`) |
-| `stage` | no | a recipe boundary during `apply` / `provision` |
-| `log` | no | one line of guest output during `apply` / `provision` |
+| `stage` | no | a recipe boundary during `apply` |
+| `log` | no | one line of guest output during `apply` |
 
 **A consumer MUST ignore any `type` it does not recognize.** New non-terminal
 types can be added without a version bump.
@@ -112,7 +112,7 @@ bump the contract version. Do not write code that requires them.
 | `immutable_field` | `update` was asked to change a field that cannot change |
 | `disk_shrink` | a disk can only grow |
 | `cannot_reach` | `wait` was asked for a state this VM can never reach |
-| `applied_at_boot` | a cloud VM's recipes already ran; `apply` has nothing to do |
+| `applied_at_boot` | reserved; no command emits it. A cloud VM whose recipes ran at boot answers `ok:true` with `applied: []` |
 | `unknown_log` | bad `--which` |
 | `timeout` | the deadline expired |
 | `canceled` | the context was cancelled |
@@ -188,9 +188,13 @@ Check       {"name":"qemu-img","ok":false,"detail":"not found",
 
 PruneItem   {"class":"orphaned_image","path":"/home/u/.stoat/isos/old.iso"}
 
-Recipe      {"name":"xfce","description":"XFCE desktop over SSH or at boot"}
+Recipe      {"name":"xfce","description":"XFCE desktop over SSH or at boot",
+             "reboot":false,"depends":[],"runtime":"sh"}
 
 RecipeIssue {"name":"docker","reason":"docker is not offered to debian/cloudinit"}
+
+ApplyPlan   {"name":"xfce","action":"run","reason":"never applied",
+             "version":"1.2"}
 ```
 
 `state` is one of `stopped`, `running`, `broken`. `error` appears only on a
@@ -210,6 +214,16 @@ itself before calling.
 
 `Snapshot.size_display` and `created_display` are named that way because they
 are qemu's own formatted table output. They are opaque. Do not parse them.
+
+`Recipe.reboot` says the guest needs a restart before that recipe's effect is
+visible. A caller that runs `apply` and then waits for `reachable` can see the
+sshd that is about to go down, so it must account for the reboot itself.
+`Recipe.depends` names recipes that run first. `apply` orders the run on its
+own, so a caller reads `depends` to report the order, never to sort by it.
+
+`ApplyPlan.action` is `run` or `skip`, and `reason` is human text whose wording
+is not part of the contract. `version` is the recipe version already applied,
+absent when the recipe never ran.
 
 `Image.file` is a bare filename under the data root's `isos/`, never an
 absolute path. That is a guarantee, not an accident.
@@ -284,8 +298,8 @@ so a leak fails the build rather than shipping.
 | `snapshot` (list) | `{"vm":"work","snapshots":[Snapshot,...]}` |
 | `snapshot` (act) | `{"vm":"work","tag":"clean","action":"restore"}` |
 | `prune` | `{"dry_run":true,"items":[PruneItem,...]}` |
-| `apply` | `{"vm":"work","applied":["xfce"]}` |
-| `provision` | `{"vm":"work","provisioned":true,"skipped_reason":""}` |
+| `apply` | `{"vm":"work","applied":["xfce"],"skipped_reason":""}` |
+| `apply --dry-run` | `{"vm":"work","dry_run":true,"plan":[ApplyPlan,...]}` |
 | `recipes` | `{"recipes":[Recipe,...]}` |
 | `check-recipes` | `{"applicable":false,"issues":[RecipeIssue,...]}` |
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
@@ -302,7 +316,7 @@ actually run; use `recipe list` only to find a file to edit.
 | `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |
 | `logs <vm>` | `{"vm":"work","which":"console","lines":[...]}` |
 | `doctor` | `{"healthy":false,"checks":[Check,...]}` |
-| `version` | `{"version":"1.2.3","contract":1}` |
+| `version` | `{"version":"1.2.3","contract":2}` |
 | `help` | `{"usage":"..."}` |
 | `ssh` | **refused**, see below |
 
@@ -319,9 +333,13 @@ Fields worth knowing about:
 - **`check-recipes.applicable`** is emitted explicitly even though it equals
   `issues == []`, because a consumer reading an empty list and guessing is a
   consumer that will one day guess wrong.
-- **`provision.skipped_reason`** distinguishes "recipes ran" from "there was
-  nothing to run" without reading English. A cloud VM's recipes ran at first
-  boot, so `provisioned` is `false` with a reason.
+- **`apply.skipped_reason`** distinguishes "recipes ran" from "there was
+  nothing to run" without reading English. It is `""` when the apply ran. A
+  cloud VM's recipes ran at first boot, and a second run already holding the
+  VM's lock is the other case; both come back with `applied: []` and a reason.
+  `applied` is always a list, never a bool.
+- **`provision`** is a hidden alias of `apply` and reports `"cmd":"apply"`.
+  It has no `data` shape of its own.
 - **`doctor.healthy`**, not `ok`: the envelope already owns `ok`, and two
   differently-scoped `ok` fields one level apart is a trap.
 
@@ -348,7 +366,8 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 
 ## Streaming
 
-`pull`, `apply` and `provision` emit non-terminal events before their result.
+`pull` and `apply` emit non-terminal events before their result. `apply
+--dry-run` emits none: it computes the plan host-side and runs nothing.
 
 ```
 {"v":2,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":41943040,"total":62914560,"percent":66}}
@@ -358,8 +377,8 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 
 `progress` fires only when the percentage changes, not per read.
 
-`apply` and `provision` wrap each appended line of the recipe log as a `log`
-event, and emit a `stage` event at each recipe boundary:
+`apply` wraps each appended line of the recipe log as a `log` event, and emits
+a `stage` event at each recipe boundary:
 
 ```
 {"v":2,"type":"stage","cmd":"apply","data":{"recipe":"xfce"}}
