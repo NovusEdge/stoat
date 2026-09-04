@@ -1,4 +1,4 @@
-// Package backend turns guest.OS.Backend from a string into an interface.
+// Package backend turns guest.OS.DefaultBackend from a string into an interface.
 // It is the only package allowed to assume "this is Alpine" or "this is
 // cloud-init". internal/qemu no longer needs that assumption.
 //
@@ -15,7 +15,7 @@ import (
 	"github.com/novusedge/stoat/internal/guest"
 )
 
-// Backend is the behaviour a guest.OS.Backend name stands for: how to build
+// Backend is the behaviour a guest.OS.DefaultBackend name stands for: how to build
 // the pre-boot artifact this OS needs, and what QEMU arguments that artifact
 // requires. Only Prepare and Args are implemented here. Ready (today:
 // sshx.Wait plus cloud-init polling) and Provision (today:
@@ -64,7 +64,7 @@ func For(v *config.VM) Backend {
 	name := v.Backend
 	if name == "" {
 		if o, ok := guest.Lookup(v.OS); ok {
-			name = o.Backend
+			name = o.DefaultBackend
 		}
 	}
 	switch name {

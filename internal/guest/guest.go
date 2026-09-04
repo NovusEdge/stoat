@@ -5,8 +5,9 @@
 // scaffolded recipe uses, and the filename hints that recognise the OS in a
 // bring-your-own image.
 //
-// Adding an OS means adding one entry to registry below. Every field must
-// be filled. A missing field fails silently: an unselectable catalog entry,
+// Adding an OS means adding one guest.toml, bundled or dropped in
+// ~/.stoat/guests/. validate rejects a file missing a required field: a
+// missing field otherwise fails silently, as an unselectable catalog entry,
 // an OS that hands cloud-init a shell the image lacks, or a VM offered zero
 // recipes. See docs/design/guest-subsystem.md for the incident that made
 // this the rule.
@@ -80,12 +81,6 @@ type OS struct {
 	// Source is where the definition came from: "bundled", "user", or
 	// "bundled+user" for a user file merged over a bundled one.
 	Source string `toml:"-"`
-
-	// Kept until Task 3 deletes the literal.
-	Backend      string `toml:"-"`
-	PkgSetup     string `toml:"-"`
-	PkgInstall   string `toml:"-"`
-	CloudRecipes bool   `toml:"-"`
 }
 
 // Pkg is the package-manager surface.
@@ -114,102 +109,28 @@ type Svc struct {
 	Status  string `toml:"status"`
 }
 
-// registry is the single home for every guest-OS fact. See the package doc
-// comment: adding an OS means adding one complete entry here.
-var registry = []OS{
-	{
-		Name:           "alpine",
-		Shell:          "/bin/ash",
-		SeedPackages:   []string{"sudo"},
-		Backend:        "apkovl",
-		Init:           InitOpenRC, // Alpine has shipped OpenRC as its init since its first release; it has never carried systemd
-		Installer:      "setup-alpine",
-		DefaultSSHUser: "root",
-		PkgSetup: "# -c enables the community repository (docker, tailscale and most of what\n" +
-			"# you would want live there, not in main); -1 picks a mirror and refreshes\n" +
-			"# the indexes, so a separate `apk update` is redundant.\nsetup-apkrepos -c -1\n",
-		PkgInstall:    "apk add ",
-		FilenameHints: []string{"alpine"},
-		CloudRecipes:  true,
-	},
-	{
-		Name:           "ubuntu",
-		Shell:          "/bin/bash",
-		SeedPackages:   nil,
-		Backend:        "cloudinit",
-		Init:           InitSystemd, // Ubuntu switched from Upstart to systemd in 15.04 (2015); every supported release since is systemd
-		Installer:      "",
-		DefaultSSHUser: "stoat",
-		PkgSetup:       "export DEBIAN_FRONTEND=noninteractive\napt-get update\n",
-		PkgInstall:     "apt-get install -y ",
-		FilenameHints:  []string{"ubuntu"},
-		CloudRecipes:   true,
-	},
-	{
-		Name:           "debian",
-		Shell:          "/bin/bash",
-		SeedPackages:   nil,
-		Backend:        "cloudinit",
-		Init:           InitSystemd, // Debian made systemd the default init in Debian 8 "jessie" (2015)
-		Installer:      "",
-		DefaultSSHUser: "stoat",
-		PkgSetup:       "export DEBIAN_FRONTEND=noninteractive\napt-get update\n",
-		PkgInstall:     "apt-get install -y ",
-		FilenameHints:  []string{"debian"},
-		CloudRecipes:   true,
-	},
-	{
-		Name:           "fedora",
-		Shell:          "/bin/bash",
-		SeedPackages:   nil,
-		Backend:        "cloudinit",
-		Init:           InitSystemd, // Fedora was systemd's original adopter, default since Fedora 15 (2011)
-		Installer:      "",
-		DefaultSSHUser: "stoat",
-		PkgSetup:       "",
-		PkgInstall:     "dnf install -y ",
-		FilenameHints:  []string{"fedora"},
-		CloudRecipes:   false,
-	},
-	{
-		Name:           "arch",
-		Shell:          "/bin/bash",
-		SeedPackages:   nil,
-		Backend:        "cloudinit",
-		Init:           InitSystemd, // Arch replaced its own initscripts with systemd as the default in 2012
-		Installer:      "",
-		DefaultSSHUser: "stoat",
-		PkgSetup:       "pacman -Sy --noconfirm\n",
-		PkgInstall:     "pacman -S --noconfirm ",
-		FilenameHints:  []string{"arch"},
-		CloudRecipes:   true,
-	},
-}
+// loaded is the active set: bundled at init, then Load merges user files
+// over it. Lookup before Load sees bundled guests only, so a broken user
+// file cannot take the bundled set down.
+var loaded = loadBundled()
 
-// Lookup returns the OS declared for name, or false if name is not in the
-// registry. It never guesses: an unknown OS is reported as unknown, and it
-// is the caller's job to decide what that means.
+// Lookup returns the OS declared for name. It never guesses: an unknown OS
+// is reported as unknown, and it is the caller's job to decide what that
+// means.
 func Lookup(name string) (OS, bool) {
-	for _, o := range registry {
-		if o.Name == name {
-			return o, true
-		}
-	}
-	return OS{}, false
+	o, ok := loaded[name]
+	return o, ok
 }
 
-// All returns every declared OS.
+// All returns every loaded OS, sorted by name.
 func All() []OS {
-	out := make([]OS, len(registry))
-	copy(out, registry)
-	return out
-}
-
-// Names returns the canonical name of every declared OS, in registry order.
-func Names() []string {
-	out := make([]string, len(registry))
-	for i, o := range registry {
-		out[i] = o.Name
+	names := sortedNames(loaded)
+	out := make([]OS, len(names))
+	for i, n := range names {
+		out[i] = loaded[n]
 	}
 	return out
 }
+
+// Names returns every loaded name, sorted.
+func Names() []string { return sortedNames(loaded) }

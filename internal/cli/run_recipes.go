@@ -36,7 +36,7 @@ func recipesFor(osName, backend string) ([]core.Recipe, error) {
 	case osName != "":
 		b := backend
 		if g, ok := guest.Lookup(osName); ok {
-			b = g.Backend
+			b = g.DefaultBackend
 		}
 		pairs = []pair{{osName, b}}
 	case backend != "":
@@ -45,7 +45,7 @@ func recipesFor(osName, backend string) ([]core.Recipe, error) {
 		}
 	default:
 		for _, g := range guest.All() {
-			pairs = append(pairs, pair{g.Name, g.Backend})
+			pairs = append(pairs, pair{g.Name, g.DefaultBackend})
 		}
 	}
 
