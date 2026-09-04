@@ -115,21 +115,10 @@ func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error
 	return buildArchive(docs)
 }
 
-// mountsDoc mounts the 9p exports. Cloud VMs used to get the exports on the
-// QEMU command line with nothing to mount them, so the share silently did
-// nothing.
-//
-// debian's cloud kernel (deb13-cloud) ships no 9p module, so the mount can
-// never succeed and cloud-init's mounts module marks the whole seed as
-// errored on every boot. SkipShares reads guest.toml's backend.cloudinit
-// skip_9p for the guest and skips the mounts document there.
-//
-// nofail keeps a share that drops out at runtime from holding up boot. The
-// host mount is ro, matching what QEMU enforces, so a write fails immediately
-// instead of after a remount that appears to succeed.
-
 // SkipShares reports whether osName's guest.toml sets backend.cloudinit's
-// skip_9p.
+// skip_9p. A kernel without the 9p module makes cloud-init's mounts module
+// fail the whole seed on every boot, and nofail does not cover an unknown
+// filesystem type.
 func SkipShares(osName string) bool {
 	o, ok := guest.Lookup(osName)
 	if !ok {
@@ -139,6 +128,17 @@ func SkipShares(osName string) bool {
 	return skip
 }
 
+// mountsDoc mounts the 9p exports. Cloud VMs used to get the exports on the
+// QEMU command line with nothing to mount them, so the share silently did
+// nothing.
+//
+// debian's cloud kernel (deb13-cloud) ships no 9p module, so the mount can
+// never succeed. Its guest.toml sets backend.cloudinit's skip_9p, and this
+// document is skipped there.
+//
+// nofail keeps a share that drops out at runtime from holding up boot. The
+// host mount is ro, matching what QEMU enforces, so a write fails immediately
+// instead of after a remount that appears to succeed.
 func mountsDoc(v *config.VM) string {
 	if SkipShares(v.OS) {
 		return ""
