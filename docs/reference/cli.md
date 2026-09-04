@@ -42,6 +42,8 @@ usage: stoat <command> [flags]
 | [`check-recipes`](#stoat-check-recipes-names---osos) | Report why a recipe would not apply | 0, 1, 2 |
 | [`recipe list`](#stoat-recipe-list) | List installed recipes and where they live | 0, 1 |
 | [`recipe new`](#stoat-recipe-new-name) | Scaffold a recipe in the recipes directory | 0, 1 |
+| [`guest ls`](#stoat-guest-ls) | List loaded guest OS definitions | 0 |
+| [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |

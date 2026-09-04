@@ -322,13 +322,12 @@ so a leak fails the build rather than shipping.
 | `check-recipes` | `{"applicable":false,"issues":[RecipeIssue,...]}` |
 | `guest ls` | `{"guests":[Guest,...]}` |
 | `guest show` | `{"guest":Guest}` |
-
-Both `guest` subcommands report `"cmd":"guest"`, not `"cmd":"guest ls"`.
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
 | `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
 
-Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`.
-Distinguish them by which fields `data` carries.
+Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`,
+and both `guest` subcommands report `"cmd":"guest"`. Distinguish them by which
+fields `data` carries.
 
 `recipe list` is "every file in the recipes directory", which is not the same
 as "every recipe you can use": it currently includes the `.bak` files the
