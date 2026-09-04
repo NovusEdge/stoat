@@ -118,9 +118,35 @@ func TestHostCheckGolden(t *testing.T) {
 }
 
 func TestRecipeGolden(t *testing.T) {
-	r := core.Recipe{Name: "xfce", Description: "XFCE desktop environment"}
+	r := core.Recipe{
+		Name:        "xfce",
+		Description: "XFCE desktop environment",
+		Reboot:      true,
+		Depends:     []string{"devtools"},
+		Runtime:     "sh",
+	}
 	got := marshal(t, FromRecipe(r))
-	want := `{"name":"xfce","description":"XFCE desktop environment"}`
+	want := `{"name":"xfce","description":"XFCE desktop environment","reboot":true,"depends":["devtools"],"runtime":"sh"}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// TestRecipeNilDependsIsEmptyList pins the nil -> [] normalization this file's
+// doc comment requires: a Python consumer iterating "depends" raises TypeError
+// on null.
+func TestRecipeNilDependsIsEmptyList(t *testing.T) {
+	got := marshal(t, FromRecipe(core.Recipe{Name: "xfce"}))
+	want := `{"name":"xfce","description":"","reboot":false,"depends":[],"runtime":""}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestApplyPlanGolden(t *testing.T) {
+	p := core.ApplyPlan{Name: "xfce", Action: "run", Reason: "never applied"}
+	got := marshal(t, FromApplyPlan(p))
+	want := `{"name":"xfce","action":"run","reason":"never applied"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

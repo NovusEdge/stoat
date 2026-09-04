@@ -21,10 +21,13 @@ import (
 // file would show up as selectable and let a VM build on a truncated
 // image. Downloads run minutes with no cancel key, so aborted ones, and
 // their .part files, are common.
-func LocalImages() []string {
+func LocalImages() ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(config.Root(), "isos"))
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	var out []string
 	for _, e := range entries {
@@ -32,7 +35,7 @@ func LocalImages() []string {
 			out = append(out, e.Name())
 		}
 	}
-	return out
+	return out, nil
 }
 
 // MatchLocal reports which local file, if any, satisfies catalog entry e.
@@ -86,7 +89,7 @@ func MatchLocal(e iso.Entry, files []string) string {
 
 // image is everything Create needs to know about the file a Spec named.
 type image struct {
-	abs     string     // absolute path to the file on disk
+	abs     string
 	rel     string     // bare name under isos/; "" when abs lives elsewhere
 	entry   *iso.Entry // nil for BYO
 	osName  string
@@ -126,7 +129,10 @@ func resolveImage(spec string) (image, error) {
 		return image{abs: spec, backend: backend, osName: osName}, nil
 	}
 
-	files := LocalImages()
+	files, err := LocalImages()
+	if err != nil {
+		return image{}, err
+	}
 	for _, e := range iso.Catalog() {
 		if e.ID != spec {
 			continue

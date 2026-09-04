@@ -157,7 +157,7 @@ The TUI keeps its prompt and passes the answer. The MCP server requires the agen
 
 ## 7. Convenience operations
 
-These are the "quick VM-based testing" features that make stoat pleasant rather than merely functional. All are cheap because of what QEMU and qcow2 already give us.
+These are the "quick VM-based testing" features that make stoat pleasant to use. All are cheap because of what QEMU and qcow2 already give us.
 
 | Operation | Signature | Why it earns a slot |
 |---|---|---|
@@ -282,7 +282,7 @@ The mechanism that does work is `security_model=mapped-xattr`, which stores *"ui
 
 ### 10.3 MCP tool taxonomy
 
-Three classes, annotated honestly and, crucially, enforced independently of whether the client honours the annotation.
+Three classes, annotated honestly and enforced independently of whether the client honours the annotation.
 
 | Class | Tools | Annotations | Server-side rule |
 |---|---|---|---|

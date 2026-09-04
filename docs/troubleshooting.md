@@ -34,9 +34,9 @@ window, which stays reachable even if the guest locks up or loses its network.
 stoat: up: qemu failed to start: qemu-system-x86_64: OpenGL is not supported by display backend 'gtk'
 ```
 
-This one is not about OpenGL, and mesa and your GPU drivers are not the place
-to look. stoat starts a VM with `-display gtk,gl=on` by default, and `gl=on`
-is simply the first option QEMU rejects when it cannot open a window at all.
+`gl=on` is the first option QEMU rejects when it can't open a window at all;
+mesa and GPU drivers aren't involved. stoat starts a VM with
+`-display gtk,gl=on` by default.
 With the same window and no `gl=on`, the same host says `gtk initialization
 failed` instead.
 
@@ -185,7 +185,7 @@ membership actually takes effect. Confirm with `ls -l /dev/kvm` and `groups`.
 
 ## A live VM lost everything after a reboot
 
-This isn't a bug, it's how live mode works. A live VM's root filesystem is a
+Live mode works this way by design. A live VM's root filesystem is a
 `tmpfs`/`overlay` mount that only exists in RAM for that boot
 (`internal/apkovl/apkovl.go`'s doc comment, and the same detection every
 bundled recipe uses: `awk '$2 == "/" { print $3 }' /proc/mounts` reporting

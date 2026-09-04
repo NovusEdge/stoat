@@ -131,21 +131,31 @@ def check_host_path(path: str, vm: str, data_root: str | os.PathLike[str] | None
 
 
 class RateLimiter:
-    """A token bucket per tool name.
+    """A token bucket per tool name, plus one bucket every tool shares.
 
     The MCP spec makes rate limiting a server MUST. The numbers here are a
     starting point rather than a tuned value: generous enough that ordinary
     agent work never notices, tight enough that a runaway loop calling
     `create` a thousand times stops being the host's problem.
 
+    The shared bucket is what bounds the server as a whole. Per-tool buckets
+    alone let a caller burst `capacity` times against each of ~20 tools, so
+    the real ceiling was 20x the number anyone read off this class.
+
     Not thread-safe on purpose; the stdio server is single-threaded, and a
     lock here would imply a concurrency story that does not exist.
     """
 
-    def __init__(self, capacity: int = 30, refill_per_second: float = 0.5) -> None:
-        if capacity < 1:
+    def __init__(
+        self,
+        capacity: int = 30,
+        refill_per_second: float = 0.5,
+        total_capacity: int = 60,
+        total_refill_per_second: float = 2.0,
+    ) -> None:
+        if capacity < 1 or total_capacity < 1:
             raise ValueError("capacity must be at least 1, or nothing can ever run")
-        if refill_per_second <= 0:
+        if refill_per_second <= 0 or total_refill_per_second <= 0:
             # A bucket that never refills is a bucket that permanently bricks
             # the tool after `capacity` calls. Refusing at construction beats
             # discovering it in production, and it is why the message below
@@ -153,19 +163,54 @@ class RateLimiter:
             raise ValueError("refill_per_second must be positive")
         self.capacity = capacity
         self.refill_per_second = refill_per_second
+        self.total_capacity = total_capacity
+        self.total_refill_per_second = total_refill_per_second
         self._buckets: dict[str, tuple[float, float]] = {}
 
     def check(self, tool: str, now: float | None = None) -> None:
-        """Consume one token for `tool`, raising if the bucket is empty."""
+        """Consume one token for `tool` and one shared token.
+
+        Both buckets are read before either is charged. A call refused by one
+        must not spend from the other: a hot tool hitting its own limit would
+        otherwise drain the shared bucket and starve every other tool.
+        """
         now = time.monotonic() if now is None else now
-        tokens, last = self._buckets.get(tool, (float(self.capacity), now))
-        tokens = min(self.capacity, tokens + (now - last) * self.refill_per_second)
+        tool_tokens = self._read(tool, self.capacity, self.refill_per_second, now, tool)
+        total_tokens = self._read(
+            "", self.total_capacity, self.total_refill_per_second, now, "the server"
+        )
+        self._buckets[tool] = (tool_tokens - 1.0, now)
+        self._buckets[""] = (total_tokens - 1.0, now)
+
+    def _read(
+        self, key: str, capacity: int, refill: float, now: float, subject: str
+    ) -> float:
+        """Return key's token count at `now`, raising when it is below one."""
+        tokens, last = self._buckets.get(key, (float(capacity), now))
+        tokens = min(capacity, tokens + (now - last) * refill)
         if tokens < 1.0:
-            wait = (1.0 - tokens) / self.refill_per_second
+            wait = (1.0 - tokens) / refill
             raise GuardRejection(
-                f"rate limit reached for {tool}; retry in about {wait:.0f}s"
+                f"rate limit reached for {subject}; retry in about {wait:.0f}s"
             )
-        self._buckets[tool] = (tokens - 1.0, now)
+        return tokens
+
+
+def check_flag_free(values: list[str], what: str) -> list[str]:
+    """Refuse a value that kong would read as a flag.
+
+    `forward` and `check_recipes` splat their list arguments into argv as
+    positionals. `forward(pairs=["--clear"])` reached kong as the --clear
+    flag and wiped the VM's forwards, from a call that passed clear=False.
+    Nothing escapes the process (there is no shell), so this is argv
+    confusion, and refusing a leading dash closes it.
+    """
+    for v in values:
+        if not isinstance(v, str) or not v.strip():
+            raise GuardRejection(f"{what} contains an empty value")
+        if v.startswith("-"):
+            raise GuardRejection(f"{what} value {v!r} may not start with a dash")
+    return values
 
 
 def strip_forbidden(patch: dict[str, object]) -> dict[str, object]:

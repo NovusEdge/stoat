@@ -440,7 +440,7 @@ original and is fine), `vmlist.go`'s delegate and every width constant,
 `app.go`'s `View`/`newView`/`renderModal` compositing, `list.go brokenReason`,
 `access.go`'s `shortenPath`/`joinAccess`.
 
-**Every width constant is load-bearing and has a story:** `listWidth = 60`
+**Every width constant has a story:** `listWidth = 60`
 (sized to a running row), `formContentWidth = 72` (sized to fit 80 columns),
 `byoFileWidth = 24`, `imageMetaWidth = 11` (sized to `"13 (trixie)"`),
 `modalSizeWidth = 9` (sized to `"~66.0 MiB"`), `accessWidth = 40`,

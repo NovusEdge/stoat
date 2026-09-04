@@ -112,7 +112,8 @@ is enforced regardless of what the client does.
 | `check_vm_name` | Must match stoat's own name rules and resolve to a managed VM. No paths, no traversal, no empty. |
 | `check_host_path` | For `copy_to`/`copy_from` only. Resolve with `os.path.realpath` (after symlinks), require the prefix `~/.stoat/shared/<vm>/`, reject anything else. |
 | `check_image_id` | Catalog IDs only. An absolute or relative path is rejected: §7.1 #4. |
-| `rate_limit` | A token bucket per tool. The MCP spec makes rate limiting a server `MUST`. |
+| `rate_limit` | A token bucket per tool, and a second one shared by every tool. Per-tool alone let a caller burst `capacity` times across each of ~20 tools. The MCP spec makes rate limiting a server `MUST`. |
+| `check_flag_free` | Values splatted into argv as positionals (`forward` pairs, `check_recipes` names) must not start with `-`. `forward(pairs=["--clear"])` otherwise reached kong as the clear flag. |
 
 **Never exposed as tools at all** (§7.1): `share` as any parameter, BYO image
 paths, `recipe new`, `ssh-command`, and the global (no VM) `logs`. These are
@@ -128,10 +129,22 @@ may ignore them.
 
 | Class | Tools | `readOnlyHint` | `destructiveHint` |
 |---|---|---|---|
-| Read-only | `list_vms`, `vm_status`, `list_images`, `list_recipes`, `check_recipes`, `logs`, `doctor` | true | false |
-| Mutating | `create`, `start`, `stop`, `apply_recipes`, `update`, `clone`, `snapshot`, `restore`, `forward`, `wait` | false | false |
-| Destructive | `destroy`, `prune` | false | true |
+| Read-only | `list_vms`, `vm_status`, `list_images`, `list_recipes`, `check_recipes`, `logs`, `doctor`, `plan_recipes` | true | false |
+| Mutating | `create`, `start`, `stop`, `apply_recipes`, `update`, `clone`, `snapshot`, `forward`, `wait` | false | false |
+| Destructive | `destroy`, `prune`, `restore` | false | true |
 | Execution | `exec`, `copy_to`, `copy_from` | false | true, `openWorldHint` true |
+
+`plan_recipes` is `apply --dry-run`. It exists so an agent can read what an
+apply would do before running one, which is the cheapest safety an agent gets
+here. It is a separate tool rather than a `dry_run` flag on `apply_recipes`,
+because one tool cannot honestly declare `readOnlyHint` both ways.
+
+`restore` is destructive. It discards everything written since the snapshot,
+and only another snapshot taken later undoes that.
+
+`apply_recipes` runs arbitrary scripts inside the guest, so it checks
+`allow_exec` exactly as `exec` does. A VM created with `--allow-exec=false`
+refuses both.
 
 Every schema sets `additionalProperties: false`, so an unexpected parameter is
 rejected rather than silently ignored (OWASP MCP guidance).

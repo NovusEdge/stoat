@@ -7,12 +7,16 @@ to compute something stoat's JSON contract does not already hand back, that
 is a sign the layering is wrong (docs/design/mcp-server.md, "Layering"), and
 the fix belongs in the Go core, not here.
 
-Four things are enforced independently of what an MCP client does, because
+Five things are enforced independently of what an MCP client does, because
 the protocol guarantees none of them: rate limiting (RateLimiter.check,
 first thing every tool does), path confinement (guards.check_host_path),
-name validation (guards.check_vm_name), and allow_exec (checked here, since
-core.Exec deliberately does not enforce it and core is a library the TUI and
-CLI also call without wanting that restriction).
+name validation (guards.check_vm_name), argv-flag confusion
+(guards.check_flag_free), and allow_exec (checked here, since core.Exec
+deliberately does not enforce it and core is a library the TUI and CLI also
+call without wanting that restriction).
+
+allow_exec covers apply_recipes too. A recipe body is arbitrary guest code,
+so a VM that refuses exec refuses an apply as well.
 
 Deliberately absent, not merely gated, per docs/design/mcp-server.md §4:
 no `share` parameter on any tool, no bring-your-own image path, no
@@ -22,6 +26,7 @@ no `share` parameter on any tool, no bring-your-own image path, no
 from __future__ import annotations
 
 import functools
+import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, TypeVar
@@ -31,7 +36,14 @@ from fastmcp.exceptions import ToolError
 
 from .client import Client, argv_for_bool
 from .errors import ContractMismatch, GuardRejection, StoatCrashed, StoatError
-from .guards import RateLimiter, check_host_path, check_image_id, check_vm_name, strip_forbidden
+from .guards import (
+    RateLimiter,
+    check_flag_free,
+    check_host_path,
+    check_image_id,
+    check_vm_name,
+    strip_forbidden,
+)
 
 mcp: FastMCP = FastMCP("stoat")
 
@@ -89,6 +101,11 @@ def _guarded(tool_name: str) -> Callable[[F], F]:
                 raise ToolError(f"{e.code}: {e.message}") from e
             except StoatCrashed as e:
                 raise ToolError(f"stoat exited {e.returncode} without answering") from e
+            except subprocess.TimeoutExpired as e:
+                # Client.run kills the process in its own finally, so this is
+                # already cleaned up. Without this arm it surfaces as a bare
+                # traceback that fastmcp masks.
+                raise ToolError(f"stoat did not finish within {e.timeout:.0f}s") from e
 
         return wrapper  # type: ignore[return-value]
 
@@ -114,8 +131,16 @@ def _recipes_flag(recipes: Sequence[str] | None) -> list[str]:
     return ["--recipes", ",".join(recipes)]
 
 
+# The stdio transport is single-threaded: one blocked tool blocks the server.
+# `wait` is the only tool that blocks on purpose, so it is the only one that
+# needs a ceiling a caller cannot raise.
+MAX_WAIT_SECONDS = 600
+
+MAX_LOG_LINES = 2000
+
+
 def _require_exec_allowed(vm: str) -> None:
-    """Refuse exec/copy_to/copy_from on a VM created with --allow-exec=false.
+    """Refuse exec, copy and apply on a VM created with --allow-exec=false.
 
     core.Exec does not enforce this itself (core is a library the TUI and
     CLI also call, and a blanket refusal there would be the wrong layer);
@@ -206,6 +231,7 @@ def list_recipes(os: str | None = None, backend: str | None = None) -> dict[str,
 def check_recipes(
     recipes: list[str], os: str, backend: str | None = None
 ) -> dict[str, Any]:
+    check_flag_free(recipes, "recipes")
     argv = ["check-recipes", *recipes, "--os", os, *_flag("backend", backend)]
     return get_client().run(*argv)
 
@@ -215,13 +241,17 @@ def check_recipes(
     description=(
         "Tail one VM's log: its qemu console output (default), or its most "
         "recent recipe-apply log. Always scoped to a single named VM; there is "
-        "no way to read stoat's own global log through this tool. Read-only."
+        "no way to read stoat's own global log through this tool. 'n' is "
+        "capped at 2000 lines. Read-only."
     ),
     annotations={"readOnlyHint": True, "destructiveHint": False},
 )
 @_guarded("logs")
 def logs(vm: str, which: Literal["console", "apply"] = "console", n: int = 50) -> dict[str, Any]:
     vm = check_vm_name(vm)
+    # A console log grows without bound, and the whole tail comes back in one
+    # response. Clamping beats handing an agent a payload it cannot read.
+    n = max(1, min(n, MAX_LOG_LINES))
     return get_client().run("logs", vm, "--which", which, "-n", str(n))
 
 
@@ -318,21 +348,48 @@ def stop(vm: str) -> dict[str, Any]:
 
 
 @mcp.tool(
+    name="plan_recipes",
+    description=(
+        "Report what apply_recipes would do to a VM, without running anything: "
+        "one entry per recipe with 'run' or 'skip' and the reason. Computed on "
+        "the host, so it works on a stopped VM. Read-only."
+    ),
+    annotations={"readOnlyHint": True, "destructiveHint": False},
+)
+@_guarded("plan_recipes")
+def plan_recipes(vm: str, only: list[str] | None = None) -> dict[str, Any]:
+    vm = check_vm_name(vm)
+    return get_client().run(*_apply_argv(vm, only), "--dry-run")
+
+
+@mcp.tool(
     name="apply_recipes",
     description=(
         "Run a VM's own configured recipes over ssh (or, optionally, a subset "
-        "of them). Mutating: runs arbitrary recipe scripts inside the guest, "
-        "which is only reversible to whatever extent the recipe itself is."
+        "of them). Call plan_recipes first to see what this would do. Refused "
+        "on a VM created with --allow-exec=false, since a recipe is arbitrary "
+        "guest code. Mutating: runs arbitrary recipe scripts inside the guest, "
+        "which is only reversible to whatever extent the recipe itself is. "
+        "Reaches outside this process (openWorldHint)."
     ),
-    annotations={"readOnlyHint": False, "destructiveHint": False},
+    annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
 )
 @_guarded("apply_recipes")
 def apply_recipes(vm: str, only: list[str] | None = None) -> dict[str, Any]:
     vm = check_vm_name(vm)
+    # A recipe body is arbitrary guest code, so this is exec by another name
+    # and answers to the same opt-out.
+    _require_exec_allowed(vm)
+    return get_client().run(*_apply_argv(vm, only))
+
+
+def _apply_argv(vm: str, only: list[str] | None) -> list[str]:
+    """Shared argv for apply and its dry run: `apply <vm> [--only n]...`."""
+    names = check_flag_free(list(only or []), "only")
     argv = ["apply", vm]
-    for name in only or []:
+    for name in names:
         argv += ["--only", name]
-    return get_client().run(*argv)
+    return argv
 
 
 @mcp.tool(
@@ -420,10 +477,10 @@ def snapshot(vm: str, tag: str) -> dict[str, Any]:
     name="restore",
     description=(
         "Roll a VM's disk back to a previously saved snapshot tag, discarding "
-        "everything written since. Mutating and only reversible if another "
+        "everything written since. Destructive and only reversible if another "
         "snapshot was taken after the one being restored to."
     ),
-    annotations={"readOnlyHint": False, "destructiveHint": False},
+    annotations={"readOnlyHint": False, "destructiveHint": True},
 )
 @_guarded("restore")
 def restore(vm: str, tag: str) -> dict[str, Any]:
@@ -448,7 +505,7 @@ def forward(vm: str, pairs: list[str] | None = None, clear: bool = False) -> dic
     if clear:
         argv.append("--clear")
     else:
-        argv += list(pairs or [])
+        argv += check_flag_free(list(pairs or []), "pairs")
     return get_client().run(*argv)
 
 
@@ -458,7 +515,8 @@ def forward(vm: str, pairs: list[str] | None = None, clear: bool = False) -> dic
         "Block until a VM reaches a state: reachable (sshd answering), applied "
         "(most recent recipe run finished), or stopped (qemu no longer "
         "running). The bound is 'timeout_seconds', a plain integer count of "
-        "seconds, not a duration string. Fails immediately, rather than waiting "
+        "seconds, not a duration string, capped at 600. Fails immediately, "
+        "rather than waiting "
         "out the timeout, for a state the VM can never reach. Mutating only in "
         "that it blocks the caller; it does not itself change the VM."
     ),
@@ -471,6 +529,7 @@ def wait(
     timeout_seconds: int = 120,
 ) -> dict[str, Any]:
     vm = check_vm_name(vm)
+    timeout_seconds = max(1, min(timeout_seconds, MAX_WAIT_SECONDS))
     argv = ["wait", vm, "--until", until, "--timeout", f"{timeout_seconds}s"]
     # The subprocess-level timeout must exceed stoat's own --timeout, or the
     # process gets killed before stoat has a chance to answer with "timeout"
@@ -592,11 +651,14 @@ def _verify_cp_local(data: dict[str, Any], authorised_local: str) -> None:
     """Post-verify that `cp` acted on the exact path this server authorised.
 
     `cp` echoes back the resolved absolute local path it used (json.md's
-    `cp` row). Guard-time validation establishes that the path we ASKED for
-    was safe; this establishes that the path stoat actually ACTED on is the
-    same one, catching any divergence between the two resolvers (guard-time
-    uses os.path.realpath, stoat's own resolveLocal does not) rather than
-    trusting them to agree.
+    `cp` row). This catches a divergence between the two resolvers: the guard
+    uses os.path.realpath, stoat's own resolveLocal does not.
+
+    It does not catch a component of the path swapped to a symlink between
+    the guard and scp's open, and it runs after the copy either way. The
+    defence there is QEMU's mapped-xattr, which stores a guest symlink as an
+    extended attribute instead of a real host one (mcp-server.md section 8).
+    That guard and this one are independent; neither covers the other.
     """
     actual = data.get("local")
     if actual != authorised_local:

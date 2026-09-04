@@ -96,18 +96,9 @@ func PlanApply(name string, opts ApplyOpts) ([]ApplyPlan, error) {
 		return nil, err
 	}
 
-	targets := v.Recipes
-	if len(opts.Only) > 0 {
-		have := make(map[string]bool, len(v.Recipes))
-		for _, r := range v.Recipes {
-			have[r] = true
-		}
-		for _, o := range opts.Only {
-			if !have[o] {
-				return nil, fmt.Errorf("%w: recipe %q is not one of %s's recipes", ErrRecipeNotApplicable, o, v.Name)
-			}
-		}
-		targets = opts.Only
+	targets, err := resolveTargets(v, opts.Only)
+	if err != nil {
+		return nil, err
 	}
 	explicit := make(map[string]bool, len(opts.Only))
 	for _, o := range opts.Only {
@@ -129,24 +120,35 @@ func PlanApply(name string, opts ApplyOpts) ([]ApplyPlan, error) {
 	return plan, nil
 }
 
+// resolveTargets validates only against v's own recipes and returns the
+// target list: only itself when non-empty, v.Recipes otherwise. Shared by
+// PlanApply and applyLocked so a dry-run plan always targets the same
+// recipes a real Apply would.
+func resolveTargets(v *config.VM, only []string) ([]string, error) {
+	if len(only) == 0 {
+		return v.Recipes, nil
+	}
+	have := make(map[string]bool, len(v.Recipes))
+	for _, r := range v.Recipes {
+		have[r] = true
+	}
+	for _, o := range only {
+		if !have[o] {
+			return nil, fmt.Errorf("%w: recipe %q is not one of %s's recipes", ErrRecipeNotApplicable, o, v.Name)
+		}
+	}
+	return only, nil
+}
+
 // applyLocked is Apply's body, run while Apply holds name's provision lock.
 func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	if !qemu.Running(v) {
 		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
 	}
 
-	targets := v.Recipes
-	if len(opts.Only) > 0 {
-		have := make(map[string]bool, len(v.Recipes))
-		for _, r := range v.Recipes {
-			have[r] = true
-		}
-		for _, o := range opts.Only {
-			if !have[o] {
-				return fmt.Errorf("%w: recipe %q is not one of %s's recipes", ErrRecipeNotApplicable, o, v.Name)
-			}
-		}
-		targets = opts.Only
+	targets, err := resolveTargets(v, opts.Only)
+	if err != nil {
+		return err
 	}
 	if len(targets) == 0 {
 		// Nothing to run is not an error. An explicit Apply on a VM with no
@@ -473,6 +475,16 @@ func dependencyError(dependent, dep string, manifests map[string]recipes.Manifes
 type Recipe struct {
 	Name        string // recipe name, matches the directory name
 	Description string // from recipe.toml
+	// Reboot says the guest needs a restart before this recipe's effect is
+	// visible. A caller that waits for "reachable" after an apply sees the
+	// pre-reboot sshd and reads it as done.
+	Reboot bool
+	// Depends names recipes that run before this one. Apply orders the run
+	// itself, so this is for a caller that reports the plan, not one that
+	// sorts.
+	Depends []string
+	// Runtime is the interpreter the script runs under: "sh" or "python3".
+	Runtime string
 }
 
 // RecipeFilter selects the recipes Recipes returns: the set
@@ -496,7 +508,13 @@ func Recipes(f RecipeFilter) ([]Recipe, error) {
 	var out []Recipe
 	for _, m := range manifests {
 		if recipes.MatchesVM(&m, f.OS) {
-			out = append(out, Recipe{Name: m.Name, Description: m.Description})
+			out = append(out, Recipe{
+				Name:        m.Name,
+				Description: m.Description,
+				Reboot:      m.Reboot,
+				Depends:     m.Depends,
+				Runtime:     m.Runtime,
+			})
 		}
 	}
 	return out, nil

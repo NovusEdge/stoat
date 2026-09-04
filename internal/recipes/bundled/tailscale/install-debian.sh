@@ -9,7 +9,6 @@ set -e
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Use Tailscale's official install script
 curl -fsSL https://tailscale.com/install.sh | sh
 
 systemctl enable tailscaled

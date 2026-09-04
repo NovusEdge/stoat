@@ -1,4 +1,4 @@
-# Recipe System Fixes
+# Recipe system fixes
 
 Status: **draft**
 
@@ -6,7 +6,7 @@ Status: **draft**
 
 This spec addresses six architectural issues in the recipe system. Items 1 and the cloudinit v2 conversion are coupled; the rest can land independently.
 
-## Priority Order
+## Priority order
 
 1. Delete v1 metadata parser + wire cloudinit to v2 scripts (coupled)
 2. Add dependency ordering
@@ -17,7 +17,7 @@ This spec addresses six architectural issues in the recipe system. Items 1 and t
 
 ---
 
-## 1. Delete v1 Metadata Parser + Cloudinit v2 Conversion
+## 1. Delete v1 metadata parser + cloudinit v2 conversion
 
 **Can implement independently:** No — cloudinit's `Prepare()` and `clone.go` call `recipes.Read()` on v2 directory names, which fails. These must be fixed together.
 
@@ -31,12 +31,12 @@ Additionally, the cloudinit backend is already broken for v2 recipes. `cloudinit
 
 Delete the v1 path, wire cloudinit to v2 scripts, and make `Manifest` the single source of truth.
 
-### Files to Delete
+### Files to delete
 
 - `internal/recipes/metadata.go`
 - `internal/recipes/metadata_test.go`
 
-### Files to Modify
+### Files to modify
 
 **`internal/core/apply.go`:**
 - Remove `ReadMetadata` calls
@@ -69,7 +69,7 @@ Warning: Moved legacy recipe <name> to .v1-removed/. Convert to v2 format. See d
 
 ---
 
-## 2. Dependency Ordering
+## 2. Dependency ordering
 
 **Can implement independently:** Yes
 
@@ -77,7 +77,7 @@ Warning: Moved legacy recipe <name> to .v1-removed/. Convert to v2 format. See d
 
 `v.Recipes` is a flat list run in array order. Recipes cannot declare "run after X". If devtools assumes Docker is present, the user must manually order them correctly.
 
-### Manifest Change
+### Manifest change
 
 ```toml
 name = "devtools"
@@ -98,7 +98,7 @@ depends = ["docker"]
 - Error with the cycle path if found: `"cycle detected: devtools -> docker -> devtools"`
 - Auto-added dependencies must pass `MatchesVM` for the target VM's OS
 
-### Topo-Sort
+### Topo-sort
 
 **In `filterByRunMode`:**
 - Before filtering by run mode, topo-sort `targets` so dependencies come first
@@ -106,7 +106,7 @@ depends = ["docker"]
 - Kahn's algorithm or DFS-based sort; either works for small N
 - **Cycle detection here too**: user can edit manifests on disk after add-time. Error if a cycle appears; do not silently fall back to array order.
 
-### Dependency Satisfaction Rules
+### Dependency satisfaction rules
 
 A dependency is satisfied when:
 - The dependency recipe ran earlier in this apply run, OR
@@ -116,13 +116,13 @@ A dependency is **not** satisfied when:
 - The dependency is `run = "manual"` and was never applied — error: `"devtools depends on docker, which has never been applied (run = manual)"`
 - The dependency is filtered out by `ApplyOpts.Only` and was never applied — error: `"devtools depends on docker; add it to --recipe or apply it first"`
 
-### TUI Behavior
+### TUI behavior
 
 User adds "devtools" which depends on "docker":
 - If docker is already in `v.Recipes`: proceed
 - If docker is missing: run `CheckRecipes` on docker for this VM's OS. If it passes, auto-add and show: `"Added docker (required by devtools)"`. If it fails, error with the reason.
 
-### CLI Behavior
+### CLI behavior
 
 `stoat vm create --recipes devtools` errors if docker isn't also specified:
 ```
@@ -133,7 +133,7 @@ The CLI does not auto-add. Scripts must be explicit.
 
 ---
 
-## 3. Cloudinit Post-Boot Path
+## 3. Cloudinit post-boot path
 
 **Can implement independently:** Yes (after item 1)
 
@@ -150,7 +150,7 @@ After item 1, cloudinit generates seeds with v2 scripts. `Apply()` still returns
 
 Remove `ErrAppliedAtBoot`. Allow `Apply()` to work on cloudinit VMs via SSH after first boot. Track what cloud-init ran via marker files.
 
-### Marker Files
+### Marker files
 
 **At VM creation (in cloudinit backend's seed generation):**
 
@@ -162,7 +162,7 @@ runcmd:
 
 Each recipe writes a marker file on success.
 
-### Apply Behavior
+### Apply behavior
 
 **In `applyLocked` (after removing the `ErrAppliedAtBoot` check):**
 
@@ -175,7 +175,7 @@ Each recipe writes a marker file on success.
 
 **Fallback:** If `/var/lib/stoat/.applied/` doesn't exist (old VM created before this feature, or cloud-init failed entirely), treat all recipes as pending. The first `Apply()` re-runs everything once; after that, state is tracked correctly.
 
-### Files to Modify
+### Files to modify
 
 **`internal/core/apply.go`:**
 - Remove the `backend.For(v).Name() == "cloudinit"` check that returns `ErrAppliedAtBoot`
@@ -201,7 +201,7 @@ Cloudinit VMs behave like other VMs after first boot:
 
 ---
 
-## 4. Dry-Run
+## 4. Dry-run
 
 **Can implement independently:** Yes
 
@@ -213,7 +213,7 @@ Cloudinit VMs behave like other VMs after first boot:
 
 Add `stoat apply --dry-run` and expose the filtering result.
 
-### CLI Output
+### CLI output
 
 **Human-readable (default):**
 ```
@@ -257,11 +257,11 @@ func PlanApply(v *config.VM, opts ApplyOpts) ([]ApplyPlan, error)
 
 ---
 
-## 5. Single Reboot Behavior
+## 5. Single reboot behavior
 
 **Can implement independently:** Yes (documentation only)
 
-### Current Behavior
+### Current behavior
 
 `reboot = true` in the manifest triggers one reboot after all recipes finish. The first recipe that declares `reboot = true` names the reboot in the log. Subsequent `reboot = true` recipes don't trigger additional reboots.
 
@@ -271,7 +271,7 @@ Reboot only fires for disk-mode VMs (`apply.go:185` checks `v.Mode == "disk"`).
 
 Keep this behavior. Document it clearly.
 
-### Documentation Update
+### Documentation update
 
 In `docs/recipe-spec-v2.md`, add a section:
 
@@ -291,13 +291,13 @@ and a reboot wipes everything. Live recipes that need a session restart
 should restart in place instead (e.g., `kill -HUP 1`).
 ```
 
-### Future Extension
+### Future extension
 
 Per-recipe reboots (reboot after recipe A, then run recipe B) could be added later. Out of scope for this spec.
 
 ---
 
-## 6. Stage Field Validation
+## 6. Stage field validation
 
 **Can implement independently:** Yes
 
@@ -305,7 +305,7 @@ Per-recipe reboots (reboot after recipe A, then run recipe B) could be added lat
 
 `stage = "install"` parses and validates, but install-stage recipe bodies are never executed. The field exists in the schema with no effect.
 
-### Use Case
+### Use case
 
 BYO ISO support will need install-stage hooks for custom partitioning, bootloader config, and installer automation. That feature does not exist yet.
 
@@ -322,7 +322,7 @@ if m.Stage == "install" {
 }
 ```
 
-### Why Not Implement Now
+### Why not implement now
 
 The cloudinit design has a bug: cloud-init's `bootcmd` runs *before* the `write_files` module, so the script file doesn't exist yet. `bootcmd` also runs before networking, so package installs fail. "Install stage" on a cloud image is conceptually unclear anyway — the system is already installed.
 
@@ -334,9 +334,9 @@ When BYO ISO support is added, revisit this section. The implementation will lik
 
 ---
 
-## Testing Strategy
+## Testing strategy
 
-### Unit Tests
+### Unit tests
 
 - `TestParseManifestDependsField` — validates depends parsing
 - `TestCycleDetection` — catches A→B→A cycles at add-time
@@ -347,14 +347,14 @@ When BYO ISO support is added, revisit this section. The implementation will lik
 - `TestPlanApplyStoppedVM` — works when VM is not running
 - `TestCloudInitMarkerDiscovery` — reads marker files, populates Applied
 
-### Integration Tests
+### Integration tests
 
 - Create a VM with depends, verify execution order
 - `--dry-run` outputs correct plan
 - cloudinit VM: apply after first boot, verify state tracking
 - TUI: add recipe with missing dep that fails OS check, verify error
 
-### Manual Tests
+### Manual tests
 
 - TUI: add recipe with missing dep, verify auto-add message
 - CLI: `--recipes devtools` without docker, verify error
@@ -362,9 +362,9 @@ When BYO ISO support is added, revisit this section. The implementation will lik
 
 ---
 
-## Implementation Notes
+## Implementation notes
 
-### Order Matters
+### Order matters
 
 1. **Item 1** first — deletes v1, fixes broken cloudinit backend
 2. **Item 2** — dependency ordering, no blockers
@@ -373,7 +373,7 @@ When BYO ISO support is added, revisit this section. The implementation will lik
 5. **Item 5** — docs only
 6. **Item 6** — validation only, can land anytime
 
-### Backwards Compatibility
+### Backwards compatibility
 
 - v1 flat-file recipes are swept to `.v1-removed/` with a warning; users must migrate
 - Existing v2 recipes without `depends` keep working (empty deps = no ordering constraint)
