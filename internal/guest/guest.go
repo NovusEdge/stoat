@@ -85,6 +85,15 @@ type OS struct {
 	// xfce.fedora.cloud.yaml. See recipes/recipes.go's List doc comment for
 	// how a per-OS fragment and the shared set combine.
 	CloudRecipes bool
+
+	Capabilities []string
+	Pkg          Pkg
+	Source       string
+}
+
+// Pkg is the package-manager surface.
+type Pkg struct {
+	Install []string
 }
 
 // registry is the single home for every guest-OS fact. See the package doc
