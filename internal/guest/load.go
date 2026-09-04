@@ -138,6 +138,12 @@ func sortedNames(m map[string]OS) []string {
 	return names
 }
 
+var loaded = loadBundled()
+
+func Load(dir string) error { return fmt.Errorf("guest: Load not implemented") }
+
+func Capabilities() map[string][]string { return nil }
+
 // userFiles lists <dir>/*.toml, or nothing when dir is absent.
 func userFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
