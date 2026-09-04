@@ -36,6 +36,9 @@ const (
 	StateBroken  State = "broken"
 )
 
+// States returns every State this package produces.
+func States() []State { return nil }
+
 // ErrNotRunning is returned by Stop (and by Destroy, transitively) for a VM
 // that is not running. qemu.Stop itself treats "already stopped" as a
 // no-op; Stop checks first so the caller gets a typed error instead.

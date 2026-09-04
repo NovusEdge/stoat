@@ -33,6 +33,12 @@ const (
 	UntilStopped Until = "stopped"
 )
 
+// Untils returns every state Wait can block for.
+func Untils() []Until { return nil }
+
+// Valid reports whether u is one of Untils().
+func (u Until) Valid() bool { return false }
+
 // ErrCannotReach is returned by Wait for a VM that cannot, by construction,
 // ever reach the requested state: a stopped VM asked to become Reachable, or
 // a VM with no recipes asked to become Applied. Wait checks for these cases

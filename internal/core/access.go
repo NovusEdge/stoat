@@ -48,6 +48,12 @@ const (
 // reading the wrong file.
 var ErrUnknownWhich = fmt.Errorf("unknown log selector")
 
+// Whichs returns every log a caller can ask for.
+func Whichs() []Which { return nil }
+
+// Valid reports whether w is one of Whichs().
+func (w Which) Valid() bool { return false }
+
 // Logs opens the requested log file for VM name.
 //
 // A missing file is normal, not an error. A VM that never started has no
