@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
@@ -117,6 +118,10 @@ var codeTable = []struct {
 	{CodeNoConsolePassword, qemu.ErrNoConsolePassword},
 	{CodeShareInvalid, qemu.ErrShareInvalid},
 	{CodeNoXattr, qemu.ErrNoXattr},
+	{CodeDownloadFailed, iso.ErrDownloadFailed},
+	{CodeDownloadStalled, iso.ErrDownloadStalled},
+	{CodeChecksumMismatch, iso.ErrChecksumMismatch},
+	{CodeNoSuchImage, iso.ErrNoSuchImage},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking

@@ -348,7 +348,7 @@ func Latest(flavor string) (*Release, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("index: %s", resp.Status)
+		return nil, fmt.Errorf("%w: index: %s", ErrDownloadFailed, resp.Status)
 	}
 	var releases []Release
 	if err := yaml.NewDecoder(resp.Body).Decode(&releases); err != nil {
@@ -359,7 +359,7 @@ func Latest(flavor string) (*Release, error) {
 			return &releases[i], nil
 		}
 	}
-	return nil, fmt.Errorf("no %s iso in index", flavor)
+	return nil, fmt.Errorf("%w: no %s iso in index", ErrNoSuchImage, flavor)
 }
 
 // Resolve turns a catalog Entry into a concrete Release ready for Download.
@@ -412,7 +412,7 @@ func fetchChecksum(checksumURL, filename string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("checksum: %s", resp.Status)
+		return "", fmt.Errorf("%w: checksum: %s", ErrDownloadFailed, resp.Status)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -450,7 +450,7 @@ func parseChecksum(body []byte, filename string) (string, error) {
 			return strings.ToLower(fields[0]), nil
 		}
 	}
-	return "", fmt.Errorf("no checksum for %s", filename)
+	return "", fmt.Errorf("%w: no checksum for %s", ErrDownloadFailed, filename)
 }
 
 // newDigest picks the hash algorithm by the expected digest's hex length:
@@ -530,7 +530,7 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download: %s", resp.Status)
+		return "", fmt.Errorf("%w: download: %s", ErrDownloadFailed, resp.Status)
 	}
 
 	// Cancelling the request unblocks a Read that would otherwise never
@@ -592,7 +592,7 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 			_ = f.Close()
 			_ = os.Remove(part)
 			if stalled.Load() {
-				return "", fmt.Errorf("download stalled: no data for %s", stallTimeout)
+				return "", fmt.Errorf("%w: download stalled: no data for %s", ErrDownloadStalled, stallTimeout)
 			}
 			return "", rerr
 		}
@@ -609,7 +609,7 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 	if r.SHA256 != "" {
 		if got := hex.EncodeToString(h.Sum(nil)); got != r.SHA256 {
 			_ = os.Remove(part)
-			return "", fmt.Errorf("checksum mismatch: got %s, want %s", got, r.SHA256)
+			return "", fmt.Errorf("%w: checksum mismatch: got %s, want %s", ErrChecksumMismatch, got, r.SHA256)
 		}
 		r.Verified = true
 	}
