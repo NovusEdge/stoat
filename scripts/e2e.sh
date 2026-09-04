@@ -19,7 +19,7 @@ UP_TIMEOUT=1200   # install + xfce pull + reboot-once
 X_TIMEOUT=90      # Xorg restart after the reboot-once
 
 # Prefer the just-built binary over whatever is on PATH.
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 STOAT="$root/stoat"
 [ -x "$STOAT" ] || STOAT=stoat
 
