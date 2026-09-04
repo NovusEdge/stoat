@@ -1,0 +1,24 @@
+name: e2e
+
+# Manual only. scripts/e2e.sh boots a real KVM VM and takes ~15 minutes;
+# no hosted runner has /dev/kvm, so this runs on a self-hosted runner with
+# the `kvm` label. It is the gate for the needs-live-boot label.
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: [self-hosted, linux, kvm]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: kvm
+        run: test -r /dev/kvm && test -w /dev/kvm
+      - name: e2e
+        env:
+          STOAT_HOME: ${{ runner.temp }}/stoat-e2e
+        run: ./scripts/e2e.sh
