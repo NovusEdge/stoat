@@ -168,7 +168,7 @@ func streamFile(path string, out io.Writer, done <-chan error) error {
 	for {
 		select {
 		case err := <-done:
-			offset = copyNew(path, out, offset)
+			copyNew(path, out, offset)
 			return err
 		case <-ticker.C:
 			offset = copyNew(path, out, offset)
@@ -181,7 +181,7 @@ func copyNew(path string, out io.Writer, offset int64) int64 {
 	if err != nil {
 		return offset
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil || fi.Size() <= offset {
 		return offset
@@ -189,6 +189,6 @@ func copyNew(path string, out io.Writer, offset int64) int64 {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return offset
 	}
-	io.Copy(out, f)
+	_, _ = io.Copy(out, f)
 	return fi.Size()
 }

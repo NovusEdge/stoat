@@ -47,7 +47,7 @@ func TestApplyRefusesWhileLockIsHeld(t *testing.T) {
 	release := make(chan struct{})
 	held := make(chan struct{})
 	go func() {
-		WithProvisionLock(v.Dir, func() error {
+		_ = WithProvisionLock(v.Dir, func() error {
 			close(held)
 			<-release
 			return nil
@@ -141,15 +141,15 @@ func TestApplyOnlyAcceptsAValidSubset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			c.Write([]byte("SSH-2.0-fake\r\n"))
-			c.Close()
+			_, _ = c.Write([]byte("SSH-2.0-fake\r\n"))
+			_ = c.Close()
 		}
 	}()
 	port := ln.Addr().(*net.TCPAddr).Port
@@ -600,15 +600,15 @@ func TestApplyRecordsHashAndSkipsOnRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			c.Write([]byte("SSH-2.0-fake\r\n"))
-			c.Close()
+			_, _ = c.Write([]byte("SSH-2.0-fake\r\n"))
+			_ = c.Close()
 		}
 	}()
 	port := ln.Addr().(*net.TCPAddr).Port

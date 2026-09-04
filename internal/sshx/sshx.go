@@ -140,7 +140,7 @@ func Wait(ctx context.Context, v *config.VM, timeout time.Duration) error {
 			if bannerReady(c, time.Until(deadline)) {
 				return nil
 			}
-			c.Close()
+			_ = c.Close()
 		} else if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -196,7 +196,7 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 	if budget < d {
 		d = budget
 	}
-	c.SetReadDeadline(time.Now().Add(d))
+	_ = c.SetReadDeadline(time.Now().Add(d))
 	buf := make([]byte, 4)
 	_, err := io.ReadFull(c, buf)
 	return err == nil && string(buf) == "SSH-"
@@ -231,7 +231,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	if err != nil {
 		return err
 	}
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
 	if err := Wait(ctx, v, WaitTimeout); err != nil {

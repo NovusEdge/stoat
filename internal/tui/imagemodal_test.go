@@ -957,7 +957,7 @@ func TestByoScreenFitsAndCentersAtAnIntermediateTerminal(t *testing.T) {
 	// flush to a corner the way a too-narrow terminal forces it to.
 	stripped := ansi.Strip(out)
 	lines := strings.Split(stripped, "\n")
-	var leftmostBorder int = -1
+	var leftmostBorder = -1
 	for _, line := range lines {
 		if i := strings.Index(line, "╭"); i >= 0 {
 			leftmostBorder = i

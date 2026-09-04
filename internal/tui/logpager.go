@@ -83,7 +83,7 @@ func openLogPager(name string) tea.Cmd {
 // console log yet. That one is empty, so reading it whole is not a
 // problem.
 func tailReadCloser(rc io.ReadCloser, max int64) (content string, truncated bool, err error) {
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	if seeker, ok := rc.(io.Seeker); ok {
 		if size, serr := seeker.Seek(0, io.SeekEnd); serr == nil {
 			start := int64(0)

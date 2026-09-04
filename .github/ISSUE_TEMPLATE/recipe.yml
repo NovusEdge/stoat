@@ -1,0 +1,34 @@
+name: Recipe
+description: A bundled recipe is broken, or you want a new one
+labels: [recipes]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - A bundled recipe fails
+        - Request for a new recipe
+    validations:
+      required: true
+  - type: input
+    id: recipe
+    attributes:
+      label: Recipe name
+    validations:
+      required: true
+  - type: input
+    id: guest
+    attributes:
+      label: Guest OS and mode
+      description: For example `fedora cloud`
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: Detail
+      description: For a failure, paste `~/.stoat/<vm>/last-provision.log`. For a request, say what the recipe installs and which guests it should support.
+      render: text
+    validations:
+      required: true

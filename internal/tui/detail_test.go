@@ -115,7 +115,7 @@ func TestToggleInstalledFailedSaveLeavesMemoryUnchanged(t *testing.T) {
 	if err := os.Chmod(tomlPath, 0o444); err != nil {
 		t.Fatalf("chmod vm.toml: %v", err)
 	}
-	t.Cleanup(func() { os.Chmod(tomlPath, 0o644) }) // let TempDir cleanup remove it
+	t.Cleanup(func() { _ = os.Chmod(tomlPath, 0o644) }) // let TempDir cleanup remove it
 
 	v, err := core.Get(cv.Name)
 	if err != nil {

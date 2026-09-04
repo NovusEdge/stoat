@@ -110,11 +110,6 @@ func radio(label string, on bool) string {
 	return glyphRadioOff + " " + label
 }
 
-// rowGap separates rows inside a pane. A terminal has no fractional leading,
-// so "a bit more line spacing" can only mean one blank line; this names it in
-// one place.
-const rowGap = "\n\n"
-
 // appContentWidth is the left edge every screen's stacked panes share. Before
 // this, each pane centered on its own width, so switching screens, or a pane
 // changing size as content appeared, shifted the whole block sideways.

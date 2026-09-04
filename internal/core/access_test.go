@@ -95,7 +95,7 @@ func TestLogsReturnsWrittenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestLogsReturnsWrittenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err = io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func TestLogsMissingFileIsEmptyNotError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestLogsBrokenVMStillServesConsoleLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Logs on a broken VM should still serve the console log, got err = %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestLogsBrokenVMMissingFileIsEmptyNotError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)

@@ -64,7 +64,7 @@ func TypeConsolePassword(v *config.VM) error {
 	if err != nil {
 		return fmt.Errorf("qemu monitor: %w", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	for _, k := range keys {
 		if _, err := fmt.Fprintln(c, "sendkey "+k); err != nil {
 			return fmt.Errorf("qemu monitor: %w", err)

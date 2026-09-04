@@ -4,6 +4,7 @@ set -e
 [ -f go.mod ] || exit 0        # no Go code yet
 # git ls-files only lists tracked files, so this is already just our own code.
 # The repo does not vendor: it builds from the module cache, same as CI.
+# shellcheck disable=SC2046 # git ls-files output is a list of filenames, splitting is the point
 unformatted=$(gofmt -l $(git ls-files '*.go') 2>/dev/null)
 [ -z "$unformatted" ] || { echo "gofmt needed:"; echo "$unformatted"; exit 1; }
 go vet ./...

@@ -57,7 +57,7 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 	if v.Disk != "" {
 		out, err := exec.Command("qemu-img", "resize", v.DiskPath(), v.Disk).CombinedOutput()
 		if err != nil {
-			os.Remove(v.DiskPath())
+			_ = os.Remove(v.DiskPath())
 			return fmt.Errorf("qemu-img resize to %s: %s", v.Disk, strings.TrimSpace(string(out)))
 		}
 	}

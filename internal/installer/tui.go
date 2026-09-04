@@ -161,7 +161,7 @@ func buildCmd(repoDir, version string) tea.Cmd {
 			// Nothing will call installCmd to clean this up. The build
 			// produced no binary to hand it, so this path
 			// removes the temp dir itself.
-			os.RemoveAll(tmp)
+			_ = os.RemoveAll(tmp)
 			return errMsg{err: err}
 		}
 		return builtMsg{tmpPath: out}
@@ -173,7 +173,7 @@ func installCmd(src, destDir, repoDir, home string) tea.Cmd {
 		// buildCmd's temp dir has done its job once the binary is copied out,
 		// whether the copy succeeds or fails. It is removed here
 		// unconditionally, so a run never leaks ~10MB.
-		defer os.RemoveAll(filepath.Dir(src))
+		defer func() { _ = os.RemoveAll(filepath.Dir(src)) }()
 		path, err := Install(src, destDir)
 		if err != nil {
 			return errMsg{err: err}

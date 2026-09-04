@@ -21,12 +21,12 @@ install: build
 
 # build and install stoat, interactively: checks the host too
 [group('build')]
-setup:
+setup: hooks
     go run ./cmd/installer
 
 # build and install stoat without a TTY: for CI and scripts
 [group('build')]
-setup-headless:
+setup-headless: hooks
     go run ./cmd/installer --no-tty
 
 # remove the installed binary: never touches ~/.stoat
@@ -85,6 +85,12 @@ check:
     gofmt -l $(git ls-files "*.go")
     go vet ./...
     go build ./...
+
+# exactly what the lint and shellcheck CI jobs run
+[group('dev')]
+lint:
+    golangci-lint run ./...
+    shellcheck -S warning $(git ls-files "internal/recipes/bundled/*.sh" "internal/recipes/bundled/*/*.sh" "scripts/*.sh" ".githooks/*")
 
 # format in place
 [group('dev')]

@@ -31,7 +31,7 @@ func WithProvisionLock(dir string, fn func() error) error {
 	if err != nil {
 		return fmt.Errorf("open provision lock: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
@@ -39,7 +39,7 @@ func WithProvisionLock(dir string, fn func() error) error {
 		}
 		return fmt.Errorf("lock %s: %w", path, err)
 	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
 	return fn()
 }

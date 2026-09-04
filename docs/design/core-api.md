@@ -327,3 +327,22 @@ Once more than one caller exists, two current mechanisms are unsafe:
 - **VM directory creation and `vm.toml` writes** are unlocked, so two `Create` calls with the same name race.
 
 The API needs a data-root lock held across allocate-and-write in `Create`, and per-VM locks for state transitions. Invisible until it corrupts something, so it is designed in rather than added after.
+
+## 12. CLI conventions
+
+Every new command follows these. A reviewer rejects a PR that does not.
+
+- A command's `--json` data is a struct in `internal/cli/wire`, never an
+  inline `map[string]any`. The struct is the schema; `json.md` documents
+  it; the MCP server reuses it.
+- `a.fail(stdout, stderr, err)` for an error that came from `core`.
+  `a.failMsg(stdout, stderr, sentinel, msg)` for a condition the CLI
+  detected itself, such as a missing flag or a refused prompt.
+- A destructive command calls the shared `confirm` helper: `-y` skips
+  the prompt, `--json` and `--quiet` refuse without `-y`, a TTY prompts.
+  No command hand-rolls that branch.
+- A command that aliases another declares `aliases:"..."` on the kong
+  struct and shares one `toArgs` case. No duplicate command struct.
+- Every TOML file type decodes through `internal/tomlx`, which wraps the
+  path into errors and reports unknown keys.
+- Lists in a `wire` struct are never `null`; use `nonNil`.

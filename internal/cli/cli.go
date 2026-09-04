@@ -355,7 +355,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	// rather than failing the command the user actually asked for. `logs`
 	// re-Inits and reports its own error, since there the log IS the command.
 	_ = logx.Init()
-	defer logx.Close()
+	defer func() { _ = logx.Close() }()
 	logx.L().Debug("cli", "cmd", a.Cmd, "vm", a.VM)
 
 	switch a.Cmd {

@@ -136,9 +136,9 @@ func mountsDoc(v *config.VM) string {
 	const opts = "trans=virtio,version=9p2000.L,%s,_netdev,nofail"
 	var b strings.Builder
 	b.WriteString("#cloud-config\nmounts:\n")
-	b.WriteString(fmt.Sprintf("  - [ work, /mnt/work, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "rw")))
+	fmt.Fprintf(&b, "  - [ work, /mnt/work, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "rw"))
 	if v.Share != "" {
-		b.WriteString(fmt.Sprintf("  - [ host, /mnt/host, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "ro")))
+		fmt.Fprintf(&b, "  - [ host, /mnt/host, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "ro"))
 	}
 	return b.String()
 }
@@ -197,10 +197,10 @@ func ValidateFragment(body string) (annotated string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("creating schema-check temp file: %w", err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	if _, err := f.WriteString(body); err != nil {
-		f.Close()
+		_ = f.Close()
 		return "", fmt.Errorf("writing schema-check temp file: %w", err)
 	}
 	if err := f.Close(); err != nil {

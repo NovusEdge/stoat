@@ -50,7 +50,7 @@ func runPull(a *Args, stdout, stderr io.Writer) int {
 	if a.JSON {
 		em = wire.NewEmitter(stdout)
 	}
-	var lastPct int = -1
+	var lastPct = -1
 	// Both renderers fire only on a percentage CHANGE: a per-read event is
 	// thousands of lines for one image, and a consumer gains nothing from them.
 	progress := func(done, total int64) {

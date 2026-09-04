@@ -157,14 +157,14 @@ func Build(v *config.VM) error {
 	tmp := filepath.Join(v.OvlDir(), tmpName)
 	// Remove any temp file orphaned by a crash mid-Build before tmpName
 	// existed: unlike tmpName, it matches the initramfs's glob.
-	os.Remove(filepath.Join(v.OvlDir(), legacyTmpName))
+	_ = os.Remove(filepath.Join(v.OvlDir(), legacyTmpName))
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()
+		_ = os.Remove(tmp)
 	}()
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)

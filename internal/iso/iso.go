@@ -346,7 +346,7 @@ func Latest(flavor string) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("index: %s", resp.Status)
 	}
@@ -410,7 +410,7 @@ func fetchChecksum(checksumURL, filename string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("checksum: %s", resp.Status)
 	}
@@ -469,7 +469,7 @@ func fileDigest(path string, h hash.Hash) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
@@ -528,7 +528,7 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download: %s", resp.Status)
 	}
@@ -575,8 +575,8 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 		if n > 0 {
 			stall.Reset(stallTimeout)
 			if _, werr := f.Write(buf[:n]); werr != nil {
-				f.Close()
-				os.Remove(part)
+				_ = f.Close()
+				_ = os.Remove(part)
 				return "", werr
 			}
 			h.Write(buf[:n])
@@ -589,8 +589,8 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 			break
 		}
 		if rerr != nil {
-			f.Close()
-			os.Remove(part)
+			_ = f.Close()
+			_ = os.Remove(part)
 			if stalled.Load() {
 				return "", fmt.Errorf("download stalled: no data for %s", stallTimeout)
 			}
@@ -602,19 +602,19 @@ func Download(ctx context.Context, r *Release, progress func(done, total int64))
 	// file would still pass verification and get renamed into place as
 	// "verified".
 	if err := f.Close(); err != nil {
-		os.Remove(part)
+		_ = os.Remove(part)
 		return "", err
 	}
 
 	if r.SHA256 != "" {
 		if got := hex.EncodeToString(h.Sum(nil)); got != r.SHA256 {
-			os.Remove(part)
+			_ = os.Remove(part)
 			return "", fmt.Errorf("checksum mismatch: got %s, want %s", got, r.SHA256)
 		}
 		r.Verified = true
 	}
 	if err := os.Rename(part, final); err != nil {
-		os.Remove(part)
+		_ = os.Remove(part)
 		return "", err
 	}
 	return rel, nil

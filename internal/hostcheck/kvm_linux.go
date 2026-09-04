@@ -18,7 +18,7 @@ func KVMCheck() Check { return kvmCheckAt("/dev/kvm") }
 func kvmCheckAt(path string) Check {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err == nil {
-		f.Close()
+		_ = f.Close()
 		return Check{Name: "/dev/kvm", OK: true, Detail: "read/write"}
 	}
 

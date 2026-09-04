@@ -24,7 +24,7 @@ func Preflight() error {
 	if err != nil {
 		return fmt.Errorf("/dev/kvm not usable: %w (are you in the kvm group?)", err)
 	}
-	f.Close()
+	_ = f.Close()
 	return nil
 }
 
@@ -59,11 +59,11 @@ func Running(v *config.VM) bool {
 	}
 	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", p))
 	if err != nil {
-		os.Remove(v.PidPath())
+		_ = os.Remove(v.PidPath())
 		return false
 	}
 	if !cmdlineMatches(cmdline, v.Dir) {
-		os.Remove(v.PidPath())
+		_ = os.Remove(v.PidPath())
 		return false
 	}
 	return true
@@ -106,7 +106,7 @@ func Start(v *config.VM) error {
 	if Running(v) {
 		return fmt.Errorf("%s is already running", v.Name)
 	}
-	os.Remove(v.MonitorPath())
+	_ = os.Remove(v.MonitorPath())
 	// The interactive install happens inside the guest, where stoat can't
 	// watch it finish. Checked here, at the next start, since that's the
 	// only moment the boot order matters.
@@ -203,7 +203,7 @@ func Stop(v *config.VM) error {
 	}
 	if c, err := dialMonitor(v); err == nil {
 		fmt.Fprintln(c, "system_powerdown")
-		c.Close()
+		_ = c.Close()
 		for i := 0; i < 100; i++ {
 			if !Running(v) {
 				logx.L().Info("stopped", "vm", v.Name)

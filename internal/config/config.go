@@ -194,7 +194,7 @@ func (v *VM) Save() error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return toml.NewEncoder(f).Encode(v)
 }
 
@@ -341,7 +341,7 @@ func FreePort() (int, error) {
 		if err != nil {
 			continue
 		}
-		l.Close()
+		_ = l.Close()
 		return p, nil
 	}
 	return 0, fmt.Errorf("no free port in 2200-2299")

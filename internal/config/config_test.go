@@ -394,7 +394,7 @@ func TestFreePortFreshInstallNoVMs(t *testing.T) {
 	if err != nil {
 		t.Errorf("FreePort returned %d, which is not actually free: %v", p, err)
 	} else {
-		l.Close()
+		_ = l.Close()
 	}
 }
 

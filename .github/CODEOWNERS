@@ -1,0 +1,6 @@
+# Every path requests review from the maintainer. The recipe and docs
+# lines exist so a recipe PR shows who reviews it, even while that is
+# the same person.
+*                            @NovusEdge
+/internal/recipes/bundled/   @NovusEdge
+/docs/recipes/               @NovusEdge

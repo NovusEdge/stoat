@@ -102,7 +102,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
@@ -126,14 +126,14 @@ func Install(srcPath, destDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	tmp, err := os.CreateTemp(destDir, ".stoat-*")
 	if err != nil {
 		return "", err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename succeeds
+	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
 
 	if _, err := io.Copy(tmp, src); err != nil {
 		_ = tmp.Close()
