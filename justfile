@@ -21,12 +21,12 @@ install: build
 
 # build and install stoat, interactively: checks the host too
 [group('build')]
-setup:
+setup: hooks
     go run ./cmd/installer
 
 # build and install stoat without a TTY: for CI and scripts
 [group('build')]
-setup-headless:
+setup-headless: hooks
     go run ./cmd/installer --no-tty
 
 # remove the installed binary: never touches ~/.stoat

@@ -4,9 +4,10 @@
 
 ```sh
 just setup      # builds, installs to ~/.local/bin, reports missing host deps
-just hooks      # installs the pre-commit and commit-msg hooks
 just dev        # runs the TUI against a scratch STOAT_HOME
 ```
+
+`just setup` also installs the git hooks.
 
 Go 1.26 (pinned in `go.mod`), `just`, and for anything that boots a VM:
 KVM, `qemu-system-x86_64`, `qemu-img`, `ssh`. `stoat doctor` lists what is
@@ -17,8 +18,8 @@ missing.
 - Branch off `main`. One change per branch.
 - Every PR is squash merged. The PR title becomes the commit subject, so
   write it in the commit grammar below.
-- Sign off every commit (`git commit -s`). The DCO check reads the
-  `Signed-off-by` trailer.
+- Sign off every commit (`git commit -s`). The DCO check on the PR reads
+  the `Signed-off-by` trailer and blocks a merge without it.
 - No `Co-Authored-By` or tool-attribution trailers. The `commit-msg` hook
   strips them.
 - A PR that changes a bundled recipe, a guest, or the boot path gets the
@@ -38,7 +39,9 @@ was found.
 ## Gates
 
 `just check` runs gofmt, `go vet`, and `go build`. The pre-commit hook
-runs the same. CI runs those plus `go test ./...` on every PR.
+runs the same. `just lint` runs golangci-lint and shellcheck. CI runs
+all of those plus `go test ./...` on every PR. The DCO app checks the
+sign-off trailer on every commit in a PR.
 
 ## Tests
 
