@@ -56,7 +56,9 @@ skip_9p = true
 - `escalate` is an OS fact, not a VM fact: Alpine and OpenBSD ship `doas`,
   not `sudo`. `sshx` applies it only when the VM's ssh user is not root.
 - Every `[svc]` value is a template: `{name}` renders to `"$1"`; a template
-  without `{name}` gets `"$@"` appended instead.
+  without `{name}` gets `"$@"` appended instead. A template may not contain
+  a single quote: the python prelude wraps each one in a single-quoted
+  literal.
 - `STOAT_PKGMGR` (available in the recipe prelude) is the basename of
   `pkg.install[0]`.
 
