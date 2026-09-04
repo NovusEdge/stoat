@@ -545,3 +545,26 @@ func TestProvisionCancelKillsTheSSHProcess(t *testing.T) {
 		t.Errorf("provision log reports success for a cancelled run:\n%s", log)
 	}
 }
+
+// escalate must use the guest's own escalate argv, not a hardcoded "sudo":
+// a BYO image with a different sudo path, or a doas-only image, needs its
+// own prefix. Root gets no prefix regardless of the guest.
+func TestEscalateUsesGuestArgv(t *testing.T) {
+	v := &config.VM{OS: "ubuntu", SSHUser: "stoat"}
+	got := escalate(v, []string{"sh", "-s"})
+	want := []string{"sudo", "-n", "sh", "-s"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("got %v want %v", got, want)
+	}
+	if got := escalate(&config.VM{OS: "alpine"}, []string{"sh", "-s"}); len(got) != 2 {
+		t.Errorf("root must get no prefix: %v", got)
+	}
+}
+
+// A guest stoat does not know renders no prelude: the recipe runs bare, as
+// it always did before this feature existed.
+func TestPreludeForUnknownOSIsEmpty(t *testing.T) {
+	if p := preludeFor(&config.VM{OS: "plan9"}, "sh"); p != "" {
+		t.Errorf("got %q", p)
+	}
+}

@@ -33,7 +33,10 @@ type Script struct {
 // meant to be handed to Seed alongside other recipe bodies, like any other
 // cloud recipe fragment (see userData in cloudinit.go). It goes through
 // withMergeHow and buildArchive the same way every other document does.
-func WrapScripts(scripts []Script) string {
+// prelude is prepended to each script's content and, when non-empty, run
+// once via stoat_pkg_setup as the first runcmd entry. Stub: Task 6 wires it
+// in; today it is accepted but ignored.
+func WrapScripts(scripts []Script, prelude string) string {
 	if len(scripts) == 0 {
 		return ""
 	}

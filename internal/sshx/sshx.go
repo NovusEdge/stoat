@@ -84,6 +84,16 @@ func sudoWrap(v *config.VM, remote []string) []string {
 	return append([]string{"sudo"}, remote...)
 }
 
+// escalate replaces sudoWrap. Stub: Task 6 reads v's guest's Escalate argv.
+func escalate(v *config.VM, remote []string) []string {
+	return sudoWrap(v, remote)
+}
+
+// preludeFor renders the guest prelude for v. Stub: Task 6 fills this in.
+func preludeFor(v *config.VM, runtime string) string {
+	return "stub"
+}
+
 // CopyArgs returns the argv (excluding argv[0]) for scp between the host and
 // v's guest. It shares every connection setting Args does (see connOptions)
 // and differs only in the port flag, since scp's is capital -P.

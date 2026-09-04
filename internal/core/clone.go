@@ -216,7 +216,7 @@ func cloneCloud(src, clone *config.VM) error {
 		scripts = append(scripts, cloudinit.Script{Name: name, Content: body})
 	}
 	var bodies []string
-	if frag := cloudinit.WrapScripts(scripts); frag != "" {
+	if frag := cloudinit.WrapScripts(scripts, ""); frag != "" {
 		bodies = []string{frag}
 	}
 	_, err = cloudinit.Seed(clone, pub, bodies)

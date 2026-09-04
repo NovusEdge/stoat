@@ -76,7 +76,7 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 	// cloud-init runs in order at first boot. An empty selection wraps to "",
 	// which Seed must not carry as a document; pass no bodies instead.
 	var bodies []string
-	if frag := cloudinit.WrapScripts(scripts); frag != "" {
+	if frag := cloudinit.WrapScripts(scripts, ""); frag != "" {
 		bodies = []string{frag}
 	}
 	if _, err := cloudinit.Seed(v, pub, bodies); err != nil {

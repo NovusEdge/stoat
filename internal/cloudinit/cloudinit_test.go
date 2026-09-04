@@ -544,3 +544,18 @@ func TestSeedFallsBackToBashForAnUnknownOS(t *testing.T) {
 		}
 	}
 }
+
+// SkipShares must read the flag from the guest file, not recognise debian by
+// name: any future 9p-less guest sets backend.cloudinit.skip_9p and needs no
+// Go change.
+func TestSkipSharesReadsGuestFlag(t *testing.T) {
+	if !SkipShares("debian") {
+		t.Error("debian's guest.toml sets skip_9p; SkipShares must report true")
+	}
+	if SkipShares("fedora") {
+		t.Error("fedora keeps the 9p mounts")
+	}
+	if SkipShares("plan9") {
+		t.Error("an unknown guest must not skip shares")
+	}
+}
