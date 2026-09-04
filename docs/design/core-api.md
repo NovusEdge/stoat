@@ -238,6 +238,12 @@ ErrBroken              ErrDiskShrink
 
 Each carries the specific subject (which field, which recipe, which dependency) rather than only a message.
 
+The CLI reports these two ways, and the choice is not a style question. `a.fail` takes an
+error `core` returned and maps its sentinel to the JSON error code. `a.failMsg` takes a
+sentinel the CLI picked itself, for a condition `core` never saw: a bad flag combination, an
+unknown subcommand. A CLI-detected condition sent through `a.fail` would carry whatever code
+the wrapped error happened to hold.
+
 ---
 
 ## 10. Security model
