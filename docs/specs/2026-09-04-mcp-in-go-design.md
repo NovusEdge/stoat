@@ -67,6 +67,49 @@ Additions from specs 1 to 3:
 
 `vm_status` gains `recipes[]` through `wire.VMStatus`.
 
+## In-VM tools over ssh
+
+Every tool here is a wrapper over the VM's ssh connection through
+`sshx.Args`, needs no software in the guest, and is gated by
+`requireExecAllowed`. All are class Execution (`destructiveHint`,
+`openWorldHint`) except the reads, which are read-only but still gated,
+since reading a guest file is guest access.
+
+| Tool | Guest command | Notes |
+|---|---|---|
+| `read_file(vm, path, offset?, max_bytes?)` | `dd`/`head -c` | `max_bytes` clamped to 1 MiB; returns `{content, size, truncated}`; binary returned base64 with `encoding` set |
+| `write_file(vm, path, content, mode?, append?)` | `install -m` then `cat >` | content over stdin; `mode` defaults 0644; parent must exist |
+| `list_dir(vm, path)` | `find -maxdepth 1 -printf` | name, type, size, mode, mtime; capped at 2000 entries |
+| `stat(vm, path)` | `stat -c` | one entry, same fields |
+| `exec(vm, argv, stdin?, cwd?, env?, timeout?)` | as today | gains `cwd`, `env`, `timeout` (clamp 600 s) |
+| `exec_bg(vm, argv, cwd?, env?)` | `nohup … &` | returns `job_id`; stdout, stderr, and exit code land in `/run/stoat/jobs/<id>/` |
+| `job_status(vm, job_id)` | `cat exit`, `kill -0` | `running`, `exited(code)`, `unknown` |
+| `job_output(vm, job_id, stream?, offset?, max_bytes?)` | `read_file` on the job files | same clamps |
+| `job_kill(vm, job_id, signal?)` | `kill` | TERM by default |
+| `ps(vm)` | `ps -eo pid,ppid,user,etime,args` | capped at 2000 rows |
+| `forward` | as today | unchanged |
+
+Rules:
+
+- Guest paths are absolute. A relative path is an error, not resolved
+  against `$HOME`, so a tool call means one thing on every guest.
+- The guest user is `sshx.User(v)`; `escalate` (spec 1) applies when a
+  call sets `root = true`. A tool never escalates on its own.
+- Job ids are `j-<8 hex>` chosen by the host and recorded in
+  `~/.stoat/vms/<vm>/jobs.toml` with argv, started time, and the guest
+  user, so `list_jobs(vm)` works from the host without ssh. The guest side
+  is `/run/stoat/jobs/<id>/{out,err,exit,pid}`; a reboot clears it and
+  `job_status` then reports `unknown`.
+- `write_file` and `exec_bg` refuse when the VM is not running with
+  `CodeNotRunning`, the same as `exec`.
+- Every wrapper runs a fixed argv with values passed as positional args
+  through `checkFlagFree`; no tool concatenates a guest path into a shell
+  string.
+
+Out of scope: a pty session tool and a guest agent binary over vsock.
+The agent would also cover guests without sshd (Windows) and streaming
+output; it is a candidate for its own spec after the project file.
+
 Every input struct carries `jsonschema` tags and the generated schema sets
 `additionalProperties: false`. A test asserts it for every tool.
 
@@ -82,7 +125,8 @@ the top of each handler:
   `@ref`, no traversal), `checkParamName` (spec 2's regex).
 
 `requireExecAllowed` stays in the server, since `core.Exec` does not
-enforce it. It gates `exec`, `copy_to`, `copy_from`, `apply_recipes`.
+enforce it. It gates `exec`, `copy_to`, `copy_from`, `apply_recipes`, and
+every in-VM tool above.
 
 Rate limiting is receiving middleware: a per-tool bucket (30, 0.5/s) and a
 shared bucket (60, 2/s), both checked before either is charged. The
@@ -152,7 +196,12 @@ the same text the CLI prints. A guard failure names the guard:
   across tools; neither bucket charged on refusal.
 - Redaction: a fixture VM with a sentinel secret; every tool's output is
   scanned for it.
-- `requireExecAllowed` refuses the four tools on `allow_exec = false`.
+- `requireExecAllowed` refuses the four tools and every in-VM tool on
+  `allow_exec = false`.
+- In-VM tools against a fake ssh: relative path refused, `max_bytes`
+  clamp, `write_file` mode, `exec_bg` then `job_status` then
+  `job_output` round trip, `job_kill`, `ps` cap, argv never shell-joined
+  (a path with a space and a `;` arrives intact).
 - Install: each client's config written into a temp home; existing
   unrelated entries preserved.
 - In-process client from the SDK drives the server over stdio for an
