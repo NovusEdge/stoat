@@ -1,0 +1,34 @@
+name: Guest OS
+description: Request support for a guest OS
+labels: [guest]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: OS name and version
+    validations:
+      required: true
+  - type: input
+    id: image
+    attributes:
+      label: Cloud image URL
+      description: A qcow2 or raw image with cloud-init, if one exists
+  - type: dropdown
+    id: init
+    attributes:
+      label: Init system
+      options: [systemd, openrc, rc, other]
+    validations:
+      required: true
+  - type: input
+    id: pkg
+    attributes:
+      label: Package manager
+      description: For example `apt`, `dnf`, `pkg`
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Default ssh user, whether sudo or doas ships, anything the installer needs

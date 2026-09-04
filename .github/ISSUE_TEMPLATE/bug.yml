@@ -1,0 +1,44 @@
+name: Bug
+description: stoat did something wrong
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: stoat version
+      description: Output of `stoat --version`
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host distro and kernel
+      description: Output of `uname -sr` and the distro name
+    validations:
+      required: true
+  - type: input
+    id: guest
+    attributes:
+      label: Guest OS and mode
+      description: For example `alpine live`, `ubuntu cloud`, `debian disk`
+  - type: textarea
+    id: doctor
+    attributes:
+      label: stoat doctor
+      description: Paste the output of `stoat doctor`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command or key you pressed, what you expected, what you saw
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log tail
+      description: Paste the last 50 lines of `~/.stoat/logs/stoat.log` and, for a provisioning problem, `~/.stoat/<vm>/last-provision.log`
+      render: text
