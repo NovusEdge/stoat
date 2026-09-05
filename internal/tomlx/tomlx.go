@@ -40,41 +40,54 @@ func Decode(path string, v any, opts ...Option) error {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	_, err := decode(path, v, o)
+	return err
+}
+
+// DecodeDefined behaves like Decode but also reports, for each of keys,
+// whether that top-level key was present in path's TOML. It parses the file
+// once: config.Load uses it to tell an explicit legacy key from a field a
+// decode seeded itself, without a second read of the same file.
+func DecodeDefined(path string, v any, keys []string, opts ...Option) ([]bool, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	md, err := decode(path, v, o)
+	if err != nil {
+		return nil, err
+	}
+	defined := make([]bool, len(keys))
+	for i, k := range keys {
+		defined[i] = md.IsDefined(k)
+	}
+	return defined, nil
+}
+
+func decode(path string, v any, o options) (toml.MetaData, error) {
 	md, err := toml.DecodeFile(path, v)
 	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return md, fmt.Errorf("%s: %w", path, err)
 	}
 	if o.schemaMax > 0 && md.IsDefined("schema") {
 		var s struct {
 			Schema int `toml:"schema"`
 		}
 		if _, err := toml.DecodeFile(path, &s); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			return md, fmt.Errorf("%s: %w", path, err)
 		}
 		if s.Schema > o.schemaMax {
-			return fmt.Errorf("%s: schema %d is newer than this stoat (%d)", path, s.Schema, o.schemaMax)
+			return md, fmt.Errorf("%s: schema %d is newer than this stoat (%d)", path, s.Schema, o.schemaMax)
 		}
 	}
 	for _, k := range md.Undecoded() {
 		key := strings.Join(k, ".")
 		if o.warn == nil {
-			return fmt.Errorf("%s: unknown key %q", path, key)
+			return md, fmt.Errorf("%s: unknown key %q", path, key)
 		}
 		fmt.Fprintf(o.warn, "%s: unknown key %q\n", path, key)
 	}
-	return nil
-}
-
-// Defined reports whether every key in keys (a dotted path, e.g. "a", "b")
-// is present in path's TOML, independent of any Go struct. config.Load uses
-// it to tell an explicit legacy key from a field a decode seeded itself.
-func Defined(path string, keys ...string) (bool, error) {
-	var scratch map[string]any
-	md, err := toml.DecodeFile(path, &scratch)
-	if err != nil {
-		return false, fmt.Errorf("%s: %w", path, err)
-	}
-	return md.IsDefined(keys...), nil
+	return md, nil
 }
 
 // Encode is the single TOML writer for files owned by stoat.

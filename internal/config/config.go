@@ -261,13 +261,14 @@ func Load(name string) (*VM, error) {
 	// Absent allow_exec means true; the seed survives the decode, a written
 	// false overrides it.
 	v := &VM{AllowExec: true}
-	if err := tomlx.Decode(path, v, tomlx.Warn(UnknownKeyWriter)); err != nil {
+	defined, err := tomlx.DecodeDefined(path, v, []string{"allow_exec"}, tomlx.Warn(UnknownKeyWriter))
+	if err != nil {
 		return nil, err
 	}
 	v.Dir = dir
 	v.Share = Expand(v.Share)
 	if v.AgentAccess == "" {
-		v.AgentAccess = legacyAgentAccess(path, v.AllowExec)
+		v.AgentAccess = legacyAgentAccess(defined[0], v.AllowExec)
 	}
 	return v, nil
 }
@@ -275,10 +276,11 @@ func Load(name string) (*VM, error) {
 // legacyAgentAccess maps a vm.toml written before agent_access existed to a
 // level. v.AllowExec is already seeded true for an absent key (the comment
 // above Load), so it alone cannot tell that case apart from an explicit
-// `allow_exec = true`; only the latter earns "exec". Everything else,
-// including an absent key, is "manage".
-func legacyAgentAccess(path string, allowExec bool) string {
-	if defined, err := tomlx.Defined(path, "allow_exec"); err == nil && defined && allowExec {
+// `allow_exec = true`; only allowExecDefined tells them apart, and only the
+// explicit case earns "exec". Everything else, including an absent key, is
+// "manage".
+func legacyAgentAccess(allowExecDefined, allowExec bool) string {
+	if allowExecDefined && allowExec {
 		return "exec"
 	}
 	return "manage"
