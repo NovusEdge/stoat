@@ -212,7 +212,6 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	// (one ManifestFor found a manifest for) gets its applied state
 	// recorded. A v1 recipe has no version to record and stays out of
 	// Applied, as it always has.
-	var changed bool
 	rebootRecipe, needsReboot := "", false
 	for _, name := range runTargets {
 		m, ok := manifests[name]
@@ -230,12 +229,11 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		if err != nil {
 			return err
 		}
-		prev := v.Applied[name]
+		provisioned := run.Applied[name]
 		v.Applied[name] = config.AppliedRecipe{
 			Version: m.Version, Hash: hash, ScriptHash: scriptHash, At: time.Now(),
-			Outputs: prev.Outputs, Health: prev.Health,
+			Outputs: provisioned.Outputs, Health: string(HealthUnknown),
 		}
-		changed = true
 		if m.Reboot && !needsReboot {
 			rebootRecipe, needsReboot = name, true
 		}
@@ -254,10 +252,22 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		}
 	}
 
-	if !changed {
-		return nil
+	verdicts, healthErr := HealthChecks(ctx, v, runTargets)
+	if healthErr != nil {
+		if saveErr := v.Save(); saveErr != nil {
+			return saveErr
+		}
+		return healthErr
 	}
-	return v.Save()
+	if err := v.Save(); err != nil {
+		return err
+	}
+	for _, verdict := range verdicts {
+		if verdict.Status == HealthFailed {
+			return fmt.Errorf("%s: %s", verdict.Name, verdict.Detail)
+		}
+	}
+	return nil
 }
 
 // rebootAndWait reboots v's guest over ssh and waits for it to come back.

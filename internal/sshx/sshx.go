@@ -225,6 +225,26 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 // react. This bounds that grace period rather than waiting on it forever.
 const recipeShutdownGrace = 5 * time.Second
 
+// RunCheck runs one command inside v's guest through the guest prelude, as
+// the recipe's ssh user and under the guest's escalation. The command is
+// sent over stdin so it does not become a local ssh argv element.
+func RunCheck(ctx context.Context, v *config.VM, command string, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var prelude string
+	if o, ok := guest.Lookup(v.OS); ok {
+		prelude = guest.Prelude(o, "sh")
+	}
+	body := prelude + "\n" + command + "\n"
+	cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = recipeShutdownGrace
+	cmd.Stdin = strings.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // Provision runs each of v's recipes over ssh, streaming output to
 // last-provision.log. The detail view tails that file on a ticker, so there
 // is no channel plumbing between this and the UI.
