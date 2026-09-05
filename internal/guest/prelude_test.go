@@ -61,6 +61,56 @@ func TestPreludePython(t *testing.T) {
 	}
 }
 
+func TestPreludeDefinesCmdVerbs(t *testing.T) {
+	for _, name := range []string{"alpine", "debian", "ubuntu", "fedora", "arch"} {
+		t.Run(name, func(t *testing.T) {
+			o, ok := Lookup(name)
+			if !ok {
+				t.Fatalf("no guest %q", name)
+			}
+			got := Prelude(o, "sh")
+			for _, fn := range []string{"stoat_download()", "stoat_useradd()"} {
+				if !strings.Contains(got, fn) {
+					t.Errorf("prelude does not define %s:\n%s", fn, got)
+				}
+			}
+		})
+	}
+}
+
+// {name} becomes "$1"; a template with no placeholder gets "$@". This is
+// the same rule [svc] follows, so a recipe author learns it once.
+func TestPreludeCmdTemplateRules(t *testing.T) {
+	o := OS{
+		Name: "freebsd", Init: "rc", Shell: "/bin/sh",
+		Cmd: map[string]string{
+			"download": "fetch -o",
+			"useradd":  "pw useradd -n {name} -m",
+		},
+	}
+	got := Prelude(o, "sh")
+	if !strings.Contains(got, `stoat_download() { fetch -o "$@"; }`) {
+		t.Errorf("download verb:\n%s", got)
+	}
+	if !strings.Contains(got, `stoat_useradd() { pw useradd -n "$1" -m; }`) {
+		t.Errorf("useradd verb:\n%s", got)
+	}
+}
+
+// The python prelude defines the same names over subprocess.run.
+func TestPythonPreludeDefinesCmdVerbs(t *testing.T) {
+	o, ok := Lookup("debian")
+	if !ok {
+		t.Fatal("bundled debian missing")
+	}
+	got := Prelude(o, "python3")
+	for _, fn := range []string{"def stoat_download(", "def stoat_useradd("} {
+		if !strings.Contains(got, fn) {
+			t.Errorf("python prelude does not define %s:\n%s", fn, got)
+		}
+	}
+}
+
 // WithPrelude inserts after a leading shebang line so the interpreter line
 // stays first; a body with no shebang gets the prelude in front.
 func TestWithPreludeKeepsShebangFirst(t *testing.T) {
