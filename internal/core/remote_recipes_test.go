@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -250,6 +252,142 @@ func TestPlanApplyRefusesDirtyOrBrokenProjectCaches(t *testing.T) {
 				t.Fatal("PlanApply dirty/probe failure changed active cache or lock")
 			}
 		})
+	}
+}
+
+func TestProjectReadersRemoveHiddenUnlockedCacheEntries(t *testing.T) {
+	for _, reader := range []string{"SyncRecipes", "PlanApply"} {
+		t.Run(reader, func(t *testing.T) {
+			coreRemoteRoot(t)
+			project := t.TempDir()
+			t.Chdir(project)
+			src := coreRecipeRepo(t, "demo", "demo")
+			commit := currentRecipeHead(t, src)
+			if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte(fmt.Sprintf(
+				"[recipes]\ndemo = { source = %q, ref = \"main\" }\n", src)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			scope, err := recipes.ScopeFor(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			clone := testutil.GitClone(t, src)
+			if err := os.MkdirAll(scope.CachePath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(clone, filepath.Join(scope.CachePath, "demo")); err != nil {
+				t.Fatal(err)
+			}
+			if err := recipes.SaveLock(scope.LockPath, recipes.Lock{Recipes: map[string]recipes.LockEntry{
+				"demo": {Source: src, Ref: "main", Commit: commit},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			writeCoreRemoteFile(t, filepath.Join(scope.CachePath, ".stray", "recipe.toml"), "name = \".stray\"\nscript = \"install.sh\"\n")
+			writeCoreRemoteFile(t, filepath.Join(scope.CachePath, ".stray", "install.sh"), "#!/bin/sh\n")
+			v := &config.VM{Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"demo"}}
+			if err := v.Save(); err != nil {
+				t.Fatal(err)
+			}
+
+			if reader == "SyncRecipes" {
+				err = SyncRecipes()
+			} else {
+				_, err = PlanApply("work", ApplyOpts{})
+			}
+			if err != nil {
+				t.Fatalf("%s() = %v, want one successful repair", reader, err)
+			}
+			if _, err := os.Stat(filepath.Join(scope.CachePath, ".stray")); !os.IsNotExist(err) {
+				t.Fatalf("hidden cache stray stat = %v, want not exist after %s", err, reader)
+			}
+			if _, err := os.Stat(filepath.Join(scope.CachePath, "demo", "recipe.toml")); err != nil {
+				t.Fatalf("current cache disappeared after %s: %v", reader, err)
+			}
+		})
+	}
+}
+
+func TestPlanApplyBlocksAcrossAnIntermediateProjectRemoval(t *testing.T) {
+	coreRemoteRoot(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	src := coreRecipeRepo(t, "demo", "demo")
+	if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte("[recipes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scope, err := recipes.ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recipes.Add(scope, src, false); err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"demo"}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	coordPath := filepath.Join(filepath.Dir(scope.CachePath), "recipe.lock")
+	coord, err := os.OpenFile(coordPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = coord.Close() }()
+	if err := syscall.Flock(int(coord.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Flock(int(coord.Fd()), syscall.LOCK_UN) }()
+	lockBackup := filepath.Join(t.TempDir(), "old.lock")
+	if err := os.Rename(scope.LockPath, lockBackup); err != nil {
+		t.Fatal(err)
+	}
+
+	type planResult struct {
+		plan []ApplyPlan
+		err  error
+	}
+	done := make(chan planResult, 1)
+	go func() {
+		plan, planErr := PlanApply("work", ApplyOpts{})
+		done <- planResult{plan: plan, err: planErr}
+	}()
+	select {
+	case got := <-done:
+		t.Fatalf("PlanApply returned while project removal lock was held: plan=%+v err=%v", got.plan, got.err)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if err := scope.RemoveDecl("demo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(scope.CachePath, "demo")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lockBackup); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(coord.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	var got planResult
+	select {
+	case got = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("PlanApply did not finish after the project removal lock was released")
+	}
+	if got.err == nil || errors.Is(got.err, ErrLockOutOfDate) || !errors.Is(got.err, ErrRecipeNotApplicable) {
+		t.Fatalf("PlanApply after complete removal = plan=%+v err=%v, want the final missing-recipe result", got.plan, got.err)
+	}
+}
+
+func writeCoreRemoteFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

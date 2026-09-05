@@ -600,6 +600,8 @@ func TestSyncBuildsTheProjectCacheAndRemovesProjectStrays(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(s.CachePath, "stray", "recipe.toml"), "name = \"stray\"\nscript = \"install.sh\"\n")
 	writeFile(t, filepath.Join(s.CachePath, "stray", "install.sh"), "#!/bin/sh\n")
+	writeFile(t, filepath.Join(s.CachePath, ".stray", "recipe.toml"), "name = \".stray\"\nscript = \"install.sh\"\n")
+	writeFile(t, filepath.Join(s.CachePath, ".stray", "install.sh"), "#!/bin/sh\n")
 
 	if err := Sync(s); err != nil {
 		t.Fatal(err)
@@ -609,6 +611,9 @@ func TestSyncBuildsTheProjectCacheAndRemovesProjectStrays(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.CachePath, "stray")); !os.IsNotExist(err) {
 		t.Fatalf("project stray stat = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.CachePath, ".stray")); !os.IsNotExist(err) {
+		t.Fatalf("hidden project stray stat = %v, want not exist", err)
 	}
 }
 
@@ -834,6 +839,186 @@ func TestUpdateMovesTheCommitAndReturnsItsName(t *testing.T) {
 	}
 	if strings.Contains(readFile(t, s.LockPath), "name =") {
 		t.Fatal("caller-only LockEntry.Name was serialized into stoat.lock after Update")
+	}
+}
+
+func TestAddAcceptsAFullCommitRefAndChecksOutThePinnedCommit(t *testing.T) {
+	remoteRoot(t)
+	src := namedRecipeRepo(t, "demo", "demo")
+	commit := testutil.GitCommit(t, src, map[string]string{
+		"recipe.toml": "schema = 3\nname = \"demo\"\ndescription = \"commit ref\"\nscript = \"install.sh\"\n",
+		"install.sh":  "#!/bin/sh\necho commit\n",
+	}, "")
+	s, err := ScopeFor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := Add(s, src+"@"+commit, false)
+	if err != nil {
+		t.Fatalf("Add() with full commit ref = %v", err)
+	}
+	if entry.Name != "demo" || entry.Ref != commit || entry.Commit != commit {
+		t.Fatalf("Add() entry = %+v, want the requested full commit pinned", entry)
+	}
+	lock, err := s.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lock.Recipes["demo"]; got.Ref != commit || got.Commit != commit {
+		t.Fatalf("persisted commit-ref entry = %+v, want ref and commit %s", got, commit)
+	}
+	if got := currentHead(t, filepath.Join(s.CachePath, "demo")); got != commit {
+		t.Fatalf("cache HEAD = %s, want %s", got, commit)
+	}
+}
+
+func TestLockAllAcceptsAFullCommitRefAndPersistsThePin(t *testing.T) {
+	remoteRoot(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	src := namedRecipeRepo(t, "demo", "demo")
+	commit := testutil.GitCommit(t, src, map[string]string{
+		"install.sh": "#!/bin/sh\necho commit\n",
+	}, "")
+	writeFile(t, filepath.Join(project, "stoat.toml"), fmt.Sprintf(
+		"[recipes]\ndemo = { source = %q, ref = %q }\n", src, commit))
+	s, err := ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LockAll(s)
+	if err != nil {
+		t.Fatalf("LockAll() with full commit ref = %v", err)
+	}
+	entry, ok := got.Recipes["demo"]
+	if !ok || entry.Ref != commit || entry.Commit != commit {
+		t.Fatalf("LockAll() = %+v, want demo ref and commit %s", got.Recipes, commit)
+	}
+	persisted, err := s.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Recipes["demo"] != entry {
+		t.Fatalf("persisted LockAll entry = %+v, want %+v", persisted.Recipes["demo"], entry)
+	}
+}
+
+func TestUpdateAcceptsAFullCommitRefAndChecksOutTheNewPin(t *testing.T) {
+	remoteRoot(t)
+	src := namedRecipeRepo(t, "demo", "demo")
+	s, err := ScopeFor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Add(s, src, false); err != nil {
+		t.Fatal(err)
+	}
+	commit := testutil.GitCommit(t, src, map[string]string{
+		"install.sh": "#!/bin/sh\necho commit\n",
+	}, "")
+	lock, err := s.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := lock.Recipes["demo"]
+	entry.Ref = commit
+	lock.Recipes["demo"] = entry
+	if err := s.Save(lock); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Update(s, []string{"demo"})
+	if err != nil {
+		t.Fatalf("Update() with full commit ref = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "demo" || got[0].Ref != commit || got[0].Commit != commit {
+		t.Fatalf("Update() = %+v, want demo ref and commit %s", got, commit)
+	}
+	if got := currentHead(t, filepath.Join(s.CachePath, "demo")); got != commit {
+		t.Fatalf("cache HEAD = %s, want %s", got, commit)
+	}
+	persisted, err := s.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Recipes["demo"].Ref != commit || persisted.Recipes["demo"].Commit != commit {
+		t.Fatalf("persisted Update entry = %+v, want ref and commit %s", persisted.Recipes["demo"], commit)
+	}
+}
+
+func TestAddMissingFullCommitRefKeepsSourceAndCommitContext(t *testing.T) {
+	remoteRoot(t)
+	src := namedRecipeRepo(t, "demo", "demo")
+	missing := strings.Repeat("f", 40)
+	s, err := ScopeFor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Add(s, src+"@"+missing, false)
+	if err == nil {
+		t.Fatal("Add() with a missing full commit ref = nil, want an error")
+	}
+	assertMissingCommitContext(t, err, src, missing)
+}
+
+func TestLockAllMissingFullCommitRefKeepsSourceAndCommitContext(t *testing.T) {
+	remoteRoot(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	src := namedRecipeRepo(t, "demo", "demo")
+	missing := strings.Repeat("e", 40)
+	writeFile(t, filepath.Join(project, "stoat.toml"), fmt.Sprintf(
+		"[recipes]\ndemo = { source = %q, ref = %q }\n", src, missing))
+	s, err := ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LockAll(s)
+	if err == nil {
+		t.Fatal("LockAll() with a missing full commit ref = nil, want an error")
+	}
+	assertMissingCommitContext(t, err, src, missing)
+}
+
+func TestUpdateMissingFullCommitRefKeepsSourceAndCommitContext(t *testing.T) {
+	remoteRoot(t)
+	src := namedRecipeRepo(t, "demo", "demo")
+	missing := strings.Repeat("d", 40)
+	s, err := ScopeFor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Add(s, src, false); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := s.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := lock.Recipes["demo"]
+	entry.Ref = missing
+	lock.Recipes["demo"] = entry
+	if err := s.Save(lock); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Update(s, []string{"demo"})
+	if err == nil {
+		t.Fatal("Update() with a missing full commit ref = nil, want an error")
+	}
+	assertMissingCommitContext(t, err, src, missing)
+}
+
+func assertMissingCommitContext(t *testing.T, err error, source, commit string) {
+	t.Helper()
+	label := strings.TrimSuffix(source, ".git")
+	labelWithoutLeadingSlash := strings.TrimPrefix(label, string(filepath.Separator))
+	if !strings.Contains(err.Error(), commit) || (!strings.Contains(err.Error(), label) && !strings.Contains(err.Error(), labelWithoutLeadingSlash)) {
+		t.Fatalf("missing commit error = %q, want source/ref context %q and %q", err, label, commit)
 	}
 }
 
