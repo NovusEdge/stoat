@@ -45,6 +45,7 @@ usage: stoat <command> [flags]
 | [`guest ls`](#stoat-guest-ls) | List loaded guest OS definitions | 0 |
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
+| [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
@@ -539,6 +540,21 @@ $ stoat logs -n 20
 `-n` sets how many lines from the end to print (default 50; `0` or negative prints the whole file).
 
 **Exit codes:** 0 on success (including an empty log, which prints nothing); 1 if the log can't be opened or read.
+
+## `stoat screenshot <name> [-o path]`
+
+Writes the VM's screen to a PNG and prints the path, the pixel size and the byte count. qemu dumps its own framebuffer over the monitor socket, so the image is the same whether the display is a GTK window or a VNC socket, and a VM stuck at a boot prompt still answers.
+
+```
+$ stoat screenshot work
+/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png (1280x800, 48213 bytes)
+```
+
+Without `-o`, the file lands in `<vm dir>/screenshots/`, named for the second it was taken: RFC3339 with the colons stripped, since a colon in a filename breaks scp's `host:path` split. A second shot inside the same second gets `-2`, then `-3`, so a caller polling a boot never overwrites the frame it just took.
+
+`-o` names the file instead. qemu writes it as its own user, so a relative path resolves against the caller's working directory before qemu sees it.
+
+**Exit codes:** 0 on success; 1 if the VM does not exist, is not running (`not_running`), or qemu refuses the dump (`screenshot_failed`).
 
 ## `stoat doctor`
 
