@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/sshx"
 	"github.com/novusedge/stoat/internal/testutil"
 )
@@ -41,20 +42,33 @@ func TestRunReportsANonZeroExitAsData(t *testing.T) {
 	}
 }
 
+// alpineEscalate is the first word of alpine's escalate argv, read from the
+// guest definition rather than spelled here, so a guest file that switches
+// its escalate command does not silently pass this test.
+func alpineEscalate(t *testing.T) string {
+	t.Helper()
+	o, ok := guest.Lookup("alpine")
+	if !ok || len(o.Escalate) == 0 {
+		t.Fatal("alpine's guest definition has no escalate argv")
+	}
+	return o.Escalate[0]
+}
+
 func TestRunEscalatesOnlyWhenAsked(t *testing.T) {
 	calls := testutil.FakeSSH(t, `true`)
 	v := &config.VM{Name: "work", SSHPort: 2222, SSHUser: "stoat", OS: "alpine"}
+	esc := alpineEscalate(t)
 
 	if _, _, _, err := sshx.Run(context.Background(), v, false, []string{"id"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(calls.Calls()[0].Remote, "doas") || strings.Contains(calls.Calls()[0].Remote, "sudo") {
+	if strings.Contains(calls.Calls()[0].Remote, esc) {
 		t.Fatalf("a tool escalated on its own: %q", calls.Calls()[0].Remote)
 	}
 	if _, _, _, err := sshx.Run(context.Background(), v, true, []string{"id"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(calls.Calls()[1].Remote, "doas") {
+	if !strings.Contains(calls.Calls()[1].Remote, esc) {
 		t.Fatalf("root=true did not apply alpine's escalate: %q", calls.Calls()[1].Remote)
 	}
 }
@@ -65,7 +79,7 @@ func TestRunDoesNotEscalateForRoot(t *testing.T) {
 	if _, _, _, err := sshx.Run(context.Background(), v, true, []string{"id"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(calls.Calls()[0].Remote, "doas") {
+	if strings.Contains(calls.Calls()[0].Remote, alpineEscalate(t)) {
 		t.Fatalf("escalated for a root ssh user: %q", calls.Calls()[0].Remote)
 	}
 }
