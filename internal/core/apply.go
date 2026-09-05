@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -323,31 +324,79 @@ func discoverCloudInitApplied(ctx context.Context, v *config.VM) error {
 	if backend.For(v).Name() != "cloudinit" || len(v.Applied) > 0 {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, "ls -1 "+cloudinit.MarkerDir+" 2>/dev/null")...).Output()
+	script := fmt.Sprintf("for marker in %s/*; do case \"$marker\" in *.out) continue;; esac; [ -f \"$marker\" ] || continue; name=$(basename \"$marker\"); printf '===%%s\\n' \"$name\"; cat \"$marker.out\" 2>/dev/null; done", cloudinit.MarkerDir)
+	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, script)...).Output()
 	if err != nil {
 		return nil // marker dir missing or a transient ssh error; discover nothing
 	}
 
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return err
+	}
 	var applied map[string]config.AppliedRecipe
-	for _, name := range strings.Fields(string(out)) {
-		hash, err := recipes.ScriptHash(name, v.OS)
-		if err != nil {
+	for name, body := range cloudInitOutputs(string(out)) {
+		m, ok, manifestErr := recipes.ManifestFor(name)
+		if manifestErr != nil || !ok {
 			continue // a marker for a recipe no longer on disk
 		}
-		ver := ""
-		if m, ok, _ := recipes.ManifestFor(name); ok {
-			ver = m.Version
+		hash, hashErr := recipeHashFor(v, m)
+		if hashErr != nil {
+			hash, _ = recipes.ScriptHash(name, v.OS)
 		}
+		scriptHash, _ := recipes.ScriptHash(name, v.OS)
+		values, _ := sshx.ParseOutputs(m.Outputs, redactCloudSecrets(body, secrets[name]))
 		if applied == nil {
 			applied = make(map[string]config.AppliedRecipe)
 		}
-		applied[name] = config.AppliedRecipe{Version: ver, Hash: hash, At: time.Now()}
+		applied[name] = config.AppliedRecipe{
+			Version: m.Version, Hash: hash, ScriptHash: scriptHash,
+			At: time.Now(), Outputs: values, Health: string(HealthUnknown),
+		}
 	}
 	if applied == nil {
 		return nil
 	}
 	v.Applied = applied
 	return v.Save()
+}
+
+func cloudInitOutputs(body string) map[string]string {
+	out := map[string]string{}
+	var name string
+	var value strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "===") {
+			if name != "" {
+				out[name] = value.String()
+			}
+			name = strings.TrimSpace(strings.TrimPrefix(line, "==="))
+			value.Reset()
+			continue
+		}
+		if name != "" {
+			value.WriteString(line)
+			value.WriteByte('\n')
+		}
+	}
+	if name != "" {
+		out[name] = value.String()
+	}
+	return out
+}
+
+func redactCloudSecrets(value string, secrets map[string]string) string {
+	names := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		if secret != "" {
+			names = append(names, secret)
+		}
+	}
+	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	for _, secret := range names {
+		value = strings.ReplaceAll(value, secret, "<redacted>")
+	}
+	return value
 }
 
 // filterByRunMode narrows targets to the recipes that should actually run,

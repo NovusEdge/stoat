@@ -2,6 +2,8 @@ package cloudinit
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/guest"
@@ -52,6 +54,19 @@ func WrapScripts(scripts []Script, prelude string) string {
 	var wf, rc strings.Builder
 	wf.WriteString("write_files:\n")
 	rc.WriteString("runcmd:\n")
+	hasSecrets := false
+	for _, s := range scripts {
+		if len(s.Secrets) > 0 {
+			hasSecrets = true
+			break
+		}
+	}
+	if hasSecrets {
+		fmt.Fprintf(&wf, "  - path: %s\n", SecretsEnvPath)
+		wf.WriteString("    permissions: '0600'\n")
+		wf.WriteString("    content: |\n")
+		wf.WriteString(indentBlock(secretEnv(scripts)))
+	}
 	if prelude != "" {
 		rc.WriteString(fmt.Sprintf("  - sh -c %s\n", guest.ShQuote(prelude+"stoat_pkg_setup")))
 	}
@@ -66,10 +81,70 @@ func WrapScripts(scripts []Script, prelude string) string {
 		// leaves no marker for a script that failed, so a failed recipe stays
 		// pending instead of being recorded as applied.
 		marker := fmt.Sprintf("%s/%s", MarkerDir, s.Name)
-		fmt.Fprintf(&rc, "  - %s && mkdir -p %s && touch %s\n", path, MarkerDir, marker)
+		command := recipeCommand(s, path, marker)
+		if len(s.Env) > 0 || len(s.Secrets) > 0 {
+			command = strconv.Quote(command)
+		}
+		fmt.Fprintf(&rc, "  - %s\n", command)
+	}
+	if hasSecrets {
+		fmt.Fprintf(&rc, "  - rm -f %s\n", SecretsEnvPath)
 	}
 
 	return "#cloud-config\n" + wf.String() + rc.String()
+}
+
+func secretEnv(scripts []Script) string {
+	var b strings.Builder
+	for _, s := range scripts {
+		names := make([]string, 0, len(s.Secrets))
+		for name := range s.Secrets {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			key := namespacedSecret(s.Name, name)
+			fmt.Fprintf(&b, "%s=%s\n", key, guest.ShQuote(s.Secrets[name]))
+		}
+	}
+	return b.String()
+}
+
+func namespacedSecret(recipe, param string) string {
+	return "STOAT_PARAM_" + strings.ToUpper(recipe) + "_" + strings.ToUpper(param)
+}
+
+func recipeCommand(s Script, path, marker string) string {
+	var b strings.Builder
+	if len(s.Secrets) > 0 {
+		fmt.Fprintf(&b, ". %s && ", SecretsEnvPath)
+	}
+	for _, entry := range s.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "export %s=%s && ", key, guest.ShQuote(value))
+	}
+	names := make([]string, 0, len(s.Secrets))
+	for name := range s.Secrets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		key := "STOAT_PARAM_" + strings.ToUpper(name)
+		fmt.Fprintf(&b, "export %s=\"$%s\" && ", key, namespacedSecret(s.Name, name))
+	}
+	output := "/tmp/.stoat-out/" + s.Name
+	if len(s.Env) > 0 {
+		fmt.Fprintf(&b, "mkdir -p /tmp/.stoat-out && chmod 700 /tmp/.stoat-out && : > %s && ", output)
+	}
+	fmt.Fprintf(&b, "%s && mkdir -p %s && ", path, MarkerDir)
+	if len(s.Env) > 0 {
+		fmt.Fprintf(&b, "if [ -f %s ]; then cp %s %s.out; fi && ", output, output, marker)
+	}
+	fmt.Fprintf(&b, "touch %s", marker)
+	return b.String()
 }
 
 // indentBlock indents body by six spaces, the depth a YAML block scalar
