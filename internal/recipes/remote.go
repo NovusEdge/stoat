@@ -469,6 +469,11 @@ func resolveCommit(source, gitRef string) (string, error) {
 // publishes the complete cache transaction. Project caches remove stray
 // entries; the global cache leaves non-remote recipes untouched.
 func Sync(s Scope) error {
+	unlock, err := lockScope(s)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unlock() }()
 	lock, err := s.Lock()
 	if err != nil {
 		return err

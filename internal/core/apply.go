@@ -490,6 +490,9 @@ type recipeDecision struct {
 // reports every decision). It raises the same errors either way: a missing
 // recipe.toml, a dependency cycle, or an unsatisfiable dependency.
 func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]recipeDecision, map[string]recipes.Manifest, error) {
+	if err := SyncRecipes(); err != nil {
+		return nil, nil, err
+	}
 	manifests := make(map[string]recipes.Manifest, len(targets))
 	for _, name := range targets {
 		m, ok, err := recipes.ManifestFor(name)
