@@ -659,7 +659,38 @@ type RecipeHealthSpec struct {
 
 // RecipeShow is the host-side lookup for one recipe's contract.
 func RecipeShow(name string) (Recipe, error) {
-	return Recipe{}, fmt.Errorf("%w: no such recipe %q", ErrNotFound, name)
+	m, ok, err := recipes.ManifestFor(name)
+	if err != nil {
+		return Recipe{}, err
+	}
+	if !ok {
+		return Recipe{}, fmt.Errorf("%w: no such recipe %q", ErrNotFound, name)
+	}
+	return fromManifest(m), nil
+}
+
+// fromManifest is the one projection shared by recipe list and recipe show.
+// Keeping the conversion here prevents the two caller surfaces from growing
+// different views of the same manifest over time.
+func fromManifest(m recipes.Manifest) Recipe {
+	r := Recipe{
+		Name: m.Name, Description: m.Description, Schema: m.Schema,
+		Reboot: m.Reboot, Depends: m.Depends, Runtime: m.Runtime,
+		Params: []RecipeParam{}, Outputs: []RecipeOutput{},
+	}
+	for _, p := range m.SortedParams() {
+		r.Params = append(r.Params, RecipeParam{
+			Name: p.Name, Type: p.Type, Default: p.Default, Help: p.Help,
+			Required: p.Required, Values: append([]string{}, p.Values...),
+		})
+	}
+	for _, o := range m.SortedOutputs() {
+		r.Outputs = append(r.Outputs, RecipeOutput{Name: o.Name, Help: o.Help})
+	}
+	if m.Health.Check != "" {
+		r.Health = &RecipeHealthSpec{Check: m.Health.Check, Timeout: m.Health.Duration().String()}
+	}
+	return r
 }
 
 // RecipeFilter selects the recipes Recipes returns: the set
@@ -683,13 +714,7 @@ func Recipes(f RecipeFilter) ([]Recipe, error) {
 	var out []Recipe
 	for _, m := range manifests {
 		if recipes.MatchesVM(&m, f.OS) {
-			out = append(out, Recipe{
-				Name:        m.Name,
-				Description: m.Description,
-				Reboot:      m.Reboot,
-				Depends:     m.Depends,
-				Runtime:     m.Runtime,
-			})
+			out = append(out, fromManifest(m))
 		}
 	}
 	return out, nil

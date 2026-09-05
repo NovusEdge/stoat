@@ -2,6 +2,8 @@ package wire
 
 import (
 	"encoding/base64"
+	"sort"
+	"time"
 	"unicode/utf8"
 
 	"github.com/novusedge/stoat/internal/core"
@@ -334,21 +336,76 @@ type RecipeSchema struct {
 	Health      *RecipeHealth  `json:"health"`
 }
 
+// RecipeShowResult is the named JSON envelope for `recipe show`.
+type RecipeShowResult struct {
+	Recipe RecipeSchema `json:"recipe"`
+}
+
 // FromRecipeSchema converts a core recipe contract to the named wire shape.
-func FromRecipeSchema(core.Recipe) RecipeSchema { return RecipeSchema{} }
+// Params and outputs remain sorted named lists so repeated calls are stable.
+func FromRecipeSchema(r core.Recipe) RecipeSchema {
+	s := RecipeSchema{
+		Name: r.Name, Description: r.Description, Schema: r.Schema,
+		Runtime: r.Runtime, Reboot: r.Reboot, Depends: nonNil(r.Depends),
+		Params: []RecipeParam{}, Outputs: []RecipeOutput{},
+	}
+	for _, p := range r.Params {
+		s.Params = append(s.Params, RecipeParam{
+			Name: p.Name, Type: p.Type, Required: p.Required,
+			Default: p.Default, Values: nonNil(p.Values), Help: p.Help,
+		})
+	}
+	for _, o := range r.Outputs {
+		s.Outputs = append(s.Outputs, RecipeOutput{Name: o.Name, Help: o.Help})
+	}
+	sort.Slice(s.Params, func(i, j int) bool { return s.Params[i].Name < s.Params[j].Name })
+	sort.Slice(s.Outputs, func(i, j int) bool { return s.Outputs[i].Name < s.Outputs[j].Name })
+	if r.Health != nil {
+		s.Health = &RecipeHealth{Check: r.Health.Check, Timeout: r.Health.Timeout}
+	}
+	return s
+}
 
 func FromRecipe(r core.Recipe) Recipe {
 	return Recipe{
 		Name:        r.Name,
 		Description: r.Description,
 		Schema:      r.Schema,
-		Params:      []RecipeParam{},
-		Outputs:     []RecipeOutput{},
-		Health:      nil,
+		Params:      fromRecipeParams(r.Params),
+		Outputs:     fromRecipeOutputs(r.Outputs),
+		Health:      fromRecipeHealth(r.Health),
 		Reboot:      r.Reboot,
 		Depends:     nonNil(r.Depends),
 		Runtime:     r.Runtime,
 	}
+}
+
+func fromRecipeParams(params []core.RecipeParam) []RecipeParam {
+	out := make([]RecipeParam, 0, len(params))
+	for _, p := range params {
+		out = append(out, RecipeParam{
+			Name: p.Name, Type: p.Type, Required: p.Required,
+			Default: p.Default, Values: nonNil(p.Values), Help: p.Help,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return nonNil(out)
+}
+
+func fromRecipeOutputs(outputs []core.RecipeOutput) []RecipeOutput {
+	out := make([]RecipeOutput, 0, len(outputs))
+	for _, o := range outputs {
+		out = append(out, RecipeOutput{Name: o.Name, Help: o.Help})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return nonNil(out)
+}
+
+func fromRecipeHealth(health *core.RecipeHealthSpec) *RecipeHealth {
+	if health == nil {
+		return nil
+	}
+	return &RecipeHealth{Check: health.Check, Timeout: health.Timeout}
 }
 
 func FromRecipes(rs []core.Recipe) []Recipe {
