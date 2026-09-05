@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -81,6 +82,9 @@ func decode(path string, v any, o options) (toml.MetaData, error) {
 		}
 	}
 	for _, k := range md.Undecoded() {
+		if insideDynamicField(reflect.TypeOf(v), k) {
+			continue
+		}
 		key := strings.Join(k, ".")
 		if o.warn == nil {
 			return md, fmt.Errorf("%s: unknown key %q", path, key)
@@ -88,6 +92,46 @@ func decode(path string, v any, o options) (toml.MetaData, error) {
 		fmt.Fprintf(o.warn, "%s: unknown key %q\n", path, key)
 	}
 	return md, nil
+}
+
+// insideDynamicField reports whether key names a value nested under a field
+// whose Go type carries an interface{} somewhere on its path, such as
+// map[string]any. BurntSushi's TOML decoder places a table value fully into
+// such a field but still lists its nested keys as undecoded, because it
+// tracks only which struct fields it used, not which map entries it filled.
+// Any key under an interface{} is definitionally known: an untyped value
+// accepts every shape by construction. A map keyed into a concrete struct
+// (map[string]VM) is not dynamic; its element's own fields are still checked,
+// only the map key itself (arbitrary, one segment) is skipped.
+func insideDynamicField(t reflect.Type, key []string) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() == reflect.Interface {
+		return true
+	}
+	if len(key) == 0 {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Map:
+		if t.Elem().Kind() == reflect.Interface {
+			return true
+		}
+		return insideDynamicField(t.Elem(), key[1:])
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			name := strings.Split(f.Tag.Get("toml"), ",")[0]
+			if name == "" {
+				name = f.Name
+			}
+			if name == key[0] {
+				return insideDynamicField(f.Type, key[1:])
+			}
+		}
+	}
+	return false
 }
 
 // Encode is the single TOML writer for files owned by stoat.

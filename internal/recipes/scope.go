@@ -8,11 +8,14 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/project"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
-// ProjectFile is the name that puts stoat in project scope.
-const ProjectFile = "stoat.toml"
+// ProjectFile is the name that puts stoat in project scope. internal/project
+// owns it: the recipe scope and the VM scope must never disagree about which
+// directory is a project.
+const ProjectFile = project.FileName
 
 // Scope is where one lock and its cache live.
 //
@@ -38,21 +41,18 @@ type Decl struct {
 // scope even inside a project.
 func ScopeFor(global bool) (Scope, error) {
 	if !global {
-		wd, err := os.Getwd()
+		p, ok, err := project.Find()
 		if err != nil {
 			return Scope{}, err
 		}
-		cfg := filepath.Join(wd, ProjectFile)
-		if _, err := os.Stat(cfg); err == nil {
+		if ok {
 			return Scope{
 				Name:       "project",
-				Dir:        wd,
-				LockPath:   filepath.Join(wd, "stoat.lock"),
-				CachePath:  filepath.Join(wd, ".stoat", "recipes"),
-				ConfigPath: cfg,
+				Dir:        p.Dir,
+				LockPath:   filepath.Join(p.Dir, "stoat.lock"),
+				CachePath:  filepath.Join(p.Dir, ".stoat", "recipes"),
+				ConfigPath: filepath.Join(p.Dir, ProjectFile),
 			}, nil
-		} else if !os.IsNotExist(err) {
-			return Scope{}, err
 		}
 	}
 	root := config.Root()
