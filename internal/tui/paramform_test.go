@@ -9,57 +9,37 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/core"
 )
-
-func paramFixture() core.Recipe {
-	return core.Recipe{
-		Name: "docker", Schema: 3,
-		Params: []core.RecipeParam{
-			{Name: "authkey", Type: "secret", Required: true, Help: "tailnet auth key"},
-			{Name: "channel", Type: "enum", Default: "stable", Values: []string{"stable", "test"}},
-			{Name: "port", Type: "int", Default: "2375"},
-			{Name: "tls", Type: "bool", Default: "true"},
-			{Name: "user", Type: "string", Default: "dev"},
-		},
-	}
-}
-
-// The component boundary must seed each field from the manifest, including a
-// blank required secret and string spellings for typed defaults. This test
-// does not reach into private bindings; the values are observed through the
-// public form contract used by the wizard.
-func TestNewParamFormSeedsDefaults(t *testing.T) {
-	p := newParamForm(paramFixture())
-	got := p.Values()
-	want := map[string]string{
-		"authkey": "", "channel": "stable", "port": "2375",
-		"tls": "true", "user": "dev",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for k, v := range want {
-		if got[k] != v {
-			t.Errorf("%s = %q, want %q", k, got[k], v)
-		}
-	}
-	if p.Complete() {
-		t.Error("required authkey made an empty parameter form complete")
-	}
-}
 
 func writeParamRecipe(t *testing.T) {
 	t.Helper()
-	dir := filepath.Join(config.Root(), "recipes", "docker")
+	baseDir := filepath.Join(config.Root(), "recipes", "param-base")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baseManifest := `schema = 2
+name = "param-base"
+description = "parameter dependency"
+os = ["alpine"]
+script = "install.sh"
+`
+	if err := os.WriteFile(filepath.Join(baseDir, "recipe.toml"), []byte(baseManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(config.Root(), "recipes", "param-docker")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	manifest := `schema = 3
-name = "docker"
-description = "parameterized docker"
+name = "param-docker"
+description = "parameterized recipe"
 os = ["alpine"]
 script = "install.sh"
+depends = ["param-base"]
 
 [params.authkey]
 type = "secret"
@@ -100,7 +80,7 @@ func parameterizedForm(t *testing.T) model {
 	f.imgIdx = 0
 	f.refreshRecipes()
 	for i, name := range f.recipeNames {
-		if name == "docker" {
+		if name == "param-docker" {
 			f.recipeIdx = i
 			break
 		}
@@ -138,8 +118,23 @@ func TestParameterizedRecipeSelectionOpensMaskedForm(t *testing.T) {
 			t.Errorf("parameter form omitted %q:\n%s", field, rendered)
 		}
 	}
-	if strings.Contains(rendered, "synthetic-secret-sentinel") {
-		t.Fatal("parameter form rendered a secret value")
+	for _, defaultValue := range []string{"stable", "2375", "true", "dev"} {
+		if !strings.Contains(rendered, defaultValue) {
+			t.Errorf("parameter form omitted manifest default %q:\n%s", defaultValue, rendered)
+		}
+	}
+	const sentinel = "synthetic-secret-sentinel"
+	m = typeParamText(m, sentinel)
+	spec, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("form spec after typing secret: %v", err)
+	}
+	if got := spec.Secrets["param-docker"]["authkey"]; got != sentinel {
+		t.Fatalf("wizard did not carry typed secret through spec: got %q, want %q", got, sentinel)
+	}
+	rendered = ansi.Strip(m.View().Content)
+	if strings.Contains(rendered, sentinel) {
+		t.Fatal("parameter form rendered the typed secret value")
 	}
 }
 
@@ -204,17 +199,68 @@ func TestParameterizedRecipeBuildSplitsSecretsAndOmitsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("form spec after parameter submission: %v", err)
 	}
-	if got := spec.Secrets["docker"]["authkey"]; got != "tskey-secret" {
+	if got := spec.Secrets["param-docker"]["authkey"]; got != "tskey-secret" {
 		t.Errorf("secret authkey = %q, want secret storage", got)
 	}
-	if got := spec.Params["docker"]["user"]; got != "alice" {
+	if got := spec.Params["param-docker"]["user"]; got != "alice" {
 		t.Errorf("non-secret user = %q, want Params storage", got)
 	}
 	for _, name := range []string{"channel", "port", "tls"} {
-		if _, ok := spec.Params["docker"][name]; ok {
+		if _, ok := spec.Params["param-docker"][name]; ok {
 			t.Errorf("unchanged default %q was stored in Params", name)
 		}
 	}
+}
+
+// A completed parameter form returns to the recipe picker with its values
+// attached to the selected recipe. Deselecting that recipe must remove both
+// its parameter values and dependencies that are no longer needed.
+func TestParameterizedRecipeSubmitAndDeselectCleansSelection(t *testing.T) {
+	m := parameterizedForm(t)
+	m = sendParamKeys(m, keySpace)
+	m = typeParamText(m, "submitted-secret")
+	// authkey -> channel -> port -> tls -> user
+	m = sendParamKeys(m, "tab", "tab", "tab", "tab")
+	m = typeParamText(m, "submitted-user")
+	m = sendParamKeys(m, "enter")
+
+	spec, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("form spec after parameter submission: %v", err)
+	}
+	if !containsString(spec.Recipes, "param-docker") || !containsString(spec.Recipes, "param-base") {
+		t.Fatalf("submitted spec = %+v, want recipe and dependency selected", spec.Recipes)
+	}
+	if got := spec.Secrets["param-docker"]["authkey"]; got != "submitted-secret" {
+		t.Fatalf("submitted secret = %q, want typed value", got)
+	}
+	if got := spec.Params["param-docker"]["user"]; got != "submitted-user" {
+		t.Fatalf("submitted user = %q, want typed value", got)
+	}
+
+	m = sendParamKeys(m, keySpace)
+	cleaned, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("form spec after recipe deselection: %v", err)
+	}
+	if containsString(cleaned.Recipes, "param-docker") || containsString(cleaned.Recipes, "param-base") {
+		t.Fatalf("deselected spec = %+v, retained recipe or dependency", cleaned.Recipes)
+	}
+	if _, ok := cleaned.Secrets["param-docker"]; ok {
+		t.Errorf("deselected spec retained recipe secrets: %#v", cleaned.Secrets)
+	}
+	if _, ok := cleaned.Params["param-docker"]; ok {
+		t.Errorf("deselected spec retained recipe params: %#v", cleaned.Params)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Escaping the parameter form returns to the recipe picker and discards the
@@ -228,7 +274,7 @@ func TestParameterizedRecipeCancelCleansSelection(t *testing.T) {
 	if m.screen != screenForm {
 		t.Fatalf("cancel left screen %v, want recipe picker", m.screen)
 	}
-	if m.form.recipeSel["docker"] {
+	if m.form.recipeSel["param-docker"] {
 		t.Fatal("cancel retained a recipe selection")
 	}
 	if strings.Contains(ansi.Strip(m.View().Content), "authkey") {

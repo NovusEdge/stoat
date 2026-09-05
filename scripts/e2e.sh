@@ -140,6 +140,9 @@ E2E_SECRET="stoat-e2e-secret-$$"
 export STOAT_SECRET_REDACTION_TOKEN=$E2E_SECRET
 redaction_src="$root/scripts/testdata/e2e-redaction"
 redaction_dst="$STOAT_HOME/recipes/redaction"
+if [ -e "$redaction_dst" ] || [ -L "$redaction_dst" ]; then
+	fail "refusing to overwrite existing recipe: $redaction_dst"
+fi
 mkdir -p "$redaction_dst"
 cp "$redaction_src/recipe.toml" "$redaction_src/install.sh" "$redaction_dst/"
 chmod 755 "$redaction_dst/install.sh"
