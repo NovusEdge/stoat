@@ -232,6 +232,8 @@ RecipeAdded {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
              "ref":"v1.2","commit":"9f3c1e2d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d",
              "scope":"global"}
 
+RecipeRemoved {"name":"tailscale","scope":"global"}
+
 IndexEntry  {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
              "description":"join a tailnet on boot","os":["alpine"]}
 
@@ -257,8 +259,8 @@ Guest       {"name":"fedora","init":"systemd","shell":"/bin/bash",
 `global` and `project` entries carry `source`, `ref`, and the seven-character
 commit prefix. `RecipeRoot` identifies each search root with `path` and
 `scope`. `RecipeAdded` uses the same remote pin fields for add, lock, sync, and
-update results, with the full resolved commit; remove results contain only the
-name and scope.
+update results, with the full resolved commit. `RecipeRemoved` contains only
+the name and scope.
 
 `state` is one of `stopped`, `running`, `broken`. `error` appears only on a
 broken VM.
@@ -377,7 +379,7 @@ so a leak fails the build rather than shipping.
 | `recipe list` | `{"roots":[RecipeRoot,...],"recipes":[RecipeEntry,...]}` |
 | `recipe show` | `{"recipe":RecipeSchema}` |
 | `recipe new` | `{"path":"/home/u/.stoat/recipes/foo/"}` |
-| `recipe add` | `{"name":"tailscale","source":"...","ref":"v1.2","commit":"9f3c1e2","scope":"global"}` |
+| `recipe add` | `{"name":"tailscale","source":"...","ref":"v1.2","commit":"9f3c1e2d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d","scope":"global"}` |
 | `recipe lock` | `{"recipes":[RecipeAdded,...]}` |
 | `recipe sync` | `{"recipes":[RecipeAdded,...]}` |
 | `recipe update` | `{"recipes":[RecipeAdded,...]}` |

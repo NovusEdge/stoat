@@ -40,6 +40,20 @@ stoat recipe search my-tools
 Stoat does not create or publish that repository. Index refreshes are cached
 for 24 hours; `--refresh` forces a new fetch.
 
+List installed recipes and their scope and short commit pin:
+
+```sh
+stoat recipe list
+```
+
+Search reads the configured index. `update` addresses an existing remote pin
+by its plain name and does not search the index again. This also applies to a
+recipe added from a URL:
+
+```sh
+stoat recipe update my-tools
+```
+
 ## Project and global scopes
 
 If the current directory contains `stoat.toml`, recipe commands use project
@@ -90,9 +104,16 @@ Remove a remote recipe after checking that no VM uses it:
 stoat recipe rm my-tools -y
 ```
 
-Use `--force` only when intentionally removing a recipe listed by a VM. A
-recipe checkout with local changes is never overwritten by update or sync;
-copy it to a local recipe first.
+If an add would replace a bundled, local, or same-scope recipe, it refuses
+unless the replacement is intentional:
+
+```sh
+stoat recipe add my-tools --global --force
+```
+
+For removal, use `--force` only when intentionally removing a recipe listed by
+a VM. A recipe checkout with local changes is never overwritten by update or
+sync; copy it to a local recipe first.
 
 `apply` in project scope checks that declarations, lock entries, and cache
 checkouts agree. A stale declaration reports a repair instruction to run

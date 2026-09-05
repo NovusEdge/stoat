@@ -32,7 +32,7 @@ func runRecipeAdd(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	source, gitRef, isURL := recipes.ParseRef(a.Ref)
 	if isURL && !a.Yes {
 		if a.JSON || !terminal(stdin) || !terminal(stdout) {
-			_, code := confirm(a, stdin, stdout, "install this recipe; pass -y to confirm")
+			_, code := confirm(a, stdin, stdout, stderr, "install this recipe; pass -y to confirm")
 			return code
 		}
 		m, tmp, previewErr := recipes.Preview(source, gitRef)
@@ -43,13 +43,12 @@ func runRecipeAdd(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 			return a.fail(stdout, stderr, removeErr)
 		}
 		fmt.Fprintf(stdout, "name: %s\n", m.Name)
-		fmt.Fprintf(stdout, "description: %s\n", m.Description)
 		fmt.Fprintf(stdout, "os: %s\n", strings.Join(m.OS, ", "))
 		fmt.Fprintf(stdout, "requires: %s\n", strings.Join(m.Requires, ", "))
 		for _, p := range m.SortedParams() {
 			fmt.Fprintf(stdout, "param: %s (%s)\n", p.Name, p.Type)
 		}
-		if ok, code := confirm(a, stdin, stdout, "install "+m.Name+" from "+source+"?"); !ok {
+		if ok, code := confirm(a, stdin, stdout, stderr, "install "+m.Name+" from "+source+"?"); !ok {
 			return code
 		}
 	}
@@ -135,8 +134,17 @@ func runRecipeUpdate(a *Args, stdout, stderr io.Writer) int {
 
 func runRecipeRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	name := a.Names[0]
-	if ok, code := confirm(a, stdin, stdout, "remove recipe "+name+"?"); !ok {
-		return code
+	s, err := recipes.ScopeFor(a.Global)
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	lock, err := s.Lock()
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	if _, ok := lock.Recipes[name]; !ok {
+		return a.failMsg(stdout, stderr, core.ErrNotFound,
+			fmt.Sprintf("%s is not a remote recipe in %s scope", name, s.Name))
 	}
 	if !a.Force {
 		users, err := core.RecipeUsers(name)
@@ -148,15 +156,14 @@ func runRecipeRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 				fmt.Sprintf("%s is used by %s; pass --force to remove it anyway", name, strings.Join(users, ", ")))
 		}
 	}
-	s, err := recipes.ScopeFor(a.Global)
-	if err != nil {
-		return a.fail(stdout, stderr, err)
+	if ok, code := confirm(a, stdin, stdout, stderr, "remove recipe "+name+"?"); !ok {
+		return code
 	}
 	if err := recipes.Remove(s, name); err != nil {
 		return a.fail(stdout, stderr, recipeGitError(err, "remove"))
 	}
 	if a.JSON {
-		return a.ok(stdout, wire.RecipeAdded{Name: name, Scope: s.Name})
+		return a.ok(stdout, wire.RecipeRemoved{Name: name, Scope: s.Name})
 	}
 	fmt.Fprintln(stdout, "removed", name)
 	return ExitOK

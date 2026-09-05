@@ -136,10 +136,13 @@ func (e *Emitter) write(env envelope) error {
 // usage error (an unknown subcommand, a bad flag, before any FlagSet
 // exists) can still produce an envelope.
 //
-// The one hard case is "exec": it parses no flags of its own (cli.go's
-// runExec dispatch), because everything after the VM name is the guest's
-// command, verbatim. So "--json" is recognized anywhere in argv EXCEPT
-// after exec's VM name:
+// The hard cases are "exec" and the conventional positional terminator:
+// exec parses no flags of its own (cli.go's runExec dispatch), because
+// everything after the VM name is the guest's command, verbatim. The
+// terminator likewise makes every following token positional, so a search for
+// the literal "--json" must not lose that token while looking for stoat's
+// global JSON flag. Thus "--json" is recognized anywhere in argv EXCEPT
+// after exec's VM name or after "--":
 //
 //	stoat --json exec work ls -la   -> stoat
 //	stoat exec --json work ls -la   -> stoat
@@ -151,7 +154,8 @@ func SplitJSONFlag(argv []string) (jsonMode bool, rest []string) {
 	// exec's own two positionals are argv[0] ("exec") and argv[1] (the VM
 	// name); scanning stops consuming --json after that point, so anything
 	// from argv[2] on is the guest's command and passes through untouched,
-	// --json included.
+	// --json included. For every command, the first -- also ends this scan:
+	// everything after it is positional data for the command.
 	stop := len(argv)
 	if len(argv) > 0 && argv[0] == "exec" {
 		stop = 2
@@ -162,6 +166,10 @@ func SplitJSONFlag(argv []string) (jsonMode bool, rest []string) {
 
 	rest = make([]string, 0, len(argv))
 	for i, a := range argv {
+		if i < stop && a == "--" {
+			rest = append(rest, argv[i:]...)
+			break
+		}
 		if i < stop && a == "--json" {
 			jsonMode = true
 			continue

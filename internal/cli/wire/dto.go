@@ -359,6 +359,13 @@ type RecipeAdded struct {
 	Scope  string `json:"scope"`
 }
 
+// RecipeRemoved is the minimal result of `recipe rm`: removal has no pin
+// metadata to report after the lock and cache are gone.
+type RecipeRemoved struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+
 // RecipeBatch is the data returned by lock, sync, and update.
 type RecipeBatch struct {
 	Recipes []RecipeAdded `json:"recipes"`

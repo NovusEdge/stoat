@@ -245,7 +245,7 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if v.State == core.StateRunning {
 		return a.failMsg(stdout, stderr, core.ErrAlreadyRunning, a.VM+" is running; stop it first")
 	}
-	if ok, code := confirm(a, stdin, stdout, "delete VM "+a.VM+"?"); !ok {
+	if ok, code := confirm(a, stdin, stdout, stderr, "delete VM "+a.VM+"?"); !ok {
 		return code
 	}
 	if err := core.Destroy(a.VM); err != nil {

@@ -104,7 +104,14 @@ def check_index_name(ref: str) -> str:
         return ref
     if not _RECIPE_REF.fullmatch(branch) or branch.startswith("/") or branch.endswith("/"):
         raise GuardRejection(f"recipe ref {branch!r} is not safe")
-    if any(part in ("", ".", "..") for part in branch.split("/")):
+    parts = branch.split("/")
+    if ".." in branch or any(
+        part in ("", ".", "..")
+        or part.startswith(".")
+        or part.endswith(".")
+        or part.endswith(".lock")
+        for part in parts
+    ):
         raise GuardRejection(f"recipe ref {branch!r} is not safe")
     return ref
 

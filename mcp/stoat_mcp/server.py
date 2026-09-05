@@ -226,7 +226,12 @@ def list_recipes(os: str | None = None, backend: str | None = None) -> dict[str,
 )
 @_guarded("search_recipes")
 def search_recipes(term: str = "") -> dict[str, Any]:
-    return get_client().run("recipe", "search", term)
+    argv = ["recipe", "search"]
+    if term.startswith("-"):
+        argv.extend(("--", term))
+    elif term:
+        argv.append(term)
+    return get_client().run(*argv)
 
 
 @mcp.tool(
