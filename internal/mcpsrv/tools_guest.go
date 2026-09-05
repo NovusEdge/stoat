@@ -272,12 +272,18 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 			}
 			n := clampInt(in.Lines, 1, maxLogLines)
 			var argv []string
+			// root is false for a caller-supplied path and true for the two
+			// branches whose target comes from the guest file. tail_log at
+			// observe would otherwise read any file as root, which is more
+			// than read_file grants at the same level.
+			root := true
 			switch {
 			case in.Path != "":
 				path, err := checkGuestPath(in.Path)
 				if err != nil {
 					return wire.LogTail{}, err
 				}
+				root = false
 				argv = []string{"tail", "-n", strconv.Itoa(n), path}
 			case in.Unit != "":
 				unit, err := checkSvcName(in.Unit)
@@ -296,7 +302,7 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 				}
 				argv = []string{"tail", "-n", strconv.Itoa(n), os.LogPath}
 			}
-			out, errb, code, err := sshx.Run(ctx, v, true, argv, nil)
+			out, errb, code, err := sshx.Run(ctx, v, root, argv, nil)
 			if err != nil {
 				return wire.LogTail{}, err
 			}

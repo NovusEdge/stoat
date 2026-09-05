@@ -88,6 +88,43 @@ func TestPSCapsRows(t *testing.T) {
 	}
 }
 
+// TestTailLogEscalatesOnlyForTheGuestsOwnLog pins where tail_log's root
+// applies. The caller's own path runs as the ssh user, or an agent at
+// observe would read any file as root through tail_log and get more than
+// read_file grants at the same level. The guest file's own log path carries
+// no tool input and still runs escalated.
+func TestTailLogEscalatesOnlyForTheGuestsOwnLog(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "observe")
+	// sshx.Escalate is a no-op for a root ssh user, and writeVM leaves the
+	// user empty, which reads as root.
+	setSSHUser(t, "dev", "stoat")
+
+	calls := testutil.FakeSSH(t, `echo line`)
+	if res := callTool(t, "tail_log", map[string]any{"vm": "dev", "path": "/etc/shadow"}); res.IsError {
+		t.Fatalf("tail_log failed: %+v", res.Content)
+	}
+	got := calls.Calls()
+	if len(got) != 1 {
+		t.Fatalf("got %d ssh calls, want 1", len(got))
+	}
+	if strings.Contains(got[0].Remote, "sudo") {
+		t.Fatalf("tail_log escalated for a caller-supplied path: %q", got[0].Remote)
+	}
+
+	calls = testutil.FakeSSH(t, `echo line`)
+	if res := callTool(t, "tail_log", map[string]any{"vm": "dev"}); res.IsError {
+		t.Fatalf("tail_log failed: %+v", res.Content)
+	}
+	got = calls.Calls()
+	if len(got) != 1 {
+		t.Fatalf("got %d ssh calls, want 1", len(got))
+	}
+	if !strings.Contains(got[0].Remote, "sudo") {
+		t.Fatalf("tail_log did not escalate for the guest's own log: %q", got[0].Remote)
+	}
+}
+
 func TestGuestReadToolsRefusedAtNone(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	writeVM(t, "locked", "none")

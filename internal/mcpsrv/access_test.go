@@ -27,6 +27,20 @@ func writeVM(t *testing.T, name, level string) {
 	}
 }
 
+// setSSHUser appends an sshuser to a VM written by writeVM. sshx.Escalate
+// returns nothing for a root user, so a test about escalation needs one.
+func setSSHUser(t *testing.T, name, user string) {
+	t.Helper()
+	path := filepath.Join(config.Root(), name, "vm.toml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(body, []byte("sshuser = \""+user+"\"\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // writeSecrets writes a VM's secrets.toml at the mode the loader requires.
 func writeSecrets(t *testing.T, vm string, kv map[string]string) {
 	t.Helper()

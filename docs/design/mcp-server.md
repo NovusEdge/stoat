@@ -130,7 +130,10 @@ config file without an open shell. `pkg_install` runs `pkg.setup` once, then
 `pkg.install` plus the requested packages. `svc` runs `svc.<action>` for
 `enable`, `start`, `stop`, or `restart`. `tail_log` runs `journalctl -u` on a
 systemd guest, `tail` on the init's own log path otherwise, or `tail` on an
-explicit `path`, with `lines` clamped to 2000.
+explicit `path`, with `lines` clamped to 2000. The first two escalate,
+because their target comes from the guest file and carries no tool input.
+An explicit `path` runs as the ssh user: a root read of any path an agent
+names would hand `observe` more than `read_file` gives it.
 
 ### In-VM tools over ssh
 
