@@ -119,3 +119,62 @@ func TestApplyWithNoArgumentCoversEveryDeclaration(t *testing.T) {
 		t.Errorf("first entry = %v, want dev, the first declaration", first)
 	}
 }
+
+func TestLSShowsProjectAndKey(t *testing.T) {
+	dir := projectRoot(t, twoVMs)
+	if err := (&config.VM{Name: "myrepo-dev", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Project: dir}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&config.VM{Name: "other", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	_, objs := runJSON(t, "ls")
+	data, _ := result(t, objs)["data"].(map[string]any)
+	vms, _ := data["vms"].([]any)
+	byName := map[string]map[string]any{}
+	for _, v := range vms {
+		m, _ := v.(map[string]any)
+		byName[m["name"].(string)] = m
+	}
+	if byName["myrepo-dev"]["key"] != "dev" {
+		t.Errorf("myrepo-dev key = %v, want dev", byName["myrepo-dev"]["key"])
+	}
+	if byName["myrepo-dev"]["project"] != dir {
+		t.Errorf("myrepo-dev project = %v, want %q", byName["myrepo-dev"]["project"], dir)
+	}
+	if byName["other"]["project"] != "" || byName["other"]["key"] != "" {
+		t.Errorf("global VM carries project fields: %v", byName["other"])
+	}
+}
+
+func TestLSProjectFilter(t *testing.T) {
+	dir := projectRoot(t, twoVMs)
+	if err := (&config.VM{Name: "myrepo-dev", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Project: dir}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&config.VM{Name: "other", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	_, objs := runJSON(t, "ls", "--project")
+	data, _ := result(t, objs)["data"].(map[string]any)
+	vms, _ := data["vms"].([]any)
+	if len(vms) != 1 {
+		t.Fatalf("vms = %v, want only this project's", vms)
+	}
+}
+
+// A VM whose project directory is gone still lists; ls marks the path.
+func TestLSMarksAMissingProjectDirectory(t *testing.T) {
+	cliRoot(t)
+	t.Chdir(t.TempDir())
+	if err := (&config.VM{Name: "orphan", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Project: "/gone/myrepo"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	_, objs := runJSON(t, "ls")
+	data, _ := result(t, objs)["data"].(map[string]any)
+	vms, _ := data["vms"].([]any)
+	m, _ := vms[0].(map[string]any)
+	if m["project_missing"] != true {
+		t.Errorf("project_missing = %v, want true", m["project_missing"])
+	}
+}
