@@ -55,6 +55,10 @@ const (
 	CodeNoSuchImage      Code = "no_such_image"
 
 	CodeScreenshotFailed Code = "screenshot_failed"
+	// CodeLockOutOfDate is the repairable project-lock condition. The mapping
+	// is added with the remote-recipe wire integration; this declaration keeps
+	// correction tests buildable before that mapping lands.
+	CodeLockOutOfDate Code = "lock_out_of_date"
 )
 
 // Codes returns every declared code, sorted. Built from the same string
@@ -73,6 +77,7 @@ func Codes() []Code {
 		CodeDownloadFailed, CodeDownloadStalled, CodeChecksumMismatch,
 		CodeNoSuchImage,
 		CodeScreenshotFailed,
+		CodeLockOutOfDate,
 	}
 	slices.Sort(out)
 	return out

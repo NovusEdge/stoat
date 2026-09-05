@@ -1,7 +1,9 @@
 package wire
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -48,6 +50,45 @@ func TestMapErrorEveryCoreSentinel(t *testing.T) {
 				t.Errorf("message = %q, want %q", got.Message, tt.err.Error())
 			}
 		})
+	}
+}
+
+func TestMapErrorLockOutOfDateUsesADedicatedCode(t *testing.T) {
+	err := fmt.Errorf("%w; run stoat recipe lock", core.ErrLockOutOfDate)
+	got := MapError(err)
+	if got == nil {
+		t.Fatal("MapError returned nil for ErrLockOutOfDate")
+	}
+	if got.Code != CodeLockOutOfDate {
+		t.Errorf("code = %q, want %q", got.Code, CodeLockOutOfDate)
+	}
+	if got.Message != err.Error() {
+		t.Errorf("message = %q, want %q", got.Message, err.Error())
+	}
+}
+
+func TestLockOutOfDateCodeSurvivesPublicJSONResultBoundary(t *testing.T) {
+	var output bytes.Buffer
+	err := fmt.Errorf("%w: project recipes are stale", core.ErrLockOutOfDate)
+	if writeErr := NewEmitter(&output).ResultErr("recipe sync", MapError(err)); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	var result struct {
+		Type  string `json:"type"`
+		OK    bool   `json:"ok"`
+		Error struct {
+			Code    Code   `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &result); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if result.Type != TypeResult || result.OK {
+		t.Fatalf("result boundary = type %q, ok %v; want result, false", result.Type, result.OK)
+	}
+	if result.Error.Code != CodeLockOutOfDate || result.Error.Message != err.Error() {
+		t.Fatalf("JSON error = %+v, want code %q and original message", result.Error, CodeLockOutOfDate)
 	}
 }
 

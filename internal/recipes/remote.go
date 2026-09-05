@@ -163,6 +163,16 @@ type publishedArtifact struct {
 	published   bool
 }
 
+// These defaults are the standard filesystem operations. Tests can replace
+// them briefly to induce a deterministic publication or backup-cleanup fault
+// through Add/Remove and then restore the defaults with t.Cleanup; production
+// behavior remains the direct os.Rename/os.RemoveAll path.
+var transactionRename = os.Rename
+var transactionRemoveBackup = func(target, backup string) error {
+	_ = target
+	return os.RemoveAll(backup)
+}
+
 func prepareAddArtifacts(s Scope, name string, lock Lock, input, source, gitRef, stageCache, stageRoot string) ([]artifact, func() error, error) {
 	var artifacts []artifact
 	lockStageDir, err := os.MkdirTemp(filepath.Dir(s.LockPath), ".stoat-lock-stage-*")
@@ -314,7 +324,7 @@ func publishArtifacts(artifacts []artifact) error {
 			if backupErr != nil {
 				return rollbackPublished(published, backupErr)
 			}
-			if err := os.Rename(a.target, backup); err != nil {
+			if err := transactionRename(a.target, backup); err != nil {
 				_ = os.Remove(backup)
 				return rollbackPublished(published, err)
 			}
@@ -329,7 +339,7 @@ func publishArtifacts(artifacts []artifact) error {
 			published[len(published)-1] = p
 			continue
 		}
-		if err := os.Rename(a.stage, a.target); err != nil {
+		if err := transactionRename(a.stage, a.target); err != nil {
 			return rollbackPublished(published, err)
 		}
 		p.published = true
@@ -337,7 +347,7 @@ func publishArtifacts(artifacts []artifact) error {
 	}
 	for _, p := range published {
 		if p.oldExists {
-			if err := os.RemoveAll(p.backup); err != nil {
+			if err := transactionRemoveBackup(p.target, p.backup); err != nil {
 				return fmt.Errorf("published recipe changes; old artifact backup %s remains: %w", p.backup, err)
 			}
 		}
@@ -359,7 +369,7 @@ func rollbackPublished(published []publishedArtifact, cause error) error {
 			}
 		}
 		if p.oldExists {
-			if err := os.Rename(p.backup, p.target); err != nil && rollbackErr == nil {
+			if err := transactionRename(p.backup, p.target); err != nil && rollbackErr == nil {
 				rollbackErr = err
 			}
 		}

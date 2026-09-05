@@ -142,3 +142,55 @@ func TestCheckCollisionDistinguishesSameScopeAndShadowing(t *testing.T) {
 	}
 
 }
+
+func TestCheckCollisionUsesTargetLockOwnershipWithoutACache(t *testing.T) {
+	home := remoteRoot(t)
+	global, err := ScopeFor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveLock(global.LockPath, Lock{Recipes: map[string]LockEntry{
+		"demo": {Source: "old", Ref: "main", Commit: strings.Repeat("d", 40)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	lockBefore, err := os.ReadFile(global.LockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := namedRecipeRepo(t, "demo", "demo")
+	if err := CheckCollision("demo", "global"); err == nil {
+		t.Fatal("lock-only same-scope collision was accepted")
+	}
+	if _, err := Add(global, src, false); err == nil {
+		t.Fatal("Add() replaced a lock-only same-scope recipe without force")
+	}
+	lockAfter, _ := os.ReadFile(global.LockPath)
+	if string(lockAfter) != string(lockBefore) {
+		t.Fatal("same-scope collision changed the target lock")
+	}
+	if _, err := os.Stat(filepath.Join(home, "recipes", "demo")); !os.IsNotExist(err) {
+		t.Fatalf("same-scope collision created/replaced cache: %v", err)
+	}
+
+	project := t.TempDir()
+	t.Chdir(project)
+	writeFile(t, filepath.Join(project, "stoat.toml"), "[recipes]\n")
+	projectScope, err := ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckCollision("demo", "project"); err != nil {
+		t.Fatalf("project-over-global shadow = %v, want nil", err)
+	}
+	if _, err := Add(global, src, false); err == nil {
+		t.Fatal("global Add() replaced its lock while a project shadow was active")
+	}
+	if _, err := os.Stat(projectScope.CachePath); !os.IsNotExist(err) {
+		t.Fatalf("global collision unexpectedly created project cache: %v", err)
+	}
+	lockAfterShadow, _ := os.ReadFile(global.LockPath)
+	if string(lockAfterShadow) != string(lockBefore) {
+		t.Fatal("global target lock changed under project shadow")
+	}
+}

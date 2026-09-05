@@ -177,6 +177,82 @@ func TestPlanApplyLazilySyncsMissingOrMismatchedProjectCache(t *testing.T) {
 	}
 }
 
+func TestPlanApplyRefusesDirtyOrBrokenProjectCaches(t *testing.T) {
+	for _, brokenGit := range []bool{false, true} {
+		name := "dirty cache"
+		if brokenGit {
+			name = "broken git cache"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := coreRemoteRoot(t)
+			project := t.TempDir()
+			t.Chdir(project)
+			src := coreRecipeRepo(t, "demo", "demo")
+			commit := currentRecipeHead(t, src)
+			if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte(fmt.Sprintf("[recipes]\ndemo = { source = %q, ref = \"main\" }\n", src)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			scope, err := recipes.ScopeFor(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			clone := testutil.GitClone(t, src)
+			if err := os.MkdirAll(scope.CachePath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cache := filepath.Join(scope.CachePath, "demo")
+			if err := os.Rename(clone, cache); err != nil {
+				t.Fatal(err)
+			}
+			if err := recipes.SaveLock(scope.LockPath, recipes.Lock{Recipes: map[string]recipes.LockEntry{
+				"demo": {Source: src, Ref: "main", Commit: commit},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			if brokenGit {
+				if err := os.RemoveAll(filepath.Join(cache, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(filepath.Join(cache, "install.sh"), []byte("edited\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cacheBefore, err := os.ReadFile(filepath.Join(cache, "install.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			lockBefore, err := os.ReadFile(scope.LockPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := &config.VM{Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"demo"}}
+			if err := v.Save(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = PlanApply("work", ApplyOpts{})
+			if err == nil {
+				t.Fatal("PlanApply() = nil, want dirty/probe error")
+			}
+			if !brokenGit && !errors.Is(err, recipes.ErrDirty) {
+				t.Fatalf("PlanApply() = %v, want recipes.ErrDirty", err)
+			}
+			if brokenGit && strings.Contains(err.Error(), "local changes") {
+				t.Fatalf("broken-git PlanApply was converted to ErrDirty: %v", err)
+			}
+			if brokenGit && !strings.Contains(strings.ToLower(err.Error()), "not a git repository") {
+				t.Fatalf("PlanApply() = %v, want the original git probe context", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(home, "stoat.lock")); !os.IsNotExist(statErr) {
+				t.Fatalf("PlanApply touched global lock: %v", statErr)
+			}
+			cacheAfter, _ := os.ReadFile(filepath.Join(cache, "install.sh"))
+			lockAfter, _ := os.ReadFile(scope.LockPath)
+			if string(cacheAfter) != string(cacheBefore) || string(lockAfter) != string(lockBefore) {
+				t.Fatal("PlanApply dirty/probe failure changed active cache or lock")
+			}
+		})
+	}
+}
+
 func TestSyncRecipesOutsideAProjectDoesNotTouchGlobalCache(t *testing.T) {
 	home := coreRemoteRoot(t)
 	t.Chdir(t.TempDir())
