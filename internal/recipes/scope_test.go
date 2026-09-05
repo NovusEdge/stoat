@@ -86,14 +86,14 @@ xfce = { source = "https://github.com/x/stoat-xfce", ref = "main" }
 
 func TestSetDeclAndRemoveDecl(t *testing.T) {
 	type projectDocument struct {
-		VM struct {
+		Project struct {
 			Name string `toml:"name"`
-		} `toml:"vm"`
+		} `toml:"project"`
 		Recipes map[string]string `toml:"recipes"`
 	}
 
 	wd := t.TempDir()
-	writeFile(t, filepath.Join(wd, "stoat.toml"), `[vm]
+	writeFile(t, filepath.Join(wd, "stoat.toml"), `[project]
 name = "alpha"
 
 [recipes]
@@ -113,7 +113,7 @@ name = "alpha"
 		if err := tomlx.Decode(filepath.Join(wd, "stoat.toml"), &project, tomlx.Reject); err != nil {
 			t.Fatal(err)
 		}
-		if project.VM.Name != "alpha" {
+		if project.Project.Name != "alpha" {
 			t.Fatalf("unrelated project data was lost: %+v", project)
 		}
 	}
