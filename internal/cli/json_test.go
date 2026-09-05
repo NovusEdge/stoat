@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,8 +143,14 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 			if errObj == nil {
 				t.Fatalf("failed result has no error object: %v", res)
 			}
-			if errObj["code"] != string(tt.code) {
+			got, _ := errObj["code"].(string)
+			if got != string(tt.code) {
 				t.Errorf("error.code = %v, want %q", errObj["code"], tt.code)
+			}
+			// A code absent from Codes() is one no consumer can generate a
+			// switch for, whatever the message beside it says.
+			if !slices.Contains(wire.Codes(), wire.Code(got)) {
+				t.Errorf("error.code = %q, which wire.Codes() does not declare", got)
 			}
 			if msg, _ := errObj["message"].(string); msg == "" {
 				t.Errorf("error.message is empty: %v", errObj)

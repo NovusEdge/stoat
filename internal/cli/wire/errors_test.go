@@ -112,7 +112,7 @@ func TestCodesCoversTheTable(t *testing.T) {
 		declared[c] = true
 	}
 	for _, row := range codeTable {
-		if !declared[Code(row.code)] {
+		if !declared[row.code] {
 			t.Errorf("codeTable has %q, Codes() does not", row.code)
 		}
 	}
