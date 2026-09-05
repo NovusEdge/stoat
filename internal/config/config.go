@@ -105,6 +105,10 @@ type VM struct {
 	// cannot tell "false" from "not written".
 	AllowExec bool `toml:"allow_exec"`
 
+	// AgentAccess is not implemented yet. Task 8 replaces AllowExec with
+	// this field and maps a legacy allow_exec key onto it in Load.
+	AgentAccess string `toml:"agent_access,omitempty"`
+
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
 	Applied map[string]AppliedRecipe `toml:"applied,omitempty" comment:"written by stoat; do not edit"`
 

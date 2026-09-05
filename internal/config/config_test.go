@@ -12,6 +12,37 @@ import (
 	"time"
 )
 
+// TestAgentAccessFromLegacyAllowExec pins the mapping from vm.toml's old
+// allow_exec key to the new agent_access levels, and that an explicit
+// agent_access always wins over allow_exec: a file round-tripped through an
+// older stoat can still carry both keys.
+func TestAgentAccessFromLegacyAllowExec(t *testing.T) {
+	for _, c := range []struct{ toml, want string }{
+		{"name = \"x\"\nallow_exec = true\n", "exec"},
+		{"name = \"x\"\nallow_exec = false\n", "manage"},
+		{"name = \"x\"\n", "manage"},
+		{"name = \"x\"\nagent_access = \"observe\"\n", "observe"},
+		{"name = \"x\"\nagent_access = \"none\"\nallow_exec = true\n", "none"},
+	} {
+		root := t.TempDir()
+		t.Setenv("STOAT_HOME", root)
+		dir := filepath.Join(root, "x")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "vm.toml"), []byte(c.toml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		v, err := Load("x")
+		if err != nil {
+			t.Fatalf("%q: %v", c.toml, err)
+		}
+		if v.AgentAccess != c.want {
+			t.Errorf("%q: AgentAccess = %q, want %q", c.toml, v.AgentAccess, c.want)
+		}
+	}
+}
+
 func TestLoadWarnsUnknownKeyToStderr(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
