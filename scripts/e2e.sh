@@ -8,7 +8,8 @@
 # udev is the device manager and Xorg drives input through libinput.
 #
 # Runs against a temporary data root by default, under a unique VM name it
-# deletes on exit. Set STOAT_HOME to retain the VM directory for inspection.
+# deletes on exit. Set STOAT_HOME to override the data root, and set
+# STOAT_E2E_EVIDENCE_DIR to choose where failure evidence is retained.
 # Needs KVM and network; the xfce apk pull is ~1.4GB, so budget ~15 minutes.
 set -eu
 

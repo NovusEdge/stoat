@@ -276,8 +276,28 @@ required = true
 	if bytes.Contains(raw, []byte(sentinel)) {
 		t.Fatalf("get output leaked secret %q: %s", sentinel, raw)
 	}
-	if !bytes.Contains(raw, []byte(`"recipes_detail"`)) || !bytes.Contains(raw, []byte(`"token":"<set>"`)) {
-		t.Fatalf("get output lacks redacted recipe detail: %s", raw)
+	data, ok := result(t, objs)["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("get data = %#v, want object", result(t, objs)["data"])
+	}
+	vm, ok := data["vm"].(map[string]any)
+	if !ok {
+		t.Fatalf("get data.vm = %#v, want object", data["vm"])
+	}
+	detail, ok := vm["recipes_detail"].([]any)
+	if !ok || len(detail) != 1 {
+		t.Fatalf("recipes_detail = %#v, want one recipe detail", vm["recipes_detail"])
+	}
+	state, ok := detail[0].(map[string]any)
+	if !ok || state["name"] != "redaction" {
+		t.Fatalf("recipe detail = %#v, want named redaction state", detail[0])
+	}
+	params, ok := state["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("recipe detail params = %#v, want object", state["params"])
+	}
+	if params["token"] != "<set>" {
+		t.Fatalf("recipe detail token = %#v, want <set>", params["token"])
 	}
 }
 
