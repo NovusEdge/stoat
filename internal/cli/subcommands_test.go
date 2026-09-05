@@ -70,7 +70,7 @@ func TestGetMissingVMIsNotFound(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, ExitFail)
 	}
 	errObj, _ := result(t, objs)["error"].(map[string]any)
-	if errObj["code"] != wire.CodeNotFound {
+	if errObj["code"] != string(wire.CodeNotFound) {
 		t.Errorf("code = %v, want %q", errObj["code"], wire.CodeNotFound)
 	}
 }
@@ -277,7 +277,7 @@ func TestApplyMissingVMIsNotFound(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, ExitFail)
 	}
 	errObj, _ := result(t, objs)["error"].(map[string]any)
-	if errObj["code"] != wire.CodeNotFound {
+	if errObj["code"] != string(wire.CodeNotFound) {
 		t.Errorf("code = %v, want %q", errObj["code"], wire.CodeNotFound)
 	}
 }

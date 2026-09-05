@@ -17,7 +17,7 @@ func TestWaitMissingVM(t *testing.T) {
 	}
 	res := result(t, objs)
 	errObj, _ := res["error"].(map[string]any)
-	if errObj["code"] != wire.CodeNotFound {
+	if errObj["code"] != string(wire.CodeNotFound) {
 		t.Errorf("error.code = %v, want %q", errObj["code"], wire.CodeNotFound)
 	}
 }
@@ -37,7 +37,7 @@ func TestWaitCannotReach(t *testing.T) {
 	}
 	res := result(t, objs)
 	errObj, _ := res["error"].(map[string]any)
-	if errObj["code"] != wire.CodeCannotReach {
+	if errObj["code"] != string(wire.CodeCannotReach) {
 		t.Errorf("error.code = %v, want %q", errObj["code"], wire.CodeCannotReach)
 	}
 }
@@ -63,7 +63,7 @@ func TestWaitTimeout(t *testing.T) {
 	}
 	res := result(t, objs)
 	errObj, _ := res["error"].(map[string]any)
-	if errObj["code"] != wire.CodeTimeout {
+	if errObj["code"] != string(wire.CodeTimeout) {
 		t.Errorf("error.code = %v, want %q", errObj["code"], wire.CodeTimeout)
 	}
 }
@@ -94,7 +94,7 @@ func TestWaitUsageErrorsUnderJSON(t *testing.T) {
 		}
 		res := result(t, objs)
 		errObj, _ := res["error"].(map[string]any)
-		if errObj["code"] != wire.CodeUsage {
+		if errObj["code"] != string(wire.CodeUsage) {
 			t.Errorf("Main(%v) error.code = %v, want %q", args, errObj["code"], wire.CodeUsage)
 		}
 	}

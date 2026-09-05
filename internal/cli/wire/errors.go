@@ -3,9 +3,17 @@ package wire
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/iso"
+	"github.com/novusedge/stoat/internal/qemu"
 )
+
+// Code is a stable, machine-readable error code. Codes are only ever ADDED:
+// never renamed, never repurposed, never removed (§2's compatibility
+// promise). A consumer MUST treat an unrecognized code as a generic failure.
+type Code string
 
 // Stable snake_case error codes (§2), one per typed error in internal/core
 // plus the three the CLI layer owns (usage, confirmation_required,
@@ -13,25 +21,62 @@ import (
 // never removed (§2's compatibility promise). A consumer MUST treat an
 // unrecognized code as a generic failure, never crash on it.
 const (
-	CodeNotFound             = "not_found"
-	CodeBroken               = "broken"
-	CodeNameTaken            = "name_taken"
-	CodeInvalidSpec          = "invalid_spec"
-	CodeImageNotDownloaded   = "image_not_downloaded"
-	CodeRecipeNotApplicable  = "recipe_not_applicable"
-	CodeNotRunning           = "not_running"
-	CodeAlreadyRunning       = "already_running"
-	CodeNoDisk               = "no_disk"
-	CodeImmutableField       = "immutable_field"
-	CodeDiskShrink           = "disk_shrink"
-	CodeCannotReach          = "cannot_reach"
-	CodeUnknownLog           = "unknown_log"
-	CodeTimeout              = "timeout"
-	CodeCanceled             = "canceled"
-	CodeUsage                = "usage"
-	CodeConfirmationRequired = "confirmation_required"
-	CodeInternal             = "internal"
+	CodeNotFound             Code = "not_found"
+	CodeBroken               Code = "broken"
+	CodeNameTaken            Code = "name_taken"
+	CodeInvalidSpec          Code = "invalid_spec"
+	CodeImageNotDownloaded   Code = "image_not_downloaded"
+	CodeRecipeNotApplicable  Code = "recipe_not_applicable"
+	CodeNotRunning           Code = "not_running"
+	CodeAlreadyRunning       Code = "already_running"
+	CodeNoDisk               Code = "no_disk"
+	CodeImmutableField       Code = "immutable_field"
+	CodeDiskShrink           Code = "disk_shrink"
+	CodeCannotReach          Code = "cannot_reach"
+	CodeUnknownLog           Code = "unknown_log"
+	CodeTimeout              Code = "timeout"
+	CodeCanceled             Code = "canceled"
+	CodeUsage                Code = "usage"
+	CodeConfirmationRequired Code = "confirmation_required"
+	CodeInternal             Code = "internal"
+
+	CodeQemuMissing        Code = "qemu_missing"
+	CodeKVMUnusable        Code = "kvm_unusable"
+	CodeQemuStartFailed    Code = "qemu_start_failed"
+	CodeMonitorUnreachable Code = "monitor_unreachable"
+	CodeMonitorRejected    Code = "monitor_rejected"
+	CodeNoConsolePassword  Code = "no_console_password"
+	CodeShareInvalid       Code = "share_invalid"
+	CodeNoXattr            Code = "no_xattr"
+
+	CodeDownloadFailed   Code = "download_failed"
+	CodeDownloadStalled  Code = "download_stalled"
+	CodeChecksumMismatch Code = "checksum_mismatch"
+	CodeNoSuchImage      Code = "no_such_image"
+
+	CodeScreenshotFailed Code = "screenshot_failed"
 )
+
+// Codes returns every declared code, sorted. Built from the same string
+// constants codeTable and ErrorInfo.Code use, so a code added to one and
+// forgotten here fails TestCodesCoversTheTable.
+func Codes() []Code {
+	out := []Code{
+		CodeNotFound, CodeBroken, CodeNameTaken, CodeInvalidSpec,
+		CodeImageNotDownloaded, CodeRecipeNotApplicable, CodeNotRunning,
+		CodeAlreadyRunning, CodeNoDisk, CodeImmutableField, CodeDiskShrink,
+		CodeCannotReach, CodeUnknownLog, CodeTimeout, CodeCanceled,
+		CodeUsage, CodeConfirmationRequired, CodeInternal,
+		CodeQemuMissing, CodeKVMUnusable, CodeQemuStartFailed,
+		CodeMonitorUnreachable, CodeMonitorRejected, CodeNoConsolePassword,
+		CodeShareInvalid, CodeNoXattr,
+		CodeDownloadFailed, CodeDownloadStalled, CodeChecksumMismatch,
+		CodeNoSuchImage,
+		CodeScreenshotFailed,
+	}
+	slices.Sort(out)
+	return out
+}
 
 // ErrConfirmationRequired is confirmation_required's sentinel (§2: "new,
 // CLI-only"). core has no equivalent; --json never prompts (§1), so `rm`
@@ -49,7 +94,7 @@ var ErrConfirmationRequired = errors.New("confirmation required; pass -y under -
 // ErrAlreadyRunning directly, never ErrDiskShrink, so there is nothing to
 // arbitrate there. Rows keep the design doc's order in case that changes.
 var codeTable = []struct {
-	code string
+	code Code
 	err  error
 }{
 	{CodeNotFound, core.ErrNotFound},
@@ -68,6 +113,21 @@ var codeTable = []struct {
 	{CodeTimeout, context.DeadlineExceeded},
 	{CodeCanceled, context.Canceled},
 	{CodeConfirmationRequired, ErrConfirmationRequired},
+	{CodeQemuMissing, qemu.ErrBinaryMissing},
+	{CodeKVMUnusable, qemu.ErrKVMUnusable},
+	{CodeQemuStartFailed, qemu.ErrStartFailed},
+	{CodeMonitorUnreachable, qemu.ErrMonitorUnreachable},
+	{CodeMonitorRejected, qemu.ErrMonitorRejected},
+	{CodeNoConsolePassword, qemu.ErrNoConsolePassword},
+	{CodeShareInvalid, qemu.ErrShareInvalid},
+	{CodeNoXattr, qemu.ErrNoXattr},
+	{CodeAlreadyRunning, qemu.ErrAlreadyRunning},
+	{CodeDownloadFailed, iso.ErrDownloadFailed},
+	{CodeDownloadStalled, iso.ErrDownloadStalled},
+	{CodeChecksumMismatch, iso.ErrChecksumMismatch},
+	{CodeNoSuchImage, iso.ErrNoSuchImage},
+	{CodeScreenshotFailed, qemu.ErrScreenshotFailed},
+	{CodeNotRunning, qemu.ErrNotRunning},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking

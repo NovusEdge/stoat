@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -726,5 +727,39 @@ func TestDownloadCancelStopsTheTransfer(t *testing.T) {
 	final := filepath.Join(os.Getenv("STOAT_HOME"), "isos", "endless.qcow2")
 	if _, err := os.Stat(final); !os.IsNotExist(err) {
 		t.Error("a cancelled download was renamed into place")
+	}
+}
+
+// A mirror that answers with a status other than 200 is a download failure a
+// caller retries; it is not a broken stoat.
+func TestDownloadReportsAFailedFetch(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	r := &Release{File: "broken.iso", URL: srv.URL + "/broken.iso"}
+	if _, err := Download(context.Background(), r, nil); !errors.Is(err, ErrDownloadFailed) {
+		t.Errorf("Download() = %v, want ErrDownloadFailed", err)
+	}
+}
+
+// Bytes that do not match the published digest are a mismatch, not a
+// transport failure: the fetch succeeded and the content is wrong.
+func TestDownloadReportsAChecksumMismatch(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte("not the expected bytes"))
+	}))
+	defer srv.Close()
+
+	r := &Release{
+		File:   "mismatch.iso",
+		URL:    srv.URL + "/mismatch.iso",
+		SHA256: strings.Repeat("0", 64),
+	}
+	if _, err := Download(context.Background(), r, nil); !errors.Is(err, ErrChecksumMismatch) {
+		t.Errorf("Download() = %v, want ErrChecksumMismatch", err)
 	}
 }

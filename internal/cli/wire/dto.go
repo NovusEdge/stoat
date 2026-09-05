@@ -422,6 +422,21 @@ func FromGuests(os []guest.OS) []Guest {
 	return nonNil(out)
 }
 
+// Screenshot is `screenshot` data. Path is the host path qemu wrote, always
+// absolute, so a caller that passed a relative -o can read back what
+// actually happened.
+type Screenshot struct {
+	VM     string `json:"vm"`
+	Path   string `json:"path"`
+	Bytes  int64  `json:"bytes"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+func FromShot(vm string, s core.Shot) Screenshot {
+	return Screenshot{VM: vm, Path: s.Path, Bytes: s.Bytes, Width: s.Width, Height: s.Height}
+}
+
 // GuestList is `guest ls` data.
 type GuestList struct {
 	Guests []Guest `json:"guests"`

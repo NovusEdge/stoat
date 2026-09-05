@@ -34,7 +34,7 @@ func prepareShares(v *config.VM) error {
 		return fmt.Errorf("share %s for %s: %w", v.Share, v.Name, err)
 	}
 	if !st.IsDir() {
-		return fmt.Errorf("share %s for %s is not a directory", v.Share, v.Name)
+		return fmt.Errorf("%w: share %s for %s is not a directory", ErrShareInvalid, v.Share, v.Name)
 	}
 	return nil
 }

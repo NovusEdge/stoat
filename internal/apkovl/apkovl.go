@@ -77,7 +77,7 @@ echo "stoat: installing Alpine unattended, this takes a few minutes..."
 # here so the child inherits it and repartitions /dev/vda unattended.
 export ERASE_DISKS=/dev/vda
 if setup-alpine -e -f /etc/stoat/answerfile; then
-	echo "$(date -Iseconds)" > /mnt/work/.installed
+` + postInstall + `	echo "$(date -Iseconds)" > /mnt/work/.installed
 	echo "stoat: install complete, powering off; run 'stoat up' to boot the disk"
 	poweroff
 else

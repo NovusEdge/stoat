@@ -114,6 +114,19 @@ bump the contract version. Do not write code that requires them.
 | `cannot_reach` | `wait` was asked for a state this VM can never reach |
 | `applied_at_boot` | reserved; no command emits it. A cloud VM whose recipes ran at boot answers `ok:true` with `applied: []` |
 | `unknown_log` | bad `--which` |
+| `qemu_missing` | `qemu-system-x86_64` is not on `PATH` |
+| `kvm_unusable` | `/dev/kvm` cannot be opened; the user is usually not in the `kvm` group |
+| `qemu_start_failed` | qemu ran and refused to start the VM |
+| `monitor_unreachable` | the VM's qemu monitor socket does not answer |
+| `monitor_rejected` | qemu answered the monitor command with an error |
+| `no_console_password` | the VM has no console password to type |
+| `share_invalid` | the configured share is not a directory |
+| `no_xattr` | the share's filesystem cannot store `user.*` extended attributes |
+| `screenshot_failed` | qemu refused the screendump |
+| `download_failed` | a mirror or a checksum file did not answer with the image |
+| `download_stalled` | the download stopped producing bytes |
+| `checksum_mismatch` | the downloaded bytes do not match the published digest |
+| `no_such_image` | the requested image is not in the index |
 | `timeout` | the deadline expired |
 | `canceled` | the context was cancelled |
 | `usage` | a bad flag, a missing argument, an unknown subcommand |
@@ -123,6 +136,7 @@ bump the contract version. Do not write code that requires them.
 **Codes are only ever added.** Never renamed, never repurposed, never removed.
 A consumer MUST treat an unrecognized code as a generic failure rather than
 crashing on it, because that is what makes adding one a non-breaking change.
+The list above is `wire.Codes()`, which returns every declared code, sorted.
 
 ## Exit codes
 
@@ -324,6 +338,7 @@ so a leak fails the build rather than shipping.
 | `guest show` | `{"guest":Guest}` |
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
 | `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
+| `screenshot` | `{"vm":"work","path":"/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png","bytes":48213,"width":1280,"height":800}` |
 
 Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`,
 and both `guest` subcommands report `"cmd":"guest"`. Distinguish them by which

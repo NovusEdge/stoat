@@ -42,7 +42,7 @@ const (
 // site supplies them explicitly rather than this package trying to parse
 // them back out.
 type ErrorInfo struct {
-	Code    string `json:"code"`
+	Code    Code   `json:"code"`
 	Message string `json:"message"`
 	// Subject names what the error is about ("work", "os"); absent when
 	// there is nothing more specific than Message to give.

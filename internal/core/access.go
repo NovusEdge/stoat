@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/sshx"
@@ -48,6 +49,12 @@ const (
 // reading the wrong file.
 var ErrUnknownWhich = fmt.Errorf("unknown log selector")
 
+// Whichs returns every log a caller can ask for.
+func Whichs() []Which { return []Which{WhichConsole, WhichApply} }
+
+// Valid reports whether w is one of Whichs().
+func (w Which) Valid() bool { return slices.Contains(Whichs(), w) }
+
 // Logs opens the requested log file for VM name.
 //
 // A missing file is normal, not an error. A VM that never started has no
@@ -60,6 +67,9 @@ var ErrUnknownWhich = fmt.Errorf("unknown log selector")
 // field, and a broken VM is exactly the one a user wants console output from,
 // so Logs builds a directory-only VM, like Destroy does.
 func Logs(name string, which Which) (io.ReadCloser, error) {
+	if !which.Valid() {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownWhich, which)
+	}
 	v, err := load(name)
 	switch {
 	case errors.Is(err, ErrBroken):
@@ -68,14 +78,9 @@ func Logs(name string, which Which) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	var path string
-	switch which {
-	case WhichConsole:
+	path := v.ProvisionLogPath()
+	if which == WhichConsole {
 		path = v.ConsoleLogPath()
-	case WhichApply:
-		path = v.ProvisionLogPath()
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnknownWhich, which)
 	}
 
 	f, err := os.Open(path)

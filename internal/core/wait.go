@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,6 +33,13 @@ const (
 	// UntilStopped is qemu.Running turning false.
 	UntilStopped Until = "stopped"
 )
+
+// Untils returns every state Wait can block for.
+func Untils() []Until { return []Until{UntilReachable, UntilApplied, UntilStopped} }
+
+// Valid reports whether u is one of Untils(). Wait calls it before it loads
+// the VM, so a typo fails with the reason rather than with "not found".
+func (u Until) Valid() bool { return slices.Contains(Untils(), u) }
 
 // ErrCannotReach is returned by Wait for a VM that cannot, by construction,
 // ever reach the requested state: a stopped VM asked to become Reachable, or
@@ -65,19 +73,20 @@ const InstallTimeout = 15 * time.Minute
 // already mid-boot by List. Wait lets that caller block on the outcome
 // instead of re-polling Get in a loop.
 func Wait(ctx context.Context, name string, until Until) error {
+	if !until.Valid() {
+		return fmt.Errorf("%w: unknown Until %q", ErrInvalidSpec, until)
+	}
 	v, err := load(name)
 	if err != nil {
 		return err
 	}
 	switch until {
-	case UntilReachable:
-		return waitReachable(ctx, v)
 	case UntilApplied:
 		return waitApplied(ctx, v)
 	case UntilStopped:
 		return waitStopped(ctx, v)
 	default:
-		return fmt.Errorf("%w: unknown Until %q", ErrInvalidSpec, until)
+		return waitReachable(ctx, v)
 	}
 }
 

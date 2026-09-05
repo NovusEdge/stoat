@@ -230,13 +230,33 @@ All of these are wanted. Ordered by effort, so the cheap wins land early and the
 Typed errors, because every caller branches on them and string matching is how that goes wrong:
 
 ```
-ErrNotFound            ErrNameTaken           ErrImmutableField
-ErrImageNotDownloaded  ErrRecipeNotApplicable ErrNotRunning
-ErrAlreadyRunning      ErrTimeout             ErrDependencyMissing
-ErrBroken              ErrDiskShrink
+core:  ErrNotFound            ErrNameTaken           ErrImmutableField
+       ErrImageNotDownloaded  ErrRecipeNotApplicable ErrNotRunning
+       ErrAlreadyRunning      ErrTimeout             ErrDependencyMissing
+       ErrBroken              ErrDiskShrink          ErrCannotReach
+       ErrNoDisk              ErrUnknownWhich
+
+qemu:  ErrBinaryMissing       ErrKVMUnusable         ErrStartFailed
+       ErrMonitorUnreachable  ErrMonitorRejected     ErrNoConsolePassword
+       ErrShareInvalid        ErrNoXattr             ErrScreenshotFailed
+       ErrNotRunning          ErrAlreadyRunning
+
+iso:   ErrDownloadFailed      ErrDownloadStalled     ErrChecksumMismatch
+       ErrNoSuchImage
 ```
 
 Each carries the specific subject (which field, which recipe, which dependency) rather than only a message.
+
+`qemu` and `iso` declare their own sentinels beside the code that raises
+them. `internal/cli/wire` maps each to a code in `codeTable`; a sentinel with
+no row reaches a consumer as `internal` with prose.
+
+`qemu.ErrNotRunning` and `qemu.ErrAlreadyRunning` duplicate `core`'s two by
+necessity: `core` imports `qemu`, so `qemu` cannot name them. They add no
+code, and `codeTable` maps each pair to one.
+
+Wrapping a sentinel prefixes its text to the message: `Preflight` now returns
+`qemu binary not found: qemu-system-x86_64 not found in PATH`.
 
 The CLI reports these two ways, and the choice is not a style question. `a.fail` takes an
 error `core` returned and maps its sentinel to the JSON error code. `a.failMsg` takes a
