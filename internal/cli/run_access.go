@@ -193,15 +193,30 @@ func newSecretRedactor(dir string, out io.Writer) (*secretRedactor, error) {
 }
 
 func (r *secretRedactor) Write(p []byte) (int, error) {
-	r.pending += string(p)
-	if len(r.pending) <= r.keep {
-		return len(p), nil
+	data := r.pending + string(p)
+	cut := len(data) - r.keep
+	if cut > 0 {
+		for _, secret := range r.values {
+			for start := strings.Index(data, secret); start >= 0; {
+				end := start + len(secret)
+				if start < cut && end > cut {
+					cut = start
+				}
+				next := strings.Index(data[start+1:], secret)
+				if next < 0 {
+					break
+				}
+				start += next + 1
+			}
+		}
 	}
-	safe := len(r.pending) - r.keep
-	if err := r.writeRedacted(r.pending[:safe]); err != nil {
+	if cut < 0 {
+		cut = 0
+	}
+	if err := r.writeRedacted(data[:cut]); err != nil {
 		return 0, err
 	}
-	r.pending = r.pending[safe:]
+	r.pending = data[cut:]
 	return len(p), nil
 }
 
