@@ -1,11 +1,9 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/qemu"
@@ -33,12 +31,10 @@ type ExecResult struct {
 // BatchMode=yes so a wedged network fails fast and a password prompt never
 // blocks forever. When 255 does surface, ssh's own message is on Stderr.
 //
-// cmd is an argv, not a shell string. shellJoin quotes each element for
-// the guest's shell before Exec sends it. ssh concatenates its trailing
-// arguments with spaces and hands the result to the remote shell to
-// re-parse, so an unquoted argv silently loses every word boundary.
-// Exec(…, []string{"touch", "my file"}) would create two files without
-// shellJoin.
+// cmd is an argv, not a shell string. sshx.Run quotes each element for the
+// guest's shell before sending it. ssh concatenates its trailing arguments
+// with spaces and hands the result to the remote shell to re-parse, so an
+// unquoted argv silently loses every word boundary.
 //
 // ctx cancels the ssh process. Exec is the only operation in this package
 // that takes a context: every other operation is bounded by local work,
@@ -65,35 +61,22 @@ func Exec(ctx context.Context, name string, cmd []string) (ExecResult, error) {
 		return ExecResult{}, fmt.Errorf("%w: %s", ErrNotRunning, name)
 	}
 
-	var stdout, stderr bytes.Buffer
-	c := exec.CommandContext(ctx, "ssh", sshx.Args(v, shellJoin(cmd))...)
-	c.Stdout = &stdout
-	c.Stderr = &stderr
-
-	err = c.Run()
-	res := ExecResult{Stdout: stdout.String(), Stderr: stderr.String()}
-
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-		return res, nil
-	case errors.As(err, &ee):
-		// The command ran and exited non-zero. That is a result, not a
-		// failure of Exec; see ExecResult.
-		res.ExitCode = ee.ExitCode()
-		// ctx expiring kills the process; that surfaces here as an
-		// ExitError, not as ctx.Err(). Report the cancellation instead:
-		// a caller that cannot tell "timed out" from "the command
-		// failed" will retry something that was never going to finish.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return res, fmt.Errorf("%s: %w", name, ctxErr)
+	out, errb, code, err := sshx.Run(ctx, v, false, cmd, nil)
+	res := ExecResult{Stdout: string(out), Stderr: string(errb), ExitCode: code}
+	if err != nil {
+		// ctx expiring kills the ssh process and surfaces here as a plain
+		// exit error, not as ctx.Err() itself; sshx.Run turns that back into
+		// the ctx error so a caller can tell "timed out" from "the ssh
+		// transport itself failed" and not retry something that was never
+		// going to finish.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return res, fmt.Errorf("%s: %w", name, err)
 		}
-		return res, nil
-	default:
 		// ssh could not be started at all (not installed, not executable).
 		// Nothing ran in the guest, so there is no exit status to report.
 		return ExecResult{}, fmt.Errorf("%s: ssh: %w", name, err)
 	}
+	return res, nil
 }
 
 // shellJoin renders an argv as a single string that the guest's shell will
