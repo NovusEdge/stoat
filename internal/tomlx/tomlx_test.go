@@ -83,6 +83,41 @@ func TestDecodeSchemaAbsentIsFine(t *testing.T) {
 	}
 }
 
+// A key nested under a map[string]any field is inside a dynamic field: an
+// untyped value accepts any shape, so an inline table's own keys are known
+// even in Reject mode.
+func TestDecodeRejectAcceptsKeysUnderADynamicMap(t *testing.T) {
+	type dynDoc struct {
+		Recipes map[string]any `toml:"recipes"`
+	}
+	p := write(t, "[recipes]\ndemo = { source = \"x\", ref = \"y\" }\n")
+	var d dynDoc
+	if err := Decode(p, &d, Reject); err != nil {
+		t.Fatalf("Decode = %v, want a dynamic map's inline-table keys accepted", err)
+	}
+}
+
+// A map keyed into a concrete struct type is not dynamic: only the map key
+// itself is arbitrary, and an unknown field on the element type is still
+// rejected.
+func TestDecodeRejectStillRejectsUnknownFieldOnATypedMapElement(t *testing.T) {
+	type item struct {
+		Image string `toml:"image"`
+	}
+	type typedDoc struct {
+		Items map[string]item `toml:"items"`
+	}
+	p := write(t, "[items.dev]\nimage = \"a\"\nbogus = 1\n")
+	var d typedDoc
+	err := Decode(p, &d, Reject)
+	if err == nil {
+		t.Fatal("Decode accepted an unknown field on a typed map element")
+	}
+	if !strings.Contains(err.Error(), `unknown key "items.dev.bogus"`) {
+		t.Errorf("err = %v, want it to name items.dev.bogus", err)
+	}
+}
+
 func TestEncodeThenDecodeRoundTrips(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "x.toml")
 	if err := Encode(p, doc{Schema: 1, Name: "x"}); err != nil {
