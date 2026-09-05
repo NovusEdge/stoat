@@ -1,6 +1,10 @@
 package apkovl
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/novusedge/stoat/internal/config"
+)
 
 // Mount9p describes one 9p share qemu attaches to a VM: its mount tag (qemu's
 // mount_tag / virtfs id), the guest mountpoint, and the fstab options.
@@ -43,4 +47,10 @@ var WorkMount9p = Mount9p{
 // FstabLine renders m as one /etc/fstab entry, newline included.
 func (m Mount9p) FstabLine() string {
 	return fmt.Sprintf("%s %s 9p %s 0 0\n", m.Tag, m.Dir, m.Options)
+}
+
+// Mount9pFor turns a project share into a fstab entry. Project shares are rw:
+// a share exists so the guest can build the checkout it is mounted from.
+func Mount9pFor(s config.Share) Mount9p {
+	return Mount9p{Tag: s.Tag, Dir: s.Guest, Options: workMountOptions}
 }

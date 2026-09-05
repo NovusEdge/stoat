@@ -150,6 +150,9 @@ func mountsDoc(v *config.VM) string {
 	if v.Share != "" {
 		fmt.Fprintf(&b, "  - [ host, /mnt/host, 9p, %q, \"0\", \"0\" ]\n", fmt.Sprintf(opts, "ro"))
 	}
+	for _, s := range v.Shares {
+		b.WriteString(fmt.Sprintf("  - [ %s, %s, 9p, %q, \"0\", \"0\" ]\n", s.Tag, s.Guest, fmt.Sprintf(opts, "rw")))
+	}
 	return b.String()
 }
 
