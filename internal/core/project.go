@@ -230,6 +230,19 @@ func renderParams(m map[string]map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
+// AttachKeys fills VM.Key from p for every VM p declares. A VM no declaration
+// names keeps an empty Key, which is what tells ls it is a global VM.
+func AttachKeys(vms []VM, p *project.Project) {
+	if p == nil {
+		return
+	}
+	for i := range vms {
+		if key, ok := p.KeyFor(vms[i].Name); ok {
+			vms[i].Key = key
+		}
+	}
+}
+
 // Reconciled is what one Reconcile call did.
 type Reconciled struct {
 	Key  string

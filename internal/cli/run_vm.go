@@ -19,11 +19,24 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
+	core.AttachKeys(vms, a.Project)
+	if a.Clear {
+		if a.Project == nil {
+			return a.failMsg(stdout, stderr, core.ErrNotFound, "--project needs a "+project.FileName+" in this directory")
+		}
+		var kept []core.VM
+		for _, v := range vms {
+			if v.Project == a.Project.Dir {
+				kept = append(kept, v)
+			}
+		}
+		vms = kept
+	}
 	if a.JSON {
 		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
-	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
+	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
 	// core.List() sorts every VM, broken ones included, together by name,
 	// so a broken VM can interleave alphabetically with good ones. The
 	// original two calls (config.List then config.ListBroken) printed every
@@ -39,8 +52,8 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State == core.StateRunning {
 			state = "running"
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %d\n",
-			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort)
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %-6d %s\n",
+			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
@@ -49,10 +62,23 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State != core.StateBroken {
 			continue
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %s\n",
-			v.Name, "-", colorState("broken", 8), "-", "-", "-", oneLine(v.Error))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %-6s %s\n",
+			v.Name, "-", colorState("broken", 8), "-", "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
+}
+
+// projectCell renders the PROJECT column: the declaring directory, marked
+// when it is gone, and "-" for a VM stoat new created.
+func projectCell(v core.VM) string {
+	switch {
+	case v.Project == "":
+		return "-"
+	case v.ProjectMissing:
+		return v.Project + " (missing)"
+	default:
+		return v.Project
+	}
 }
 
 func runUp(a *Args, stdout, stderr io.Writer) int {

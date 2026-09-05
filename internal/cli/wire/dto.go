@@ -108,6 +108,13 @@ type VM struct {
 	// already wrong.
 	Display string `json:"display"`
 	Error   string `json:"error,omitempty"`
+
+	// Project is the directory of the stoat.toml that declared this VM, and
+	// Key the declaration key. Both are empty for a VM created by stoat new.
+	// ProjectMissing says the directory is gone; the VM still runs.
+	Project        string `json:"project"`
+	Key            string `json:"key"`
+	ProjectMissing bool   `json:"project_missing"`
 }
 
 // RecipeState is one recipe's redacted per-VM state.
@@ -202,6 +209,10 @@ func FromVM(v core.VM, graphical bool) VM {
 		// PATH, which DisplayFor does once per VM it is handed.
 		Display: core.DisplayKind(v, graphical),
 		Error:   v.Error,
+
+		Project:        v.Project,
+		Key:            v.Key,
+		ProjectMissing: v.ProjectMissing,
 	}
 }
 

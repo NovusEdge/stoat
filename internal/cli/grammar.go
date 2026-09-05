@@ -95,7 +95,9 @@ type mcpDoctorCmd struct{}
 
 type helpCmd struct{}
 
-type lsCmd struct{}
+type lsCmd struct {
+	Project bool `help:"only VMs declared by the stoat.toml in this directory"`
+}
 
 type statusCmd struct{}
 
@@ -343,7 +345,10 @@ type screenshotCmd struct {
 func (g *grammar) toArgs(path string) (*Args, error) {
 	a := &Args{Cmd: path, Quiet: g.Quiet}
 	switch path {
-	case "ls", "images", "doctor", "version", "status":
+	case "ls":
+		a.Clear = g.LS.Project
+
+	case "images", "doctor", "version", "status":
 
 	case "help":
 		// The `help` COMMAND has to render the text itself; only the -h/--help
