@@ -188,6 +188,9 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		// "nothing to run at all" case above.
 		return nil
 	}
+	if v.Applied == nil {
+		v.Applied = make(map[string]config.AppliedRecipe, len(runTargets))
+	}
 
 	// run is v with Recipes narrowed to runTargets. config.VM is a plain
 	// value struct (internal/config/config.go) with no mutex and no owned
@@ -218,11 +221,19 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		if v.Applied == nil {
 			v.Applied = make(map[string]config.AppliedRecipe, len(runTargets))
 		}
-		hash, err := recipes.ScriptHash(name, v.OS)
+		hash, err := recipeHashFor(v, m)
 		if err != nil {
 			return err
 		}
-		v.Applied[name] = config.AppliedRecipe{Version: m.Version, Hash: hash, At: time.Now()}
+		scriptHash, err := recipes.ScriptHash(name, v.OS)
+		if err != nil {
+			return err
+		}
+		prev := v.Applied[name]
+		v.Applied[name] = config.AppliedRecipe{
+			Version: m.Version, Hash: hash, ScriptHash: scriptHash, At: time.Now(),
+			Outputs: prev.Outputs, Health: prev.Health,
+		}
 		changed = true
 		if m.Reboot && !needsReboot {
 			rebootRecipe, needsReboot = name, true
@@ -427,13 +438,16 @@ func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]re
 			}
 		case "once":
 			if applied, done := v.Applied[name]; done {
-				hash, err := recipes.ScriptHash(name, v.OS)
+				hash, err := recipeHashFor(v, m)
 				if err != nil {
 					return nil, nil, err
 				}
-				if applied.Hash == hash {
+				switch {
+				case applied.Hash == hash:
 					run, reason = false, "already applied"
-				} else {
+				case scriptUnchanged(v, m, applied):
+					reason = "params changed"
+				default:
 					reason = "script changed"
 				}
 			} else {
@@ -456,6 +470,50 @@ func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]re
 		decisions = append(decisions, recipeDecision{name: name, run: run, reason: reason})
 	}
 	return decisions, manifests, nil
+}
+
+// recipeHashFor computes the current combined hash for a VM's recipe. Only
+// declared secret parameters with non-empty stored values affect the hash;
+// stale keys in secrets.toml do not.
+func recipeHashFor(v *config.VM, m recipes.Manifest) (string, error) {
+	if len(m.Params) == 0 {
+		return recipes.ScriptHash(m.Name, v.OS)
+	}
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return "", err
+	}
+	params, err := recipes.Resolve(m, v.Params[m.Name], secrets[m.Name])
+	if err != nil {
+		return "", err
+	}
+	nonSecret := make(map[string]string, len(params))
+	for name, value := range params {
+		if m.Params[name].Type != "secret" {
+			nonSecret[name] = value
+		}
+	}
+	setSecrets := make(map[string]bool)
+	for _, name := range m.SecretNames() {
+		if secrets[m.Name][name] != "" {
+			setSecrets[name] = true
+		}
+	}
+	secretNames := make([]string, 0, len(setSecrets))
+	for name := range setSecrets {
+		secretNames = append(secretNames, name)
+	}
+	return recipes.RecipeHash(m.Name, v.OS, nonSecret, secretNames)
+}
+
+// scriptUnchanged distinguishes a parameter change from a changed recipe
+// body. Entries written before ScriptHash existed cannot make that claim.
+func scriptUnchanged(v *config.VM, m recipes.Manifest, applied config.AppliedRecipe) bool {
+	if applied.ScriptHash == "" {
+		return false
+	}
+	body, err := recipes.ScriptHash(m.Name, v.OS)
+	return err == nil && body == applied.ScriptHash
 }
 
 // dependencyError explains why dependent cannot run: its dependency dep is
