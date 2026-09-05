@@ -681,6 +681,56 @@ func FromShot(vm string, s core.Shot) Screenshot {
 	return Screenshot{VM: vm, Path: s.Path, Bytes: s.Bytes, Width: s.Width, Height: s.Height}
 }
 
+// VMList is the ls command's data and the list_vms tool's output.
+type VMList struct {
+	VMs []VM `json:"vms"`
+}
+
+// ImageList is the list_images tool's output.
+type ImageList struct {
+	Images []Image `json:"images"`
+}
+
+// RecipeCatalog is the list_recipes tool's output and the `recipes` command's
+// data: the recipes stoat can apply, filtered by OS or backend. It is not
+// RecipeList, which is `recipe list`'s data and whose entries are
+// RecipeEntry rows about provenance.
+type RecipeCatalog struct {
+	Recipes []Recipe `json:"recipes"`
+}
+
+// RecipeIssueList is the check_recipes tool's output.
+type RecipeIssueList struct {
+	Issues []RecipeIssue `json:"issues"`
+}
+
+// ApplyPlanList is the plan_recipes tool's output.
+type ApplyPlanList struct {
+	Plan []ApplyPlan `json:"plan"`
+}
+
+// LogTail is the logs tool's output.
+type LogTail struct {
+	Lines []string `json:"lines"`
+}
+
+// DoctorReport is the doctor tool's output. Healthy is false when any check
+// failed and is not itself Optional.
+type DoctorReport struct {
+	Healthy bool        `json:"healthy"`
+	Checks  []HostCheck `json:"checks"`
+}
+
+func FromDoctor(cs []core.HostCheck) DoctorReport {
+	r := DoctorReport{Healthy: true, Checks: FromHostChecks(cs)}
+	for _, c := range r.Checks {
+		if !c.OK && !c.Optional {
+			r.Healthy = false
+		}
+	}
+	return r
+}
+
 // GuestList is `guest ls` data.
 type GuestList struct {
 	Guests []Guest `json:"guests"`
