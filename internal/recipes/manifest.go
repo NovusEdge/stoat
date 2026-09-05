@@ -2,6 +2,7 @@ package recipes
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -144,8 +145,14 @@ func ParseManifest(path string) (Manifest, error) {
 	}
 	m.dir = filepath.Dir(path)
 
-	if m.Schema == 0 {
+	schema, schemaSet, err := manifestSchema(path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if !schemaSet {
 		m.Schema = 2
+	} else {
+		m.Schema = schema
 	}
 	if m.Stage == "" {
 		m.Stage = "provision"
@@ -175,6 +182,9 @@ func ParseManifest(path string) (Manifest, error) {
 	if m.Schema > 3 {
 		return Manifest{}, fmt.Errorf("%s: schema %d is newer than this stoat (3)", path, m.Schema)
 	}
+	if schemaSet && m.Schema != 2 && m.Schema != 3 {
+		return Manifest{}, fmt.Errorf("%s: schema %d is unsupported; want 2 or 3", path, m.Schema)
+	}
 	if m.Schema < 3 && (len(m.ParamsRaw) > 0 || len(m.Outputs) > 0 || m.Health.Check != "" || m.Health.Timeout != "") {
 		return Manifest{}, fmt.Errorf("%s: params, outputs and health require schema 3", path)
 	}
@@ -186,6 +196,22 @@ func ParseManifest(path string) (Manifest, error) {
 	}
 
 	return m, nil
+}
+
+// manifestSchema distinguishes an absent schema from an explicit zero. The
+// public Manifest.Schema field remains an int for callers, so a second decode
+// into a pointer is the boundary that preserves this distinction.
+func manifestSchema(path string) (int, bool, error) {
+	var raw struct {
+		Schema *int `toml:"schema"`
+	}
+	if err := tomlx.Decode(path, &raw, tomlx.Warn(io.Discard)); err != nil {
+		return 0, false, err
+	}
+	if raw.Schema == nil {
+		return 0, false, nil
+	}
+	return *raw.Schema, true, nil
 }
 
 // buildParams turns raw TOML declarations into the normalized parameter map.
@@ -264,7 +290,13 @@ func containsString(values []string, wanted string) bool {
 }
 
 func validateHealth(path string, h Health) error {
-	if h.Check == "" || h.Timeout == "" {
+	if h.Check == "" && h.Timeout == "" {
+		return nil
+	}
+	if h.Check == "" {
+		return fmt.Errorf("%s: health.check is required when health.timeout is set", path)
+	}
+	if h.Timeout == "" {
 		return nil
 	}
 	d, err := time.ParseDuration(h.Timeout)
