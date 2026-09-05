@@ -32,6 +32,8 @@ type grammar struct {
 	// contract, and so exec's guest command keeps its own --json.
 	Quiet bool `short:"q" name:"quiet" aliases:"no-interactive" help:"suppress progress chatter"`
 
+	Init initCmd `cmd:"" help:"write a stoat.toml for this directory"`
+
 	LS      lsCmd      `cmd:"" name:"ls" help:"list VMs, one line per VM"`
 	Get     getCmd     `cmd:"" help:"show one VM"`
 	Create  createCmd  `cmd:"" help:"create a VM without starting it"`
@@ -93,6 +95,10 @@ type mcpDoctorCmd struct{}
 type helpCmd struct{}
 
 type lsCmd struct{}
+
+type initCmd struct {
+	Name string `help:"project name; defaults to the directory name"`
+}
 type imagesCmd struct{}
 type doctorCmd struct{}
 type versionCmd struct{}
@@ -488,6 +494,9 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "pull":
 		a.VM = g.Pull.ID
+
+	case "init":
+		a.Tag = g.Init.Name
 
 	case "snapshot":
 		// The mutual exclusion of --restore and --delete is kong's, via

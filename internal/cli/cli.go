@@ -489,6 +489,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runImages(a, stdout, stderr)
 	case "pull":
 		return runPull(a, stdout, stderr)
+	case "init":
+		return runInit(a, stdout, stderr)
 	case "clone":
 		return runClone(a, stdout, stderr)
 	case "prune":

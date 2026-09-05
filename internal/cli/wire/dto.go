@@ -890,3 +890,11 @@ type MCPDoctor struct {
 type JobList struct {
 	Jobs []Job `json:"jobs"`
 }
+
+// InitResult is stoat init's answer: where the file landed and whether the
+// gitignore needed a line.
+type InitResult struct {
+	Path             string `json:"path"`
+	Project          string `json:"project"`
+	GitignoreUpdated bool   `json:"gitignore_updated"`
+}
