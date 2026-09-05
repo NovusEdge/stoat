@@ -259,7 +259,13 @@ func plan(s Spec) (*config.VM, error) {
 		allowExec = *s.AllowExec
 	}
 	agentAccess := s.AgentAccess
-	if agentAccess == "" {
+	// A given AgentAccess decides AllowExec outright: exec is the only level
+	// that grants it, so the two must not disagree. AllowExec's own pointer
+	// applies only when AgentAccess is empty, for a caller such as the TUI
+	// form that has never spoken agentAccess at all.
+	if agentAccess != "" {
+		allowExec = agentAccess == "exec"
+	} else {
 		agentAccess = "manage"
 	}
 
