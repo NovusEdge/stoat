@@ -180,7 +180,7 @@ func EnsureRoot() error {
 // one must be added or it gets scanned as a candidate VM.
 func reserved(name string) bool {
 	switch name {
-	case "isos", "recipes", "shared", "logs":
+	case "isos", "recipes", "shared", "logs", "index":
 		return true
 	}
 	return false

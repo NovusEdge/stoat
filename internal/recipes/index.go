@@ -1,13 +1,28 @@
 package recipes
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/gitx"
+	"github.com/novusedge/stoat/internal/tomlx"
 )
 
+// DefaultIndexURL is the curated index STOAT_INDEX overrides. Git accepts a
+// filesystem path as a URL, which keeps tests local.
+const DefaultIndexURL = "https://github.com/novusedge/stoat-recipes"
+
 const indexStampName = ".fetched"
+const indexSchema = 1
+const indexMaxAge = 24 * time.Hour
+
+var indexMu sync.Mutex
 
 type Index struct {
 	Schema  int                   `toml:"schema"`
@@ -21,14 +36,150 @@ type IndexEntry struct {
 	OS          []string `toml:"os"`
 }
 
-func IndexURL() string { return os.Getenv("STOAT_INDEX") }
+// IndexURL is the index repository: STOAT_INDEX, or the curated default.
+func IndexURL() string {
+	if u := os.Getenv("STOAT_INDEX"); u != "" {
+		return u
+	}
+	return DefaultIndexURL
+}
 
+// IndexDir is the local clone of the index.
 func IndexDir() string { return filepath.Join(config.Root(), "index") }
 
-func RefreshIndex(bool) error { return nil }
+// RefreshIndex clones the index into a staging directory, validates it, then
+// swaps it into place. A failed refresh leaves the last usable clone intact.
+func RefreshIndex(force bool) (err error) {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 
-func LoadIndex() (Index, error) { return Index{}, nil }
+	root := config.Root()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	dir := IndexDir()
+	stamp := filepath.Join(dir, indexStampName)
+	if !force {
+		st, statErr := os.Stat(stamp)
+		if statErr == nil {
+			if time.Since(st.ModTime()) < indexMaxAge {
+				return nil
+			}
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+	}
 
-func SearchIndex(string) ([]IndexEntry, error) { return nil, nil }
+	stage, err := os.MkdirTemp(root, ".stoat-index-stage-*")
+	if err != nil {
+		return err
+	}
+	stageActive := true
+	defer func() {
+		if stageActive {
+			if removeErr := os.RemoveAll(stage); removeErr != nil && err == nil {
+				err = removeErr
+			}
+		}
+	}()
 
-func IndexLookup(string) (IndexEntry, bool, error) { return IndexEntry{}, false, nil }
+	if err := gitx.Clone(IndexURL(), "", stage); err != nil {
+		return err
+	}
+	if _, err := loadIndex(stage); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(stage, indexStampName), nil, 0o644); err != nil {
+		return err
+	}
+	if err := replaceIndex(stage, dir); err != nil {
+		return err
+	}
+	stageActive = false
+	return nil
+}
+
+func replaceIndex(stage, dir string) error {
+	parent := filepath.Dir(dir)
+	_, statErr := os.Stat(dir)
+	hasOld := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return statErr
+	}
+	if !hasOld {
+		return os.Rename(stage, dir)
+	}
+
+	backup, err := os.MkdirTemp(parent, ".stoat-index-old-*")
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(backup); err != nil {
+		return err
+	}
+	if err := os.Rename(dir, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(stage, dir); err != nil {
+		if restoreErr := os.Rename(backup, dir); restoreErr != nil {
+			return fmt.Errorf("replace index: %w; restore old index: %v", err, restoreErr)
+		}
+		return err
+	}
+	return os.RemoveAll(backup)
+}
+
+// LoadIndex reads the cloned index.toml.
+func LoadIndex() (Index, error) { return loadIndex(IndexDir()) }
+
+func loadIndex(dir string) (Index, error) {
+	var idx Index
+	if err := tomlx.Decode(filepath.Join(dir, "index.toml"), &idx, tomlx.Reject); err != nil {
+		return Index{}, err
+	}
+	if idx.Schema > indexSchema {
+		return Index{}, fmt.Errorf("index.toml: schema %d is newer than this stoat (%d)", idx.Schema, indexSchema)
+	}
+	if idx.Recipes == nil {
+		idx.Recipes = map[string]IndexEntry{}
+	}
+	for name, entry := range idx.Recipes {
+		entry.Name = name
+		idx.Recipes[name] = entry
+	}
+	return idx, nil
+}
+
+// SearchIndex returns entries whose name or description contains term, sorted
+// by name. An empty term returns the whole index.
+func SearchIndex(term string) ([]IndexEntry, error) {
+	if err := RefreshIndex(false); err != nil {
+		return nil, err
+	}
+	idx, err := LoadIndex()
+	if err != nil {
+		return nil, err
+	}
+	q := strings.ToLower(term)
+	var out []IndexEntry
+	for _, entry := range idx.Recipes {
+		if strings.Contains(strings.ToLower(entry.Name), q) || strings.Contains(strings.ToLower(entry.Description), q) {
+			out = append(out, entry)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// IndexLookup refreshes the index and returns one entry by name.
+func IndexLookup(name string) (IndexEntry, bool, error) {
+	if err := RefreshIndex(false); err != nil {
+		return IndexEntry{}, false, err
+	}
+	idx, err := LoadIndex()
+	if err != nil {
+		return IndexEntry{}, false, err
+	}
+	entry, ok := idx.Recipes[name]
+	return entry, ok, nil
+}
