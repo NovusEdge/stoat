@@ -32,10 +32,3 @@ func LoadIndex() (Index, error) { return Index{}, nil }
 func SearchIndex(string) ([]IndexEntry, error) { return nil, nil }
 
 func IndexLookup(string) (IndexEntry, bool, error) { return IndexEntry{}, false, nil }
-
-func writeLockStub(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, nil, 0o644)
-}
