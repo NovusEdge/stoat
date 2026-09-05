@@ -102,6 +102,14 @@ func TestHealthTimeoutDefaults(t *testing.T) {
 	if (Health{Check: "true"}).Duration() != 30*time.Second {
 		t.Error("a declared check defaults to 30s")
 	}
+	body := "schema = 3\nname = \"x\"\nscript = \"i.sh\"\n[health]\ncheck = \"true\"\n"
+	m, err := ParseManifest(writeManifestFile(t, t.TempDir(), body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Health.Duration(); got != 30*time.Second {
+		t.Errorf("parsed health duration = %s, want 30s", got)
+	}
 }
 
 func TestParseManifestV3Errors(t *testing.T) {
@@ -157,19 +165,73 @@ func TestParseManifestRejectsInvalidHealthTimeout(t *testing.T) {
 			}
 		})
 	}
+	for _, timeout := range []string{"soon", "30s"} {
+		t.Run("without-check/"+timeout, func(t *testing.T) {
+			body := "schema = 3\nname = \"x\"\nscript = \"i.sh\"\n[health]\ntimeout = \"" + timeout + "\"\n"
+			_, err := ParseManifest(writeManifestFile(t, t.TempDir(), body))
+			if err == nil {
+				t.Fatalf("timeout %q without a check was accepted", timeout)
+			}
+		})
+	}
 }
 
-// Schema 2 manifests keep loading and carry no params, outputs or health.
-func TestParseManifestSchema2StillLoads(t *testing.T) {
-	body := "name = \"xfce\"\nscript = \"install.sh\"\nos = [\"alpine\"]\n"
-	m, err := ParseManifest(writeManifestFile(t, t.TempDir(), body))
-	if err != nil {
-		t.Fatal(err)
+func TestParseManifestSchemaBoundaries(t *testing.T) {
+	base := "name = \"x\"\nscript = \"i.sh\"\n"
+	for _, tt := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{name: "absent defaults to schema 2", body: base, want: 2},
+		{name: "explicit schema 2", body: "schema = 2\n" + base, want: 2},
+		{name: "explicit schema 3", body: "schema = 3\n" + base, want: 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := ParseManifest(writeManifestFile(t, t.TempDir(), tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Schema != tt.want {
+				t.Errorf("Schema = %d, want %d", m.Schema, tt.want)
+			}
+		})
 	}
-	if m.Schema != 2 {
-		t.Errorf("Schema = %d, want 2 for a manifest with no schema key", m.Schema)
+	for _, schema := range []string{"0", "1", "-1"} {
+		t.Run("reject-explicit-schema-"+schema, func(t *testing.T) {
+			_, err := ParseManifest(writeManifestFile(t, t.TempDir(), "schema = "+schema+"\n"+base))
+			if err == nil {
+				t.Fatalf("explicit schema %s was accepted", schema)
+			}
+		})
 	}
-	if len(m.Params) != 0 || len(m.Outputs) != 0 || m.Health.Check != "" {
-		t.Errorf("schema 2 manifest carries v3 data: %+v", m)
+
+	t.Run("absent schema carries no v3 data", func(t *testing.T) {
+		m, err := ParseManifest(writeManifestFile(t, t.TempDir(), base+"os = [\"alpine\"]\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Schema != 2 {
+			t.Errorf("Schema = %d, want 2 for a manifest with no schema key", m.Schema)
+		}
+		if len(m.Params) != 0 || len(m.Outputs) != 0 || m.Health.Check != "" {
+			t.Errorf("schema 2 manifest carries v3 data: %+v", m)
+		}
+	})
+
+	for _, tt := range []struct {
+		name  string
+		block string
+	}{
+		{name: "params", block: "[params.user]\ntype = \"string\"\ndefault = \"dev\"\n"},
+		{name: "outputs", block: "[outputs]\nsocket = \"path\"\n"},
+		{name: "health", block: "[health]\ncheck = \"true\"\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := "schema = 2\nname = \"x\"\nscript = \"i.sh\"\n" + tt.block
+			if _, err := ParseManifest(writeManifestFile(t, t.TempDir(), body)); err == nil {
+				t.Fatalf("schema 2 %s block was accepted", tt.name)
+			}
+		})
 	}
 }

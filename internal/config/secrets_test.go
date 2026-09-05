@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -13,9 +14,19 @@ func TestSecretsRoundTripAt0600(t *testing.T) {
 	if got, want := (&VM{Dir: dir}).SecretsPath(), filepath.Join(dir, SecretsName); got != want {
 		t.Errorf("SecretsPath = %q, want %q", got, want)
 	}
-	s := Secrets{"docker": {"zkey": "z", "authkey": "tskey-abc", "unset": ""}}
+	s := Secrets{
+		"empty":  {},
+		"docker": {"zkey": "z", "authkey": "tskey-abc", "unset": ""},
+	}
+	wantInput := Secrets{
+		"empty":  {},
+		"docker": {"zkey": "z", "authkey": "tskey-abc", "unset": ""},
+	}
 	if err := SaveSecrets(dir, s); err != nil {
 		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(s, wantInput) {
+		t.Errorf("SaveSecrets mutated its input: got %#v, want %#v", s, wantInput)
 	}
 	fi, err := os.Stat(filepath.Join(dir, SecretsName))
 	if err != nil {
