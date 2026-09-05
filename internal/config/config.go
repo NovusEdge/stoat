@@ -38,7 +38,7 @@ type AppliedRecipe struct {
 	Version string            `toml:"version"`
 	Hash    string            `toml:"hash"`
 	At      time.Time         `toml:"at"`
-	Outputs map[string]string `toml:"outputs"`
+	Outputs map[string]string `toml:"outputs,omitempty" comment:"written by stoat; do not edit"`
 	Health  string            `toml:"health"`
 }
 
@@ -112,14 +112,45 @@ type VM struct {
 
 // Param reads one stored recipe parameter.
 func (v *VM) Param(recipe, name string) (string, bool) {
-	return "", false
+	if v == nil {
+		return "", false
+	}
+	values, ok := v.Params[recipe]
+	if !ok {
+		return "", false
+	}
+	value, ok := values[name]
+	return value, ok
 }
 
 // SetParam stores one non-secret recipe parameter.
-func (v *VM) SetParam(recipe, name, value string) {}
+func (v *VM) SetParam(recipe, name, value string) {
+	if v.Params == nil {
+		v.Params = make(map[string]map[string]string)
+	}
+	if v.Params[recipe] == nil {
+		v.Params[recipe] = make(map[string]string)
+	}
+	v.Params[recipe][name] = value
+}
 
 // UnsetParam removes one stored recipe parameter.
-func (v *VM) UnsetParam(recipe, name string) {}
+func (v *VM) UnsetParam(recipe, name string) {
+	if v == nil || v.Params == nil {
+		return
+	}
+	values, ok := v.Params[recipe]
+	if !ok {
+		return
+	}
+	delete(values, name)
+	if len(values) == 0 {
+		delete(v.Params, recipe)
+	}
+	if len(v.Params) == 0 {
+		v.Params = nil
+	}
+}
 
 // Root is the data root: $STOAT_HOME, or ~/.stoat.
 func Root() string {
