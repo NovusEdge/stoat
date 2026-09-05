@@ -231,11 +231,22 @@ func renderParams(m map[string]map[string]string) string {
 }
 
 // removedParams finds recipe.param entries that vm.toml has and the
-// declaration no longer states, so Reconcile unsets them instead of leaving a
-// stale value that Diff reports as drift on every later stoat up.
-func removedParams(have, want map[string]map[string]string) map[string][]string {
+// declaration no longer states, for a recipe the declaration still applies,
+// so Reconcile unsets them instead of leaving a stale value that Diff
+// reports as drift on every later stoat up. A recipe missing from keep is
+// excluded: Update clears a dropped recipe's params (and secrets) itself
+// when Reconcile removes it from vm.toml's recipe list, and naming it here
+// too would ask Update to resolve a recipe already gone from that list.
+func removedParams(have, want map[string]map[string]string, keep []string) map[string][]string {
+	kept := make(map[string]bool, len(keep))
+	for _, r := range keep {
+		kept[r] = true
+	}
 	var out map[string][]string
 	for recipe, params := range have {
+		if !kept[recipe] {
+			continue
+		}
 		for name := range params {
 			if _, ok := want[recipe][name]; ok {
 				continue
@@ -331,7 +342,7 @@ func Reconcile(p *project.Project, key string) (Reconciled, error) {
 			patch.Shares = &shares
 		case "params":
 			patch.SetParams = spec.Params
-			patch.UnsetParams = removedParams(v.Params, spec.Params)
+			patch.UnsetParams = removedParams(v.Params, spec.Params, spec.Recipes)
 		case "agent_access":
 			access := spec.AgentAccess
 			patch.AgentAccess = &access

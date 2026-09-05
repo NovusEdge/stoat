@@ -147,14 +147,24 @@ func Update(name string, p Patch) (VM, error) {
 	if p.Share != nil {
 		work.Share = strings.TrimSpace(*p.Share)
 	}
+	var droppedRecipes []string
 	if p.Recipes != nil {
+		kept := make(map[string]bool, len(*p.Recipes))
+		for _, r := range *p.Recipes {
+			kept[r] = true
+		}
+		for _, r := range work.Recipes {
+			if !kept[r] {
+				droppedRecipes = append(droppedRecipes, r)
+			}
+		}
 		work.Recipes = append([]string(nil), (*p.Recipes)...)
 	}
 	if p.Shares != nil {
 		work.Shares = *p.Shares
 	}
 	var stored config.Secrets
-	if hasParamEdits(p) {
+	if hasParamEdits(p) || len(droppedRecipes) > 0 {
 		stored, err = config.LoadSecrets(work.Dir)
 		if err != nil {
 			return VM{}, err
@@ -165,6 +175,17 @@ func Update(name string, p Patch) (VM, error) {
 	err = stageParamEdits(work, p, stored, &stagedSecrets, &secretTouched)
 	if err != nil {
 		return VM{}, err
+	}
+	// A recipe dropped from Recipes takes its params and secrets with it.
+	// manifestForVM only resolves a recipe still in v.Recipes, so an UnsetParams
+	// entry for a dropped recipe would fail here with ErrRecipeNotApplicable;
+	// callers (Reconcile) rely on this clearing instead of naming the recipe.
+	for _, recipe := range droppedRecipes {
+		delete(work.Params, recipe)
+		if _, ok := stagedSecrets[recipe]; ok {
+			delete(stagedSecrets, recipe)
+			secretTouched = true
+		}
 	}
 	if p.Installed != nil {
 		work.Installed = *p.Installed
