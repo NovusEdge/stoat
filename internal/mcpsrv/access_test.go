@@ -10,13 +10,15 @@ import (
 )
 
 // writeVM creates a VM directory whose vm.toml declares one access level.
+// The os key names a real guest definition: pkg_install and useradd read the
+// guest file for the distro's own verbs and refuse a VM whose os is unknown.
 func writeVM(t *testing.T, name, level string) {
 	t.Helper()
 	dir := filepath.Join(config.Root(), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "name = \"" + name + "\"\nagent_access = \"" + level + "\"\n"
+	body := "name = \"" + name + "\"\nos = \"alpine\"\nagent_access = \"" + level + "\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "vm.toml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
