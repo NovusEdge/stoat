@@ -14,6 +14,9 @@ apk)
     setup-devd udev
     udevadm trigger 2>/dev/null || true
     udevadm settle 2>/dev/null || true
+    # Alpine's xfce4 metapackage pulls no X server. setup-xorg-base installs
+    # xorg-server, xinit and xf86-input-libinput, which startx below needs.
+    setup-xorg-base
     stoat_pkg_install xfce4 xfce4-terminal dbus-x11
     ;;
 apt-get)
