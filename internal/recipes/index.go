@@ -11,6 +11,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/gitx"
+	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
@@ -170,7 +171,10 @@ func replaceIndex(stage, dir string) error {
 		}
 		return err
 	}
-	return os.RemoveAll(backup)
+	if err := os.RemoveAll(backup); err != nil {
+		logx.L().Warn("published recipe index but could not remove its old cache", "dir", backup, "err", err)
+	}
+	return nil
 }
 
 // LoadIndex reads the cloned index.toml under the index file lock.
