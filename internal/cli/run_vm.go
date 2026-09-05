@@ -204,13 +204,14 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
-	// up's --json contract is the single {"vm":VM} result runUp emits once
-	// this returns (docs/reference/json.md's `up` row), not a stream: unlike
-	// run_apply.go's runApply, up has no per-line event to wrap the log in,
-	// so the raw bytes are discarded rather than reaching stdout raw.
+	// Under --json, raw log bytes must not reach stdout: they would sit
+	// inside the JSON Lines stream and break every consumer's parse. Each
+	// appended line becomes a "log" event instead (run_apply.go's runApply).
 	out := stdout
+	var lw *jsonLogWriter
 	if a.JSON {
-		out = io.Discard
+		lw = &jsonLogWriter{em: wire.NewEmitter(stdout), cmd: a.Cmd}
+		out = lw
 	}
 	redactor, err := newSecretRedactor(v.Paths.Dir, out)
 	if err != nil {
@@ -220,6 +221,9 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{}) }()
 	if err := streamFile(v.Paths.ApplyLog, redactor, done); err != nil {
 		_ = redactor.Flush()
+		if lw != nil {
+			lw.Flush()
+		}
 		if errors.Is(err, core.ErrProvisionInProgress) {
 			// A concurrent `apply` already holds the lock; that run owns the
 			// error. `up` still started the VM, so this is not a failure of
@@ -233,6 +237,9 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	}
 	if err := redactor.Flush(); err != nil {
 		return a.fail(stdout, stderr, err)
+	}
+	if lw != nil {
+		lw.Flush()
 	}
 	if !a.JSON {
 		fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
