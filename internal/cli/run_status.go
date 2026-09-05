@@ -54,7 +54,7 @@ func runStatus(a *Args, stdout, stderr io.Writer) int {
 			cell = renderDrift(r.Drift)
 		}
 		fmt.Fprintf(stdout, "%-12s %-20s %-9s %-9s %s\n",
-			r.Key, r.Name, r.State, dash(r.Health), dash(cell))
+			r.Key, r.Name, r.State, healthCell(r.Health), dash(cell))
 	}
 	return ExitOK
 }
@@ -78,4 +78,14 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// healthCell is the HEALTH column: core.HealthUnknown reads the same as no
+// verdict at all, since a VM that has never applied a recipe is not a health
+// failure.
+func healthCell(h string) string {
+	if h == string(core.HealthUnknown) {
+		return "-"
+	}
+	return dash(h)
 }
