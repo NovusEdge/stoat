@@ -63,6 +63,24 @@ func TestRedactValueReplacesSecretFields(t *testing.T) {
 	}
 }
 
+func TestRedactValueMasksSecretsInsideAList(t *testing.T) {
+	in := map[string]any{
+		"items":   []any{map[string]any{"authkey": sentinel}},
+		"secrets": []any{sentinel, sentinel},
+	}
+	out := redactValue(in).(map[string]any)
+	items := out["items"].([]any)
+	if items[0].(map[string]any)["authkey"] != core.SecretSet {
+		t.Fatalf("a secret nested inside a list element must be masked, got %v", items)
+	}
+	secrets := out["secrets"].([]any)
+	for _, v := range secrets {
+		if v != core.SecretSet {
+			t.Fatalf("a list-valued secrets field must mask every element, got %v", secrets)
+		}
+	}
+}
+
 func TestUpdateNeverEchoesASecret(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	writeVM(t, "dev", "manage")

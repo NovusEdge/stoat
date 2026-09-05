@@ -117,6 +117,12 @@ func maskSecret(v any) any {
 			out[k] = maskSecret(val)
 		}
 		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = maskSecret(val)
+		}
+		return out
 	case nil:
 		return core.SecretUnset
 	case string:
