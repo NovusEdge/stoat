@@ -1,12 +1,15 @@
 package mcpsrv
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/testutil"
 )
 
 // writeVM creates a VM directory whose vm.toml declares one access level.
@@ -24,27 +27,84 @@ func writeVM(t *testing.T, name, level string) {
 	}
 }
 
-// TestRequireAccess asserts every cell of the access table: each
-// guest-touching tool against each of the four levels.
+// accessFakeGuest answers every guest command a tool in the table can send:
+// enough exit-0 output for read_file, list_dir, stat and ps to parse
+// cleanly, and a bare success for everything else. Access denial is decided
+// before any of this runs, so this is only exercised at an allowed level.
+const accessFakeGuest = `cat > /dev/null 2>&1
+case "$1" in
+  stat) echo 5;;
+  *) exit 0;;
+esac`
+
+// accessArgsFor builds the minimal valid input for one table tool, so a call
+// reaches the handler's own requireAccess line instead of failing input
+// validation first. The content of a field that survives the access gate
+// (a bogus job id, a host path outside the sandbox) does not matter: those
+// calls are allowed to fail for a reason that is not access.
+func accessArgsFor(tool, vm string) map[string]any {
+	args := map[string]any{"vm": vm}
+	switch tool {
+	case "read_file", "list_dir", "stat":
+		args["path"] = "/etc/hostname"
+	case "svc_status":
+		args["name"] = "sshd"
+	case "write_file":
+		args["path"], args["content"] = "/tmp/x", "x"
+	case "copy_to", "copy_from":
+		args["local"], args["remote"] = "/etc/passwd", "/tmp/x"
+	case "pkg_install":
+		args["packages"] = []string{"curl"}
+	case "svc":
+		args["name"], args["action"] = "sshd", "restart"
+	case "useradd":
+		args["name"] = "bob"
+	case "exec", "exec_bg":
+		args["argv"] = []string{"true"}
+	case "job_status", "job_output", "job_kill":
+		args["job_id"] = "j-00000000"
+	}
+	return args
+}
+
+// isAccessRefusal reports whether res was refused by requireAccess rather
+// than by anything downstream. requireAccess's message is the only place
+// "agent_access =" appears in a tool's output.
+func isAccessRefusal(t *testing.T, res *mcp.CallToolResult) bool {
+	t.Helper()
+	raw, err := json.Marshal(res.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Contains(string(raw), "agent_access =")
+}
+
+// TestRequireAccess drives every guest-touching tool through callTool, the
+// path a real client takes, at each of the four levels. Calling
+// requireAccess directly would only check the table's own expectation
+// against itself; this instead exercises the Level literal each handler
+// passes to requireAccess, so a handler gated at the wrong level fails here.
 func TestRequireAccess(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	levels := []Level{LevelNone, LevelObserve, LevelManage, LevelExec}
 	for _, level := range levels {
 		writeVM(t, level.String(), level.String())
 	}
+	testutil.FakeSSH(t, accessFakeGuest)
 	for _, spec := range toolTable {
 		if spec.Access == LevelNone {
 			continue // A host-side tool is not gated.
 		}
 		for _, have := range levels {
 			t.Run(spec.Name+"/"+have.String(), func(t *testing.T) {
-				err := requireAccess(have.String(), spec.Access)
+				res := callTool(t, spec.Name, accessArgsFor(spec.Name, have.String()))
 				allowed := have.rank() >= spec.Access.rank()
-				if allowed && err != nil {
-					t.Fatalf("%s at %s was refused: %v", spec.Name, have, err)
+				refused := res.IsError && isAccessRefusal(t, res)
+				if allowed && refused {
+					t.Fatalf("%s at %s was refused by access, needs %s", spec.Name, have, spec.Access)
 				}
-				if !allowed && err == nil {
-					t.Fatalf("%s at %s was allowed, needs %s", spec.Name, have, spec.Access)
+				if !allowed && !refused {
+					t.Fatalf("%s at %s was not refused by access: %+v", spec.Name, have, res.Content)
 				}
 			})
 		}
