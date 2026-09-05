@@ -8,10 +8,11 @@ import (
 // CLI and MCP server render it their own way. Named HostCheck, not hostcheck's
 // bare Check, so a caller importing both reads them as distinct types.
 type HostCheck struct {
-	Name     string
-	OK       bool
-	Detail   string   // "/usr/bin", "not found", "permission denied"
-	Fix      []string // shell commands, already distro-resolved; empty when OK
+	Name   string
+	OK     bool
+	Detail string   // "/usr/bin", "not found", "permission denied"
+	Fix    []string // shell commands, already distro-resolved; empty when OK
+	// Optional marks a binary some commands need; a missing one is not a broken host.
 	Optional bool
 }
 
@@ -26,7 +27,7 @@ func Doctor() []HostCheck {
 	checks := hostcheck.RunChecks(hostcheck.DetectDistro())
 	out := make([]HostCheck, len(checks))
 	for i, c := range checks {
-		out[i] = HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: c.Fix}
+		out[i] = HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: c.Fix, Optional: c.Optional}
 	}
 	return out
 }

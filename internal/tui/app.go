@@ -165,7 +165,7 @@ func Run() error {
 func preflightReport(checks []core.HostCheck) string {
 	var lines []string
 	for _, c := range checks {
-		if c.OK {
+		if c.OK || c.Optional {
 			continue
 		}
 		line := c.Name + ": " + c.Detail

@@ -295,7 +295,7 @@ type HostCheck struct {
 }
 
 func FromHostCheck(c core.HostCheck) HostCheck {
-	return HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: nonNil(c.Fix)}
+	return HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: nonNil(c.Fix), Optional: c.Optional}
 }
 
 func FromHostChecks(cs []core.HostCheck) []HostCheck {

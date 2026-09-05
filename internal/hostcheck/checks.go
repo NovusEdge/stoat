@@ -11,10 +11,11 @@ import (
 // each command directly instead of parsing one. Today nothing runs it: the
 // installer only prints it.
 type Check struct {
-	Name     string
-	OK       bool
-	Detail   string   // "/usr/bin", "not found", "permission denied"
-	Fix      []string // shell commands, already distro-resolved; empty when OK
+	Name   string
+	OK     bool
+	Detail string   // "/usr/bin", "not found", "permission denied"
+	Fix    []string // shell commands, already distro-resolved; empty when OK
+	// Optional marks a binary some commands need; a missing one is not a broken host.
 	Optional bool
 }
 
@@ -22,13 +23,15 @@ type Check struct {
 // qemu-img come from one package on Arch and two on Debian, which is exactly
 // why Pkg names them per distro rather than per binary.
 var binChecks = []struct {
-	name string
-	pkg  Pkg
+	name     string
+	pkg      Pkg
+	optional bool
 }{
-	{"qemu-system-x86_64", Pkg{Arch: "qemu-full", Debian: "qemu-system-x86", Fedora: "qemu-kvm"}},
-	{"qemu-img", Pkg{Arch: "qemu-full", Debian: "qemu-utils", Fedora: "qemu-img"}},
-	{"ssh", Pkg{Arch: "openssh", Debian: "openssh-client", Fedora: "openssh-clients"}},
-	{"xorriso", Pkg{Arch: "libisoburn", Debian: "xorriso", Fedora: "xorriso"}},
+	{"qemu-system-x86_64", Pkg{Arch: "qemu-full", Debian: "qemu-system-x86", Fedora: "qemu-kvm"}, false},
+	{"qemu-img", Pkg{Arch: "qemu-full", Debian: "qemu-utils", Fedora: "qemu-img"}, false},
+	{"ssh", Pkg{Arch: "openssh", Debian: "openssh-client", Fedora: "openssh-clients"}, false},
+	{"xorriso", Pkg{Arch: "libisoburn", Debian: "xorriso", Fedora: "xorriso"}, false},
+	{"git", Pkg{Arch: "git", Debian: "git", Fedora: "git"}, true},
 }
 
 // RunChecks probes every host requirement, in the order they are displayed.
@@ -38,7 +41,9 @@ var binChecks = []struct {
 func RunChecks(d Distro) []Check {
 	checks := make([]Check, 0, len(binChecks)+1)
 	for _, b := range binChecks {
-		checks = append(checks, lookPathCheck(b.name, d.InstallCmd(b.pkg)))
+		c := lookPathCheck(b.name, d.InstallCmd(b.pkg))
+		c.Optional = b.optional
+		checks = append(checks, c)
 	}
 	return append(checks, KVMCheck())
 }
@@ -55,7 +60,7 @@ func lookPathCheck(name string, fix []string) Check {
 func Problems(cs []Check) []Check {
 	var out []Check
 	for _, c := range cs {
-		if !c.OK {
+		if !c.OK && !c.Optional {
 			out = append(out, c)
 		}
 	}

@@ -212,7 +212,7 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 	checks := core.Doctor()
 	var failed []core.HostCheck
 	for _, c := range checks {
-		if !c.OK {
+		if !c.OK && !c.Optional {
 			failed = append(failed, c)
 		}
 	}
