@@ -113,17 +113,11 @@ type createCmd struct {
 	Recipes         []string `help:"recipe names to record on the VM"`
 	Set             []string `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Secret          []string `help:"set a secret recipe param"`
-	// default:"true" is load-bearing, not decoration: without it kong treats
-	// an absent --allow-exec the same as an explicit --allow-exec=false,
-	// since a bare bool flag's zero value is false. With it, the flag must
-	// be passed AND given =false to turn exec off; --allow-exec alone (no
-	// value) sets true, matching every other bool flag. Verified by running
-	// `stoat create --help` and `stoat create x --image y --allow-exec=false`.
-	AllowExec bool `default:"true" help:"allow exec/copy_to/copy_from on this VM (enforced by the MCP server, not stoat itself)"`
-	// AgentAccess is the successor to AllowExec: a level rather than a bool.
-	// Both are read; toArgs keeps AllowExec's own behaviour unchanged and
-	// applies this one independently, so an old script's --allow-exec still
-	// does exactly what it always did.
+	// AllowExec is a hidden alias of --agent-access: a nil pointer means the
+	// flag was not given, so toArgs can tell that apart from --agent-access's
+	// own default, the same pointer trick updateCmd's fields use (see
+	// grammar's type comment). true maps to the exec level, false to manage.
+	AllowExec   *bool  `name:"allow-exec" hidden:"" help:"alias of --agent-access exec (true) or manage (false)"`
 	AgentAccess string `name:"agent-access" default:"manage" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
 }
 
@@ -333,16 +327,26 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "create":
 		c := g.Create
 		a.VM = c.Name
-		// c.AllowExec is never ambiguous here: kong's default:"true" means
-		// the flag is always either true or false, never absent, so a fresh
-		// pointer to it is exactly the "explicitly given" value Spec wants.
-		allowExec := c.AllowExec
+		// Absent --allow-exec keeps Spec.AllowExec's own default of true
+		// (see Spec.AllowExec's doc comment); given, it also sets the
+		// access level, per --allow-exec's alias contract.
+		allowExec := true
+		if c.AllowExec != nil {
+			allowExec = *c.AllowExec
+		}
+		access := c.AgentAccess
+		if c.AllowExec != nil {
+			access = "manage"
+			if *c.AllowExec {
+				access = "exec"
+			}
+		}
 		a.Spec = core.Spec{
 			Name: c.Name, Image: c.Image, OS: c.OS, Backend: c.Backend, Mode: c.Mode,
 			RAM: c.RAM, CPUs: c.CPUs, Disk: c.Disk, Share: c.Share,
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
 			AllowExec:   &allowExec,
-			AgentAccess: c.AgentAccess,
+			AgentAccess: access,
 		}
 		edits, err := parseParamFlags(c.Set, nil, c.Secret)
 		if err != nil {
