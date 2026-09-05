@@ -154,7 +154,10 @@ def test_timeout_covers_open_stdout_and_cleans_owned_descendants(tmp_path):
     parent_pid_path = tmp_path / "parent.pid"
     child_code = textwrap.dedent(
         f"""
+        import signal
         import time
+        # The group leader exits on TERM; this owned descendant requires KILL.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         time.sleep(2.0)
         """
     )
