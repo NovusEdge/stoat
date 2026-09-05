@@ -94,9 +94,10 @@ func assertJSONCleanStdout(t *testing.T, out string) {
 // returns before the boot-time apply finishes": under --json, afterStart
 // must still wait for ssh and run Apply, not skip straight to ExitOK, and
 // none of that work may print plain prose or raw apply-log bytes to stdout
-// (docs/reference/json.md rule 1; the apply log is streamed as "log" events
-// under --json, see run_apply.go's jsonLogWriter). config.Load's Applied
-// entry is the proof Apply actually ran rather than the call returning early.
+// (docs/reference/json.md rule 1; the apply log is wrapped as "log" events
+// under --json, via the same jsonLogWriter run_apply.go uses). config.Load's
+// Applied entry is the proof Apply actually ran rather than the call
+// returning early.
 //
 // Quiet is set alongside JSON because Main always sets it that way
 // (internal/cli/cli.go:426): the two "waiting for ssh"/"applying recipes"
@@ -131,6 +132,9 @@ func TestAfterStartJSONWaitsForApplyToFinish(t *testing.T) {
 		t.Fatalf("code = %d, want ExitOK: stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	assertJSONCleanStdout(t, out.String())
+	if !strings.Contains(out.String(), `"type":"log"`) {
+		t.Errorf("stdout has no log event; recipe output was dropped instead of wrapped: %q", out.String())
+	}
 
 	updated, err := config.Load("work")
 	if err != nil {
