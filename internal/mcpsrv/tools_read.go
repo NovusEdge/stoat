@@ -38,6 +38,10 @@ type planRecipesIn struct {
 	Only []string `json:"only,omitempty" jsonschema:"subset of the VM's own recipes"`
 }
 
+type nameIn struct {
+	Name string `json:"name" jsonschema:"name to look up"`
+}
+
 func (s *srv) registerRead(server *mcp.Server) {
 	register(server, "list_vms", classRead,
 		"List every VM stoat manages, one entry per VM: name, OS, mode, state, resources, disk, share, ssh port, agent access level, recipes, and port forwards. A VM whose vm.toml failed to parse is listed with state broken and an error message rather than hidden. Read-only: it touches no VM and changes nothing on the host.",
@@ -136,6 +140,31 @@ func (s *srv) registerRead(server *mcp.Server) {
 				return wire.ApplyPlanList{}, err
 			}
 			return wire.ApplyPlanList{Plan: wire.FromApplyPlans(plans)}, nil
+		})
+
+	// Stubs: Task 14 implements these bodies over core.Guests, core.Guest
+	// and core.RecipeShow.
+	register(server, "list_guests", classRead,
+		"List every guest OS definition stoat knows: name, init system, package manager, default backend and whether the definition is bundled, a user file, or a user file merged over a bundled one. It reads the guest definitions only. Read-only.",
+		func(ctx context.Context, _ emptyIn) (wire.GuestList, error) {
+			return wire.GuestList{}, nil
+		})
+
+	register(server, "guest_info", classRead,
+		"Show one guest OS definition in full: init system, shell, escalate argv, capabilities, aliases, seed packages, the package manager verbs, the service verbs and the per-backend tables. Use it to learn what pkg_install and svc will run on a VM before you call them. Read-only.",
+		func(ctx context.Context, _ nameIn) (wire.Guest, error) {
+			// The generated output schema requires the map fields as objects,
+			// not null, so the stub sets them empty rather than nil.
+			return wire.Guest{
+				Svc: map[string]string{}, Cmd: map[string]string{}, Backend: map[string]map[string]any{},
+				Pkg: wire.GuestPkg{Env: map[string]string{}, RuntimePackages: map[string]string{}},
+			}, nil
+		})
+
+	register(server, "recipe_schema", classRead,
+		"Show one recipe's contract: its params with type, default and help, its declared outputs, and its health check. Read it before update sets params on a VM. Read-only.",
+		func(ctx context.Context, _ nameIn) (wire.RecipeSchema, error) {
+			return wire.RecipeSchema{}, nil
 		})
 }
 
