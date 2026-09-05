@@ -35,12 +35,21 @@ func DoctorReport(version string) wire.MCPDoctor {
 			r.Clients = append(r.Clients, row)
 			continue
 		}
-		var doc map[string]map[string]entry
+		// Only the server map is decoded as entries. ~/.claude.json holds
+		// numbers, strings and unrelated objects beside mcpServers, so
+		// decoding the whole document as entries fails on the first of them
+		// and reports an installed client as missing.
+		var doc map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			r.Clients = append(r.Clients, row)
 			continue
 		}
-		e, ok := doc[c.Key]["stoat"]
+		var servers map[string]entry
+		if err := json.Unmarshal(doc[c.Key], &servers); err != nil {
+			r.Clients = append(r.Clients, row)
+			continue
+		}
+		e, ok := servers["stoat"]
 		if !ok {
 			r.Clients = append(r.Clients, row)
 			continue
