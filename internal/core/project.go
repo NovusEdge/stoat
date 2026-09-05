@@ -307,7 +307,7 @@ func Reconcile(p *project.Project, key string) (Reconciled, error) {
 		return Reconciled{}, err
 	}
 	r.Drift = drift
-	if len(drift) == 0 {
+	if len(drift) == 0 && len(spec.Secrets) == 0 {
 		return r, nil
 	}
 
