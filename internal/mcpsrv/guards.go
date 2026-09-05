@@ -35,3 +35,19 @@ func stripForbidden(patch map[string]any) map[string]any {
 	_ = forbiddenPatchKeys
 	return nil
 }
+
+func checkIndexName(ref string) (string, string, error) {
+	return "", "", fmt.Errorf("not implemented")
+}
+
+func checkParamName(name string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
+func checkGuestPath(path string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}
+
+func checkSvcName(name string) (string, error) {
+	return "", fmt.Errorf("not implemented")
+}

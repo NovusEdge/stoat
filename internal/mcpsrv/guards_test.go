@@ -198,6 +198,73 @@ func TestStripForbidden(t *testing.T) {
 	})
 }
 
+func TestCheckIndexName(t *testing.T) {
+	t.Run("accepts", func(t *testing.T) {
+		for _, c := range []struct{ in, name, ref string }{
+			{"tailscale", "tailscale", ""},
+			{"tailscale@v1.2", "tailscale", "v1.2"},
+			{"my-recipe@main", "my-recipe", "main"},
+		} {
+			name, ref, err := checkIndexName(c.in)
+			if err != nil || name != c.name || ref != c.ref {
+				t.Errorf("checkIndexName(%q) = %q,%q,%v", c.in, name, ref, err)
+			}
+		}
+	})
+	t.Run("rejects", func(t *testing.T) {
+		for _, s := range []string{
+			"", "https://github.com/x/y", "git@github.com:x/y.git",
+			"x/y", "../evil", "a@b@c", "tailscale@", "@v1", "Tailscale",
+			"tail scale", "tailscale@../evil",
+		} {
+			if _, _, err := checkIndexName(s); err == nil {
+				t.Errorf("checkIndexName(%q) accepted", s)
+			}
+		}
+	})
+}
+
+func TestCheckParamName(t *testing.T) {
+	for _, s := range []string{"user", "auth_key", "u1"} {
+		if _, err := checkParamName(s); err != nil {
+			t.Errorf("checkParamName(%q): %v", s, err)
+		}
+	}
+	for _, s := range []string{"", "User", "1user", "auth-key", "auth key", "_user"} {
+		if _, err := checkParamName(s); err == nil {
+			t.Errorf("checkParamName(%q) accepted", s)
+		}
+	}
+}
+
+func TestCheckGuestPath(t *testing.T) {
+	for _, s := range []string{"/etc/hosts", "/var/log/messages", "/a b/c"} {
+		if _, err := checkGuestPath(s); err != nil {
+			t.Errorf("checkGuestPath(%q): %v", s, err)
+		}
+	}
+	// A relative path is an error, never resolved against $HOME, so a tool
+	// call means the same thing on every guest.
+	for _, s := range []string{"", "etc/hosts", "./x", "~/x", "/x\x00"} {
+		if _, err := checkGuestPath(s); err == nil {
+			t.Errorf("checkGuestPath(%q) accepted", s)
+		}
+	}
+}
+
+func TestCheckSvcName(t *testing.T) {
+	for _, s := range []string{"docker", "sshd", "getty@tty1", "my.service"} {
+		if _, err := checkSvcName(s); err != nil {
+			t.Errorf("checkSvcName(%q): %v", s, err)
+		}
+	}
+	for _, s := range []string{"", "a b", "a;b", "$(x)", "a/b", "-x"} {
+		if _, err := checkSvcName(s); err == nil {
+			t.Errorf("checkSvcName(%q) accepted", s)
+		}
+	}
+}
+
 func TestCheckFlagFree(t *testing.T) {
 	t.Run("long_flag", func(t *testing.T) {
 		if err := checkFlagFree([]string{"--clear"}, "pairs"); err == nil {
