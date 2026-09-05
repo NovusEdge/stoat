@@ -22,4 +22,8 @@ var (
 	ErrNoConsolePassword = errors.New("no console password set")
 	ErrShareInvalid      = errors.New("share is not a directory")
 	ErrAlreadyRunning    = errors.New("already running")
+	ErrScreenshotFailed  = errors.New("screenshot failed")
+	// ErrNotRunning duplicates core.ErrNotRunning: core imports qemu, so
+	// qemu cannot name core's sentinel. wire maps both to not_running.
+	ErrNotRunning = errors.New("not running")
 )

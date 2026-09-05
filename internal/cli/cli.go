@@ -49,6 +49,9 @@ type Args struct {
 	Yes   bool
 	N     int // logs -n
 
+	// Out belongs to "screenshot": the -o path, empty for the default.
+	Out string
+
 	// NoApply belongs to "up": it skips the automatic post-boot apply,
 	// leaving `up` returning as soon as the VM starts, as it did before that
 	// behavior existed.
@@ -404,6 +407,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runGuest(a, stdout, stderr)
 	case "logs":
 		return runLogs(a, stdout, stderr)
+	case "screenshot":
+		return runScreenshot(a, stdout, stderr)
 	case "get":
 		return runGet(a, stdout, stderr)
 	case "ssh-command":

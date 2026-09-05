@@ -57,10 +57,11 @@ type grammar struct {
 	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
 	Guest        recipeGuestCmd  `cmd:"" help:"list or show guest OS definitions"`
 
-	Logs    logsCmd    `cmd:"" help:"tail a VM's log, or stoat's own"`
-	Doctor  doctorCmd  `cmd:"" help:"check host prerequisites"`
-	Version versionCmd `cmd:"" help:"print the stoat version"`
-	Help    helpCmd    `cmd:"" help:"show this message"`
+	Logs       logsCmd       `cmd:"" help:"tail a VM's log, or stoat's own"`
+	Screenshot screenshotCmd `cmd:"" help:"write the VM's screen to a PNG"`
+	Doctor     doctorCmd     `cmd:"" help:"check host prerequisites"`
+	Version    versionCmd    `cmd:"" help:"print the stoat version"`
+	Help       helpCmd       `cmd:"" help:"show this message"`
 }
 
 type helpCmd struct{}
@@ -244,6 +245,11 @@ type logsCmd struct {
 	Which string `enum:"console,apply" default:"console" help:"which log, with a vm name"`
 }
 
+type screenshotCmd struct {
+	VM  string `arg:"" help:"vm name"`
+	Out string `short:"o" help:"where to write the png; default <vm dir>/screenshots/<timestamp>.png"`
+}
+
 // toArgs flattens the selected command into the Args every runX consumes.
 // Args stays the interface between parsing and running rather than
 // threading the kong structs through 18 run functions directly.
@@ -424,6 +430,9 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "logs":
 		l := g.Logs
 		a.VM, a.N, a.Which = l.VM, l.N, core.Which(l.Which)
+
+	case "screenshot":
+		a.VM, a.Out = g.Screenshot.VM, g.Screenshot.Out
 
 	default:
 		return nil, usageError("unknown subcommand " + path)

@@ -85,6 +85,9 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		{name: "doctor", argv: []string{"doctor"}, ok: true, exit: ExitOK},
 		// The plan is computed host-side, so a stopped fixture VM answers it.
 		{name: "apply dry-run", argv: []string{"apply", "work", "--dry-run"}, ok: true, exit: ExitOK},
+		// The fixture VM is stopped, so the honest answer is not_running; the
+		// point here is that the command answers in the envelope at all.
+		{name: "screenshot stopped", argv: []string{"screenshot", "work"}, code: wire.CodeNotRunning, exit: ExitFail},
 
 		{name: "up unknown", argv: []string{"up", "nope"}, code: wire.CodeNotFound, exit: ExitFail},
 		{name: "down stopped", argv: []string{"down", "work"}, code: wire.CodeNotRunning, exit: ExitFail},
