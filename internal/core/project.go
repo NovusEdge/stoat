@@ -127,10 +127,8 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		return nil, err
 	}
 
-	// vm.toml records the file a VM was built from (isos/<file>, or the
-	// absolute Base path for a cloud image), never a catalog id. Comparing
-	// that against img.id() (a catalog id) reported every unchanged
-	// declaration as a change, since the two never share a spelling.
+	// vm.toml stores the resolved ISO path or base image, never a catalog
+	// id. The declared image is compared against its resolved spelling.
 	img, err := resolveImage(spec.Image)
 	if err != nil {
 		return nil, err
