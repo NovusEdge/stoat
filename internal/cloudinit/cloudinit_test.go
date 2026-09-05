@@ -269,11 +269,12 @@ func TestSeedSecretArtifactsArePrivate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 	bin := t.TempDir()
-	// The stand-in deliberately unlinks and recreates the ISO with umask 022.
-	// Seed must protect the replacement inode before xorriso writes bytes.
+	// The stand-in deliberately unlinks and recreates the ISO, inheriting the
+	// caller's umask. Seed must protect the replacement inode before xorriso
+	// writes bytes.
 	modeFile := filepath.Join(root, "xorriso-create-mode")
 	modeFileQ := shellQuoteCloudinitTest(modeFile)
-	xorriso := "#!/bin/sh\numask 022\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=$2; shift 2; else shift; fi\ndone\nrm -f \"$out\"\n: > \"$out\"\nstat -c '%a' \"$out\" > " + modeFileQ + "\nprintf 'private seed' > \"$out\"\n"
+	xorriso := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=$2; shift 2; else shift; fi\ndone\nrm -f \"$out\"\n: > \"$out\"\nstat -c '%a' \"$out\" > " + modeFileQ + "\nprintf 'private seed' > \"$out\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "xorriso"), []byte(xorriso), 0o755); err != nil {
 		t.Fatal(err)
 	}
