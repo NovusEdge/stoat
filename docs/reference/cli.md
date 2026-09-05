@@ -41,6 +41,7 @@ usage: stoat <command> [flags]
 | [`recipes`](#stoat-recipes) | List recipes, optionally only applicable ones | 0, 1 |
 | [`check-recipes`](#stoat-check-recipes-names---osos) | Report why a recipe would not apply | 0, 1, 2 |
 | [`recipe list`](#stoat-recipe-list) | List installed recipes and where they live | 0, 1 |
+| [`recipe show`](#stoat-recipe-show-name) | Show one recipe's parameter and output contract | 0, 1 |
 | [`recipe new`](#stoat-recipe-new-name) | Scaffold a recipe in the recipes directory | 0, 1 |
 | [`guest ls`](#stoat-guest-ls) | List loaded guest OS definitions | 0 |
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
@@ -104,7 +105,7 @@ created work (alpine, live, ssh port 2222)
 start it with: stoat up work
 ```
 
-Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--allow-exec` (default true; `--allow-exec=false` opts this VM out of `exec`/`copy_to`/`copy_from`, enforced by the MCP server rather than stoat itself).
+Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--allow-exec` (default true; `--allow-exec=false` opts this VM out of `exec`/`copy_to`/`copy_from`, enforced by the MCP server rather than stoat itself).
 
 **Exit codes:** 0 on success; 1 if creation fails (e.g. the image isn't downloaded yet: run `stoat pull` or download it from the TUI's image picker first); 2 if `--image` is missing.
 
@@ -126,7 +127,7 @@ updated work: [share]
 
 `work`'s share is now unset. Compare to `stoat update work` with no flags at all, which is a usage error (there is nothing to change), not a no-op.
 
-Flags: `--ram`, `--cpus`, `--ssh-port`, `--disk` (grow-only), `--share` (empty clears it), `--recipes` (empty clears it; replaces the whole list, it does not add to it).
+Flags: `--ram`, `--cpus`, `--ssh-port`, `--disk` (grow-only), `--share` (empty clears it), `--recipes` (empty clears it; replaces the whole list, it does not add to it), `--set recipe.param=value`, `--unset recipe.param` (remove a non-secret override and restore its manifest default), and `--secret recipe.param` (set a secret without writing its value to `vm.toml`). Use `recipe show` to inspect declared types, defaults, enum values, and required parameters.
 
 Most fields are read by qemu only at start, so a change to a *running* VM is saved to `vm.toml` but doesn't take effect until the VM is next started; `update` says so:
 
@@ -211,7 +212,7 @@ $ stoat wait work --until reachable
 work reached reachable (1240ms)
 ```
 
-`--until` is one of `reachable` (sshd answering on the VM's forwarded port, default), `applied` (the most recent recipe run finished), or `stopped` (qemu no longer running). `--timeout` (default `2m`) is a Go duration (`30s`, `5m`).
+`--until` is one of `reachable` (sshd answering on the VM's forwarded port, default), `applied` (the most recent recipe run finished), or `stopped` (qemu no longer running). `--healthy` waits for reachability and then every applied recipe's declared health check; it cannot be combined with an explicit `--until`. `--timeout` (default `2m`) is a Go duration (`30s`, `5m`).
 
 A request that cannot ever be satisfied fails immediately rather than waiting out the timeout: `--until applied` on a VM with no recipes configured, or `--until reachable` on a VM that isn't running.
 
@@ -471,6 +472,30 @@ $ stoat recipe list
 
 **Exit codes:** 0 on success; 1 if the directory can't be read.
 
+## `stoat recipe show <name>`
+
+Prints the recipe's schema, sorted named parameters and outputs, and its
+declared health check without requiring a VM:
+
+```
+$ stoat recipe show docker
+docker: Docker engine and the compose plugin
+schema: 3
+runtime: sh
+
+params:
+  user           string, default dev       account to add to the docker group
+
+outputs:
+  socket         path of the docker socket
+
+health: docker info (timeout 30s)
+```
+
+Under `--json`, the result is `data.recipe` with the `RecipeSchema` documented
+in [json.md](json.md). Secret parameter values are never part of this output;
+the schema only says that a parameter has type `secret`.
+
 ## `stoat recipe new <name>`
 
 Scaffolds a new recipe file in the recipes directory and prints its path.
@@ -482,6 +507,12 @@ edit it, then pick it in the new-vm form for a matching vm
 ```
 
 `--backend cloudinit` scaffolds a cloud-init fragment instead of a shell script. `-q` suppresses the trailing hint line.
+
+`recipe new` copies the annotated [recipe sample](samples/recipe.toml), with
+`name` and `os` filled for the new recipe. It creates the default script and
+every script path declared by the sample's `[scripts]` overrides. The strict
+VM and guest samples are [here](samples/vm.toml) and
+[here](samples/guest.toml).
 
 **Exit codes:** 0 on success; 1 if the recipe can't be created (e.g. the name is already taken).
 

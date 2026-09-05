@@ -1,6 +1,7 @@
 package cloudinit
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
@@ -20,7 +21,7 @@ const scriptDir = "/var/lib/stoat/recipes"
 const MarkerDir = "/var/lib/stoat/.applied"
 
 // SecretsEnvPath is the transient guest path used for cloud-init recipe
-// secrets. The delivery implementation is added after the RED tests.
+// secrets. It is written mode 0600 and removed after all recipe commands run.
 const SecretsEnvPath = "/run/stoat/secrets.env"
 
 // Script pairs a recipe's Name with the body WrapScripts should run for it,
@@ -111,7 +112,26 @@ func secretEnv(scripts []Script) string {
 }
 
 func namespacedSecret(recipe, param string) string {
-	return "STOAT_PARAM_" + strings.ToUpper(recipe) + "_" + strings.ToUpper(param)
+	if plainNamespacePart(recipe) && plainNamespacePart(param) {
+		return "STOAT_PARAM_" + strings.ToUpper(recipe) + "_" + strings.ToUpper(param)
+	}
+	return "STOAT_PARAM_X" + hex.EncodeToString([]byte(recipe)) + "_" + hex.EncodeToString([]byte(param))
+}
+
+// plainNamespacePart retains the historical readable spelling for the
+// ordinary recipe names and parameter names already in use. Any punctuation
+// or underscore uses the pair encoding above, which makes the recipe/param
+// boundary unambiguous and prevents case-folding collisions.
+func plainNamespacePart(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func recipeCommand(s Script, path, marker string) string {

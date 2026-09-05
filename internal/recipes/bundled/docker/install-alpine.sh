@@ -40,6 +40,15 @@ docker version --format '{{.Server.Version}}' 2>/dev/null |
 	sed 's/^/docker daemon running, version /' ||
 	echo "docker installed, but the daemon did not come up: check 'rc-service docker status'"
 
+user="${STOAT_PARAM_USER:-dev}"
+if ! id "$user" >/dev/null 2>&1; then
+	adduser -D "$user"
+fi
+addgroup "$user" docker 2>/dev/null || true
+if [ -n "${STOAT_OUTPUT:-}" ]; then
+	printf '%s\n' 'socket=/var/run/docker.sock' >> "$STOAT_OUTPUT"
+fi
+
 # Live VMs are diskless: the root filesystem is a tmpfs/overlay in RAM, so
 # every package installed above is gone on reboot. A disk install mounts a
 # real block device as root, which persists. Detecting it from inside the

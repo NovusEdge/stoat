@@ -20,6 +20,9 @@
 * [CLI](reference/cli.md)
 * [JSON output](reference/json.md)
 * [Guest definitions](reference/guest.md)
+* [Recipe sample](reference/samples/recipe.toml)
+* [VM sample](reference/samples/vm.toml)
+* [Guest sample](reference/samples/guest.toml)
 
 ## Recipes
 

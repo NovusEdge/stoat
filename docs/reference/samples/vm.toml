@@ -1,0 +1,39 @@
+# Every field a vm.toml can carry. stoat writes this file; a human edits the
+# resource fields and recipe params. `stoat update` is safer for automation.
+
+name             = "work"         # directory identity.
+mode             = "disk"         # live, disk, or cloud.
+os               = "alpine"       # guest definition name.
+iso              = "isos/x.iso"   # relative to the data root.
+ram              = 2048            # MB.
+cpus             = 2
+disk             = "16G"           # disk/cloud modes; grow-only.
+installed        = true            # disk mode only; flips boot order.
+share            = "~/src"         # exposed at /mnt/host.
+sshport          = 2200            # host port forwarded to guest sshd.
+recipes          = ["docker"]
+display          = "auto"         # auto, window, or vnc.
+backend          = "cloudinit"    # apkovl, cloudinit, or ssh.
+base             = ""             # absolute shared base-image path.
+sshuser          = "stoat"        # empty means root.
+console_password = ""             # VNC console login, never over ssh.
+allow_exec       = true
+
+[[forwards]]                     # extra host-to-guest TCP forwards.
+hostport  = 8080
+guestport = 80
+
+[params.docker]                  # non-secret values, keyed by recipe.
+user    = "dev"
+channel = "stable"
+
+# Written by stoat; do not edit.
+[applied.docker]
+version     = "1.2.0"
+hash        = "recipe-and-params-hash"
+script_hash = "script-hash"
+at          = 2026-09-04T10:00:00Z
+health      = "ok"
+
+[applied.docker.outputs]
+socket = "/var/run/docker.sock"

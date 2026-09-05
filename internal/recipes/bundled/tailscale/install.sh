@@ -2,9 +2,8 @@
 # Installs Tailscale and starts the daemon. Default script for OSes not explicitly
 # listed in [scripts]. Uses Tailscale's official install script.
 #
-# Does NOT authenticate. Joining a tailnet needs an auth key, and stoat has
-# nowhere to keep one safely. This installs and starts the daemon, then tells
-# you the one command to run yourself.
+# The auth key is a required secret parameter. It is provided only for this
+# invocation, so it never lands in vm.toml or the recipe directory.
 set -e
 
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -19,5 +18,7 @@ while [ $i -lt 30 ]; do
     sleep 1
 done
 
+if [ -n "${STOAT_PARAM_AUTHKEY:-}" ]; then
+    tailscale up --authkey "$STOAT_PARAM_AUTHKEY"
+fi
 echo "tailscale installed and tailscaled running."
-echo "To join your tailnet, ssh in and run:  tailscale up"

@@ -14,14 +14,6 @@ import (
 // with a recipe.toml", and the only real problem was that nobody could tell.
 func Dir() string { return dir() }
 
-// manifestTemplate is the recipe.toml skeleton `stoat recipe new` writes.
-const manifestTemplate = `name = "%s"
-description = "TODO: describe what this recipe does"
-os = ["%s"]
-stage = "provision"
-script = "install.sh"
-`
-
 // shellTemplate is the install.sh skeleton. It carries two things every
 // bundled shell recipe needs, that a first-timer would not think to add.
 //
@@ -63,6 +55,14 @@ func osSetup(osName string) (setup, install string) {
 	return "", "# install: "
 }
 
+// scaffoldManifest fills the sample's identity fields for a new recipe. The
+// rest of the annotated sample is deliberately kept intact so new authors see
+// every supported field and the declared override scripts can be scaffolded.
+func scaffoldManifest(name, osName string) string {
+	out := strings.Replace(SampleManifest, `name        = "example"`, fmt.Sprintf(`name        = %q`, name), 1)
+	return strings.Replace(out, `os          = ["alpine"]`, fmt.Sprintf(`os          = [%q]`, osName), 1)
+}
+
 // New writes a skeleton recipe directory and returns its path. It refuses to
 // overwrite. Install() already promises never to clobber a user's edits.
 // A scaffold command that destroys the recipe you were working on is a
@@ -90,14 +90,27 @@ func New(name, osName, _ string) (string, error) {
 		return "", err
 	}
 
-	manifest := fmt.Sprintf(manifestTemplate, name, osName)
+	manifest := scaffoldManifest(name, osName)
 	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
 		return "", err
 	}
 
 	setup, install := osSetup(osName)
 	script := fmt.Sprintf(shellTemplate, name, osName, setup, install)
-	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte(script), 0o755); err != nil {
+	m, err := ParseManifest(filepath.Join(recipeDir, "recipe.toml"))
+	if err != nil {
+		return "", err
+	}
+	paths := map[string]struct{}{m.Script: {}}
+	for _, path := range m.Scripts {
+		paths[path] = struct{}{}
+	}
+	for path := range paths {
+		if err := os.WriteFile(filepath.Join(recipeDir, path), []byte(script), 0o755); err != nil {
+			return "", err
+		}
+	}
+	if _, err := os.Stat(filepath.Join(recipeDir, m.Script)); err != nil {
 		return "", err
 	}
 

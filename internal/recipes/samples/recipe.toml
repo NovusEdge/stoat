@@ -1,0 +1,50 @@
+# Every field a recipe.toml can carry. `stoat recipe new` copies this file and
+# fills name and os; delete what a recipe does not need.
+
+schema      = 3                  # 3 enables params, outputs and health.
+name        = "example"          # required; must match the directory name.
+description = "one line"         # shown by `stoat recipe list`.
+version     = "1.0.0"            # changes re-run `run = "once"` recipes.
+os          = ["alpine"]         # empty means every guest.
+requires    = ["apk"]            # capabilities from the guest file.
+stage       = "provision"        # "install" or "provision".
+script      = "install.sh"       # required; relative to this directory.
+auto        = false              # offered pre-checked in the TUI picker.
+run         = "once"             # "once", "always", or "manual".
+reboot      = false              # reboot a disk VM after this recipe.
+runtime     = "sh"               # "sh" or "python3".
+depends     = []                 # recipe names that run first.
+
+[scripts]                        # per-guest overrides of `script`.
+alpine = "install-alpine.sh"
+
+[params.user]                    # the guest reads STOAT_PARAM_USER.
+type     = "string"              # string, int, bool, enum, or secret.
+default  = "dev"                 # required unless `required = true`.
+required = false
+help     = "account to create"
+
+[params.port]
+type    = "int"
+default = 2375
+
+[params.tls]
+type    = "bool"
+default = true
+
+[params.channel]
+type    = "enum"
+values  = ["stable", "test"]
+default = "stable"
+
+[params.authkey]
+type     = "secret"              # stored only in secrets.toml.
+required = true
+help     = "auth key"
+
+[outputs]                        # the script writes name=value to $STOAT_OUTPUT.
+socket = "path of the socket"
+
+[health]
+check   = "docker info"          # exit 0 means healthy.
+timeout = "30s"
