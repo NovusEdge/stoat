@@ -362,6 +362,26 @@ func TestWrapScriptsExecutesHyphenatedSecretsAndCleansUp(t *testing.T) {
 			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = escape-shaped-secret\n",
 			Secrets: map[string]string{"token": "escape-shaped-secret"},
 		},
+		{
+			Name:    "foo",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = lower-case-secret\n",
+			Secrets: map[string]string{"token": "lower-case-secret"},
+		},
+		{
+			Name:    "Foo",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = upper-case-secret\n",
+			Secrets: map[string]string{"token": "upper-case-secret"},
+		},
+		{
+			Name:    "a_b/c",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = pair-left-secret\n",
+			Secrets: map[string]string{"token": "pair-left-secret"},
+		},
+		{
+			Name:    "a/b_c",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = pair-right-secret\n",
+			Secrets: map[string]string{"token": "pair-right-secret"},
+		},
 	}
 	f := parseWrapped(t, WrapScripts(scripts, ""))
 	if len(f.Runcmd) != len(scripts)+1 {

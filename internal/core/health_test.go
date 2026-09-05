@@ -125,6 +125,44 @@ func TestHealthChecksPropagatesCancellation(t *testing.T) {
 	}
 }
 
+func TestRecipeHealthTimeoutKeepsRawDeclarationAcrossListAndShow(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithTimeoutNamed(t, dir, "health-sixty", "60s")
+	writeHealthRecipeWithTimeoutNamed(t, dir, "health-default", "")
+
+	shown, err := RecipeShow("health-sixty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown.Health == nil || shown.Health.Timeout != "60s" {
+		t.Fatalf("RecipeShow health = %+v, want raw 60s timeout", shown.Health)
+	}
+	defaultShown, err := RecipeShow("health-default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultShown.Health == nil || defaultShown.Health.Timeout != "30s" {
+		t.Fatalf("RecipeShow omitted timeout = %+v, want 30s", defaultShown.Health)
+	}
+
+	listed, err := Recipes(RecipeFilter{OS: "alpine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]RecipeHealthSpec{}
+	for _, recipe := range listed {
+		if recipe.Health != nil {
+			seen[recipe.Name] = *recipe.Health
+		}
+	}
+	if got := seen["health-sixty"].Timeout; got != "60s" {
+		t.Errorf("Recipes health-sixty timeout = %q, want 60s", got)
+	}
+	if got := seen["health-default"].Timeout; got != "30s" {
+		t.Errorf("Recipes health-default timeout = %q, want 30s", got)
+	}
+}
+
 func writeHealthRecipe(t *testing.T, rootDir string, withHealth bool) {
 	t.Helper()
 	d := filepath.Join(rootDir, "recipes", "docker")

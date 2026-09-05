@@ -8,8 +8,8 @@
 # udev is the device manager and Xorg drives input through libinput.
 #
 # Runs against a temporary data root by default, under a unique VM name it
-# deletes on exit. Set STOAT_HOME to override the data root, and set
-# STOAT_E2E_EVIDENCE_DIR to choose where failure evidence is retained.
+# deletes on exit. STOAT_HOME selects the isolated data root; failure evidence
+# is retained separately via STOAT_E2E_EVIDENCE_DIR.
 # Needs KVM and network; the xfce apk pull is ~1.4GB, so budget ~15 minutes.
 set -eu
 
@@ -156,7 +156,6 @@ say "assert: docker recipe contract"
 "$STOAT" update "$VM" --recipes xfce,docker,redaction --set docker.user=dev --secret redaction.token
 apply_output="$STOAT_HOME/$VM/e2e-apply.log"
 if ! "$STOAT" apply "$VM" >"$apply_output" 2>&1; then
-	cat "$apply_output" >&2
 	fail "recipe apply failed; see $apply_output"
 fi
 grep -Fq '<redacted>' "$apply_output" \

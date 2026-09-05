@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
@@ -123,4 +127,105 @@ required = true
 	if !foundTrailer {
 		t.Errorf("apply log dropped trailing unterminated line %q: %v", trailer, objs)
 	}
+}
+
+// The source itself can be extended between two streamFile copies. A
+// distinctive secret fragment must not be emitted from the first copy before
+// the rest arrives, and an unterminated tail must survive the final flush.
+func TestApplyStreamRedactsSecretAcrossSourceWrites(t *testing.T) {
+	dir := cliRoot(t)
+	const (
+		recipe = "stream-cross-write-caller"
+		secret = "cross-write-secret"
+		tail   = "unterminated-cross-write-tail"
+	)
+	recipeDir := filepath.Join(dir, "recipes", recipe)
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `schema = 3
+name = "stream-cross-write-caller"
+os = ["alpine"]
+script = "install.sh"
+
+[params.token]
+type = "secret"
+required = true
+`
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{Name: "stream-cross-write-vm", OS: "alpine", Mode: "live", Backend: "apkovl", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{recipe}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveSecrets(v.Dir, config.Secrets{recipe: {"token": secret}}); err != nil {
+		t.Fatal(err)
+	}
+
+	logPath := v.ProvisionLogPath()
+	first := strings.Repeat("P", 64) + secret[:8] + strings.Repeat("Q", len(secret)+64)
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	ready := make(chan struct{})
+	sink := &firstWriteWriter{dst: &got, ready: ready}
+	redactor, err := newSecretRedactor(v.Dir, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan error, 1)
+	result := make(chan error, 1)
+	go func() { result <- streamFile(logPath, redactor, stop) }()
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamFile did not copy the initial source chunk")
+	}
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(f, secret[8:]+"\n"+tail); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stop <- nil
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if err := redactor.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	output := got.String()
+	for _, fragment := range []string{secret, secret[:8], secret[8:]} {
+		if strings.Contains(output, fragment) {
+			t.Fatalf("stream output leaked secret fragment %q: %q", fragment, output)
+		}
+	}
+	if !strings.Contains(output, "<redacted>") {
+		t.Fatalf("stream output has no redaction marker: %q", output)
+	}
+	if !strings.Contains(output, tail) {
+		t.Fatalf("stream output dropped unterminated tail %q: %q", tail, output)
+	}
+}
+
+type firstWriteWriter struct {
+	dst   io.Writer
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (w *firstWriteWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	w.once.Do(func() { close(w.ready) })
+	return n, err
 }

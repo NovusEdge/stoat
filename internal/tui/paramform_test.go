@@ -296,3 +296,126 @@ func TestParameterizedRecipeNarrowTerminalUsesExistingFloor(t *testing.T) {
 		t.Fatalf("narrow parameter form did not use terminal floor:\n%s", got)
 	}
 }
+
+func writeDependencyParamRecipes(t *testing.T) {
+	t.Helper()
+	baseDir := filepath.Join(config.Root(), "recipes", "dependency-base")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baseManifest := `schema = 3
+name = "dependency-base"
+description = "required dependency parameters"
+os = ["alpine"]
+script = "install.sh"
+
+[params.channel]
+type = "enum"
+values = ["stable", "canary"]
+default = "stable"
+
+[params.token]
+type = "secret"
+required = true
+
+[params.owner]
+type = "string"
+required = true
+`
+	if err := os.WriteFile(filepath.Join(baseDir, "recipe.toml"), []byte(baseManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	parentDir := filepath.Join(config.Root(), "recipes", "dependency-parent")
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentManifest := `schema = 2
+name = "dependency-parent"
+description = "parameterized dependency parent"
+os = ["alpine"]
+script = "install.sh"
+depends = ["dependency-base"]
+`
+	if err := os.WriteFile(filepath.Join(parentDir, "recipe.toml"), []byte(parentManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func dependencyForm(t *testing.T) model {
+	t.Helper()
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeDependencyParamRecipes(t)
+	f := newForm()
+	f.images = []imageOption{stubImage(t, "alpine-standard-3.20.0-x86_64.iso")}
+	f.imgIdx = 0
+	f.refreshRecipes()
+	for i, name := range f.recipeNames {
+		if name == "dependency-parent" {
+			f.recipeIdx = i
+			break
+		}
+	}
+	f.focus = fRecipes
+	f.inputs[fName].SetValue("dependency-vm")
+	return model{screen: screenForm, width: 100, height: 40, form: f}
+}
+
+// A selected parent must make a required secret and non-secret field from its
+// dependency usable through the same wizard boundary. The enum is changed
+// from its manifest default so the key path, not only the rendered options,
+// is exercised; submitting then records values on the dependency and parent
+// deselection removes both selections and their values.
+func TestParameterizedDependencyFieldsSubmitAndDeselectThroughWizard(t *testing.T) {
+	m := dependencyForm(t)
+	m = sendParamKeys(m, keySpace)
+	rendered := ansi.Strip(m.View().Content)
+	for _, field := range []string{"channel", "token", "owner"} {
+		if !strings.Contains(rendered, field) {
+			t.Fatalf("dependency form omitted %q:\n%s", field, rendered)
+		}
+	}
+	m = sendParamKeys(m, "down", "tab")
+	m = typeParamText(m, "dependency-secret")
+	m = sendParamKeys(m, "tab")
+	m = typeParamText(m, "alice")
+	m = sendParamKeys(m, "enter")
+
+	spec, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("dependency wizard spec = %v", err)
+	}
+	if !containsString(spec.Recipes, "dependency-parent") || !containsString(spec.Recipes, "dependency-base") {
+		t.Fatalf("dependency recipes = %v, want parent and dependency", spec.Recipes)
+	}
+	if got := spec.Secrets["dependency-base"]["token"]; got != "dependency-secret" {
+		t.Fatalf("dependency secret = %q, want typed value", got)
+	}
+	if got := spec.Params["dependency-base"]["owner"]; got != "alice" {
+		t.Fatalf("dependency owner = %q, want typed value", got)
+	}
+	if got := spec.Params["dependency-base"]["channel"]; got != "canary" {
+		t.Fatalf("dependency enum = %q, want non-default key selection", got)
+	}
+
+	m = sendParamKeys(m, keySpace)
+	cleaned, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("dependency spec after deselection = %v", err)
+	}
+	if containsString(cleaned.Recipes, "dependency-parent") || containsString(cleaned.Recipes, "dependency-base") {
+		t.Fatalf("deselected dependency recipes = %v", cleaned.Recipes)
+	}
+	if _, ok := cleaned.Secrets["dependency-base"]; ok {
+		t.Fatalf("deselected dependency retained secret: %#v", cleaned.Secrets)
+	}
+	if _, ok := cleaned.Params["dependency-base"]; ok {
+		t.Fatalf("deselected dependency retained params: %#v", cleaned.Params)
+	}
+}
