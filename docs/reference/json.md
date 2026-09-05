@@ -324,6 +324,7 @@ so a leak fails the build rather than shipping.
 | `guest show` | `{"guest":Guest}` |
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
 | `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
+| `screenshot` | `{"vm":"work","path":"/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png","bytes":48213,"width":1280,"height":800}` |
 
 Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`,
 and both `guest` subcommands report `"cmd":"guest"`. Distinguish them by which
