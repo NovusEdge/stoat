@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,6 +10,11 @@ import (
 
 // OutputDir is the guest directory used for per-recipe output files.
 const OutputDir = "/tmp/.stoat-out"
+
+// ErrParamUnset is Resolve's sentinel for a required param or secret with no
+// value: internal/cli/wire maps it to invalid_spec, the same row as
+// ErrInvalidTree.
+var ErrParamUnset = errors.New("required parameter is unset")
 
 // Resolve merges manifest defaults with values stored for one recipe. Secret
 // values come from the separate secrets map and never become VM parameters.

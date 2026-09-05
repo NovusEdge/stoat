@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,21 @@ func TestResolveErrors(t *testing.T) {
 				t.Fatalf("err = %v, want it to contain %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestResolveRequiredSecretUnsetSatisfiesErrParamUnset pins the sentinel a
+// required-secret failure must carry: internal/cli/wire maps ErrParamUnset
+// to invalid_spec, so a caller reading the error with errors.Is (not just
+// its text) must find it.
+func TestResolveRequiredSecretUnsetSatisfiesErrParamUnset(t *testing.T) {
+	m := v3ParamsFixture(t)
+	_, err := Resolve(m, map[string]string{}, map[string]string{})
+	if err == nil {
+		t.Fatal("err = nil, want required secret unset")
+	}
+	if !errors.Is(err, ErrParamUnset) {
+		t.Errorf("errors.Is(err, ErrParamUnset) = false, want true: err = %v", err)
 	}
 }
 
