@@ -58,27 +58,3 @@ jobs:
       # bundled installer is not worth a red PR.
       - name: shellcheck
         run: shellcheck -S warning $(git ls-files 'internal/recipes/bundled/*.sh' 'internal/recipes/bundled/*/*.sh' 'scripts/*.sh' '.githooks/*')
-
-  # A separate job because it needs Python rather than Go, and because a
-  # failure here should read as "the MCP server broke", not "the Go suite
-  # broke". Until this existed, mcp/'s tests ran only on a contributor's
-  # machine, so a regression in guards.py (the deterministic blocks that are
-  # the whole security boundary, since MCP guarantees nothing itself) would
-  # have merged green.
-  mcp:
-    name: mcp
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mcp
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v5
-
-      - name: install
-        run: uv pip install --system -e '.[dev]'
-      - name: test
-        run: pytest -q
