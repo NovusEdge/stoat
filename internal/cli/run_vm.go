@@ -10,6 +10,7 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/project"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -55,6 +56,28 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 }
 
 func runUp(a *Args, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		// Reconcile every declaration before any of them starts. A VM whose
+		// boot fails must not leave a sibling declared later without the
+		// vm.toml that stoat status and stoat ls read: reconcile is cheap and
+		// idempotent, so running it for the whole project up front is safe,
+		// and only the start step itself needs to stop at the first failure.
+		for _, d := range a.Project.VMs {
+			if err := reconcileOne(a, d.Key, stdout); err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+		}
+		return fanOut(a, stdout, stderr, func(name string) error {
+			return upOne(a, name, stdout, stderr)
+		})
+	}
+	if a.Project != nil {
+		if key, ok := a.Project.KeyFor(a.VM); ok {
+			if err := reconcileOne(a, key, stdout); err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+		}
+	}
 	// core.Get first: a caller must learn "no such VM" or "broken" before
 	// any progress line prints, not after.
 	v, err := core.Get(a.VM)
@@ -167,6 +190,43 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
 	return ExitOK
+}
+
+// reconcileOne makes one declared VM match stoat.toml before it starts. A
+// change that needs a restart is already saved; the guest sees it at the next
+// down and up, and that is what the line says.
+func reconcileOne(a *Args, key string, stdout io.Writer) error {
+	r, err := core.Reconcile(a.Project, key)
+	if err != nil {
+		return err
+	}
+	if a.Quiet {
+		return nil
+	}
+	if r.Created {
+		fmt.Fprintf(stdout, "created %s from %s\n", r.Name, project.FileName)
+		return nil
+	}
+	for _, d := range r.Drift {
+		suffix := ""
+		if d.NeedsRestart {
+			suffix = " (applies at the next down and up)"
+		}
+		fmt.Fprintf(stdout, "%s: %s %s -> %s%s\n", d.Key, d.Field, d.From, d.To, suffix)
+	}
+	return nil
+}
+
+// upOne is runUp's body for one VM, used by the no-argument fan-out. It
+// returns an error rather than an exit code, which is what fanOut collects.
+func upOne(a *Args, name string, stdout, stderr io.Writer) error {
+	sub := *a
+	sub.VM = name
+	sub.JSON = false // the fan-out emits the single terminal result line
+	if code := runUp(&sub, stdout, stderr); code != ExitOK {
+		return fmt.Errorf("%s: up failed", name)
+	}
+	return nil
 }
 
 // printDisplay says where a VM's screen is and how to reach it.

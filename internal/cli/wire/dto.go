@@ -898,3 +898,24 @@ type InitResult struct {
 	Project          string `json:"project"`
 	GitignoreUpdated bool   `json:"gitignore_updated"`
 }
+
+// ProjectRunVM is one VM's outcome in a no-argument project command.
+// Status is "ok", "error" or "skipped"; skipped means a VM earlier in
+// declaration order failed and this one was never attempted.
+type ProjectRunVM struct {
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// ProjectRun is a no-argument project command's answer: one entry per
+// declared VM, in declaration order.
+type ProjectRun struct {
+	Project string         `json:"project"`
+	VMs     []ProjectRunVM `json:"vms"`
+}
+
+func FromProjectRun(name string, vms []ProjectRunVM) ProjectRun {
+	return ProjectRun{Project: name, VMs: nonNil(vms)}
+}
