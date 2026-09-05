@@ -233,6 +233,8 @@ func TestJSONNeverLeaksHostPathsOrConsolePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// v.Dir is the VM's data directory, not project.Project.Dir: wire.VM.Project
+	// is a project's host path and is meant to ship, so only v.Dir is checked.
 	for _, leak := range []string{"deadbeefcafe", "console_password", "paths", v.Dir} {
 		if bytes.Contains(raw, []byte(leak)) {
 			t.Errorf("ls output leaks %q: %s", leak, raw)
