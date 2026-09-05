@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // A VM name becomes a directory name under the data root, so the pattern is
@@ -232,8 +232,5 @@ func checkEnvName(name string) (string, error) {
 // stopped VM. Without it, sshx.Run against a stopped VM's forwarded port
 // surfaces ssh's own connection-refused exit rather than this error.
 func requireRunning(v *config.VM) error {
-	if !qemu.Running(v) {
-		return fmt.Errorf("%w: %s", qemu.ErrNotRunning, v.Name)
-	}
-	return nil
+	return core.EnsureRunning(v)
 }

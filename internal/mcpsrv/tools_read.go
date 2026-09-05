@@ -8,7 +8,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
-	"github.com/novusedge/stoat/internal/recipes"
 )
 
 type emptyIn struct{}
@@ -168,11 +167,10 @@ func (s *srv) registerRead(server *mcp.Server) {
 	register(server, "recipe_schema", classRead,
 		"Show one recipe's contract: its params with type, default and help, its declared outputs, and its health check. Read it before update sets params on a VM. Read-only.",
 		func(ctx context.Context, in nameIn) (wire.RecipeSchema, error) {
-			// The CLI's dispatch loop installs bundled recipes to the data
-			// root before every command; the mcp server has no equivalent
-			// entrypoint yet, so a bundled recipe is otherwise invisible to
-			// ManifestFor on a data root nothing has touched yet.
-			if err := recipes.Install(); err != nil {
+			// core.EnsureRecipes installs the bundled set: mcpsrv has no
+			// startup entrypoint of its own to do this once, unlike the
+			// CLI's dispatch loop.
+			if err := core.EnsureRecipes(); err != nil {
 				return wire.RecipeSchema{}, err
 			}
 			r, err := core.RecipeShow(in.Name)

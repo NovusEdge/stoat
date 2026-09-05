@@ -502,6 +502,16 @@ func Start(name string) error {
 	return qemu.Start(v)
 }
 
+// EnsureRunning refuses with ErrNotRunning when v is not running. It exists
+// so a caller above core, such as mcpsrv, answers the same error Stop and
+// Exec give without importing qemu.Running itself.
+func EnsureRunning(v *config.VM) error {
+	if !qemu.Running(v) {
+		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
+	}
+	return nil
+}
+
 // Stop powers down VM name. qemu.Stop treats "already stopped" as a
 // successful no-op; Stop does not. The CLI's `down` (internal/cli/cli.go's
 // runDown) already refuses a stopped VM as a failure, and Stop preserves
