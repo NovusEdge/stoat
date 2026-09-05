@@ -113,6 +113,11 @@ func (s *srv) registerExec(server *mcp.Server) {
 			if err != nil {
 				return wire.CommandResult{}, err
 			}
+			if code != 0 {
+				if runErr := requireRunning(v); runErr != nil {
+					return wire.CommandResult{}, runErr
+				}
+			}
 			return wire.CommandResult{Stdout: string(out), Stderr: string(errb), ExitCode: code}, nil
 		})
 
