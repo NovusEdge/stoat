@@ -63,7 +63,11 @@ func New(opts Options) *mcp.Server {
 	s.registerGuestRead(server)
 	s.registerGuestWrite(server)
 	s.registerExec(server)
-	server.AddReceivingMiddleware(s.rateLimit())
+	// redact must be receiving middleware, not sending: a Server's sending
+	// method handler only covers requests the server itself initiates
+	// (sampling, elicitation), never the CallToolResult built for an
+	// incoming tools/call request. See redact.go.
+	server.AddReceivingMiddleware(s.rateLimit(), s.redact())
 	return server
 }
 
