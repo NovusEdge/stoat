@@ -83,6 +83,16 @@ func projectCell(v core.VM) string {
 
 func runUp(a *Args, stdout, stderr io.Writer) int {
 	if a.VM == "" {
+		// Reconcile every declaration before starting any. A start failure
+		// stops the fan-out below (the spec's contract for a half-built
+		// project), but by then every declared VM already exists: a later
+		// declaration's presence must not depend on an earlier one's start
+		// succeeding.
+		for _, d := range a.Project.VMs {
+			if err := reconcileOne(a, d.Key, stdout); err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+		}
 		return fanOut(a, stdout, stderr, func(name string) error {
 			return upOne(a, name, stdout, stderr)
 		})
