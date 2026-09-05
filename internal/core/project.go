@@ -3,7 +3,9 @@ package core
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/project"
@@ -90,6 +92,12 @@ func configShares(in []project.Share) []config.Share {
 	return out
 }
 
+// ErrImmutableDeclaration is returned by Diff when a declaration changes
+// image or disk. Neither can be applied to an existing VM: image decides the
+// disk contents and disk is the size that disk was created at, so the only
+// honest answer is to delete the VM and let stoat up build it again.
+var ErrImmutableDeclaration = errors.New("immutable declaration field")
+
 // Drift is one field where the declaration and vm.toml disagree.
 //
 // Key is the declaration key, not the global name: the user wrote "dev" and
@@ -106,9 +114,89 @@ type Drift struct {
 	NeedsRestart bool
 }
 
-// Diff compares one declaration to the VM it names.
+// Diff compares one declaration to the VM it names. A VM that does not exist
+// yet is not drift; Reconcile creates it.
 func Diff(p *project.Project, key string) ([]Drift, error) {
-	return nil, errors.New("core: not implemented")
+	spec, err := SpecFor(p, key)
+	if err != nil {
+		return nil, err
+	}
+	v, err := load(spec.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	// image is compared against the resolved image, not the raw string: a
+	// catalog id and the path it resolves to name the same image, and
+	// reporting them as a difference would refuse a VM that is correct.
+	img, err := resolveImage(spec.Image)
+	if err != nil {
+		return nil, err
+	}
+	if was := declaredImage(v); was != img.id() {
+		return nil, fmt.Errorf("%w: %s: image changed (%s -> %s); run stoat rm %s and stoat up",
+			ErrImmutableDeclaration, key, was, img.id(), key)
+	}
+	if spec.Disk != "" && v.Disk != "" && spec.Disk != v.Disk {
+		return nil, fmt.Errorf("%w: %s: disk changed (%s -> %s); run stoat rm %s and stoat up",
+			ErrImmutableDeclaration, key, v.Disk, spec.Disk, key)
+	}
+
+	var out []Drift
+	add := func(field, from, to string, restart bool) {
+		if from != to {
+			out = append(out, Drift{Key: key, Field: field, From: from, To: to, NeedsRestart: restart})
+		}
+	}
+	if spec.CPUs != 0 {
+		add("cpus", strconv.Itoa(v.CPUs), strconv.Itoa(spec.CPUs), true)
+	}
+	if spec.RAM != 0 {
+		add("ram", strconv.Itoa(v.RAM), strconv.Itoa(spec.RAM), true)
+	}
+	add("recipes", strings.Join(v.Recipes, ","), strings.Join(spec.Recipes, ","), false)
+	add("shares", renderShares(v.Shares), renderShares(spec.Shares), true)
+	add("params", renderParams(v.Params), renderParams(spec.Params), false)
+	if spec.AgentAccess != "" {
+		add("agent_access", v.AgentAccess, spec.AgentAccess, false)
+	}
+	return out, nil
+}
+
+// declaredImage names the image a VM was created from, whichever field holds
+// it. A cloud VM records Base, every other mode records ISO.
+func declaredImage(v *config.VM) string {
+	if v.Base != "" {
+		return v.Base
+	}
+	return v.ISO
+}
+
+// renderShares is the comparable form of a share list: guest mountpoint and
+// host path, in order. The mount tag is derived from position, so comparing
+// it would report drift for a reordering that changes nothing in the guest.
+func renderShares(ss []config.Share) string {
+	parts := make([]string, len(ss))
+	for i, s := range ss {
+		parts[i] = s.Guest + "=" + s.Host
+	}
+	return strings.Join(parts, ",")
+}
+
+// renderParams is the comparable form of a param table: recipe.param=value,
+// sorted, so a map walk cannot report drift where there is none. It takes
+// the stored shape, map[string]map[string]string, which is what both
+// config.VM and core.Spec carry after SpecFor renders the declaration's TOML
+// values.
+func renderParams(m map[string]map[string]string) string {
+	var parts []string
+	for recipe, params := range m {
+		for name, val := range params {
+			parts = append(parts, fmt.Sprintf("%s.%s=%s", recipe, name, val))
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 // Reconciled is what one Reconcile call did.
