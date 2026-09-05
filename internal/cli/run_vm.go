@@ -374,6 +374,10 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 // what came back. There was no create subcommand before core existed, because
 // everything it needed lived inside the TUI's form.
 func runCreate(a *Args, stdout, stderr io.Writer) int {
+	if a.Project != nil && !a.Global {
+		return a.failMsg(stdout, stderr, core.ErrInvalidSpec,
+			"a "+project.FileName+" is present; declare the VM there and run stoat up, or pass --global")
+	}
 	set, _, secrets := paramMaps(a.Params)
 	a.Spec.Params = set
 	a.Spec.Secrets = secrets

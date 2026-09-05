@@ -37,7 +37,7 @@ type grammar struct {
 
 	LS      lsCmd      `cmd:"" name:"ls" help:"list VMs, one line per VM"`
 	Get     getCmd     `cmd:"" help:"show one VM"`
-	Create  createCmd  `cmd:"" help:"create a VM without starting it"`
+	Create  createCmd  `cmd:"" aliases:"new" help:"create a VM without starting it"`
 	Update  updateCmd  `cmd:"" help:"change a stopped VM; only the flags you pass change"`
 	Up      upCmd      `cmd:"" help:"start a VM"`
 	Down    downCmd    `cmd:"" help:"stop a VM (graceful)"`
@@ -157,6 +157,11 @@ type createCmd struct {
 	// --agent-access always wins over this alias.
 	AllowExec   *bool   `name:"allow-exec" hidden:"" help:"alias of --agent-access exec (true) or manage (false)"`
 	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
+
+	// Global creates a VM outside the project even when a stoat.toml is
+	// present. Without it, a create at project scope is refused: a VM that
+	// exists only on one machine is exactly what stoat.toml removes.
+	Global bool `help:"create outside the project even inside one"`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.
@@ -368,6 +373,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "create":
 		c := g.Create
 		a.VM = c.Name
+		a.Global = c.Global
 		// Absent --allow-exec keeps Spec.AllowExec's own default of true
 		// (see Spec.AllowExec's doc comment); given, it also sets the
 		// access level, per --allow-exec's alias contract.

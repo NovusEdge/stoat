@@ -78,7 +78,11 @@ type Args struct {
 	// Sub is the second word for subcommands that have one ("recipe list").
 	// OS and Backend belong to "recipe new"; VM carries the recipe name
 	// there, since it is the same "one positional argument" slot.
-	Sub     string
+	Sub string
+
+	// Global belongs to the "recipe" subcommands and to "create". On a recipe
+	// command it forces the home scope; on create it opts out of the
+	// project-scope refusal. No two of those share a toArgs case.
 	Global  bool
 	Force   bool
 	Refresh bool
