@@ -467,6 +467,141 @@ agent_access = "observe"
 	}
 }
 
+// A recipe with a secret, dropped from the declaration, must take that
+// secret with it the same way TestReconcileDropsAWholeRecipeWithParams
+// shows a non-secret param going.
+func TestReconcileDropsARecipeAndItsSecret(t *testing.T) {
+	withTailscale := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 2
+ram     = 2048
+recipes = ["docker", "tailscale"]
+shares  = ["."]
+agent_access = "observe"
+
+[vms.dev.params.docker]
+user = "dev"
+`
+	p := projectDir(t, withTailscale)
+	writeProjectSecrets(t, p.Dir, "[dev.tailscale]\nauthkey = \"first-key\"\n")
+	p, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	// tailscale is gone from recipes; its secret goes with it.
+	dropped := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 2
+ram     = 2048
+recipes = ["docker"]
+shares  = ["."]
+agent_access = "observe"
+
+[vms.dev.params.docker]
+user = "dev"
+`
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName), []byte(dropped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(p2, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := load("myrepo-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := secrets["tailscale"]; ok {
+		t.Errorf("secrets = %+v, want tailscale dropped", secrets)
+	}
+
+	drift, err := Diff(p2, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drift) != 0 {
+		t.Errorf("second diff = %+v, want none", drift)
+	}
+}
+
+// A repeat Reconcile of an unchanged declaration must not rewrite the VM's
+// secrets.toml: commitUpdate replaces the file by rename, so an unnecessary
+// write still changes its mtime and inode even when the content is the same.
+func TestReconcileWithNoDriftDoesNotRewriteSecrets(t *testing.T) {
+	withTailscale := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 2
+ram     = 2048
+recipes = ["docker", "tailscale"]
+shares  = ["."]
+agent_access = "observe"
+
+[vms.dev.params.docker]
+user = "dev"
+`
+	p := projectDir(t, withTailscale)
+	writeProjectSecrets(t, p.Dir, "[dev.tailscale]\nauthkey = \"first-key\"\n")
+	p, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := load("myrepo-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretsPath := filepath.Join(v.Dir, config.SecretsName)
+	before, err := os.Stat(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.Stat(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) || !os.SameFile(before, after) {
+		t.Errorf("secrets.toml was rewritten by a no-op reconcile: mtime %v -> %v", before.ModTime(), after.ModTime())
+	}
+}
+
 func TestReconcileAppliesASecretsOnlyChange(t *testing.T) {
 	withTailscale := `
 schema = 1
