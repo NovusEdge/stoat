@@ -264,6 +264,38 @@ func TestDiffRefusesADiskChange(t *testing.T) {
 	}
 }
 
+// A cloud VM's stored image field is Base, an absolute path (core.go sets
+// v.Base = img.abs regardless of whether the image came from the catalog).
+// imageName must still resolve that path back to a catalog id on both sides
+// of the message, not just the "isos/"-prefixed field a disk/live VM stores.
+func TestDiffNamesCatalogIDsForACloudImageChange(t *testing.T) {
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"debian-13\"\n")
+	haveImage(t, os.Getenv("STOAT_HOME"), "debian-13-genericcloud-amd64.qcow2")
+	haveImage(t, os.Getenv("STOAT_HOME"), "ubuntu-24.04-server-cloudimg-amd64.img")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName),
+		[]byte("schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"ubuntu-24.04\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Diff(p2, "dev")
+	if !errors.Is(err, ErrImmutableDeclaration) {
+		t.Fatalf("err = %v, want ErrImmutableDeclaration", err)
+	}
+	if !strings.Contains(err.Error(), "dev: image changed (debian-13 -> ubuntu-24.04)") {
+		t.Errorf("err = %q, want catalog ids on both sides, not the resolved base-image path", err.Error())
+	}
+}
+
 // A declaration that omits disk takes stoat new's default, the same as a
 // minimal declaration does for every other field. vm.toml then records that
 // default rather than an empty string, and re-declaring the same omission
@@ -286,6 +318,25 @@ func TestDiffOmittedDiskMatchesTheDefault(t *testing.T) {
 		if d.Field == "disk" {
 			t.Errorf("disk reported as drift for an omitted field: %+v", d)
 		}
+	}
+}
+
+// plan() stores strings.TrimSpace(s.Disk) in vm.toml. Diff must trim the
+// declaration's disk the same way before comparing, or a padded value in
+// stoat.toml (valid TOML, easy to type by accident) reads as changed on
+// every reconcile even though create resolved it to the same size.
+func TestDiffTrimsDeclaredDiskBeforeComparing(t *testing.T) {
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"debian-13\"\ndisk  = \" 20G\"\n")
+	haveImage(t, os.Getenv("STOAT_HOME"), "debian-13-genericcloud-amd64.qcow2")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Diff(p, "dev"); err != nil {
+		t.Errorf("err = %v, want no drift for a disk value that only differs by padding", err)
 	}
 }
 

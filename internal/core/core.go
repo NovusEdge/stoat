@@ -251,17 +251,18 @@ func plan(s Spec) (*config.VM, error) {
 		return nil, err
 	}
 
-	// Default true: an agent should be able to exec in a VM it just created
-	// unless the caller explicitly said otherwise. See Spec.AllowExec's doc
-	// comment for why this is a pointer rather than a plain bool.
-	allowExec := true
-	if s.AllowExec != nil {
-		allowExec = *s.AllowExec
-	}
+	// The level decides allow_exec: exec is the only level that grants it, so
+	// the two never disagree on disk. A caller that speaks only the legacy
+	// AllowExec pointer, such as the TUI form, gets the level config.Load
+	// would map that pointer to: true means exec, anything else means manage.
 	agentAccess := s.AgentAccess
 	if agentAccess == "" {
 		agentAccess = "manage"
+		if s.AllowExec != nil && *s.AllowExec {
+			agentAccess = "exec"
+		}
 	}
+	allowExec := agentAccess == "exec"
 
 	v := &config.VM{
 		Name:        name,

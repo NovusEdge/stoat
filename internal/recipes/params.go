@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,6 +10,11 @@ import (
 
 // OutputDir is the guest directory used for per-recipe output files.
 const OutputDir = "/tmp/.stoat-out"
+
+// ErrParamUnset is Resolve's sentinel for a required param or secret with no
+// value: internal/cli/wire maps it to invalid_spec, the same row as
+// ErrInvalidTree.
+var ErrParamUnset = errors.New("required parameter is unset")
 
 // Resolve merges manifest defaults with values stored for one recipe. Secret
 // values come from the separate secrets map and never become VM parameters.
@@ -51,10 +57,17 @@ func Resolve(m Manifest, set map[string]string, secrets map[string]string) (map[
 
 func requiredUnset(recipe string, p Param) error {
 	if p.Type == "secret" {
-		return fmt.Errorf("%s.%s: required secret is unset; run stoat update --secret %s.%s", recipe, p.Name, recipe, p.Name)
+		return paramUnset{fmt.Errorf("%s.%s: required secret is unset; run stoat update --secret %s.%s", recipe, p.Name, recipe, p.Name)}
 	}
-	return fmt.Errorf("%s.%s: required param is unset; run stoat update --set %s.%s=VALUE", recipe, p.Name, recipe, p.Name)
+	return paramUnset{fmt.Errorf("%s.%s: required param is unset; run stoat update --set %s.%s=VALUE", recipe, p.Name, recipe, p.Name)}
 }
+
+// paramUnset carries ErrParamUnset without a "%w: " prefix on its message: a
+// secret's failure text must read "required secret is unset", not "required
+// parameter is unset: required secret is unset".
+type paramUnset struct{ error }
+
+func (paramUnset) Unwrap() error { return ErrParamUnset }
 
 // Validate checks one declared parameter value against its manifest type.
 func Validate(m Manifest, name, value string) error {

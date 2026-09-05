@@ -68,6 +68,11 @@ mounts at `/work`. Every other entry mounts at `/work/<basename>`.
 Every entry must resolve inside the project directory. A relative path
 that escapes it, directly or through a symlink, is refused.
 
+Shares do not mount on a Debian cloud VM. Debian's cloud kernel has no 9p
+module, so the mount would fail on every boot. Debian's `guest.toml` sets
+the `skip_9p` flag under `[backend.cloudinit]`, and stoat skips the mount
+step there. Ubuntu cloud VMs mount shares as usual.
+
 ## Reconcile
 
 `stoat up` reconciles a declared VM before it starts it:

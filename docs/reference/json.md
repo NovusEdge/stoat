@@ -78,8 +78,8 @@ branching on `ok` and one branching on `"error" in obj` can never disagree.
 |---|---|---|
 | `result` | yes | the answer; exactly one per invocation, always last |
 | `progress` | no | a download's byte count (`pull`) |
-| `stage` | no | a recipe boundary during `apply` |
-| `log` | no | one line of guest output during `apply` |
+| `stage` | no | a recipe boundary during `apply`, or during `up` when it applies at boot |
+| `log` | no | one line of guest output during `apply`, or during `up` when it applies at boot |
 
 **A consumer MUST ignore any `type` it does not recognize.** New non-terminal
 types can be added without a version bump.
@@ -518,7 +518,9 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 
 ## Streaming
 
-`pull` and `apply` emit non-terminal events before their result. `apply
+`pull`, `apply` and `up` emit non-terminal events before their result. `up`
+emits the `stage` and `log` events of the apply it runs after boot, with
+`"cmd":"up"`, and its result comes after that apply has finished. `apply
 --dry-run` emits none: it computes the plan host-side and runs nothing.
 
 ```

@@ -124,6 +124,50 @@ func TestRejectedRecipeTreeSurvivesTheJSONResultBoundary(t *testing.T) {
 	}
 }
 
+// TestRequiredSecretUnsetSurvivesTheJSONResultBoundary pins the envelope a
+// `stoat up` caller sees when a recipe's required secret has no value:
+// invalid_spec, not the internal escape hatch. Resolve is called directly
+// (the real caller of requiredUnset) so the test fails unless its returned
+// error actually wraps recipes.ErrParamUnset, not just a matching message.
+func TestRequiredSecretUnsetSurvivesTheJSONResultBoundary(t *testing.T) {
+	m := recipes.Manifest{
+		Name: "docker",
+		Params: map[string]recipes.Param{
+			"authkey": {Name: "authkey", Type: "secret", Required: true},
+		},
+	}
+	_, resolveErr := recipes.Resolve(m, map[string]string{}, map[string]string{})
+	if resolveErr == nil {
+		t.Fatal("Resolve err = nil, want required secret unset")
+	}
+
+	var output bytes.Buffer
+	if writeErr := NewEmitter(&output).ResultErr("up", MapError(resolveErr)); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	var result struct {
+		Type  string `json:"type"`
+		OK    bool   `json:"ok"`
+		Error struct {
+			Code    Code   `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &result); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if result.OK {
+		t.Fatal("result.ok = true, want false")
+	}
+	if result.Error.Code != CodeInvalidSpec {
+		t.Fatalf("error.code = %q, want %q", result.Error.Code, CodeInvalidSpec)
+	}
+	const wantMessage = "docker.authkey: required secret is unset; run stoat update --secret docker.authkey"
+	if result.Error.Message != wantMessage {
+		t.Fatalf("error.message = %q, want %q", result.Error.Message, wantMessage)
+	}
+}
+
 func TestMapErrorUnrecognizedFallsBackToInternal(t *testing.T) {
 	got := MapError(errors.New("qemu-img: some unrelated failure"))
 	if got.Code != CodeInternal {
