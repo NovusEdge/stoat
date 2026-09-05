@@ -5,6 +5,8 @@
 /stoat
 /installer
 
+.env
+
 # the installer copies to a temp file in the destination dir and renames, so a
 # kill mid-copy can orphan one. Only lands here if $PREFIX points into the repo.
 .stoat-*
