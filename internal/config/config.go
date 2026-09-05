@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
@@ -55,8 +54,8 @@ type VM struct {
 	Installed bool                         `toml:"installed"` // disk mode only; flips boot order
 	Share     string                       `toml:"share"`     // host dir exposed as /mnt/host
 	SSHPort   int                          `toml:"sshport"`
-	Recipes   []string                     `toml:"recipes"`
-	Params    map[string]map[string]string `toml:"params" comment:"written by stoat; do not edit"`
+	Recipes   []string                     `toml:"recipes,omitempty"`
+	Params    map[string]map[string]string `toml:"params,omitempty" comment:"written by stoat; do not edit"`
 
 	// Display is the user's screen preference: "" or "auto" (default),
 	// "window", or "vnc". "auto" opens a real qemu window on a graphical
@@ -76,7 +75,7 @@ type VM struct {
 	// vm.toml immediately but has no effect on the live process. See
 	// core.Forward and core.ErrAppliesAtNextStart, which exist so a caller
 	// cannot mistake "saved" for "live".
-	Forwards []PortForward `toml:"forwards"`
+	Forwards []PortForward `toml:"forwards,omitempty"`
 
 	// Backend is the provisioning backend: "apkovl" | "cloudinit" | "ssh".
 	// Written by the form at creation time; dispatch elsewhere in stoat
@@ -106,7 +105,7 @@ type VM struct {
 	AllowExec bool `toml:"allow_exec"`
 
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
-	Applied map[string]AppliedRecipe `toml:"applied"`
+	Applied map[string]AppliedRecipe `toml:"applied,omitempty" comment:"written by stoat; do not edit"`
 
 	Dir string `toml:"-"` // absolute path to the VM directory
 }
@@ -210,12 +209,7 @@ func (v *VM) Save() error {
 	if err := os.MkdirAll(v.Dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.Create(v.path())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return toml.NewEncoder(f).Encode(v)
+	return tomlx.Encode(v.path(), v)
 }
 
 // Load reads one VM by name.

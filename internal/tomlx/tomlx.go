@@ -6,9 +6,11 @@ package tomlx
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	gotoml "github.com/pelletier/go-toml/v2"
 )
 
 type options struct {
@@ -64,5 +66,16 @@ func Decode(path string, v any, opts ...Option) error {
 
 // Encode is the single TOML writer for files owned by stoat.
 func Encode(path string, v any) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if err := gotoml.NewEncoder(f).Encode(v); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
 	return nil
 }
