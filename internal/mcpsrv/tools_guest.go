@@ -187,7 +187,7 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 				return wire.DirListing{}, err
 			}
 			return wire.DirListing{
-				Entries:   parseStat(statOut),
+				Entries:   wire.NonNil(parseStat(statOut)),
 				Truncated: len(names) == maxDirEntries,
 			}, nil
 		})
@@ -241,7 +241,7 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 			}
 			rows := parsePS(out)
 			list := wire.ProcessList{Truncated: len(rows) > maxPSRows}
-			list.Processes = rows[:min(len(rows), maxPSRows)]
+			list.Processes = wire.NonNil(rows[:min(len(rows), maxPSRows)])
 			return list, nil
 		})
 
