@@ -159,12 +159,22 @@ func TestWrapScriptsFragmentMergesIntoSeed(t *testing.T) {
 // how the cloudinit path keeps the package index refresh and the recipe
 // verbs behaving the same as the ssh path.
 func TestWrapScriptsRunsSetupFirst(t *testing.T) {
-	got := WrapScripts([]Script{{Name: "x", Content: "#!/bin/sh\necho hi\n"}}, "P\n")
-	if !strings.Contains(got, "runcmd:\n  - sh -c 'P\nstoat_pkg_setup'\n") {
-		t.Errorf("setup not first in runcmd:\n%s", got)
+	body := WrapScripts([]Script{{Name: "x", Content: "#!/bin/sh\necho hi\n"}}, "P\n")
+	f := parseWrapped(t, body)
+	if len(f.Runcmd) != 2 {
+		t.Fatalf("runcmd = %v, want setup followed by one recipe", f.Runcmd)
 	}
-	if !strings.Contains(got, "      #!/bin/sh\n      P\n      echo hi\n") {
-		t.Errorf("prelude not after the shebang:\n%s", got)
+	if got, want := f.Runcmd[0], "sh -c 'P\nstoat_pkg_setup'"; got != want {
+		t.Errorf("setup command = %q, want preserved shell command %q", got, want)
+	}
+	if !strings.Contains(f.Runcmd[1], "/var/lib/stoat/recipes/x.sh") {
+		t.Errorf("recipe command = %q, want x recipe after setup", f.Runcmd[1])
+	}
+	if len(f.WriteFiles) != 1 {
+		t.Fatalf("write_files = %v, want one recipe script", f.WriteFiles)
+	}
+	if got, want := f.WriteFiles[0].Content, "#!/bin/sh\nP\necho hi\n"; got != want {
+		t.Errorf("script content = %q, want prelude after shebang %q", got, want)
 	}
 }
 
