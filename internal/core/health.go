@@ -49,12 +49,12 @@ func healthChecksForVM(ctx context.Context, v *config.VM, names []string) ([]Rec
 		if ok && m.Health.Check != "" {
 			text, runErr := sshx.RunCheck(ctx, v, m.Health.Check, m.Health.Duration())
 			if runErr != nil {
-				if err := ctx.Err(); err != nil {
-					return out, err
-				}
 				stored, loadErr := config.LoadSecrets(v.Dir)
 				if loadErr != nil {
-					return nil, loadErr
+					if err := ctx.Err(); err != nil {
+						return out, err
+					}
+					return out, loadErr
 				}
 				verdict.Status = HealthFailed
 				detail := redactCloudSecrets(text, stored[name])
@@ -68,6 +68,9 @@ func healthChecksForVM(ctx context.Context, v *config.VM, names []string) ([]Rec
 			v.Applied[name] = a
 		}
 		out = append(out, verdict)
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
 	}
 	return out, nil
 }

@@ -69,7 +69,11 @@ func WrapScripts(scripts []Script, prelude string) string {
 		wf.WriteString(indentBlock(secretEnv(scripts)))
 	}
 	if prelude != "" {
-		rc.WriteString(fmt.Sprintf("  - sh -c %s\n", guest.ShQuote(prelude+"stoat_pkg_setup")))
+		setup := "sh -c " + guest.ShQuote(prelude+"stoat_pkg_setup")
+		// YAML plain scalars cannot contain the unindented newlines in a
+		// guest prelude. Encode the complete shell command as a YAML string;
+		// the parser restores those newlines before cloud-init invokes sh.
+		rc.WriteString(fmt.Sprintf("  - %s\n", strconv.Quote(setup)))
 	}
 	for _, s := range scripts {
 		path := fmt.Sprintf("%s/%s.sh", scriptDir, s.Name)
