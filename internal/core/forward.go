@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
@@ -14,6 +16,31 @@ import (
 // forward has no extra shape: host port and guest port are the whole of it
 // on both sides. Duplicating the struct would only add a conversion step.
 type PortForward = config.PortForward
+
+// ParseForwards reads "8080:80" pairs, host port first: the spelling docker
+// and ssh -L both use, so the ordering is the one a user already has in
+// their fingers. Getting it backwards silently binds the wrong port, so the
+// error names the whole offending argument rather than just complaining
+// about a number.
+func ParseForwards(pairs []string) ([]PortForward, error) {
+	var out []PortForward
+	for _, p := range pairs {
+		host, guest, ok := strings.Cut(p, ":")
+		if !ok {
+			return nil, fmt.Errorf("%q is not a HOST:GUEST port pair", p)
+		}
+		h, err := strconv.Atoi(strings.TrimSpace(host))
+		if err != nil {
+			return nil, fmt.Errorf("%q: host port %q is not a number", p, host)
+		}
+		g, err := strconv.Atoi(strings.TrimSpace(guest))
+		if err != nil {
+			return nil, fmt.Errorf("%q: guest port %q is not a number", p, guest)
+		}
+		out = append(out, PortForward{HostPort: h, GuestPort: g})
+	}
+	return out, nil
+}
 
 // Forward replaces VM name's declared port forwards and saves vm.toml.
 //

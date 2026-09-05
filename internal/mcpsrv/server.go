@@ -59,6 +59,7 @@ func New(opts Options) *mcp.Server {
 	s := &srv{opts: opts, lim: newLimiter(opts.Limits)}
 	server := mcp.NewServer(&mcp.Implementation{Name: "stoat", Version: opts.Version}, nil)
 	s.registerRead(server)
+	s.registerVM(server)
 	server.AddReceivingMiddleware(s.rateLimit())
 	return server
 }

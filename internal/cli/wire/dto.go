@@ -740,3 +740,37 @@ type GuestList struct {
 type GuestShow struct {
 	Guest Guest `json:"guest"`
 }
+
+// SnapshotList is the snapshot and restore tools' output.
+type SnapshotList struct {
+	Snapshots []Snapshot `json:"snapshots"`
+}
+
+// ForwardList is the forward tool's output.
+type ForwardList struct {
+	Forwards []PortForward `json:"forwards"`
+}
+
+// PruneList is the prune tool's output.
+type PruneList struct {
+	Items  []PruneItem `json:"items"`
+	DryRun bool        `json:"dry_run"`
+}
+
+// WaitResult is the wait tool's output.
+type WaitResult struct {
+	VM      string `json:"vm"`
+	Until   string `json:"until"`
+	Healthy bool   `json:"healthy"`
+}
+
+// ApplyResult is what an apply left behind, so a caller does not have to
+// call vm_status to find out.
+type ApplyResult struct {
+	VM      string        `json:"vm"`
+	Recipes []RecipeState `json:"recipes_detail"`
+}
+
+func FromApplyResult(v core.VM) ApplyResult {
+	return ApplyResult{VM: v.Name, Recipes: FromVMStatus(v, false).RecipeStates}
+}

@@ -434,7 +434,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		if f.Clear && len(f.Pairs) > 0 {
 			return nil, usageError("forward: --clear takes no port pairs")
 		}
-		fwds, err := parseForwards(f.Pairs)
+		fwds, err := core.ParseForwards(f.Pairs)
 		if err != nil {
 			return nil, usageError("forward: " + err.Error())
 		}
