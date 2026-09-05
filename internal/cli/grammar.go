@@ -291,6 +291,11 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
 			AllowExec: &allowExec,
 		}
+		edits, err := parseParamFlags(c.Set, nil, c.Secret)
+		if err != nil {
+			return nil, err
+		}
+		a.Params = edits
 
 	case "update":
 		u := g.Update
@@ -320,8 +325,16 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 				a.Changed = append(a.Changed, f.name)
 			}
 		}
+		edits, err := parseParamFlags(u.Set, u.Unset, u.Secret)
+		if err != nil {
+			return nil, err
+		}
+		a.Params = edits
+		if len(edits) > 0 {
+			a.Changed = append(a.Changed, "params")
+		}
 		if len(a.Changed) == 0 {
-			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes")
+			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes --set --unset --secret")
 		}
 
 	case "clone":

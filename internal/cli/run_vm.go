@@ -275,6 +275,9 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 // what came back. There was no create subcommand before core existed, because
 // everything it needed lived inside the TUI's form.
 func runCreate(a *Args, stdout, stderr io.Writer) int {
+	set, _, secrets := paramMaps(a.Params)
+	a.Spec.Params = set
+	a.Spec.Secrets = secrets
 	v, err := core.Create(a.Spec)
 	if err != nil {
 		if a.JSON {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // ErrImmutableField is returned by Update when a Patch changes a field with no
@@ -136,6 +137,9 @@ func Update(name string, p Patch) (VM, error) {
 	if p.Recipes != nil {
 		v.Recipes = *p.Recipes
 	}
+	if err := applyParamEdits(v, p); err != nil {
+		return VM{}, err
+	}
 	if p.Installed != nil {
 		v.Installed = *p.Installed
 	}
@@ -176,6 +180,129 @@ func Update(name string, p Patch) (VM, error) {
 		return VM{}, err
 	}
 	return fromConfig(v), nil
+}
+
+// applyParamEdits validates and applies parameter changes. Non-secret values
+// stay in vm.toml; secret values stay in secrets.toml and are removed when an
+// unset edit names a secret parameter.
+func applyParamEdits(v *config.VM, p Patch) error {
+	if len(p.SetParams) == 0 && len(p.UnsetParams) == 0 && len(p.Secrets) == 0 {
+		return nil
+	}
+
+	for recipe, values := range p.SetParams {
+		m, err := manifestForVM(v, recipe)
+		if err != nil {
+			return err
+		}
+		for name, value := range values {
+			param, ok := m.Params[name]
+			if !ok {
+				if err := recipes.Validate(m, name, value); err != nil {
+					return fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+				}
+			}
+			if ok && param.Type == "secret" {
+				return fmt.Errorf("%w: %s.%s is a secret; use --secret", ErrInvalidSpec, recipe, name)
+			}
+			if err := recipes.Validate(m, name, value); err != nil {
+				return fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+			}
+		}
+	}
+
+	secretTouched := len(p.Secrets) > 0
+	for recipe, names := range p.UnsetParams {
+		m, err := manifestForVM(v, recipe)
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			if _, ok := m.Params[name]; !ok {
+				return fmt.Errorf("%w: %s.%s is not declared", ErrInvalidSpec, recipe, name)
+			}
+			if m.Params[name].Type == "secret" {
+				secretTouched = true
+			}
+		}
+	}
+	for recipe, values := range p.Secrets {
+		m, err := manifestForVM(v, recipe)
+		if err != nil {
+			return err
+		}
+		for name, value := range values {
+			param, ok := m.Params[name]
+			if !ok {
+				return fmt.Errorf("%w: %s.%s is not declared", ErrInvalidSpec, recipe, name)
+			}
+			if param.Type != "secret" {
+				return fmt.Errorf("%w: %s.%s is not a secret param", ErrInvalidSpec, recipe, name)
+			}
+			if value == "" {
+				return fmt.Errorf("%w: %s.%s secret is empty", ErrInvalidSpec, recipe, name)
+			}
+		}
+	}
+
+	for recipe, values := range p.SetParams {
+		for name, value := range values {
+			v.SetParam(recipe, name, value)
+		}
+	}
+	for recipe, names := range p.UnsetParams {
+		m, _ := manifestForVM(v, recipe)
+		for _, name := range names {
+			if m.Params[name].Type != "secret" {
+				v.UnsetParam(recipe, name)
+			}
+		}
+	}
+	var stored config.Secrets
+	if secretTouched {
+		var err error
+		stored, err = config.LoadSecrets(v.Dir)
+		if err != nil {
+			return err
+		}
+		for recipe, names := range p.UnsetParams {
+			m, _ := manifestForVM(v, recipe)
+			for _, name := range names {
+				if m.Params[name].Type == "secret" {
+					delete(stored[recipe], name)
+				}
+			}
+		}
+		for recipe, values := range p.Secrets {
+			if stored[recipe] == nil {
+				stored[recipe] = map[string]string{}
+			}
+			for name, value := range values {
+				stored[recipe][name] = value
+			}
+		}
+		if err := config.SaveSecrets(v.Dir, stored); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func manifestForVM(v *config.VM, recipe string) (recipes.Manifest, error) {
+	for _, name := range v.Recipes {
+		if name != recipe {
+			continue
+		}
+		m, ok, err := recipes.ManifestFor(recipe)
+		if err != nil {
+			return recipes.Manifest{}, err
+		}
+		if !ok {
+			return recipes.Manifest{}, fmt.Errorf("%w: recipe %q has no recipe.toml", ErrRecipeNotApplicable, recipe)
+		}
+		return m, nil
+	}
+	return recipes.Manifest{}, fmt.Errorf("%w: %s is not one of %s's recipes", ErrRecipeNotApplicable, recipe, v.Name)
 }
 
 // validateSSHPort checks a candidate ssh port by reusing validateForwards

@@ -339,6 +339,13 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		// lines: they are all already gated on it.
 		a.Quiet = true
 	}
+	if len(a.Params) > 0 {
+		resolved, err := resolveParamEdits(a.Params, stdin, stderr, !jsonMode && streamIsTTY(stdin))
+		if err != nil {
+			return a.failMsg(stdout, stderr, core.ErrInvalidSpec, err.Error())
+		}
+		a.Params = resolved
+	}
 
 	switch a.Cmd {
 	case "help":
