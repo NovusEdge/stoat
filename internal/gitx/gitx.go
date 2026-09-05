@@ -15,7 +15,11 @@ var (
 	ErrNoRef = errors.New("no such tag or branch")
 )
 
-var fullCommitRef = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+// commitRef matches a ref that names a commit rather than a tag or branch: a
+// full sha, or an abbreviation git can still resolve unambiguously (7 hex
+// chars is git's own minimum). --branch rejects anything but a real ref, so a
+// commit has to go through CloneFull and a checkout instead.
+var commitRef = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
 // Available reports whether git is on PATH.
 func Available() bool {
@@ -26,7 +30,7 @@ func Available() bool {
 // Clone makes a shallow clone of url at ref into dst. An empty ref takes the
 // remote's default branch.
 func Clone(url, ref, dst string) error {
-	if fullCommitRef.MatchString(ref) {
+	if commitRef.MatchString(ref) {
 		if err := CloneFull(url, dst); err != nil {
 			return err
 		}

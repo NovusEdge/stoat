@@ -30,6 +30,23 @@ func TestCloneAtTagAndRevParse(t *testing.T) {
 	}
 }
 
+func TestCloneAtAbbreviatedCommit(t *testing.T) {
+	bare := testutil.GitRepo(t, map[string]string{"recipe.toml": "name = \"demo\"\n"})
+	want := testutil.GitCommit(t, bare, map[string]string{"install.sh": "echo hi\n"}, "v1.2")
+
+	dst := filepath.Join(t.TempDir(), "demo")
+	if err := gitx.Clone(bare, want[:7], dst); err != nil {
+		t.Fatal(err)
+	}
+	got, err := gitx.RevParse(dst, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("HEAD = %q, want %q", got, want)
+	}
+}
+
 func TestCloneUnknownRef(t *testing.T) {
 	bare := testutil.GitRepo(t, map[string]string{"recipe.toml": "name = \"demo\"\n"})
 	err := gitx.Clone(bare, "v9", filepath.Join(t.TempDir(), "demo"))
