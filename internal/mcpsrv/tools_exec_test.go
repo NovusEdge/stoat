@@ -58,6 +58,20 @@ func TestWriteFileRefusesOnAStoppedVM(t *testing.T) {
 	}
 }
 
+func TestExecRefusesOnAStoppedVM(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	testutil.FakeSSH(t, `exit 1`)
+	res := callTool(t, "exec", map[string]any{"vm": "dev", "argv": []string{"id"}})
+	if !res.IsError {
+		t.Fatal("exec ran on a stopped VM")
+	}
+	raw, _ := json.Marshal(res.Content)
+	if !strings.Contains(string(raw), "not running") {
+		t.Fatalf("refusal did not report not_running: %s", raw)
+	}
+}
+
 func TestExecBgRefusesOnAStoppedVM(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	writeVM(t, "dev", "exec")

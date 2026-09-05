@@ -113,12 +113,13 @@ type createCmd struct {
 	Recipes         []string `help:"recipe names to record on the VM"`
 	Set             []string `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Secret          []string `help:"set a secret recipe param"`
-	// AllowExec is a hidden alias of --agent-access: a nil pointer means the
-	// flag was not given, so toArgs can tell that apart from --agent-access's
-	// own default, the same pointer trick updateCmd's fields use (see
-	// grammar's type comment). true maps to the exec level, false to manage.
-	AllowExec   *bool  `name:"allow-exec" hidden:"" help:"alias of --agent-access exec (true) or manage (false)"`
-	AgentAccess string `name:"agent-access" default:"manage" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
+	// AllowExec is a hidden alias of --agent-access, and both are pointers
+	// so toArgs can tell "not given" from every real value, the same
+	// pointer trick updateCmd's fields use (see grammar's type comment).
+	// true maps to the exec level, false to manage; an explicit
+	// --agent-access always wins over this alias.
+	AllowExec   *bool   `name:"allow-exec" hidden:"" help:"alias of --agent-access exec (true) or manage (false)"`
+	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.
@@ -334,8 +335,14 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		if c.AllowExec != nil {
 			allowExec = *c.AllowExec
 		}
-		access := c.AgentAccess
-		if c.AllowExec != nil {
+		// An explicit --agent-access always wins over the hidden
+		// --allow-exec alias; only when it is unset does --allow-exec pick
+		// the level, and only when neither is given is the default manage.
+		access := "manage"
+		switch {
+		case c.AgentAccess != nil:
+			access = *c.AgentAccess
+		case c.AllowExec != nil:
 			access = "manage"
 			if *c.AllowExec {
 				access = "exec"
