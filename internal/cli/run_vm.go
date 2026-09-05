@@ -124,22 +124,16 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	if err := core.Start(a.VM); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
-	if a.JSON {
-		// Re-read rather than emitting the pre-Start copy: state is the field a
-		// caller acts on next, and the one this command just changed.
-		if started, err := core.Get(a.VM); err == nil {
-			v = started
-		}
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
-	}
-	fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
-	// Re-read for the display line too: Start is what flips a disk VM to
-	// installed, and that flip is exactly what moves the screen off the qemu
-	// window. The pre-Start copy would announce a window that is not there.
+	// Re-read rather than keeping the pre-Start copy: state is the field a
+	// caller acts on next, and Start is what flips a disk VM to installed,
+	// which is what the mode/Installed check below depends on.
 	if started, err := core.Get(a.VM); err == nil {
 		v = started
 	}
-	printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+	if !a.JSON {
+		fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
+		printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+	}
 
 	// An uninstalled disk VM's own installer is running now, not the system
 	// `apply` needs to reach. The CLI is a foreground process, so it blocks
@@ -152,6 +146,12 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		}
 		restarted, err := core.AutoRestartAfterInstall(context.Background(), a.VM)
 		if err != nil || !restarted {
+			if a.JSON {
+				if started, err := core.Get(a.VM); err == nil {
+					v = started
+				}
+				return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+			}
 			fmt.Fprintf(stdout, "install did not finish; inspect: stoat logs %s\n", a.VM)
 			return ExitOK
 		}
@@ -159,7 +159,17 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 			v = started
 		}
 	}
-	return afterStart(a, v, stdout, stderr)
+
+	code := afterStart(a, v, stdout, stderr)
+	if a.JSON && code == ExitOK {
+		// Re-read again: afterStart is what runs the boot-time apply, and
+		// state is the field this result must be authoritative about.
+		if started, err := core.Get(a.VM); err == nil {
+			v = started
+		}
+		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+	}
+	return code
 }
 
 // afterStart runs v's pending recipes once it answers ssh, the same
@@ -194,7 +204,15 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
-	redactor, err := newSecretRedactor(v.Paths.Dir, stdout)
+	// up's --json contract is the single {"vm":VM} result runUp emits once
+	// this returns (docs/reference/json.md's `up` row), not a stream: unlike
+	// run_apply.go's runApply, up has no per-line event to wrap the log in,
+	// so the raw bytes are discarded rather than reaching stdout raw.
+	out := stdout
+	if a.JSON {
+		out = io.Discard
+	}
+	redactor, err := newSecretRedactor(v.Paths.Dir, out)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
@@ -206,7 +224,9 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 			// A concurrent `apply` already holds the lock; that run owns the
 			// error. `up` still started the VM, so this is not a failure of
 			// the up command.
-			fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
+			if !a.JSON {
+				fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
+			}
 			return ExitOK
 		}
 		return a.fail(stdout, stderr, err)
@@ -214,7 +234,9 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	if err := redactor.Flush(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
-	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
+	if !a.JSON {
+		fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
+	}
 	return ExitOK
 }
 
