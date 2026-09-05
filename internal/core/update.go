@@ -50,6 +50,11 @@ type Patch struct {
 	SSHPort *int
 	Disk    *string
 
+	// Shares replaces the project's 9p export list wholesale when non-nil.
+	// Like Recipes, a non-nil empty slice clears it and nil leaves it alone.
+	// Applies at next start: qemu cannot hot-add a virtfs device.
+	Shares *[]config.Share
+
 	// Recipes replaces the recipe list wholesale when non-nil, including
 	// with an empty (but non-nil) slice to clear it. A nil Recipes leaves
 	// the list untouched, matching every other field's "nil means don't
@@ -144,6 +149,9 @@ func Update(name string, p Patch) (VM, error) {
 	}
 	if p.Recipes != nil {
 		work.Recipes = append([]string(nil), (*p.Recipes)...)
+	}
+	if p.Shares != nil {
+		work.Shares = *p.Shares
 	}
 	var stored config.Secrets
 	if hasParamEdits(p) {

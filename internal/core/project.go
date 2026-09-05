@@ -217,7 +217,67 @@ type Reconciled struct {
 	RestartPending bool
 }
 
-// Reconcile makes the VM named by one declaration match it.
+// Reconcile makes the VM named by one declaration match it. A missing VM is
+// created; an existing one takes every mutable difference through the same
+// Update path stoat update uses, so there is one place that validates an
+// edit. It does not start anything: the caller decides that.
 func Reconcile(p *project.Project, key string) (Reconciled, error) {
-	return Reconciled{}, errors.New("core: not implemented")
+	spec, err := SpecFor(p, key)
+	if err != nil {
+		return Reconciled{}, err
+	}
+	r := Reconciled{Key: key, Name: spec.Name}
+
+	if _, err := load(spec.Name); errors.Is(err, ErrNotFound) {
+		if _, err := Create(spec); err != nil {
+			return Reconciled{}, err
+		}
+		r.Created = true
+		return r, nil
+	} else if err != nil {
+		return Reconciled{}, err
+	}
+
+	drift, err := Diff(p, key)
+	if err != nil {
+		return Reconciled{}, err
+	}
+	r.Drift = drift
+	if len(drift) == 0 {
+		return r, nil
+	}
+
+	patch := Patch{}
+	for _, d := range drift {
+		if d.NeedsRestart {
+			r.RestartPending = true
+		}
+		switch d.Field {
+		case "cpus":
+			cpus := spec.CPUs
+			patch.CPUs = &cpus
+		case "ram":
+			ram := spec.RAM
+			patch.RAM = &ram
+		case "recipes":
+			recipes := spec.Recipes
+			patch.Recipes = &recipes
+		case "shares":
+			shares := spec.Shares
+			patch.Shares = &shares
+		case "params":
+			// SetParams, not Params: the recipe-contract plan splits the
+			// patch into SetParams and UnsetParams. A declaration states the
+			// full set it wants, so nothing here unsets.
+			patch.SetParams = spec.Params
+		case "agent_access":
+			access := spec.AgentAccess
+			patch.AgentAccess = &access
+		}
+	}
+	patch.Secrets = spec.Secrets
+	if _, err := Update(spec.Name, patch); err != nil {
+		return Reconciled{}, err
+	}
+	return r, nil
 }
