@@ -137,7 +137,10 @@ func (s *srv) registerExec(server *mcp.Server) {
 			}
 			id := newJobID()
 			dir := path.Join(jobRoot, id)
-			if _, _, code, err := sshx.Run(ctx, v, false, []string{"mkdir", "-p", dir}, nil); err != nil {
+			// /run/stoat is root-owned on every guest, so the directory is made
+			// escalated and handed to the ssh user, who then runs the job.
+			const mkjob = `mkdir -p "$1" && chown "$2" "$1"`
+			if _, _, code, err := sshx.Run(ctx, v, true, []string{"sh", "-c", mkjob, "stoat_jobdir", dir, sshx.User(v)}, nil); err != nil {
 				return wire.JobStarted{}, err
 			} else if code != 0 {
 				if runErr := requireRunning(v); runErr != nil {
@@ -147,8 +150,10 @@ func (s *srv) registerExec(server *mcp.Server) {
 			}
 			// The runner is a constant shell body. The job directory is $1
 			// and the command is the remaining positional arguments, so no
-			// tool input becomes shell syntax.
-			const runner = `d="$1"; shift; { "$@" >"$d/out" 2>"$d/err"; echo $? >"$d/exit"; } & echo $! >"$d/pid"`
+			// tool input becomes shell syntax. nohup keeps the wrapper alive
+			// after the ssh session ends; the pid file names the command
+			// itself, so job_kill signals it and the wrapper records its exit.
+			const runner = `d="$1"; shift; nohup sh -c 'd="$1"; shift; "$@" >"$d/out" 2>"$d/err" & c=$!; echo $c >"$d/pid"; wait $c; echo $? >"$d/exit"' stoat_job "$d" "$@" >/dev/null 2>&1 &`
 			start := append([]string{"sh", "-c", runner, "stoat_job", dir}, argv...)
 			if _, errb, code, err := sshx.Run(ctx, v, false, start, nil); err != nil {
 				return wire.JobStarted{}, err

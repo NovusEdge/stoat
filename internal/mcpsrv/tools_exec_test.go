@@ -137,6 +137,35 @@ esac`)
 	}
 }
 
+// /run/stoat is root-owned on a real guest, so the job directory must be made
+// escalated and chowned to the ssh user, and the runner must survive the ssh
+// session ending. A live Debian 13 boot found both gaps.
+func TestExecBgMakesTheJobDirEscalatedAndRunsUnderNohup(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	setSSHUser(t, "dev", "stoat")
+	calls := testutil.FakeSSH(t, `exit 0`)
+
+	if res := callTool(t, "exec_bg", map[string]any{"vm": "dev", "argv": []string{"sleep", "60"}}); res.IsError {
+		t.Fatalf("exec_bg failed: %+v", res.Content)
+	}
+	got := calls.Calls()
+	if len(got) != 2 {
+		t.Fatalf("got %d ssh calls, want mkdir then start", len(got))
+	}
+	mk := got[0].Remote
+	if !strings.Contains(mk, "sudo") || !strings.Contains(mk, "chown") || !strings.Contains(mk, "'stoat'") {
+		t.Fatalf("job dir was not made escalated and chowned to the ssh user: %q", mk)
+	}
+	start := got[1].Remote
+	if strings.Contains(start, "sudo") {
+		t.Fatalf("the job itself ran escalated: %q", start)
+	}
+	if !strings.Contains(start, "nohup") {
+		t.Fatalf("the runner does not survive the ssh session: %q", start)
+	}
+}
+
 func TestJobStatusIsUnknownAfterAReboot(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	writeVM(t, "dev", "exec")
