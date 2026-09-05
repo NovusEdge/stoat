@@ -295,11 +295,12 @@ func TestCreateWritesVMToml(t *testing.T) {
 	}
 }
 
-// TestCreateAllowExecDefaultsTrue pins that a Spec built by a caller that
-// never mentions AllowExec, such as the TUI's form today, still creates a VM
-// an agent can run commands in. It must not be silently locked down by Go's
-// bool zero value. See Spec.AllowExec for the pointer-vs-bool reasoning.
-func TestCreateAllowExecDefaultsTrue(t *testing.T) {
+// TestCreateAllowExecFollowsTheDefaultLevel pins that a Spec which names
+// neither AllowExec nor AgentAccess, such as the TUI's form or a stoat.toml
+// declaration without agent_access, lands on the default level manage, and
+// that allow_exec on disk agrees with it. Before agent_access existed the
+// default was allow_exec = true; the level is the source of truth now.
+func TestCreateAllowExecFollowsTheDefaultLevel(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
 
@@ -307,15 +308,32 @@ func TestCreateAllowExecDefaultsTrue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !v.AllowExec {
-		t.Errorf("Create with AllowExec unset should default to true, got false")
+	if v.AgentAccess != "manage" || v.AllowExec {
+		t.Errorf("Create with nothing said: agent_access = %q allow_exec = %v, want manage and false", v.AgentAccess, v.AllowExec)
 	}
 	got, err := config.Load("work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.AllowExec {
-		t.Errorf("reloaded vm.toml should have allow_exec = true, got false")
+	if got.AgentAccess != "manage" || got.AllowExec {
+		t.Errorf("reloaded vm.toml: agent_access = %q allow_exec = %v, want manage and false", got.AgentAccess, got.AllowExec)
+	}
+}
+
+// TestCreateLegacyAllowExecTrueMeansExec pins the one caller that still
+// speaks AllowExec alone: a true pointer with no level lands on exec, the
+// same mapping config.Load applies to an old vm.toml.
+func TestCreateLegacyAllowExecTrueMeansExec(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+
+	yes := true
+	v, err := Create(Spec{Name: "legacy", Image: "alpine-virt-3.24.1-x86_64.iso", AllowExec: &yes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.AgentAccess != "exec" || !v.AllowExec {
+		t.Errorf("Create with AllowExec &true: agent_access = %q allow_exec = %v, want exec and true", v.AgentAccess, v.AllowExec)
 	}
 }
 
