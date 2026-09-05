@@ -32,7 +32,8 @@ type grammar struct {
 	// contract, and so exec's guest command keeps its own --json.
 	Quiet bool `short:"q" name:"quiet" aliases:"no-interactive" help:"suppress progress chatter"`
 
-	Init initCmd `cmd:"" help:"write a stoat.toml for this directory"`
+	Init   initCmd   `cmd:"" help:"write a stoat.toml for this directory"`
+	Status statusCmd `cmd:"" help:"one line per declared VM: state, health and drift"`
 
 	LS      lsCmd      `cmd:"" name:"ls" help:"list VMs, one line per VM"`
 	Get     getCmd     `cmd:"" help:"show one VM"`
@@ -95,6 +96,8 @@ type mcpDoctorCmd struct{}
 type helpCmd struct{}
 
 type lsCmd struct{}
+
+type statusCmd struct{}
 
 type initCmd struct {
 	Name string `help:"project name; defaults to the directory name"`
@@ -340,7 +343,7 @@ type screenshotCmd struct {
 func (g *grammar) toArgs(path string) (*Args, error) {
 	a := &Args{Cmd: path, Quiet: g.Quiet}
 	switch path {
-	case "ls", "images", "doctor", "version":
+	case "ls", "images", "doctor", "version", "status":
 
 	case "help":
 		// The `help` COMMAND has to render the text itself; only the -h/--help

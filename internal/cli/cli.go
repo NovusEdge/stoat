@@ -537,6 +537,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDoctor(a, stdout, stderr)
 	case "mcp":
 		return runMCP(a, version, stdout, stderr)
+	case "status":
+		return runStatus(a, stdout, stderr)
 	default:
 		// Unreachable: Parse already rejected anything not handled above.
 		fmt.Fprintln(stderr, "stoat: unknown subcommand", a.Cmd)

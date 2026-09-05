@@ -919,3 +919,46 @@ type ProjectRun struct {
 func FromProjectRun(name string, vms []ProjectRunVM) ProjectRun {
 	return ProjectRun{Project: name, VMs: nonNil(vms)}
 }
+
+// Drift is core.Drift for the wire: one field where stoat.toml and vm.toml
+// disagree.
+type Drift struct {
+	Field        string `json:"field"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	NeedsRestart bool   `json:"needs_restart"`
+}
+
+func FromDrift(d core.Drift) Drift {
+	return Drift{Field: d.Field, From: d.From, To: d.To, NeedsRestart: d.NeedsRestart}
+}
+
+func FromDrifts(ds []core.Drift) []Drift {
+	out := make([]Drift, len(ds))
+	for i, d := range ds {
+		out[i] = FromDrift(d)
+	}
+	return nonNil(out)
+}
+
+// ProjectStatusVM is one declaration's line in stoat status. State is
+// "missing" for a declared VM that has not been created; every other value is
+// a core.State.
+type ProjectStatusVM struct {
+	Key    string  `json:"key"`
+	Name   string  `json:"name"`
+	State  string  `json:"state"`
+	Health string  `json:"health"`
+	Drift  []Drift `json:"drift"`
+}
+
+// ProjectStatus is stoat status, and the MCP project_status tool.
+type ProjectStatus struct {
+	Project string            `json:"project"`
+	Dir     string            `json:"dir"`
+	VMs     []ProjectStatusVM `json:"vms"`
+}
+
+func FromProjectStatus(name, dir string, vms []ProjectStatusVM) ProjectStatus {
+	return ProjectStatus{Project: name, Dir: dir, VMs: nonNil(vms)}
+}
