@@ -52,7 +52,13 @@ image = "alpine-virt"
 
 func TestStatusJSON(t *testing.T) {
 	projectRoot(t, twoVMs)
-	if err := (&config.VM{Name: "myrepo-dev", Mode: "live", ISO: "alpine-virt.iso", RAM: 4096, CPUs: 4, SSHPort: 2200}).Save(); err != nil {
+	haveImage(t, os.Getenv("STOAT_HOME"), "alpine-virt-3.24.1-x86_64.iso")
+	// dev has applied docker, which twoVMs no longer declares, so it drifts
+	// by one field.
+	if err := (&config.VM{
+		Name: "myrepo-dev", Mode: "live", ISO: "isos/alpine-virt-3.24.1-x86_64.iso",
+		RAM: 4096, CPUs: 4, SSHPort: 2200, Recipes: []string{"docker"},
+	}).Save(); err != nil {
 		t.Fatal(err)
 	}
 	code, objs := runJSON(t, "status")
@@ -71,8 +77,13 @@ func TestStatusJSON(t *testing.T) {
 	if first["key"] != "dev" || first["name"] != "myrepo-dev" {
 		t.Errorf("first = %v", first)
 	}
-	if _, ok := first["drift"].([]any); !ok {
-		t.Errorf("drift = %#v, want an array, never null", first["drift"])
+	drift, ok := first["drift"].([]any)
+	if !ok || len(drift) != 1 {
+		t.Fatalf("drift = %#v, want one entry", first["drift"])
+	}
+	d, _ := drift[0].(map[string]any)
+	if d["field"] != "recipes" || d["from"] != "docker" || d["to"] != "" {
+		t.Errorf("drift[0] = %v", d)
 	}
 }
 
