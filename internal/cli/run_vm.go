@@ -83,16 +83,6 @@ func projectCell(v core.VM) string {
 
 func runUp(a *Args, stdout, stderr io.Writer) int {
 	if a.VM == "" {
-		// Reconcile every declaration before any of them starts. A VM whose
-		// boot fails must not leave a sibling declared later without the
-		// vm.toml that stoat status and stoat ls read: reconcile is cheap and
-		// idempotent, so running it for the whole project up front is safe,
-		// and only the start step itself needs to stop at the first failure.
-		for _, d := range a.Project.VMs {
-			if err := reconcileOne(a, d.Key, stdout); err != nil {
-				return a.fail(stdout, stderr, err)
-			}
-		}
 		return fanOut(a, stdout, stderr, func(name string) error {
 			return upOne(a, name, stdout, stderr)
 		})
