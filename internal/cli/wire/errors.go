@@ -53,6 +53,8 @@ const (
 	CodeDownloadStalled  Code = "download_stalled"
 	CodeChecksumMismatch Code = "checksum_mismatch"
 	CodeNoSuchImage      Code = "no_such_image"
+
+	CodeScreenshotFailed Code = "screenshot_failed"
 )
 
 // Codes returns every declared code, sorted. Built from the same string
@@ -70,6 +72,7 @@ func Codes() []Code {
 		CodeShareInvalid, CodeNoXattr,
 		CodeDownloadFailed, CodeDownloadStalled, CodeChecksumMismatch,
 		CodeNoSuchImage,
+		CodeScreenshotFailed,
 	}
 	slices.Sort(out)
 	return out
@@ -123,6 +126,8 @@ var codeTable = []struct {
 	{CodeDownloadStalled, iso.ErrDownloadStalled},
 	{CodeChecksumMismatch, iso.ErrChecksumMismatch},
 	{CodeNoSuchImage, iso.ErrNoSuchImage},
+	{CodeScreenshotFailed, qemu.ErrScreenshotFailed},
+	{CodeNotRunning, qemu.ErrNotRunning},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking
