@@ -62,6 +62,7 @@ func New(opts Options) *mcp.Server {
 	s.registerVM(server)
 	s.registerGuestRead(server)
 	s.registerGuestWrite(server)
+	s.registerExec(server)
 	server.AddReceivingMiddleware(s.rateLimit())
 	return server
 }

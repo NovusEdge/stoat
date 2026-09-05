@@ -830,3 +830,30 @@ type CopyResult struct {
 	Remote   string `json:"remote"`
 	ToRemote bool   `json:"to_remote"`
 }
+
+// JobStarted is the exec_bg tool's output.
+type JobStarted struct {
+	JobID string `json:"job_id"`
+	Dir   string `json:"dir"`
+}
+
+// JobStatus is the job_status tool's output.
+type JobStatus struct {
+	JobID    string `json:"job_id"`
+	State    string `json:"state"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// Job is one list_jobs row.
+type Job struct {
+	JobID   string    `json:"job_id"`
+	Argv    []string  `json:"argv"`
+	User    string    `json:"user"`
+	CWD     string    `json:"cwd,omitempty"`
+	Started time.Time `json:"started"`
+}
+
+// JobList is the list_jobs tool's output.
+type JobList struct {
+	Jobs []Job `json:"jobs"`
+}
