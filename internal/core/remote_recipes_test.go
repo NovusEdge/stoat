@@ -72,6 +72,42 @@ func TestRecipeUsersReturnsSortedVMNames(t *testing.T) {
 	}
 }
 
+func TestRemoveCheckedWithRecipeUsersDoesNotDeadlock(t *testing.T) {
+	coreRemoteRoot(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	src := coreRecipeRepo(t, "demo", "demo")
+	if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte("[recipes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scope, err := recipes.ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recipes.Add(scope, src, false); err != nil {
+		t.Fatal(err)
+	}
+	// A VM that lists any recipe makes core.List resolve manifests, which
+	// takes the scope lock RemoveChecked already holds.
+	v := &config.VM{Name: "other", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"xfce"}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- recipes.RemoveChecked(scope, "demo", func() ([]string, error) { return RecipeUsers("demo") })
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RemoveChecked() = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("RemoveChecked() blocked on its own scope lock")
+	}
+}
+
 func TestPlanApplyAndNeedsProvisionUseAFreshProjectCacheWithoutSync(t *testing.T) {
 	home := coreRemoteRoot(t)
 	project := t.TempDir()

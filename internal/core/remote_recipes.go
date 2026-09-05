@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -23,8 +24,12 @@ func SyncRecipes() error {
 }
 
 // RecipeUsers returns sorted VM names that list name in their recipe set.
+// It reads vm.toml only. recipes.RemoveChecked calls it while holding the
+// scope lock exclusively, and List resolves every VM's manifests through
+// recipes.ManifestFor, which takes that same lock on a second descriptor and
+// deadlocks the process.
 func RecipeUsers(name string) ([]string, error) {
-	vms, err := List()
+	vms, err := config.List()
 	if err != nil {
 		return nil, err
 	}
