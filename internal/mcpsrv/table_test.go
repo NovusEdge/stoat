@@ -75,17 +75,15 @@ var forbiddenInputFields = []string{"share", "base", "iso", "console_password", 
 // pending names tools a later task registers. Every entry is removed by the
 // task that adds the tool; Task 18 asserts the list is empty.
 //
-// Tasks 7 and 10 own the rest of this chunk's tools registered so far and
-// are gone from this map already: their tests assert real registration,
-// which does not exist yet, so TestEveryTableToolIsRegistered fails for
-// them until their implementer lands.
+// Tasks 7, 10 and 11 own the rest of this chunk's tools registered so far
+// and are gone from this map already: their tests assert real
+// registration, which does not exist yet, so TestEveryTableToolIsRegistered
+// fails for them until their implementer lands.
 var pending = map[string]string{
 	"list_guests": "Task 14", "guest_info": "Task 14", "recipe_schema": "Task 14",
 	"search_recipes": "Task 14", "add_recipe": "Task 15", "update_recipe": "Task 15",
 	"remove_recipe": "Task 15",
-	"write_file":    "Task 11", "copy_to": "Task 11",
-	"copy_from": "Task 11", "pkg_install": "Task 11", "svc": "Task 11",
-	"useradd": "Task 11", "exec": "Task 12", "exec_bg": "Task 12",
+	"exec":          "Task 12", "exec_bg": "Task 12",
 	"job_status": "Task 12", "job_output": "Task 12", "job_kill": "Task 12",
 	"list_jobs": "Task 12",
 }

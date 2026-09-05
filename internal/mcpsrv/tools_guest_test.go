@@ -112,3 +112,106 @@ func makeNames(n int) []string {
 	}
 	return out
 }
+
+func TestWriteFileSetsTheMode(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	calls := testutil.FakeSSH(t, `cat > /dev/null; true`)
+	res := callTool(t, "write_file", map[string]any{
+		"vm": "dev", "path": "/etc/app.conf", "content": "k=v\n", "mode": "0600",
+	})
+	if res.IsError {
+		t.Fatalf("write_file failed: %+v", res.Content)
+	}
+	got := calls.Calls()
+	if len(got) != 2 {
+		t.Fatalf("want a write then a chmod, got %d calls", len(got))
+	}
+	if !strings.Contains(got[0].Remote, "'tee' '/etc/app.conf'") {
+		t.Fatalf("write argv = %q", got[0].Remote)
+	}
+	if !strings.Contains(got[1].Remote, "'chmod' '0600' '/etc/app.conf'") {
+		t.Fatalf("chmod argv = %q", got[1].Remote)
+	}
+}
+
+func TestWriteFileAppends(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	calls := testutil.FakeSSH(t, `cat > /dev/null; true`)
+	callTool(t, "write_file", map[string]any{
+		"vm": "dev", "path": "/etc/app.conf", "content": "x", "append": true,
+	})
+	if !strings.Contains(calls.Calls()[0].Remote, "'tee' '-a'") {
+		t.Fatalf("append did not use tee -a: %q", calls.Calls()[0].Remote)
+	}
+}
+
+func TestWriteFileRefusesAtObserve(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "observe")
+	res := callTool(t, "write_file", map[string]any{"vm": "dev", "path": "/tmp/x", "content": "x"})
+	if !res.IsError {
+		t.Fatal("write_file ran at agent_access = observe")
+	}
+	raw, _ := json.Marshal(res.Content)
+	if !strings.Contains(string(raw), "needs manage") {
+		t.Fatalf("refusal did not name the level: %s", raw)
+	}
+}
+
+func TestSvcRefusesAnUnknownAction(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	if res := callTool(t, "svc", map[string]any{"vm": "dev", "name": "sshd", "action": "reload"}); !res.IsError {
+		t.Fatal("svc accepted an action outside the four verbs")
+	}
+}
+
+func TestSvcPassesTheNameAsAPositional(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	calls := testutil.FakeSSH(t, `true`)
+	callTool(t, "svc", map[string]any{"vm": "dev", "name": "sshd", "action": "restart"})
+	remote := calls.Calls()[0].Remote
+	// The template is the shell body and the name is $1, so a name that
+	// looks like shell syntax cannot become syntax.
+	if !strings.Contains(remote, `'stoat_svc' 'sshd'`) {
+		t.Fatalf("svc argv = %q", remote)
+	}
+}
+
+func TestPkgInstallRunsSetupThenInstall(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	calls := testutil.FakeSSH(t, `true`)
+	res := callTool(t, "pkg_install", map[string]any{"vm": "dev", "packages": []string{"curl", "jq"}})
+	if res.IsError {
+		t.Fatalf("pkg_install failed: %+v", res.Content)
+	}
+	got := calls.Calls()
+	if len(got) != 2 {
+		t.Fatalf("want setup then install, got %d calls", len(got))
+	}
+	if !strings.Contains(got[1].Remote, "'curl' 'jq'") {
+		t.Fatalf("install argv = %q", got[1].Remote)
+	}
+}
+
+func TestPkgInstallRefusesAFlagPackage(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	if res := callTool(t, "pkg_install", map[string]any{"vm": "dev", "packages": []string{"--force"}}); !res.IsError {
+		t.Fatal("pkg_install accepted a package name that reads as a flag")
+	}
+}
+
+func TestCopyToConfinesTheHostPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	writeVM(t, "dev", "manage")
+	res := callTool(t, "copy_to", map[string]any{"vm": "dev", "local": "/etc/passwd", "remote": "/tmp/x"})
+	if !res.IsError {
+		t.Fatal("copy_to accepted a host path outside the VM's shared directory")
+	}
+}
