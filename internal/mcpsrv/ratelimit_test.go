@@ -1,9 +1,12 @@
 package mcpsrv
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestRateLimiter(t *testing.T) {
@@ -78,4 +81,45 @@ func TestRateLimiter(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRateLimitMiddlewareRefusesABurst(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	ctx := context.Background()
+	srv := New(Options{Version: "test", Limits: Limits{ToolBurst: 2, ToolRate: 0.001, Burst: 100, Rate: 2}})
+	ct, st := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cs.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	for i := range 2 {
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "list_vms", Arguments: map[string]any{}})
+		if err != nil || res.IsError {
+			t.Fatalf("call %d refused: %v %+v", i, err, res)
+		}
+	}
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "list_vms", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatalf("the third call errored at the protocol level: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("the third call was not refused")
+	}
+	if txt, ok := res.Content[0].(*mcp.TextContent); !ok || !strings.Contains(txt.Text, "rate limit") {
+		t.Fatalf("refusal message = %+v, want a rate limit message", res.Content[0])
+	}
+	// A tool the caller has not touched still works, so the refusals spent
+	// no shared tokens.
+	if res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "doctor", Arguments: map[string]any{}}); err != nil || res.IsError {
+		t.Fatalf("doctor refused after list_vms hit its own limit: %v %+v", err, res)
+	}
 }
