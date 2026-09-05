@@ -30,7 +30,7 @@ name = %q
 [vms.dev]
 # image is the only required field: a catalog id from stoat images, or a path
 # to your own image, relative to this file.
-image = "ubuntu-24"
+image = "ubuntu-24.04"
 # Every field below takes stoat new's default when you delete it.
 cpus = 4
 ram = 4096
