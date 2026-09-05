@@ -19,6 +19,7 @@ capabilities = ["pkg"]                  # feeds recipe.toml's `requires`; the lo
 aliases  = ["bsd"]                      # extra keys a recipe's [scripts] map may use for this OS
 filename_hints = ["FreeBSD-"]           # recognise this OS in a BYO image filename
 seed_packages  = ["sudo"]               # packages the cloud-init seed assumes but the image may lack
+log_path = "/var/log/messages"          # tail_log's fallback when a unit and a path are both omitted; optional
 
 [pkg]
 setup   = "pkg update"                  # prelude's stoat_pkg_setup; empty means no refresh needed
@@ -41,8 +42,8 @@ skip_9p = true
 ## Field rules
 
 - Required: every top-level scalar and list except `installer`, `aliases`,
-  `filename_hints`; every `[pkg]` and `[svc]` key except `scaffold_setup`. A
-  missing one is `guest.toml: <name>: missing <field>`.
+  `filename_hints`, `log_path`; every `[pkg]` and `[svc]` key except
+  `scaffold_setup`. A missing one is `guest.toml: <name>: missing <field>`.
 - Unknown keys are an error: `<path>: unknown key "<key>"`.
 - `schema` must be present and equal to 1.
 - The loader appends `init` to `capabilities`. A file whose `capabilities`

@@ -12,6 +12,7 @@ capabilities = ["apk"]
 aliases = []
 filename_hints = ["alpine"]
 seed_packages = ["sudo"]
+log_path = "/var/log/messages"
 
 [pkg]
 setup = "apk update"
