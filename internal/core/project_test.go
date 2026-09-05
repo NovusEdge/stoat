@@ -1,8 +1,10 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/project"
@@ -207,6 +209,7 @@ func TestDiffOnAnUnchangedDeclarationIsEmpty(t *testing.T) {
 
 func TestDiffRefusesAnImageChange(t *testing.T) {
 	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\n")
+	haveImage(t, os.Getenv("STOAT_HOME"), "alpine-standard-3.24.1-x86_64.iso")
 	s, err := SpecFor(p, "dev")
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +218,7 @@ func TestDiffRefusesAnImageChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName),
-		[]byte("schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"deb13-cloud\"\n"), 0o644); err != nil {
+		[]byte("schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-standard\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	p2, err := project.Load(p.Dir)
@@ -223,12 +226,12 @@ func TestDiffRefusesAnImageChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Diff(p2, "dev")
-	if err == nil {
-		t.Fatal("Diff accepted an image change")
+	if !errors.Is(err, ErrImmutableDeclaration) {
+		t.Fatalf("err = %v, want ErrImmutableDeclaration", err)
 	}
-	want := "dev: image changed (alpine-virt -> deb13-cloud); run stoat rm dev and stoat up"
-	if err.Error() != want {
-		t.Errorf("err = %q, want %q", err.Error(), want)
+	if !strings.Contains(err.Error(), "dev: image changed (alpine-virt -> alpine-standard)") ||
+		!strings.Contains(err.Error(), "stoat rm dev") {
+		t.Errorf("err = %q, want the image-changed message with the stoat rm hint", err.Error())
 	}
 }
 
