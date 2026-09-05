@@ -220,7 +220,7 @@ func TestAddValidationFailurePreservesProjectState(t *testing.T) {
 	remoteRoot(t)
 	project := t.TempDir()
 	t.Chdir(project)
-	writeFile(t, filepath.Join(project, "stoat.toml"), "[vm]\nname = \"kept\"\n\n[recipes]\n")
+	writeFile(t, filepath.Join(project, "stoat.toml"), "[project]\nname = \"kept\"\n\n[recipes]\n")
 	if err := os.Chmod(filepath.Join(project, "stoat.toml"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestProjectAddPreservesGitignoreAndLeavesNoRootCoordinationFile(t *testing.
 	remoteRoot(t)
 	project := t.TempDir()
 	t.Chdir(project)
-	writeFile(t, filepath.Join(project, "stoat.toml"), "[vm]\nname = \"keep\"\n\n[recipes]\n")
+	writeFile(t, filepath.Join(project, "stoat.toml"), "[project]\nname = \"keep\"\n\n[recipes]\n")
 	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func setupTransactionalAdd(t *testing.T) (Scope, string, transactionSnapshot) {
 	project := t.TempDir()
 	t.Chdir(project)
 	projectPath := filepath.Join(project, "stoat.toml")
-	writeFile(t, projectPath, "[vm]\nname = \"keep\"\n\n[recipes]\n")
+	writeFile(t, projectPath, "[project]\nname = \"keep\"\n\n[recipes]\n")
 	if err := os.Chmod(projectPath, 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,8 @@ just setup      # builds, installs to ~/.local/bin, reports missing host deps
 just dev        # runs the TUI against a scratch STOAT_HOME
 ```
 
-`just setup` also installs the git hooks.
+`just setup` also installs the git hooks. A repository with a `stoat.toml`
+declares its own VMs; run `stoat up` in it to build them.
 
 Go 1.26 (pinned in `go.mod`), `just`, and for anything that boots a VM:
 KVM, `qemu-system-x86_64`, `qemu-img`, `ssh`. `stoat doctor` lists what is

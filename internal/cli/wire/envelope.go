@@ -123,6 +123,13 @@ func (e *Emitter) ResultErr(cmd string, errInfo *ErrorInfo) error {
 	return e.Result(cmd, false, nil, errInfo)
 }
 
+// ResultOKCode emits a terminal result whose ok flag the caller decides. A
+// project fan-out carries a full per-VM report even when one VM failed, so it
+// cannot use ResultErr, which carries an error object and no data.
+func (e *Emitter) ResultOKCode(cmd string, data any, ok bool) error {
+	return e.Result(cmd, ok, data, nil)
+}
+
 func (e *Emitter) write(env envelope) error {
 	if err := e.enc.Encode(env); err != nil {
 		return err

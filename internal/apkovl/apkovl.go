@@ -11,6 +11,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/keys"
@@ -214,6 +215,11 @@ func Build(v *config.VM) error {
 	if v.Share != "" {
 		fstab += HostMount9p.FstabLine()
 		b.dir("mnt/host", 0o755)
+	}
+	for _, s := range v.Shares {
+		m := Mount9pFor(s)
+		fstab += m.FstabLine()
+		b.dir(strings.TrimPrefix(m.Dir, "/"), 0o755)
 	}
 	// The initramfs's default-boot-services set doesn't include localmount,
 	// so without this symlink the shares would only mount as a side effect

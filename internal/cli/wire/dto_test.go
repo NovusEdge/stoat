@@ -13,7 +13,7 @@ import (
 
 func TestVMGolden(t *testing.T) {
 	got := marshal(t, FromVM(sampleVM(), true))
-	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"window"}`
+	want := `{"name":"work","os":"alpine","mode":"live","backend":"apkovl","state":"running","cpus":4,"ram_mb":4096,"disk":"8G","share":"/home/u/src","recipes":["xfce"],"ssh_port":2222,"ssh_user":"root","installed":false,"forwards":[{"host_port":8080,"guest_port":80}],"allow_exec":true,"display":"window","project":"","key":"","project_missing":false}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

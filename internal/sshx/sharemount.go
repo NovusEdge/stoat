@@ -21,16 +21,19 @@ const guestFstabPath = "/etc/fstab"
 //
 // A live VM already mounts through the apkovl overlay's own fstab (see
 // apkovl.Build). A cloud VM seeds its mounts through cloud-init instead. So
-// this only fires for Mode "disk", and only when Share is configured: with
-// no Share there is no host mount to add, by this feature's design.
-//
-// qemu.Args attaches the work virtfs to every VM unconditionally, so a disk
-// VM gets both tags once Share makes this step run at all.
+// this only fires for Mode "disk".
 func shareMountTags(v *config.VM) []apkovl.Mount9p {
-	if v.Mode != "disk" || v.Share == "" {
+	if v.Mode != "disk" {
 		return nil
 	}
-	return []apkovl.Mount9p{apkovl.HostMount9p, apkovl.WorkMount9p}
+	var out []apkovl.Mount9p
+	if v.Share != "" {
+		out = append(out, apkovl.HostMount9p, apkovl.WorkMount9p)
+	}
+	for _, s := range v.Shares {
+		out = append(out, apkovl.Mount9pFor(s))
+	}
+	return out
 }
 
 // fstabEnsureLine returns the sh fragment that appends m's fstab line to

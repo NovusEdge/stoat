@@ -193,6 +193,18 @@ type VM struct {
 	// config.Load's parse error so a caller can show the user why, not just
 	// that it's broken.
 	Error string
+
+	// Project is the absolute directory of the stoat.toml that declared this
+	// VM, empty for a VM created by stoat new. ProjectMissing is true when
+	// that directory is gone: the VM still lists and still runs, and ls says
+	// the declaration is no longer reachable.
+	Project        string
+	ProjectMissing bool
+
+	// Key is the declaration key this VM answers to, filled by AttachKeys
+	// from the active project. It is not in vm.toml: only a loaded stoat.toml
+	// knows it, and two projects could name the same VM differently.
+	Key string
 }
 
 // A VM's IDENTITY is its DIRECTORY under the data root. It is never the
@@ -277,6 +289,8 @@ func fromConfigUnchecked(v *config.VM) VM {
 		Installed:       v.Installed,
 		AllowExec:       v.AllowExec,
 		AgentAccess:     v.AgentAccess,
+		Project:         v.Project,
+		ProjectMissing:  v.Project != "" && !dirExists(v.Project),
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),
@@ -286,6 +300,14 @@ func fromConfigUnchecked(v *config.VM) VM {
 			MonitorSocket: v.MonitorPath(),
 		},
 	}
+}
+
+// dirExists answers whether a VM's project directory is still there. A stat
+// error of any kind counts as gone: an unreadable path is no more usable than
+// an absent one.
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 // fromConfigChecked adds the stored recipe state that requires reading the

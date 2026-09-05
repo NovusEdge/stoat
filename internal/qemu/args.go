@@ -138,6 +138,10 @@ func Args(v *config.VM, graphical bool) []string {
 	}
 	a = append(a, "-virtfs",
 		fmt.Sprintf("local,path=%s,mount_tag=work,security_model=mapped-xattr", v.WorkDir()))
+	for _, s := range v.Shares {
+		a = append(a, "-virtfs",
+			fmt.Sprintf("local,path=%s,mount_tag=%s,security_model=mapped-xattr", s.Host, s.Tag))
+	}
 
 	// Mode owns the boot media: the qcow2, the installer ISO, the boot
 	// order. Provisioning is the backend's job, below.

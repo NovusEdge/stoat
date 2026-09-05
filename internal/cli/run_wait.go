@@ -14,6 +14,13 @@ import (
 // ctx, so a stopped VM asked to become reachable fails fast rather than
 // waiting out the whole timeout.
 func runWait(a *Args, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		return fanOut(a, stdout, stderr, func(name string) error {
+			ctx, cancel := context.WithTimeout(context.Background(), a.Timeout)
+			defer cancel()
+			return core.Wait(ctx, name, a.Until)
+		})
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), a.Timeout)
 	defer cancel()
 

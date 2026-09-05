@@ -331,9 +331,6 @@ func TestParseApplyOnly(t *testing.T) {
 	if len(a.Only) != 2 || a.Only[0] != "a.sh" || a.Only[1] != "b.sh" {
 		t.Errorf("Only = %v, want [a.sh b.sh]", a.Only)
 	}
-	if _, err := Parse([]string{"apply"}); err == nil {
-		t.Error("apply with no vm name was accepted")
-	}
 }
 
 func TestApplyMissingVMIsNotFound(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/project"
 )
 
 // class is a tool's annotation class. The four classes are the taxonomy in
@@ -52,6 +53,16 @@ const (
 type srv struct {
 	opts Options
 	lim  *limiter
+
+	// proj is the stoat.toml in the server's cwd, nil outside a project.
+	// Read once in New: a client that has listed VMs must not find the scope
+	// changed under it by a later chdir.
+	proj *project.Project
+
+	// projErr holds a stoat.toml that will not parse. New returns no error,
+	// so the failure surfaces from the tools that need the project rather
+	// than taking the whole server down over a file most tools never read.
+	projErr error
 }
 
 // New builds the server with every tool registered. The caller runs it over
@@ -61,6 +72,13 @@ func New(opts Options) *mcp.Server {
 		opts.Limits = DefaultLimits()
 	}
 	s := &srv{opts: opts, lim: newLimiter(opts.Limits)}
+	p, ok, err := project.Find()
+	switch {
+	case err != nil:
+		s.projErr = err
+	case ok:
+		s.proj = p
+	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "stoat", Version: opts.Version}, nil)
 	s.registerRead(server)
 	s.registerVM(server)
@@ -68,6 +86,7 @@ func New(opts Options) *mcp.Server {
 	s.registerGuestRead(server)
 	s.registerGuestWrite(server)
 	s.registerExec(server)
+	s.registerProject(server)
 	// redact must be receiving middleware, not sending: a Server's sending
 	// method handler only covers requests the server itself initiates
 	// (sampling, elicitation), never the CallToolResult built for an

@@ -10,6 +10,7 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/project"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -18,11 +19,24 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
+	core.AttachKeys(vms, a.Project)
+	if a.Clear {
+		if a.Project == nil {
+			return a.failMsg(stdout, stderr, core.ErrNotFound, "--project needs a "+project.FileName+" in this directory")
+		}
+		var kept []core.VM
+		for _, v := range vms {
+			if v.Project == a.Project.Dir {
+				kept = append(kept, v)
+			}
+		}
+		vms = kept
+	}
 	if a.JSON {
 		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
-	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
+	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
 	// core.List() sorts every VM, broken ones included, together by name,
 	// so a broken VM can interleave alphabetically with good ones. The
 	// original two calls (config.List then config.ListBroken) printed every
@@ -38,8 +52,8 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State == core.StateRunning {
 			state = "running"
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %d\n",
-			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort)
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %-6d %s\n",
+			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
@@ -48,13 +62,48 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State != core.StateBroken {
 			continue
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %s\n",
-			v.Name, "-", colorState("broken", 8), "-", "-", "-", oneLine(v.Error))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %-6s %s\n",
+			v.Name, "-", colorState("broken", 8), "-", "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
 }
 
+// projectCell renders the PROJECT column: the declaring directory, marked
+// when it is gone, and "-" for a VM stoat new created.
+func projectCell(v core.VM) string {
+	switch {
+	case v.Project == "":
+		return "-"
+	case v.ProjectMissing:
+		return v.Project + " (missing)"
+	default:
+		return v.Project
+	}
+}
+
 func runUp(a *Args, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		// Reconcile every declaration before starting any. A start failure
+		// stops the fan-out below (the spec's contract for a half-built
+		// project), but by then every declared VM already exists: a later
+		// declaration's presence must not depend on an earlier one's start
+		// succeeding.
+		for _, d := range a.Project.VMs {
+			if err := reconcileOne(a, d.Key, stdout); err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+		}
+		return fanOut(a, stdout, stderr, func(name string) error {
+			return upOne(a, name, stdout, stderr)
+		})
+	}
+	if a.Project != nil {
+		if key, ok := a.Project.KeyFor(a.VM); ok {
+			if err := reconcileOne(a, key, stdout); err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+		}
+	}
 	// core.Get first: a caller must learn "no such VM" or "broken" before
 	// any progress line prints, not after.
 	v, err := core.Get(a.VM)
@@ -169,6 +218,43 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
+// reconcileOne makes one declared VM match stoat.toml before it starts. A
+// change that needs a restart is already saved; the guest sees it at the next
+// down and up, and that is what the line says.
+func reconcileOne(a *Args, key string, stdout io.Writer) error {
+	r, err := core.Reconcile(a.Project, key)
+	if err != nil {
+		return err
+	}
+	if a.Quiet {
+		return nil
+	}
+	if r.Created {
+		fmt.Fprintf(stdout, "created %s from %s\n", r.Name, project.FileName)
+		return nil
+	}
+	for _, d := range r.Drift {
+		suffix := ""
+		if d.NeedsRestart {
+			suffix = " (applies at the next down and up)"
+		}
+		fmt.Fprintf(stdout, "%s: %s %s -> %s%s\n", d.Key, d.Field, d.From, d.To, suffix)
+	}
+	return nil
+}
+
+// upOne is runUp's body for one VM, used by the no-argument fan-out. It
+// returns an error rather than an exit code, which is what fanOut collects.
+func upOne(a *Args, name string, stdout, stderr io.Writer) error {
+	sub := *a
+	sub.VM = name
+	sub.JSON = false // the fan-out emits the single terminal result line
+	if code := runUp(&sub, stdout, stderr); code != ExitOK {
+		return fmt.Errorf("%s: up failed", name)
+	}
+	return nil
+}
+
 // printDisplay says where a VM's screen is and how to reach it.
 //
 // This prints on every start, not only the surprising one, because the
@@ -203,6 +289,16 @@ func printDisplay(w io.Writer, d core.Display) {
 }
 
 func runDown(a *Args, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		return fanOut(a, stdout, stderr, func(name string) error {
+			sub := *a
+			sub.VM, sub.JSON = name, false
+			if code := runDown(&sub, stdout, stderr); code != ExitOK {
+				return fmt.Errorf("%s is not running", name)
+			}
+			return nil
+		})
+	}
 	v, err := core.Get(a.VM)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
@@ -238,6 +334,16 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 }
 
 func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		return fanOut(a, stdout, stderr, func(name string) error {
+			sub := *a
+			sub.VM, sub.JSON = name, false
+			if code := runRM(&sub, stdin, stdout, stderr); code != ExitOK {
+				return fmt.Errorf("%s was not deleted", name)
+			}
+			return nil
+		})
+	}
 	v, err := core.Get(a.VM)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
@@ -268,6 +374,10 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 // what came back. There was no create subcommand before core existed, because
 // everything it needed lived inside the TUI's form.
 func runCreate(a *Args, stdout, stderr io.Writer) int {
+	if a.Project != nil && !a.Global {
+		return a.failMsg(stdout, stderr, core.ErrInvalidSpec,
+			"a "+project.FileName+" is present; declare the VM there and run stoat up, or pass --global")
+	}
 	set, _, secrets := paramMaps(a.Params)
 	a.Spec.Params = set
 	a.Spec.Secrets = secrets

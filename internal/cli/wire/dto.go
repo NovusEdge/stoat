@@ -108,6 +108,13 @@ type VM struct {
 	// already wrong.
 	Display string `json:"display"`
 	Error   string `json:"error,omitempty"`
+
+	// Project is the directory of the stoat.toml that declared this VM, and
+	// Key the declaration key. Both are empty for a VM created by stoat new.
+	// ProjectMissing says the directory is gone; the VM still runs.
+	Project        string `json:"project"`
+	Key            string `json:"key"`
+	ProjectMissing bool   `json:"project_missing"`
 }
 
 // RecipeState is one recipe's redacted per-VM state.
@@ -202,6 +209,10 @@ func FromVM(v core.VM, graphical bool) VM {
 		// PATH, which DisplayFor does once per VM it is handed.
 		Display: core.DisplayKind(v, graphical),
 		Error:   v.Error,
+
+		Project:        v.Project,
+		Key:            v.Key,
+		ProjectMissing: v.ProjectMissing,
 	}
 }
 
@@ -889,4 +900,79 @@ type MCPDoctor struct {
 // JobList is the list_jobs tool's output.
 type JobList struct {
 	Jobs []Job `json:"jobs"`
+}
+
+// InitResult is stoat init's answer: where the file landed and whether the
+// gitignore needed a line.
+type InitResult struct {
+	Path             string `json:"path"`
+	Project          string `json:"project"`
+	GitignoreUpdated bool   `json:"gitignore_updated"`
+}
+
+// ProjectRunVM is one VM's outcome in a no-argument project command.
+// Status is "ok", "error" or "skipped"; skipped means a VM earlier in
+// declaration order failed and this one was never attempted.
+type ProjectRunVM struct {
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// ProjectRun is a no-argument project command's answer: one entry per
+// declared VM, in declaration order.
+type ProjectRun struct {
+	Project string         `json:"project"`
+	VMs     []ProjectRunVM `json:"vms"`
+}
+
+func FromProjectRun(name string, vms []ProjectRunVM) ProjectRun {
+	return ProjectRun{Project: name, VMs: nonNil(vms)}
+}
+
+// Drift is core.Drift for the wire: one field where stoat.toml and vm.toml
+// disagree.
+type Drift struct {
+	Field        string `json:"field"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	NeedsRestart bool   `json:"needs_restart"`
+}
+
+func FromDrift(d core.Drift) Drift {
+	return Drift{Field: d.Field, From: d.From, To: d.To, NeedsRestart: d.NeedsRestart}
+}
+
+func FromDrifts(ds []core.Drift) []Drift {
+	out := make([]Drift, len(ds))
+	for i, d := range ds {
+		out[i] = FromDrift(d)
+	}
+	return nonNil(out)
+}
+
+// ProjectStatusVM is one declaration's line in stoat status. State is
+// "missing" for a declared VM that has not been created; every other value is
+// a core.State. Error carries core.Diff's message for an immutable-field
+// mismatch; Drift is empty whenever Error is set, since Diff refuses to
+// compare the rest of the fields once image or disk disagrees.
+type ProjectStatusVM struct {
+	Key    string  `json:"key"`
+	Name   string  `json:"name"`
+	State  string  `json:"state"`
+	Health string  `json:"health"`
+	Drift  []Drift `json:"drift"`
+	Error  string  `json:"error,omitempty"`
+}
+
+// ProjectStatus is stoat status, and the MCP project_status tool.
+type ProjectStatus struct {
+	Project string            `json:"project"`
+	Dir     string            `json:"dir"`
+	VMs     []ProjectStatusVM `json:"vms"`
+}
+
+func FromProjectStatus(name, dir string, vms []ProjectStatusVM) ProjectStatus {
+	return ProjectStatus{Project: name, Dir: dir, VMs: nonNil(vms)}
 }

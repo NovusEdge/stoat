@@ -71,6 +71,15 @@ type Spec struct {
 	Params  map[string]map[string]string
 	Secrets config.Secrets
 
+	// Project is the absolute directory of the stoat.toml that declared this
+	// VM. Empty for stoat new. plan writes it to vm.toml unchanged.
+	Project string
+
+	// Shares are the project's 9p exports, already resolved and checked by
+	// project.Shares. plan does not validate them again: containment is a
+	// question about the project directory, which core cannot see.
+	Shares []config.Share
+
 	// Display is the screen preference to record in vm.toml: "" or "auto"
 	// (default), "window", or "vnc". validateDisplay is the single check
 	// for the value; plan applies it.
@@ -269,6 +278,8 @@ func plan(s Spec) (*config.VM, error) {
 		AllowExec:   allowExec,
 		AgentAccess: agentAccess,
 		Display:     s.Display,
+		Project:     s.Project,
+		Shares:      s.Shares,
 	}
 
 	if img.backend == "cloudinit" {

@@ -108,6 +108,17 @@ func (i image) isoField() string {
 	return i.abs
 }
 
+// id names the image for a drift comparison: the catalog id when the image
+// came from the catalog, the absolute path otherwise. A BYO image has no
+// catalog id, so the path is the only stable identifier to compare against a
+// re-declared vms.<key>.image.
+func (i image) id() string {
+	if i.entry != nil {
+		return i.entry.ID
+	}
+	return i.abs
+}
+
 // resolveImage turns Spec.Image into a concrete file. It accepts a catalog
 // entry ID, a bare filename under isos/, or an absolute path to anything.
 //

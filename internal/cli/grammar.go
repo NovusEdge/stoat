@@ -32,9 +32,12 @@ type grammar struct {
 	// contract, and so exec's guest command keeps its own --json.
 	Quiet bool `short:"q" name:"quiet" aliases:"no-interactive" help:"suppress progress chatter"`
 
+	Init   initCmd   `cmd:"" help:"write a stoat.toml for this directory"`
+	Status statusCmd `cmd:"" help:"one line per declared VM: state, health and drift"`
+
 	LS      lsCmd      `cmd:"" name:"ls" help:"list VMs, one line per VM"`
 	Get     getCmd     `cmd:"" help:"show one VM"`
-	Create  createCmd  `cmd:"" help:"create a VM without starting it"`
+	Create  createCmd  `cmd:"" aliases:"new" help:"create a VM without starting it"`
 	Update  updateCmd  `cmd:"" help:"change a stopped VM; only the flags you pass change"`
 	Up      upCmd      `cmd:"" help:"start a VM"`
 	Down    downCmd    `cmd:"" help:"stop a VM (graceful)"`
@@ -92,7 +95,15 @@ type mcpDoctorCmd struct{}
 
 type helpCmd struct{}
 
-type lsCmd struct{}
+type lsCmd struct {
+	Project bool `help:"only VMs declared by the stoat.toml in this directory"`
+}
+
+type statusCmd struct{}
+
+type initCmd struct {
+	Name string `help:"project name; defaults to the directory name"`
+}
 type imagesCmd struct{}
 type doctorCmd struct{}
 type versionCmd struct{}
@@ -102,12 +113,12 @@ type getCmd struct {
 }
 
 type upCmd struct {
-	VM      string `arg:"" help:"vm name"`
+	VM      string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	NoApply bool   `name:"no-apply" aliases:"no-provision" help:"start only; skip the automatic post-boot apply"`
 }
 
 type downCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 }
 
 type sshCmd struct {
@@ -119,7 +130,7 @@ type sshCmdCmd struct {
 }
 
 type rmCmd struct {
-	VM  string `arg:"" help:"vm name"`
+	VM  string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	Yes bool   `short:"y" help:"skip the delete confirmation"`
 }
 
@@ -146,6 +157,11 @@ type createCmd struct {
 	// --agent-access always wins over this alias.
 	AllowExec   *bool   `name:"allow-exec" hidden:"" help:"alias of --agent-access exec (true) or manage (false)"`
 	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
+
+	// Global creates a VM outside the project even when a stoat.toml is
+	// present. Without it, a create at project scope is refused: a VM that
+	// exists only on one machine is exactly what stoat.toml removes.
+	Global bool `help:"create outside the project even inside one"`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.
@@ -227,14 +243,14 @@ type pruneCmd struct {
 }
 
 type waitCmd struct {
-	VM      string        `arg:"" help:"vm name"`
+	VM      string        `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	Until   string        `enum:"reachable,applied,stopped" default:"reachable" help:"state to wait for"`
 	Healthy bool          `help:"wait for every applied recipe's health check to pass"`
 	Timeout time.Duration `default:"2m" help:"give up after this long"`
 }
 
 type applyCmd struct {
-	VM     string   `arg:"" help:"vm name"`
+	VM     string   `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	Only   []string `help:"subset of the VM's own recipes"`
 	DryRun bool     `name:"dry-run" help:"print what would run without running it"`
 }
@@ -334,7 +350,10 @@ type screenshotCmd struct {
 func (g *grammar) toArgs(path string) (*Args, error) {
 	a := &Args{Cmd: path, Quiet: g.Quiet}
 	switch path {
-	case "ls", "images", "doctor", "version":
+	case "ls":
+		a.Clear = g.LS.Project
+
+	case "images", "doctor", "version", "status":
 
 	case "help":
 		// The `help` COMMAND has to render the text itself; only the -h/--help
@@ -354,6 +373,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "create":
 		c := g.Create
 		a.VM = c.Name
+		a.Global = c.Global
 		// Absent --allow-exec keeps Spec.AllowExec's own default of true
 		// (see Spec.AllowExec's doc comment); given, it also sets the
 		// access level, per --allow-exec's alias contract.
@@ -489,6 +509,9 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "pull":
 		a.VM = g.Pull.ID
 
+	case "init":
+		a.Tag = g.Init.Name
+
 	case "snapshot":
 		// The mutual exclusion of --restore and --delete is kong's, via
 		// xor:"action"; only the "needs a tag" rule is left here.
@@ -593,7 +616,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "mcp install":
 		i := g.MCP.Install
 		a.Cmd, a.Sub = "mcp", "install"
-		a.Client, a.Project, a.Print = i.Client, i.Project, i.Print
+		a.Client, a.InstallProject, a.Print = i.Client, i.Project, i.Print
 
 	case "mcp doctor":
 		a.Cmd, a.Sub = "mcp", "doctor"

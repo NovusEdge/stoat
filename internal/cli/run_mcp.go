@@ -27,7 +27,7 @@ func runMCP(a *Args, version string, stdout, stderr io.Writer) int {
 		}
 		return ExitOK
 	case "install":
-		report, err := mcpsrv.Install(a.Client, mcpsrv.InstallOpts{Project: a.Project, Print: a.Print})
+		report, err := mcpsrv.Install(a.Client, mcpsrv.InstallOpts{Project: a.InstallProject, Print: a.Print})
 		if err != nil {
 			return a.fail(stdout, stderr, err)
 		}

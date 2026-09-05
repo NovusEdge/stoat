@@ -70,21 +70,23 @@ func TestParse(t *testing.T) {
 		// compares with DeepEqual and cannot sensibly hardcode.
 
 		{"up", []string{"up", "alpine"}, &Args{Cmd: "up", VM: "alpine"}, false},
-		{"up missing name", []string{"up"}, nil, true},
+		// A missing name is a project-scope fan-out, not a parse error; see
+		// resolveScope and TestMissingVMArgumentOutsideAProjectIsUsage.
+		{"up missing name", []string{"up"}, &Args{Cmd: "up"}, false},
 		{"up too many args", []string{"up", "a", "b"}, nil, true},
 		{"up quiet", []string{"up", "-q", "alpine"}, &Args{Cmd: "up", VM: "alpine", Quiet: true}, false},
 		{"up --no-apply", []string{"up", "--no-apply", "alpine"}, &Args{Cmd: "up", VM: "alpine", NoApply: true}, false},
 		{"up --no-provision (hidden alias)", []string{"up", "--no-provision", "alpine"}, &Args{Cmd: "up", VM: "alpine", NoApply: true}, false},
 
 		{"down", []string{"down", "alpine"}, &Args{Cmd: "down", VM: "alpine"}, false},
-		{"down missing name", []string{"down"}, nil, true},
+		{"down missing name", []string{"down"}, &Args{Cmd: "down"}, false},
 
 		{"ssh", []string{"ssh", "alpine"}, &Args{Cmd: "ssh", VM: "alpine"}, false},
 		{"ssh missing name", []string{"ssh"}, nil, true},
 
 		// provision is a kong alias of apply, so it parses to Cmd "apply".
 		{"provision", []string{"provision", "alpine"}, &Args{Cmd: "apply", VM: "alpine"}, false},
-		{"provision missing name", []string{"provision"}, nil, true},
+		{"provision missing name", []string{"provision"}, &Args{Cmd: "apply"}, false},
 		{"provision quiet alias", []string{"provision", "--no-interactive", "alpine"}, &Args{Cmd: "apply", VM: "alpine", Quiet: true}, false},
 
 		{"rm", []string{"rm", "alpine"}, &Args{Cmd: "rm", VM: "alpine"}, false},
@@ -94,7 +96,7 @@ func TestParse(t *testing.T) {
 		// TestParseRMAcceptsFlagsEitherSide.
 		{"rm name then -y", []string{"rm", "alpine", "-y"}, &Args{Cmd: "rm", VM: "alpine", Yes: true}, false},
 		{"rm two names", []string{"rm", "alpine", "extra"}, nil, true},
-		{"rm missing name", []string{"rm"}, nil, true},
+		{"rm missing name", []string{"rm"}, &Args{Cmd: "rm"}, false},
 		{"rm quiet and yes", []string{"rm", "-q", "-y", "alpine"}, &Args{Cmd: "rm", VM: "alpine", Quiet: true, Yes: true}, false},
 
 		{"logs default", []string{"logs"}, &Args{Cmd: "logs", N: 50, Which: core.WhichConsole}, false},
@@ -351,11 +353,11 @@ func TestRunLSOutput(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("got %d lines, want 3 (header + good + broken): %q", len(lines), out.String())
 	}
-	wantHeader := fmt.Sprintf("%-15s %-5s %-8s %-5s %-6s %s", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH")
+	wantHeader := fmt.Sprintf("%-15s %-5s %-8s %-5s %-6s %-6s %s", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
 	if lines[0] != wantHeader {
 		t.Errorf("header = %q, want %q", lines[0], wantHeader)
 	}
-	wantGood := fmt.Sprintf("%-15s %-5s %s %-5d %-6d %d", "good", "live", "stopped ", 2, 1024, 2200)
+	wantGood := fmt.Sprintf("%-15s %-5s %s %-5d %-6d %-6d %s", "good", "live", "stopped ", 2, 1024, 2200, "-")
 	if lines[1] != wantGood {
 		t.Errorf("good row = %q, want %q", lines[1], wantGood)
 	}
