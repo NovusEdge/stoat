@@ -33,7 +33,7 @@ from .errors import ContractMismatch, StoatCrashed, StoatError
 # Recipe lost label, target_os and shared. There is no v1 path on either side;
 # a server built for v1 refuses to start against a v2 binary and vice versa,
 # which is the entire point of checking this at startup.
-EXPECTED_CONTRACT = 2
+EXPECTED_CONTRACT = 3
 
 # Non-terminal event types we understand. Anything else is skipped per rule 3.
 EVENT_PROGRESS = "progress"
