@@ -129,6 +129,18 @@ type Args struct {
 	// nil pointer, and `--share ""` is a pointer to the empty string.
 	Patch   core.Patch
 	Changed []string
+	Params  []ParamEdit
+}
+
+// ParamEdit is one recipe parameter edit parsed from create or update flags.
+// Secret values are resolved at the run boundary, not while Parse interprets
+// argv, so parsing remains free of prompts and environment reads.
+type ParamEdit struct {
+	Recipe string
+	Param  string
+	Value  string
+	Secret bool
+	Unset  bool
 }
 
 // usageError marks a Parse failure as an exit-2 condition. Every Parse

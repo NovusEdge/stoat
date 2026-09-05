@@ -53,7 +53,10 @@ type Patch struct {
 	// the list untouched, matching every other field's "nil means don't
 	// touch" rule; there is no other way to tell "clear the list" and
 	// "didn't mention it" apart with a bare []string.
-	Recipes *[]string
+	Recipes     *[]string
+	SetParams   map[string]map[string]string
+	UnsetParams map[string][]string
+	Secrets     config.Secrets
 
 	// Installed is meaningful only for a disk-mode VM: it tracks whether the OS
 	// is installed to disk.qcow2 yet. qemu.Start flips it true once disk.qcow2

@@ -35,11 +35,12 @@ type PortForward struct {
 // with an empty string, never equal to a current script's hash, so that
 // recipe re-runs once and then carries a real hash from then on.
 type AppliedRecipe struct {
-	Version string            `toml:"version"`
-	Hash    string            `toml:"hash"`
-	At      time.Time         `toml:"at"`
-	Outputs map[string]string `toml:"outputs,omitempty" comment:"written by stoat; do not edit"`
-	Health  string            `toml:"health"`
+	Version    string            `toml:"version"`
+	Hash       string            `toml:"hash"`
+	ScriptHash string            `toml:"script_hash"`
+	At         time.Time         `toml:"at"`
+	Outputs    map[string]string `toml:"outputs,omitempty" comment:"written by stoat; do not edit"`
+	Health     string            `toml:"health"`
 }
 
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.

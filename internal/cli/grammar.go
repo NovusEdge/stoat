@@ -111,6 +111,8 @@ type createCmd struct {
 	Share           string   `help:"host directory to expose in the guest"`
 	ConsolePassword string   `help:"console password; \"random\" generates one"`
 	Recipes         []string `help:"recipe names to record on the VM"`
+	Set             []string `help:"set a recipe param: <recipe>.<param>=<value>"`
+	Secret          []string `help:"set a secret recipe param"`
 	// default:"true" is load-bearing, not decoration: without it kong treats
 	// an absent --allow-exec the same as an explicit --allow-exec=false,
 	// since a bare bool flag's zero value is false. With it, the flag must
@@ -129,6 +131,9 @@ type updateCmd struct {
 	Disk    *string   `help:"disk size, absolute only and grow-only (16G)"`
 	Share   *string   `help:"host directory to expose in the guest; empty clears it"`
 	Recipes *[]string `help:"replace the recipe list; empty clears it"`
+	Set     []string  `help:"set a recipe param: <recipe>.<param>=<value>"`
+	Unset   []string  `help:"clear a recipe param back to its manifest default"`
+	Secret  []string  `help:"set a secret recipe param"`
 }
 
 type cloneCmd struct {

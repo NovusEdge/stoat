@@ -67,6 +67,8 @@ type Spec struct {
 	Disk    string // qemu-img size, absolute only ("8G", never "+8G")
 	Share   string
 	Recipes []string
+	Params  map[string]map[string]string
+	Secrets config.Secrets
 
 	// Display is the screen preference to record in vm.toml: "" or "auto"
 	// (default), "window", or "vnc". validateDisplay is the single check

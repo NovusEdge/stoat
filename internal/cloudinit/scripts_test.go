@@ -163,3 +163,95 @@ func TestWrapScriptsRunsSetupFirst(t *testing.T) {
 		t.Errorf("prelude not after the shebang:\n%s", got)
 	}
 }
+
+func TestWrapScriptsNamespacesSecretsAndRemovesTheSecretFileLast(t *testing.T) {
+	body := WrapScripts([]Script{
+		{
+			Name: "docker", Content: "#!/bin/sh\necho docker\n",
+			Env:     []string{"STOAT_RECIPE=docker", "STOAT_PARAM_USER=dev"},
+			Secrets: map[string]string{"authkey": "docker-secret"},
+		},
+		{
+			Name: "tailscale", Content: "#!/bin/sh\necho tailscale\n",
+			Env:     []string{"STOAT_RECIPE=tailscale"},
+			Secrets: map[string]string{"authkey": "tailscale-secret"},
+		},
+	}, "")
+	f := parseWrapped(t, body)
+
+	var secretFile *struct {
+		Path        string
+		Permissions string
+		Content     string
+	}
+	for i := range f.WriteFiles {
+		wf := f.WriteFiles[i]
+		if wf.Path == SecretsEnvPath {
+			copy := struct {
+				Path        string
+				Permissions string
+				Content     string
+			}{wf.Path, wf.Permissions, wf.Content}
+			secretFile = &copy
+		}
+	}
+	if secretFile == nil {
+		t.Fatalf("no %s write_files entry:\n%s", SecretsEnvPath, body)
+	}
+	if secretFile.Permissions != "0600" {
+		t.Errorf("secrets permissions = %q, want 0600", secretFile.Permissions)
+	}
+	for _, want := range []string{
+		"STOAT_PARAM_DOCKER_AUTHKEY", "docker-secret",
+		"STOAT_PARAM_TAILSCALE_AUTHKEY", "tailscale-secret",
+	} {
+		if !strings.Contains(secretFile.Content, want) {
+			t.Errorf("secret file missing %q:\n%s", want, secretFile.Content)
+		}
+	}
+	if len(f.Runcmd) != 3 {
+		t.Fatalf("runcmd = %v, want two recipes plus final cleanup", f.Runcmd)
+	}
+	if !strings.Contains(f.Runcmd[0], "STOAT_PARAM_DOCKER_AUTHKEY") || !strings.Contains(f.Runcmd[1], "STOAT_PARAM_TAILSCALE_AUTHKEY") {
+		t.Errorf("recipe wrappers do not select their namespaced secrets: %v", f.Runcmd[:2])
+	}
+	if got := f.Runcmd[len(f.Runcmd)-1]; got != "rm -f "+SecretsEnvPath {
+		t.Errorf("last runcmd = %q, want secret cleanup", got)
+	}
+}
+
+func TestWrapScriptsWithoutSecretsWritesNoSecretFile(t *testing.T) {
+	f := parseWrapped(t, WrapScripts([]Script{{Name: "xfce", Content: "#!/bin/sh\n"}}, ""))
+	for _, wf := range f.WriteFiles {
+		if wf.Path == SecretsEnvPath {
+			t.Fatalf("a recipe with no secrets wrote %s", SecretsEnvPath)
+		}
+	}
+	for _, cmd := range f.Runcmd {
+		if strings.Contains(cmd, SecretsEnvPath) {
+			t.Fatalf("a recipe with no secrets references %s: %q", SecretsEnvPath, cmd)
+		}
+	}
+}
+
+func TestWrapScriptsFailureCannotWriteSuccessMarker(t *testing.T) {
+	f := parseWrapped(t, WrapScripts([]Script{{
+		Name: "docker", Content: "#!/bin/sh\nexit 1\n",
+		Env: []string{"STOAT_RECIPE=docker"},
+	}}, ""))
+	if len(f.Runcmd) != 1 {
+		t.Fatalf("runcmd = %v, want one recipe command", f.Runcmd)
+	}
+	cmd := f.Runcmd[0]
+	marker := MarkerDir + "/docker"
+	if !strings.Contains(cmd, "/tmp/.stoat-out/docker") {
+		t.Errorf("recipe output was not copied before success marking: %q", cmd)
+	}
+	markerAt := strings.Index(cmd, marker)
+	if markerAt < 0 || !strings.Contains(cmd[:markerAt], "&&") {
+		t.Errorf("success marker is not gated by the recipe/output commands: %q", cmd)
+	}
+	if strings.Contains(cmd, "; touch "+marker) {
+		t.Errorf("success marker is unconditional after a semicolon: %q", cmd)
+	}
+}

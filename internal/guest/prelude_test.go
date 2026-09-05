@@ -144,6 +144,22 @@ func TestPythonPreludeCmdForwardsDownloadArguments(t *testing.T) {
 	}
 }
 
+// STOAT_OUTPUT belongs to the per-recipe execution wrapper. The shared
+// prelude also runs health and package-setup commands, which must not create
+// or truncate a recipe output file.
+func TestPreludeDoesNotInitializeStoatOutput(t *testing.T) {
+	o, ok := Lookup("alpine")
+	if !ok {
+		t.Fatal("bundled alpine missing")
+	}
+	for _, runtime := range []string{"sh", "python3"} {
+		got := Prelude(o, runtime)
+		if strings.Contains(got, "STOAT_OUTPUT") || strings.Contains(got, "/tmp/.stoat-out") {
+			t.Errorf("%s prelude initializes recipe output state:\n%s", runtime, got)
+		}
+	}
+}
+
 // WithPrelude inserts after a leading shebang line so the interpreter line
 // stays first; a body with no shebang gets the prelude in front.
 func TestWithPreludeKeepsShebangFirst(t *testing.T) {

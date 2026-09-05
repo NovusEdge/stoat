@@ -17,12 +17,18 @@ const scriptDir = "/var/lib/stoat/recipes"
 // extension.
 const MarkerDir = "/var/lib/stoat/.applied"
 
+// SecretsEnvPath is the transient guest path used for cloud-init recipe
+// secrets. The delivery implementation is added after the RED tests.
+const SecretsEnvPath = "/run/stoat/secrets.env"
+
 // Script pairs a recipe's Name with the body WrapScripts should run for it,
 // i.e. the manifest's Name and manifest.ScriptContent(osName) for the guest
 // being provisioned.
 type Script struct {
 	Name    string
 	Content string
+	Env     []string
+	Secrets map[string]string
 }
 
 // WrapScripts renders scripts into a #cloud-config fragment: each script's
