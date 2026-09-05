@@ -161,12 +161,17 @@ os = ["alpine"]
 	if err := RefreshIndex(true); err != nil {
 		t.Fatal(err)
 	}
+	managedVM := "name = \"cache-workspace\"\nmode = \"live\"\n"
+	writeFile(t, filepath.Join(IndexDir(), "vm.toml"), managedVM)
 	private := filepath.Join(IndexDir(), "old-cache", "private")
 	if err := os.MkdirAll(private, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(private, "keep.me"), "caller-owned\n")
 	if err := os.Chmod(private, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(IndexDir(), 0o500); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,6 +185,34 @@ os = ["alpine"]
 	}
 	if len(idx.Recipes) != 1 || idx.Recipes["other"].Description != "only from source B" {
 		t.Fatalf("published index = %+v, want source B", idx)
+	}
+	foundManagedVM := false
+	if err := filepath.Walk(home, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && filepath.Base(path) == "vm.toml" {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if string(data) == managedVM {
+				foundManagedVM = true
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !foundManagedVM {
+		t.Fatal("old index vm.toml was removed before cleanup completed")
+	}
+	listed, err := config.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("internal index cleanup directories appeared in VM list: %+v", listed)
 	}
 	broken, err := config.ListBroken()
 	if err != nil {
