@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -136,6 +137,59 @@ func TestRefreshIndexFailureKeepsUsableCache(t *testing.T) {
 	}
 }
 
+func TestRefreshIndexSucceedsWhenOldCacheCleanupFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based cleanup failure is unavailable to root")
+	}
+	home := t.TempDir()
+	t.Setenv("STOAT_HOME", home)
+	t.Chdir(t.TempDir())
+	t.Cleanup(func() {
+		if err := restoreIndexTreePermissions(home); err != nil {
+			t.Error(err)
+		}
+	})
+	sourceA := testutil.GitRepo(t, map[string]string{"index.toml": sampleIndex})
+	sourceB := testutil.GitRepo(t, map[string]string{"index.toml": `schema = 1
+
+[recipes.other]
+source = "https://example.invalid/x/stoat-other"
+description = "only from source B"
+os = ["alpine"]
+`})
+	t.Setenv("STOAT_INDEX", sourceA)
+	if err := RefreshIndex(true); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(IndexDir(), "old-cache", "private")
+	if err := os.MkdirAll(private, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(private, "keep.me"), "caller-owned\n")
+	if err := os.Chmod(private, 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("STOAT_INDEX", sourceB)
+	if err := RefreshIndex(true); err != nil {
+		t.Fatalf("published refresh was reported as failed: %v", err)
+	}
+	idx, err := LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Recipes) != 1 || idx.Recipes["other"].Description != "only from source B" {
+		t.Fatalf("published index = %+v, want source B", idx)
+	}
+	broken, err := config.ListBroken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(broken) != 0 {
+		t.Fatalf("internal index cleanup directories appeared as broken VMs: %+v", broken)
+	}
+}
+
 func TestSearchIndexMatchesNameAndDescription(t *testing.T) {
 	indexRoot(t)
 	got, err := SearchIndex("tailnet")
@@ -156,4 +210,17 @@ func TestIndexLookupUnknownName(t *testing.T) {
 	if ok {
 		t.Error("tailscal resolved")
 	}
+}
+
+func restoreIndexTreePermissions(root string) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(0o600)
+		if info.IsDir() {
+			mode = 0o700
+		}
+		return os.Chmod(path, mode)
+	})
 }
