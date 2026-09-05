@@ -367,6 +367,54 @@ func TestJSONErrorsGoToStdout(t *testing.T) {
 	}
 }
 
+// TestJSONCreateAllowExecMatchesAgentAccess pins allow_exec at the create
+// --json boundary: it must track agent_access rather than default to true
+// underneath it, so a consumer reading only allow_exec (the field
+// agent_access replaces) never sees a non-exec level advertised as exec
+// access, or the reverse.
+func TestJSONCreateAllowExecMatchesAgentAccess(t *testing.T) {
+	dir := cliRoot(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+
+	cases := []struct {
+		name   string
+		flags  []string
+		access string
+	}{
+		{"vm-none", []string{"--agent-access", "none"}, "none"},
+		{"vm-observe", []string{"--agent-access", "observe"}, "observe"},
+		{"vm-manage", []string{"--agent-access", "manage"}, "manage"},
+		{"vm-exec", []string{"--agent-access", "exec"}, "exec"},
+		{"vm-default", nil, "manage"},
+		{"vm-allow-exec-alias", []string{"--allow-exec"}, "exec"},
+		{"vm-allow-exec-false-alias", []string{"--allow-exec=false"}, "manage"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			argv := append([]string{"create", c.name, "--image", "alpine-virt-3.24.1-x86_64.iso"}, c.flags...)
+			code, objs := runJSON(t, argv...)
+			if code != ExitOK {
+				t.Fatalf("create exit = %d, want %d: %v", code, ExitOK, objs)
+			}
+			data, ok := result(t, objs)["data"].(map[string]any)
+			if !ok {
+				t.Fatalf("create data = %#v, want object", result(t, objs)["data"])
+			}
+			vm, ok := data["vm"].(map[string]any)
+			if !ok {
+				t.Fatalf("create data.vm = %#v, want object", data["vm"])
+			}
+			if got := vm["agent_access"]; got != c.access {
+				t.Errorf("agent_access = %v, want %q", got, c.access)
+			}
+			wantAllowExec := c.access == "exec"
+			if got := vm["allow_exec"]; got != wantAllowExec {
+				t.Errorf("allow_exec = %v, want %v (agent_access %q)", got, wantAllowExec, c.access)
+			}
+		})
+	}
+}
+
 // exec's guest command is verbatim: a --json after the VM name belongs to the
 // guest, so the scan must stop consuming it there.
 func TestJSONFlagStopsAtExecsCommand(t *testing.T) {
