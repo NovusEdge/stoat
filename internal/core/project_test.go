@@ -6,13 +6,23 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/project"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // projectDir writes a stoat.toml into a fresh directory, chdirs there and
 // returns the loaded project. Every project test runs from inside the project
-// directory, the same place a user runs stoat from.
+// directory, the same place a user runs stoat from. It also points
+// STOAT_HOME at a fresh data root with alpine-virt marked downloaded and the
+// bundled recipes installed, since every declaration in this file resolves
+// that image and most declare the docker recipe.
 func projectDir(t *testing.T, body string) *project.Project {
 	t.Helper()
+	home := root(t)
+	haveImage(t, home, "alpine-virt-3.24.1-x86_64.iso")
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, project.FileName), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -90,7 +100,6 @@ func TestSpecForMinimalDeclaration(t *testing.T) {
 // The vm.toml a declaration produces is the golden this whole feature rests
 // on: a contributor's stoat up must build the same VM the author's did.
 func TestSpecForWritesTheExpectedVMToml(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
 	p := projectDir(t, fullDecl)
 	s, err := SpecFor(p, "dev")
 	if err != nil {
@@ -112,7 +121,6 @@ func TestSpecForWritesTheExpectedVMToml(t *testing.T) {
 }
 
 func TestDiffReportsEveryMutableField(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
 	p := projectDir(t, fullDecl)
 	s, err := SpecFor(p, "dev")
 	if err != nil {
@@ -180,7 +188,6 @@ user = "build"
 }
 
 func TestDiffOnAnUnchangedDeclarationIsEmpty(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
 	p := projectDir(t, fullDecl)
 	s, err := SpecFor(p, "dev")
 	if err != nil {
@@ -199,7 +206,6 @@ func TestDiffOnAnUnchangedDeclarationIsEmpty(t *testing.T) {
 }
 
 func TestDiffRefusesAnImageChange(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
 	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\n")
 	s, err := SpecFor(p, "dev")
 	if err != nil {
@@ -227,7 +233,6 @@ func TestDiffRefusesAnImageChange(t *testing.T) {
 }
 
 func TestReconcileCreatesAMissingVM(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
 	p := projectDir(t, fullDecl)
 	r, err := Reconcile(p, "dev")
 	if err != nil {
@@ -242,7 +247,6 @@ func TestReconcileCreatesAMissingVM(t *testing.T) {
 }
 
 func TestReconcileAppliesDriftAndReportsRestart(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
 	p := projectDir(t, fullDecl)
 	if _, err := Reconcile(p, "dev"); err != nil {
 		t.Fatal(err)
