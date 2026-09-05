@@ -15,10 +15,20 @@ usage: stoat <command> [flags]
 - **`-h`, `--help`** prints the command's usage and flags and exits 0. `stoat help` (the subcommand) prints the same top-level text `stoat --help` does.
 - **`-v`, `--version`** prints `stoat <version>` and exits 0. It is matched as the **first argument only**, before any parsing (`cmd/stoat/main.go`), which has two consequences worth knowing: `stoat -v --json` prints plain text and ignores `--json`, and `stoat --json --version` is a usage error because `-v` is no longer first. **Scripts and machine consumers should use the `version` subcommand**, which behaves normally under `--json`.
 
+## Project scope
+
+A `stoat.toml` in the current directory activates project scope. `up`,
+`down`, `apply`, `wait` and `rm` act on every declared VM, in declaration
+order, when given no VM argument. A bare VM argument resolves against
+`stoat.toml` first, then against a global VM name. See
+[project-file.md](project-file.md).
+
 ## Subcommands
 
 | Command | Synopsis | Exit codes |
 |---|---|---|
+| [`init`](#stoat-init---name-n) | Write a `stoat.toml` for this directory | 0, 1 |
+| [`status`](#stoat-status) | One line per declared VM: state, health, drift | 0, 1 |
 | [`ls`](#stoat-ls) | List VMs, one line per VM | 0, 1 |
 | [`get`](#stoat-get-name) | Show one VM's details | 0, 1 |
 | [`create`](#stoat-create-name---imageimage) | Create a VM without starting it | 0, 1, 2 |
@@ -67,7 +77,39 @@ oldvm           -     broken   -    -      -    unexpected token near line 4
 
 The `STATE` column is colored (green `running`, red `broken`) when [color is enabled](#scripting). `-q`/`--quiet` is accepted but has no effect on `ls`'s output.
 
-**Exit codes:** 0 on success; 1 if the data root can't be read.
+`--project` filters the list to VMs the `stoat.toml` in the current directory declares. It refuses outside a project.
+
+**Exit codes:** 0 on success; 1 if the data root can't be read, or `--project` is given outside a project.
+
+## `stoat init [--name n]`
+
+Writes `stoat.toml` for this directory: one `[vms.dev]` declaration, annotated with every field's type and default. Refuses if `stoat.toml` already exists; there is no safe automatic merge into a file you already wrote.
+
+```
+$ stoat init
+wrote stoat.toml
+added .stoat/ to .gitignore
+edit it, then run: stoat up
+```
+
+`--name` sets `project.name`, the prefix for a VM's global name; it defaults to the current directory's name, lowercased. In a git checkout, `init` also appends `.stoat/` to `.gitignore` if it is not already there.
+
+**Exit codes:** 0 on success; 1 if `stoat.toml` already exists or the file can't be written.
+
+## `stoat status`
+
+Prints one line per VM `stoat.toml` declares: declaration key, global name, state, health, and every field where the declaration and the VM disagree.
+
+```
+$ stoat status
+KEY          NAME                 STATE     HEALTH    DRIFT
+dev          myrepo-dev           running   ok        cpus 2 → 4 (restart)
+ci           myrepo-ci            missing   -         -
+```
+
+A VM `stoat.toml` declares but that does not exist yet shows state `missing`. An immutable-field mismatch (`image` or `disk`) prints in place of the drift column, naming `stoat rm <key>` as the fix.
+
+**Exit codes:** 0 on success; 1 outside a project, or if a VM's status can't be read.
 
 ## `stoat get <name>`
 
@@ -107,7 +149,9 @@ start it with: stoat up work
 
 Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--allow-exec` (default true; `--allow-exec=false` opts this VM out of `exec`/`copy_to`/`copy_from`, enforced by the MCP server rather than stoat itself).
 
-**Exit codes:** 0 on success; 1 if creation fails (e.g. the image isn't downloaded yet: run `stoat pull` or download it from the TUI's image picker first); 2 if `--image` is missing.
+`create` (alias `new`) refuses at project scope: `a stoat.toml is present; declare the VM there and run stoat up, or pass --global`. `--global` creates the VM outside the project.
+
+**Exit codes:** 0 on success; 1 if creation fails (e.g. the image isn't downloaded yet: run `stoat pull` or download it from the TUI's image picker first) or a `stoat.toml` refuses it without `--global`; 2 if `--image` is missing.
 
 ## `stoat update <name>`
 
@@ -152,6 +196,8 @@ display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
 ```
 
 `-q`/`--quiet`/`--no-interactive` suppresses the `starting <name>...` line; the final result line always prints.
+
+At project scope, `<name>` is optional. A named VM is reconciled against its `stoat.toml` declaration before it starts, the same change `stoat update` would make. With no name, every declared VM is reconciled, then started, in declaration order; a VM that fails to reconcile or start stops the run, and every later VM is reported skipped.
 
 ### Where the screen is
 
@@ -201,6 +247,8 @@ work stopped
 
 `-q` suppresses the `stopping <name>...` line only.
 
+At project scope, `<name>` is optional: with no name, every declared VM is stopped in declaration order, and a failure stops the run and reports every later VM as skipped.
+
 **Exit codes:** 0 on success; 1 if the VM can't be loaded, is broken, isn't running, or fails to stop.
 
 ## `stoat wait <name>`
@@ -216,6 +264,8 @@ work reached reachable (1240ms)
 
 A request that cannot ever be satisfied fails immediately rather than waiting out the timeout: `--until applied` on a VM with no recipes configured, or `--until reachable` on a VM that isn't running.
 
+At project scope, `<name>` is optional: with no name, `wait` blocks on every declared VM in turn, in declaration order, and a VM that does not reach the state stops the run.
+
 **Exit codes:** 0 if the state was reached; 1 if the timeout expires or the state can't be reached at all; 2 if `--timeout` is zero or negative.
 
 ## `stoat rm <name> [-y]`
@@ -229,6 +279,8 @@ scratch deleted
 ```
 
 Without `-y`, confirmation is required: interactively it prompts on stdout and reads a line from stdin (anything other than a `y`/`Y` aborts); in `-q`/`--quiet`/`--no-interactive` mode there is no prompt to answer, so it refuses outright instead of guessing. Under `--json` the same rule applies for the same reason: nothing reads stdin, so `-y` is required or the command fails with `confirmation_required`. `-y` skips the prompt in every mode.
+
+At project scope, `<name>` is optional: with no name, every declared VM is asked for (or refused without `-y`) and deleted in declaration order.
 
 **Exit codes:** 0 if deleted; 1 if the VM can't be loaded, is running, the confirmation is declined or aborted, `-y` was needed but not given, or the delete itself fails. Note that declining the confirmation prompt is exit 1, not 0: a script checking `$?` sees "delete didn't happen" as a failure either way, whether the VM was running or the user just said no.
 
@@ -420,6 +472,8 @@ work: recipes applied
 ```
 
 `--only` restricts the run to a subset of the VM's own recipe list (comma-separated or repeated), instead of applying all of them.
+
+At project scope, `<name>` is optional: with no name, every declared VM's recipes run in turn, in declaration order, and a failure stops the run.
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded, the run fails, or (for a cloud-mode VM) recipes were already applied at boot rather than by this command.
 

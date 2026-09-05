@@ -196,7 +196,8 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "ssh_port":2200,"ssh_user":"stoat","installed":false,
              "forwards":[{"host_port":8080,"guest_port":80}],
              "allow_exec":true,"agent_access":"manage","display":"vnc",
-             "error":"only on a broken VM"}
+             "error":"only on a broken VM",
+             "project":"/home/u/myrepo","key":"dev","project_missing":false}
 
 VMStatus    {"name":"work",...VM fields...,"health":"ok","recipes_detail":[
              {"name":"xfce","applied":true,"version":"1.2","at":"...",
@@ -261,10 +262,40 @@ Guest       {"name":"fedora","init":"systemd","shell":"/bin/bash",
 MCPClient   {"client":"cursor","path":"/home/u/.cursor/mcp.json",
              "installed":true,"command":"/home/u/.local/bin/stoat",
              "current":true}
+
+InitResult  {"path":"/home/u/myrepo/stoat.toml","project":"myrepo",
+             "gitignore_updated":true}
+
+Drift       {"field":"cpus","from":"2","to":"4","needs_restart":true}
+
+ProjectStatusVM {"key":"dev","name":"myrepo-dev","state":"running",
+                 "health":"ok","drift":[Drift,...],
+                 "error":"only on an immutable-field mismatch"}
+ProjectStatus   {"project":"myrepo","dir":"/home/u/myrepo",
+                 "vms":[ProjectStatusVM,...]}
+
+ProjectRunVM {"key":"dev","name":"myrepo-dev","status":"ok",
+              "error":"only when status is error"}
+ProjectRun   {"project":"myrepo","vms":[ProjectRunVM,...]}
 ```
 
 `MCPClient.current` is false when the client's entry names a different
 binary than the running one, which is the stale entry `mcp doctor` reports.
+
+`VM.project` is the absolute directory of the `stoat.toml` that declared this
+VM, and `VM.key` is the declaration key, both empty for a VM `stoat create`
+made outside a project. `VM.project_missing` is true when that directory no
+longer exists; the VM still lists and runs.
+
+`ProjectStatusVM.state` is `missing` for a declared VM that does not exist
+yet, otherwise a `VM.state` value. `drift` is empty when `error` is set: an
+immutable-field mismatch (`image` or `disk`) stops the comparison before the
+rest of the fields are checked.
+
+`ProjectRunVM.status` is `ok`, `error` or `skipped`. `skipped` means a VM
+earlier in declaration order failed and this one was never attempted;
+`ProjectRun.vms` always lists every declared VM, in declaration order, so a
+caller can see what did not run as plainly as what did.
 
 `RecipeEntry` has `name`, `description`, `scope`, `source`, `ref`, and
 `commit`. `scope` is one of `bundled`, `local`, `global`, or `project`; only
@@ -369,12 +400,15 @@ so a leak fails the build rather than shipping.
 
 | `cmd` | `data` |
 |---|---|
+| `init` | `InitResult` |
+| `status` | `ProjectStatus` |
 | `ls` | `{"vms":[VM,...]}` |
 | `get` | `{"vm":VMStatus}` |
 | `create` | `{"vm":VM}` |
 | `update` | `{"vm":VM,"changed":["ram"],"applies_at":"now"}` |
-| `up` | `{"vm":VM}` (re-read after start, so `state` is authoritative) |
-| `down` | `{"vm":VM}` |
+| `up` (one VM) | `{"vm":VM}` (re-read after start, so `state` is authoritative) |
+| `up`, `down`, `apply`, `wait`, `rm` (no VM, project scope) | `ProjectRun` |
+| `down` (one VM) | `{"vm":VM}` |
 | `wait` | `{"vm":"work","until":"reachable","reached":true,"waited_ms":4210}` |
 | `rm` | `{"name":"scratch","deleted":true}` |
 | `clone` | `{"vm":VM,"source":"work","forwards_copied":false}` |
@@ -432,6 +466,11 @@ which fields `data` carries.
 scope (`bundled`, `local`, `global`, or `project`); only remote `global` and
 `project` rows carry source, ref, and the seven-character commit prefix. The
 `roots` list gives the search order and the scope label for each root.
+
+`up`, `down`, `apply`, `wait` and `rm` report `ProjectRun` only when they run
+at project scope with no VM argument; given a VM, each keeps its one-VM shape
+from the row above. `stoat.toml`'s `[project]` fan-out is the only thing that
+changes `data`'s shape; the command's own `cmd` name does not.
 
 Fields worth knowing about:
 
@@ -552,3 +591,10 @@ The same version also adds `agent_access` to `VM`, additive alongside
 `stoat mcp` in this binary. Neither change removes or repurposes a field, so
 neither bumped the version on its own; they are noted here only because they
 landed in the same branch as the `recipe list` change.
+
+The project-file plan adds `init` and `status` commands, `--project` on `ls`,
+and a no-argument fan-out on `up`, `down`, `apply`, `wait` and `rm` at project
+scope, plus `project`, `key` and `project_missing` on `VM`, and five new MCP
+tools (`project_status`, `project_up`, `project_down`, `project_apply`,
+`project_wait`) alongside `start`, `stop`, `apply_recipes` and `wait`, which
+keep their existing inputs and outputs. All additions; the contract stays 3.

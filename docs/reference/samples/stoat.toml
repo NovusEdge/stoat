@@ -1,0 +1,34 @@
+# stoat.toml declares this repository's VMs. Commit it, and stoat.lock with it.
+# Every field carries its type, its default, and who writes it.
+schema = 1                      # int, required. The file format version.
+
+[project]
+name = "myrepo"                 # string, default: the directory name.
+                                 # The prefix for a VM's global name.
+
+# Remote recipes. A value is a ref string, or a table naming a source.
+# stoat recipe lock pins each one to a commit in stoat.lock.
+[recipes]
+tailscale = "v1.2"
+
+[vms.dev]                       # the key "dev" is the name you type
+image        = "ubuntu-24"      # string, required. A catalog id, or a path
+                                 # to your own image, relative to this file.
+name         = "shared-dev"     # string, default "<project>-<key>". The VM's
+                                 # global name under ~/.stoat.
+cpus         = 4                # int, default 4
+ram          = 4096             # int, MB, default 4096
+disk         = "20G"            # string, default 8G. Disk-mode images only.
+recipes      = ["docker", "tailscale"]  # applied in dependency order
+shares       = [".", "src"]     # directories from this project, mounted under
+                                 # /work. "." mounts at /work, "src" at
+                                 # /work/src. Every entry stays inside the
+                                 # project.
+agent_access = "manage"         # none | observe | manage | exec, default manage
+
+[vms.dev.params.docker]         # non-secret recipe params
+user = "dev"                    # secrets go in .stoat/secrets.toml, 0600
+
+[vms.docs]
+image  = "alpine-virt"
+shares = ["docs"]
