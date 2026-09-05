@@ -109,6 +109,7 @@ var codeTable = []struct {
 	{CodeNameTaken, core.ErrNameTaken},
 	{CodeInvalidSpec, core.ErrInvalidSpec},
 	{CodeInvalidSpec, recipes.ErrInvalidTree},
+	{CodeInvalidSpec, recipes.ErrParamUnset},
 	{CodeInUse, core.ErrInUse},
 	{CodeGitRequired, gitx.ErrNoGit},
 	{CodeImageNotDownloaded, core.ErrImageNotDownloaded},
