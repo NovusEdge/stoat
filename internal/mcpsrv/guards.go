@@ -28,6 +28,7 @@ var (
 	gitRefRE    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 	paramNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	svcNameRE   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]*$`)
+	envNameRE   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
 // forbiddenPatchKeys are never accepted as tool input at any level. share
@@ -212,6 +213,17 @@ func checkGuestPath(path string) (string, error) {
 func checkSvcName(name string) (string, error) {
 	if !svcNameRE.MatchString(name) {
 		return "", fmt.Errorf("invalid service name %q: must match %s", name, svcNameRE)
+	}
+	return name, nil
+}
+
+// checkEnvName bounds an exec/exec_bg environment variable name to the POSIX
+// shell identifier grammar. checkSvcName is the wrong guard here: it accepts
+// '.', '@' and a leading digit, none of which a guest shell reads as part of
+// a variable name.
+func checkEnvName(name string) (string, error) {
+	if !envNameRE.MatchString(name) {
+		return "", fmt.Errorf("invalid env name %q: must match %s", name, envNameRE)
 	}
 	return name, nil
 }

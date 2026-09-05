@@ -69,8 +69,8 @@ func envArgv(env map[string]string, cwd string, argv []string) ([]string, error)
 	if len(env) > 0 {
 		pre := []string{"env"}
 		for k, v := range env {
-			if _, err := checkSvcName(k); err != nil {
-				return nil, fmt.Errorf("invalid env name %q", k)
+			if _, err := checkEnvName(k); err != nil {
+				return nil, err
 			}
 			pre = append(pre, k+"="+v)
 		}
