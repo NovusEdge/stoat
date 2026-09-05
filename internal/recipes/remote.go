@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,10 +29,19 @@ func ParseRef(in string) (source, gitRef string, isURL bool) {
 		sourceLike := strings.Contains(candidateSource, "://") || strings.Contains(candidateSource, ":") || strings.Contains(candidateSource, "/") ||
 			strings.HasPrefix(candidateSource, "/") || strings.HasPrefix(candidateSource, ".")
 		indexLike := !strings.ContainsAny(candidateSource, "/:") && !strings.HasPrefix(candidateSource, ".")
+		authorityAt := false
+		if scheme := strings.Index(in, "://"); scheme >= 0 {
+			authorityStart := scheme + len("://")
+			authorityEnd := strings.IndexByte(in[authorityStart:], '/')
+			if authorityEnd < 0 {
+				authorityEnd = len(in) - authorityStart
+			}
+			authorityAt = i < authorityStart+authorityEnd
+		}
 		// An scp-style source has the form user@host:path. Its colon is
 		// part of the source unless the source itself already contains path
 		// syntax before a second at-sign carrying the requested ref.
-		if sourceLike || (indexLike && !strings.Contains(candidateRef, ":")) {
+		if !authorityAt && (sourceLike || (indexLike && !strings.Contains(candidateRef, ":"))) {
 			source, gitRef = candidateSource, candidateRef
 		}
 	}
@@ -92,9 +102,21 @@ func Preview(source, gitRef string) (Manifest, string, error) {
 
 func refError(source, gitRef string, err error) error {
 	if errors.Is(err, gitx.ErrNoRef) {
-		return fmt.Errorf("%s: no tag or branch %q", source, gitRef)
+		return fmt.Errorf("%s: no tag or branch %q", refLabel(source), gitRef)
 	}
 	return err
+}
+
+func refLabel(source string) string {
+	if strings.Contains(source, "://") {
+		if parsed, err := url.Parse(source); err == nil && parsed.Path != "" {
+			return strings.TrimSuffix(strings.TrimPrefix(strings.Trim(parsed.Path, "/"), "/"), ".git")
+		}
+	}
+	if colon := strings.IndexByte(source, ':'); colon >= 0 && !strings.Contains(source[:colon], "/") {
+		source = source[colon+1:]
+	}
+	return strings.TrimSuffix(strings.Trim(source, "/"), ".git")
 }
 
 // Add stages a validated checkout and all related files before replacing the

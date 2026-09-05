@@ -55,9 +55,7 @@ const (
 	CodeNoSuchImage      Code = "no_such_image"
 
 	CodeScreenshotFailed Code = "screenshot_failed"
-	// CodeLockOutOfDate is the repairable project-lock condition. The mapping
-	// is added with the remote-recipe wire integration; this declaration keeps
-	// correction tests buildable before that mapping lands.
+	// CodeLockOutOfDate identifies a repairable project-lock condition.
 	CodeLockOutOfDate Code = "lock_out_of_date"
 )
 
