@@ -27,6 +27,19 @@ func writeVM(t *testing.T, name, level string) {
 	}
 }
 
+// writeSecrets writes a VM's secrets.toml at the mode the loader requires.
+func writeSecrets(t *testing.T, vm string, kv map[string]string) {
+	t.Helper()
+	var b strings.Builder
+	for k, v := range kv {
+		b.WriteString(k + " = \"" + v + "\"\n")
+	}
+	path := filepath.Join(config.Root(), vm, "secrets.toml")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // accessFakeGuest answers every guest command a tool in the table can send:
 // enough exit-0 output for read_file, list_dir, stat and ps to parse
 // cleanly, and a bare success for everything else. Access denial is decided
