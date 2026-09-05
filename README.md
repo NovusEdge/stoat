@@ -9,7 +9,7 @@ A terminal UI and CLI for running local QEMU VMs on Linux. No libvirt, no daemon
 - Persistent disk VMs for anything else: install once with the guest's own installer, then boot straight to it.
 - Ships a few ready-made recipes (XFCE, Docker, dev tools, Tailscale) to run post-boot over ssh or bake into a cloud-init seed. `stoat recipe new` scaffolds your own.
 - QEMU processes are tracked by pidfile, not supervised: `stoat` can exit and the VM keeps running.
-- A TUI for interactive use, and a scriptable CLI (`ls`, `up`, `down`, `ssh`, `provision`, `rm`, `recipe`, `logs`, `doctor`) covering the same operations for scripts and automation.
+- A TUI for interactive use, and a scriptable CLI (`ls`, `up`, `down`, `ssh`, `apply`, `rm`, `recipe`, `guest`, `screenshot`, `logs`, `doctor`) covering the same operations for scripts and automation. Every command takes `--json` for one object per line, errors included.
 
 ## What it looks like
 
@@ -99,10 +99,13 @@ See [docs/getting-started/first-vm.md](docs/getting-started/first-vm.md) for the
 | `stoat up <name>` | start a VM |
 | `stoat down <name>` | stop a VM (graceful) |
 | `stoat ssh <name>` | ssh into a VM, replacing this process |
-| `stoat provision <name>` | run recipes, streaming output to stdout |
+| `stoat apply <name> [--dry-run]` | run the VM's recipes, streaming output to stdout |
 | `stoat rm <name> [-y]` | delete a VM; refuses while running, confirms unless `-y` |
+| `stoat screenshot <name> [-o path]` | write the VM's screen to a PNG |
 | `stoat recipe list` | list installed recipes and where they live |
 | `stoat recipe new <name> [--os alpine] [--backend cloudinit]` | scaffold a recipe in the recipes directory |
+| `stoat guest ls` | list the guest OS definitions stoat knows |
+| `stoat guest show <name>` | print one guest definition |
 | `stoat logs [-n N]` | tail the stoat log (default 50 lines) |
 | `stoat doctor` | check host prerequisites |
 | `stoat version` | print the stoat version |
@@ -119,11 +122,19 @@ Every VM is one of three modes:
 
 Each VM is a directory under `~/.stoat` (override with `$STOAT_HOME`) holding a hand-editable `vm.toml` plus whatever state its mode keeps, nothing else is shared between VMs. See [docs/concepts/modes-and-backends.md](docs/concepts/modes-and-backends.md) and [docs/concepts/data-root.md](docs/concepts/data-root.md).
 
-Recipes (the scripts and cloud-init fragments that install XFCE, Docker, etc.) are covered in [docs/recipes/overview.md](docs/recipes/overview.md), including how to write your own.
+Recipes (the scripts and cloud-init fragments that install XFCE, Docker, etc.) are covered in [docs/recipes/overview.md](docs/recipes/overview.md), including how to write your own. A recipe script runs with a prelude of guest-neutral verbs (`stoat_pkg_install`, `stoat_svc_enable`, and the rest) rendered from the guest's own definition, so one script can serve several distros.
+
+Guest OS facts live in one TOML file per OS, bundled in the binary and overridable from `~/.stoat/guests/`. Adding an OS is a file, not a code change: see [docs/reference/guest.md](docs/reference/guest.md).
 
 ## Status
 
 Pre-1.0 and single-user: stoat assumes it's the only thing managing its `~/.stoat`, and offers no sandboxing beyond what QEMU/KVM already give a guest. The Alpine live path is the most exercised mode; the cloud-init backends and disk-mode installs are newer. `vm.toml`'s shape and the CLI's flags may still change before 1.0.
+
+## Contributing
+
+`CONTRIBUTING.md` covers setup, the branch and PR flow, commit grammar, the
+gates CI runs, and the test tiers. New recipes go in `~/.stoat/recipes/`;
+the bundled set is closed.
 
 ## License
 
