@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
 )
@@ -235,7 +236,7 @@ func waitApplied(ctx context.Context, v *config.VM) error {
 	if len(v.Recipes) == 0 {
 		return fmt.Errorf("%w: %s: no recipes configured", ErrCannotReach, v.Name)
 	}
-	if v.Mode == "cloud" {
+	if backend.For(v).Name() == "cloudinit" {
 		return pollUntil(ctx, func() bool { return allRecipesApplied(v) })
 	}
 	return pollUntil(ctx, func() bool { return lastProvisionLineIs(v, "done") })

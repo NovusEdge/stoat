@@ -205,7 +205,7 @@ func writeProvisionLog(v *config.VM, content string) error {
 func TestWaitAppliedCloudResolvesWhenAllRecipesRecorded(t *testing.T) {
 	root(t)
 	v := &config.VM{
-		Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2310,
+		Name: "work", Mode: "cloud", Backend: "cloudinit", RAM: 1024, CPUs: 1, SSHPort: 2310,
 		Recipes: []string{"docker"},
 		Applied: map[string]config.AppliedRecipe{"docker": {}},
 	}
@@ -230,7 +230,7 @@ func TestWaitAppliedCloudResolvesWhenAllRecipesRecorded(t *testing.T) {
 func TestWaitAppliedCloudKeepsWaitingWhileRecipeNotYetApplied(t *testing.T) {
 	root(t)
 	v := &config.VM{
-		Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2311,
+		Name: "work", Mode: "cloud", Backend: "cloudinit", RAM: 1024, CPUs: 1, SSHPort: 2311,
 		Recipes: []string{"docker", "tailscale"},
 		Applied: map[string]config.AppliedRecipe{"docker": {}},
 	}
@@ -256,7 +256,7 @@ func TestWaitAppliedCloudKeepsWaitingWhileRecipeNotYetApplied(t *testing.T) {
 func TestWaitAppliedCloudPollsUntilVMTomlRecordsRemainingRecipe(t *testing.T) {
 	root(t)
 	v := &config.VM{
-		Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2312,
+		Name: "work", Mode: "cloud", Backend: "cloudinit", RAM: 1024, CPUs: 1, SSHPort: 2312,
 		Recipes: []string{"docker", "tailscale"},
 		Applied: map[string]config.AppliedRecipe{"docker": {}},
 	}
