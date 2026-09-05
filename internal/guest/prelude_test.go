@@ -111,6 +111,39 @@ func TestPythonPreludeDefinesCmdVerbs(t *testing.T) {
 	}
 }
 
+func TestPythonPreludeCmdForwardsDownloadArguments(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Fatal("python3 is required to execute the public Python prelude")
+	}
+	dir := t.TempDir()
+	recorded := filepath.Join(dir, "args")
+	recorder := filepath.Join(dir, "record")
+	if err := os.WriteFile(recorder, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RECORD\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(recorder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := OS{
+		Name: "freebsd", Init: "rc", Shell: "/bin/sh",
+		Pkg: Pkg{Install: []string{"true"}},
+		Cmd: map[string]string{"download": "record"},
+	}
+	body := Prelude(o, "python3") + "\nstoat_download(\"output.bin\", \"https://example.test/a\")\n"
+	cmd := exec.Command("python3", "-c", body)
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "RECORD="+recorded)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("python prelude failed: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "output.bin\nhttps://example.test/a\n" {
+		t.Errorf("download args = %q, want output then URL", got)
+	}
+}
+
 // WithPrelude inserts after a leading shebang line so the interpreter line
 // stays first; a body with no shebang gets the prelude in front.
 func TestWithPreludeKeepsShebangFirst(t *testing.T) {
