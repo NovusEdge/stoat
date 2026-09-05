@@ -74,6 +74,12 @@ type OS struct {
 	Svc Svc               `toml:"svc"`
 	Cmd map[string]string `toml:"cmd"`
 
+	// LogPath is where the init system writes its own log, for a guest whose
+	// init has no journal. tail_log reads it when the caller names neither a
+	// unit nor a path. It is optional: validate does not require it, and a
+	// systemd guest leaves it empty because journalctl answers instead.
+	LogPath string `toml:"log_path"`
+
 	// Backends holds one opaque table per backend name. The backend package
 	// that owns the name decodes it; this package never reads inside.
 	Backends map[string]map[string]any `toml:"backend"`
@@ -107,6 +113,24 @@ type Svc struct {
 	Stop    string `toml:"stop"`
 	Restart string `toml:"restart"`
 	Status  string `toml:"status"`
+}
+
+// Get returns one [svc] template by action name, or "" when the guest
+// declares none.
+func (s Svc) Get(action string) string {
+	switch action {
+	case "enable":
+		return s.Enable
+	case "start":
+		return s.Start
+	case "stop":
+		return s.Stop
+	case "restart":
+		return s.Restart
+	case "status":
+		return s.Status
+	}
+	return ""
 }
 
 // loaded is the active set: bundled at init, then Load merges user files

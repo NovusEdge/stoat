@@ -774,3 +774,51 @@ type ApplyResult struct {
 func FromApplyResult(v core.VM) ApplyResult {
 	return ApplyResult{VM: v.Name, Recipes: FromVMStatus(v, false).RecipeStates}
 }
+
+// FileContent is the read_file and job_output tools' output.
+type FileContent struct {
+	Content   string `json:"content"`
+	Encoding  string `json:"encoding,omitempty"`
+	Size      int64  `json:"size"`
+	Truncated bool   `json:"truncated"`
+}
+
+// DirEntry is the list_dir and stat tools' per-file output.
+type DirEntry struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Size  int64  `json:"size"`
+	Mode  string `json:"mode"`
+	MTime int64  `json:"mtime"`
+}
+
+// DirListing is the list_dir tool's output.
+type DirListing struct {
+	Entries   []DirEntry `json:"entries"`
+	Truncated bool       `json:"truncated"`
+}
+
+// Process is one row of the ps tool's output.
+type Process struct {
+	PID     int    `json:"pid"`
+	PPID    int    `json:"ppid"`
+	User    string `json:"user"`
+	Elapsed string `json:"elapsed,omitempty"`
+	Command string `json:"command"`
+}
+
+// ProcessList is the ps tool's output.
+type ProcessList struct {
+	Processes []Process `json:"processes"`
+	Truncated bool      `json:"truncated"`
+}
+
+// CommandResult is the output of a fixed-verb in-VM tool: svc, svc_status,
+// pkg_install, useradd, write_file's chmod, exec and exec_bg's siblings.
+// Unlike ExecResult, it assumes text output; a guest verb this narrow never
+// returns binary.
+type CommandResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+}
