@@ -108,9 +108,12 @@ type Args struct {
 	Remote   string
 	ToRemote bool
 
-	// Forwards and Clear belong to "forward". Clear is separate from an empty
-	// Forwards because they mean different things: no pairs means "show me",
-	// --clear means "remove them all".
+	// Forwards belongs to "forward". Clear belongs to "forward" (--clear
+	// removes every port forward) and to "ls" (--project, filtering to the
+	// current project); no command uses both, so the field is shared. Clear
+	// is separate from an empty Forwards because they mean different things
+	// for "forward": no pairs means "show me", --clear means "remove them
+	// all".
 	Forwards []core.PortForward
 	Clear    bool
 
