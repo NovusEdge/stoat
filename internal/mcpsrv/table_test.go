@@ -62,6 +62,13 @@ var toolTable = []toolSpec{
 	{"job_output", classRead, LevelExec},
 	{"job_kill", classExec, LevelExec},
 	{"list_jobs", classRead, LevelExec},
+
+	// Project scope (project-file plan).
+	{"project_status", classRead, LevelNone},
+	{"project_up", classMutate, LevelNone},
+	{"project_down", classMutate, LevelNone},
+	{"project_apply", classMutate, LevelNone},
+	{"project_wait", classMutate, LevelNone},
 }
 
 // forbiddenSurfaces are absent rather than gated. A parameter that exists
