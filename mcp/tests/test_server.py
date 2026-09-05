@@ -193,7 +193,7 @@ def test_forward_refuses_a_pair_that_kong_reads_as_a_flag(fake_client):
     assert fake_client.calls == []
 
 
-@pytest.mark.parametrize("term", ["-tail", "--refresh", "--"])
+@pytest.mark.parametrize("term", ["-tail", "--json", "--refresh", "--"])
 def test_search_recipes_preserves_a_leading_dash_as_data(fake_client, term):
     server.search_recipes(term)
     assert fake_client.calls == [("recipe", "search", "--", term)]

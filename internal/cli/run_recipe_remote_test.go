@@ -377,6 +377,40 @@ func TestRecipeVersionAndEmptyRemoteListsUseContractThreeAndArrays(t *testing.T)
 	}
 }
 
+func TestRecipeSearchLiteralLeadingOptionsReachTheRealIndexQuery(t *testing.T) {
+	cases := []struct {
+		term string
+		name string
+	}{
+		{term: "--json", name: "match-json"},
+		{term: "--refresh", name: "match-refresh"},
+		{term: "--", name: "match-terminator"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.term, func(t *testing.T) {
+			cliRoot(t)
+			t.Chdir(t.TempDir())
+			cliIndex(t, fmt.Sprintf(
+				"[recipes.%s]\nsource = \"local\"\ndescription = %q\nos = [\"alpine\"]\n\n[recipes.other]\nsource = \"local\"\ndescription = \"not this term\"\nos = [\"alpine\"]\n",
+				tc.name, tc.term,
+			))
+
+			code, objs := runJSON(t, "recipe", "search", "--", tc.term)
+			if code != ExitOK {
+				t.Fatalf("search %q exit = %d: %v", tc.term, code, objs)
+			}
+			rows, _ := dataOf(t, objs)["recipes"].([]any)
+			if len(rows) != 1 {
+				t.Fatalf("search %q returned %d rows %v, want only its matching fixture", tc.term, len(rows), rows)
+			}
+			row, _ := rows[0].(map[string]any)
+			if row["name"] != tc.name || row["description"] != tc.term {
+				t.Fatalf("search %q row = %v, want %q/%q", tc.term, row, tc.name, tc.term)
+			}
+		})
+	}
+}
+
 func TestRecipeJSONRemoteResultShapesUseFullPinsAndMinimalRemoval(t *testing.T) {
 	t.Run("empty batch", func(t *testing.T) {
 		cliRoot(t)
