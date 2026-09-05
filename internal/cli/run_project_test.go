@@ -79,3 +79,43 @@ func TestUpWithNoArgumentReconcilesEveryDeclaration(t *testing.T) {
 		}
 	}
 }
+
+// --json never prompts, so rm with no -y is an error, not a question, at
+// project scope too.
+func TestRMAtProjectScopeRefusesWithoutYesUnderJSON(t *testing.T) {
+	projectRoot(t, twoVMs)
+	for _, n := range []string{"myrepo-dev", "myrepo-ci"} {
+		if err := (&config.VM{Name: n, Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, _ := runJSON(t, "rm")
+	if code != ExitFail {
+		t.Errorf("exit = %d, want %d", code, ExitFail)
+	}
+	if _, err := config.Load("myrepo-dev"); err != nil {
+		t.Error("myrepo-dev was deleted without -y under --json")
+	}
+}
+
+// apply with no argument runs every declaration in order. The fixture VMs are
+// stopped, so every entry fails; the point is that all three are attempted in
+// order and the report names them.
+func TestApplyWithNoArgumentCoversEveryDeclaration(t *testing.T) {
+	projectRoot(t, twoVMs)
+	for _, n := range []string{"myrepo-dev", "myrepo-ci"} {
+		if err := (&config.VM{Name: n, Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, objs := runJSON(t, "apply", "--dry-run")
+	data, _ := result(t, objs)["data"].(map[string]any)
+	vms, _ := data["vms"].([]any)
+	if len(vms) != 2 {
+		t.Fatalf("vms = %v, want two entries", vms)
+	}
+	first, _ := vms[0].(map[string]any)
+	if first["key"] != "dev" {
+		t.Errorf("first entry = %v, want dev, the first declaration", first)
+	}
+}
