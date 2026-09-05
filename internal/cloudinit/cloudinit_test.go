@@ -265,6 +265,65 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 	}
 }
 
+func TestSeedSecretArtifactsArePrivate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	bin := t.TempDir()
+	// The stand-in deliberately unlinks and recreates the ISO, inheriting the
+	// caller's umask. Seed must protect the replacement inode before xorriso
+	// writes bytes.
+	modeFile := filepath.Join(root, "xorriso-create-mode")
+	modeFileQ := shellQuoteCloudinitTest(modeFile)
+	xorriso := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=$2; shift 2; else shift; fi\ndone\nrm -f \"$out\"\n: > \"$out\"\nstat -c '%a' \"$out\" > " + modeFileQ + "\nprintf 'private seed' > \"$out\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "xorriso"), []byte(xorriso), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	const sentinel = "cloud-secret-value"
+	v := &config.VM{
+		Name: "cloudy", Mode: "cloud", OS: "ubuntu", Dir: filepath.Join(root, "cloudy"),
+	}
+	if _, err := Seed(v, testPubkey, []string{"#cloud-config\nruncmd:\n  - echo " + sentinel + "\n"}); err != nil {
+		t.Fatal(err)
+	}
+	createdMode, err := os.ReadFile(modeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(createdMode)) != "600" {
+		t.Fatalf("xorriso replacement mode before payload = %q, want 600", createdMode)
+	}
+	seedDir := filepath.Join(v.OvlDir(), "seed")
+	for _, item := range []struct {
+		path string
+		want os.FileMode
+	}{
+		{seedDir, 0o700},
+		{filepath.Join(seedDir, "user-data"), 0o600},
+		{filepath.Join(v.OvlDir(), "seed.iso"), 0o600},
+	} {
+		info, err := os.Stat(item.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", item.path, err)
+		}
+		if got := info.Mode().Perm(); got != item.want {
+			t.Errorf("%s mode = %#o, want %#o", item.path, got, item.want)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(seedDir, "user-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), sentinel) {
+		t.Fatal("private user-data seed lost the required secret-bearing recipe")
+	}
+}
+
+func shellQuoteCloudinitTest(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
 // TestSeedArchiveHeaderIsFirstLine pins what NoCloud checks to recognise a
 // cloud-config-archive: "#cloud-config-archive" must be the first line of
 // the file, verbatim. Same shape as the "#cloud-config" match this package

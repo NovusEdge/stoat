@@ -32,10 +32,14 @@ const (
 	UntilApplied Until = "applied"
 	// UntilStopped is qemu.Running turning false.
 	UntilStopped Until = "stopped"
+	// UntilHealthy is every applied recipe's health check passing.
+	UntilHealthy Until = "healthy"
 )
 
 // Untils returns every state Wait can block for.
-func Untils() []Until { return []Until{UntilReachable, UntilApplied, UntilStopped} }
+func Untils() []Until {
+	return []Until{UntilReachable, UntilApplied, UntilStopped, UntilHealthy}
+}
 
 // Valid reports whether u is one of Untils(). Wait calls it before it loads
 // the VM, so a typo fails with the reason rather than with "not found".
@@ -85,9 +89,78 @@ func Wait(ctx context.Context, name string, until Until) error {
 		return waitApplied(ctx, v)
 	case UntilStopped:
 		return waitStopped(ctx, v)
+	case UntilHealthy:
+		return waitHealthy(ctx, v)
 	default:
 		return waitReachable(ctx, v)
 	}
+}
+
+// waitHealthy waits for ssh first, then evaluates every applied recipe that
+// declares a check until all checks pass or the health budget expires. A
+// caller deadline still bounds the operation; cancellation is returned
+// unchanged when no health result is available.
+func waitHealthy(ctx context.Context, v *config.VM) error {
+	if err := waitReachable(ctx, v); err != nil {
+		return err
+	}
+	budget := HealthTimeout(v)
+	if budget <= 0 {
+		return nil
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	var first RecipeHealth
+	for {
+		verdicts, err := HealthChecks(healthCtx, v.Name)
+		first = firstHealthFailure(verdicts)
+		if err != nil {
+			if callerErr := ctx.Err(); callerErr != nil {
+				if first.Name != "" {
+					return fmt.Errorf("%w: %s", callerErr, healthFailure(first))
+				}
+				return callerErr
+			}
+			if first.Name != "" && errors.Is(healthCtx.Err(), context.DeadlineExceeded) {
+				return healthFailure(first)
+			}
+			return err
+		}
+		if first.Name == "" {
+			return nil
+		}
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-healthCtx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			if ctx.Err() != nil && first.Name != "" {
+				return fmt.Errorf("%w: %s", ctx.Err(), healthFailure(first))
+			}
+			if first.Name != "" {
+				return healthFailure(first)
+			}
+			return healthCtx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func firstHealthFailure(verdicts []RecipeHealth) RecipeHealth {
+	for _, verdict := range verdicts {
+		if verdict.Status == HealthFailed {
+			return verdict
+		}
+	}
+	return RecipeHealth{}
+}
+
+func healthFailure(verdict RecipeHealth) error {
+	if verdict.Detail == "" {
+		return fmt.Errorf("%s: health check failed", verdict.Name)
+	}
+	return fmt.Errorf("%s: %s", verdict.Name, verdict.Detail)
 }
 
 // waitReachable blocks until sshd answers on v's forwarded port.
@@ -116,7 +189,20 @@ func sshBannerUp(ctx context.Context, v *config.VM) bool {
 		return false
 	}
 	defer func() { _ = c.Close() }()
-	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	deadline := time.Now().Add(2 * time.Second)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	_ = c.SetReadDeadline(deadline)
+	readDone := make(chan struct{})
+	defer close(readDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = c.Close()
+		case <-readDone:
+		}
+	}()
 	buf := make([]byte, 4)
 	_, err = io.ReadFull(c, buf)
 	return err == nil && string(buf) == "SSH-"

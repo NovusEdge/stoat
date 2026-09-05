@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -269,4 +271,326 @@ func TestWaitCtxDeadlineExceeded(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Fatalf("took %s past a 200ms deadline, want well under a second past it", elapsed)
 	}
+}
+
+// A VM with no applied recipes that declare health is healthy as soon as ssh
+// answers: no later check can change the result.
+func TestWaitHealthyWithNoChecksReturnsOnReachable(t *testing.T) {
+	root(t)
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: port}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := Wait(ctx, v.Name, UntilHealthy); err != nil {
+		t.Fatalf("Wait healthy = %v, want nil", err)
+	}
+}
+
+// The first failing recipe is named and retains the check's last output line,
+// so a caller can act on the reported failure rather than a generic timeout.
+func TestWaitHealthyNamesFirstFailureAndDetail(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipe(t, dir, true)
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{"docker"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installHealthSSH(t, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil || !strings.Contains(err.Error(), "docker: health check failed") || !strings.Contains(err.Error(), "cannot connect to the docker daemon") {
+		t.Fatalf("Wait healthy error = %v, want named check detail", err)
+	}
+}
+
+// The global healthy deadline honors a declared timeout shorter than the old
+// 30s fallback; it must not wait for a separate budget per recipe.
+func TestWaitHealthyUsesLongestDeclaredTimeout(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithTimeout(t, dir, "50ms")
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{"docker"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installHealthSSH(t, false)
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil {
+		t.Fatal("Wait healthy succeeded with a failing check")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Wait healthy took %s, want the 50ms health budget", elapsed)
+	}
+}
+
+// Health checks are evaluated in recipe order, but the caller's one budget is
+// the longest declared timeout. A slow first check must not let later checks
+// add another full timeout to Wait.
+func TestWaitHealthyUsesOneGlobalBudgetForSequentialChecks(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithCheckTimeoutNamed(t, dir, "health-one", "150ms", "health-one-check")
+	writeHealthRecipeWithCheckTimeoutNamed(t, dir, "health-two", "500ms", "health-two-check")
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{"health-one", "health-two"},
+		Applied: map[string]config.AppliedRecipe{"health-one": {}, "health-two": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installSequentialHealthSSH(t, filepath.Join(t.TempDir(), "health-calls"))
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil {
+		t.Fatal("Wait healthy succeeded with blocked checks")
+	}
+	if !strings.Contains(err.Error(), "health-one") || !strings.Contains(err.Error(), "first-health-detail") {
+		t.Fatalf("Wait healthy error = %v, want first failing recipe and detail", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 800*time.Millisecond {
+		t.Fatalf("Wait healthy took %s, want one 500ms global budget rather than sequential budgets", elapsed)
+	}
+}
+
+// A single probe can time out after writing diagnostic output. Wait must keep
+// that named, redacted failure instead of returning a bare context deadline.
+func TestWaitHealthyRetainsSingleCheckDetailWhenInternalBudgetExpires(t *testing.T) {
+	dir := root(t)
+	const (
+		recipe = "single-blocked"
+		secret = "single-health-blocking-secret-7c2"
+	)
+	writeHealthRecipeWithCheckTimeoutNamed(t, dir, recipe, "100ms", "single-health-check")
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{recipe},
+		Applied: map[string]config.AppliedRecipe{recipe: {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveSecrets(v.Dir, config.Secrets{recipe: {"token": secret}}); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installSingleBlockingHealthSSH(t, secret)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil {
+		t.Fatal("Wait healthy succeeded with a single check that exceeded its internal budget")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait healthy returned bare deadline for internal health timeout: %v", err)
+	}
+	for _, want := range []string{recipe, "single-health-detail", "<redacted>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Wait healthy error = %v, want %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Wait healthy error leaked stored secret: %v", err)
+	}
+}
+
+// A child that ignores SIGTERM must still be reaped promptly when a health
+// check's context expires. The PID is the fake ssh process itself, so a
+// passing implementation cannot leave an owned descendant behind.
+func TestHealthCheckReapsTERMIgnoringChildWithinBound(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithTimeoutNamed(t, dir, "ignore-term", "100ms")
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{"ignore-term"},
+		Applied: map[string]config.AppliedRecipe{"ignore-term": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	pidPath := filepath.Join(t.TempDir(), "ssh.pid")
+	installIgnoringTERMHealthSSH(t, pidPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := HealthChecks(ctx, v.Name)
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HealthChecks error = %v, want context deadline", err)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("HealthChecks took %s after child ignored SIGTERM, want bounded reaping", elapsed)
+	}
+}
+
+// An accepted TCP peer that never sends an SSH banner is not reachable. The
+// banner read must nevertheless observe the caller context instead of waiting
+// for its independent two-second socket deadline.
+func TestWaitReachableSilentPeerHonorsContext(t *testing.T) {
+	root(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	peerDone := make(chan struct{})
+	go func() {
+		for {
+			conn, acceptErr := l.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func() {
+				<-peerDone
+				_ = conn.Close()
+			}()
+		}
+	}()
+	v := &config.VM{
+		Name: "work", Mode: "live", RAM: 1024, CPUs: 1,
+		SSHPort: l.Addr().(*net.TCPAddr).Port,
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err = Wait(ctx, v.Name, UntilReachable)
+	close(peerDone)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait silent peer error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(start); elapsed >= time.Second {
+		t.Fatalf("Wait silent peer took %s, want context-bounded banner read", elapsed)
+	}
+}
+
+func TestHealthTimeoutUsesLongestDeclaredTimeoutWithoutMinimum(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithTimeoutNamed(t, dir, "docker", "50ms")
+	writeHealthRecipeWithTimeoutNamed(t, dir, "tailscale", "2s")
+	v := &config.VM{
+		Name: "work", OS: "alpine", Recipes: []string{"docker", "tailscale"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}, "tailscale": {}},
+	}
+	if got, want := HealthTimeout(v), 2*time.Second; got != want {
+		t.Fatalf("HealthTimeout = %s, want longest declared timeout %s", got, want)
+	}
+	writeHealthRecipeWithTimeoutNamed(t, dir, "docker", "50ms")
+	v.Applied = map[string]config.AppliedRecipe{"docker": {}}
+	if got, want := HealthTimeout(v), 50*time.Millisecond; got != want {
+		t.Fatalf("HealthTimeout = %s, want declared timeout %s (not the 30s default)", got, want)
+	}
+}
+
+// Parent cancellation survives the reachability and health boundaries rather
+// than being converted into a recipe failure.
+func TestWaitHealthyPropagatesCancellation(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2399}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Wait(ctx, v.Name, UntilHealthy); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait healthy error = %v, want context.Canceled", err)
+	}
+}
+
+func writeHealthRecipeWithTimeout(t *testing.T, rootDir, timeout string) {
+	writeHealthRecipeWithTimeoutNamed(t, rootDir, "docker", timeout)
+}
+
+func writeHealthRecipeWithTimeoutNamed(t *testing.T, rootDir, name, timeout string) {
+	writeHealthRecipeWithCheckTimeoutNamed(t, rootDir, name, timeout, "docker info")
+}
+
+func writeHealthRecipeWithCheckTimeoutNamed(t *testing.T, rootDir, name, timeout, check string) {
+	t.Helper()
+	d := filepath.Join(rootDir, "recipes", name)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "schema = 3\nname = \"" + name + "\"\nscript = \"install.sh\"\n\n[health]\ncheck = \"" + check + "\"\n"
+	if timeout != "" {
+		manifest += "timeout = \"" + timeout + "\"\n"
+	}
+	if err := os.WriteFile(filepath.Join(d, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "install.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func installSequentialHealthSSH(t *testing.T, callsPath string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\nbody=$(cat)\ncalls=0\nif [ -f " + shellQuoteCoreTest(callsPath) + " ]; then calls=$(cat " + shellQuoteCoreTest(callsPath) + "); fi\ncalls=$((calls + 1))\nprintf '%s\\n' \"$calls\" > " + shellQuoteCoreTest(callsPath) + "\ncase \"$body\" in\n*health-one-check*) printf '%s\\n' first-health-detail >&2; exit 1;;\n*health-two-check*) if [ \"$calls\" -ge 4 ]; then while :; do :; done; fi; exit 0;;\nesac\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installSingleBlockingHealthSSH(t *testing.T, secret string) {
+	t.Helper()
+	bin := t.TempDir()
+	detail := shellQuoteCoreTest("single-health-detail " + secret)
+	script := "#!/bin/sh\nbody=$(cat)\ncase \"$body\" in\n*'single-health-check'*) printf '%s\\n' " + detail + " >&2; trap '' TERM; while :; do :; done;;\nesac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installIgnoringTERMHealthSSH(t *testing.T, pidPath string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' \"$$\" > " + shellQuoteCoreTest(pidPath) + "\ntrap '' TERM\nwhile :; do :; done\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

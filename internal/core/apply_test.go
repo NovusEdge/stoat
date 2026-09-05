@@ -697,3 +697,101 @@ func TestCheckRecipesReportsCapabilityMismatch(t *testing.T) {
 		t.Errorf("Reason = %q, want it to contain %q", issues[0].Reason, want)
 	}
 }
+
+func TestRecipesProjectsSchema3ContractInSortedOrder(t *testing.T) {
+	dir := root(t)
+	recipeDir := filepath.Join(dir, "recipes", "docker")
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `schema = 3
+name = "docker"
+description = "Docker engine"
+os = ["alpine"]
+script = "install.sh"
+runtime = "sh"
+depends = ["base"]
+
+[params.zeta]
+type = "string"
+default = "z"
+
+[params.alpha]
+type = "int"
+default = 2375
+
+[outputs]
+z-socket = "z"
+socket = "socket"
+
+[health]
+check = "docker info"
+timeout = "2s"
+`
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Recipes(RecipeFilter{OS: "alpine", Backend: "apkovl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var docker Recipe
+	for _, recipe := range got {
+		if recipe.Name == "docker" {
+			docker = recipe
+			break
+		}
+	}
+	if docker.Name == "" {
+		t.Fatalf("Recipes omitted docker: %+v", got)
+	}
+	if docker.Schema != 3 || docker.Description != "Docker engine" || docker.Health == nil || docker.Health.Check != "docker info" {
+		t.Fatalf("docker contract = %+v, want schema/description/health projection", docker)
+	}
+	if len(docker.Params) != 2 || docker.Params[0].Name != "alpha" || docker.Params[1].Name != "zeta" {
+		t.Fatalf("params = %+v, want sorted [alpha zeta]", docker.Params)
+	}
+	if len(docker.Outputs) != 2 || docker.Outputs[0].Name != "socket" || docker.Outputs[1].Name != "z-socket" {
+		t.Fatalf("outputs = %+v, want sorted [socket z-socket]", docker.Outputs)
+	}
+}
+
+func TestRecipeShowProjectsNamedManifestContract(t *testing.T) {
+	dir := root(t)
+	recipeDir := filepath.Join(dir, "recipes", "docker")
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `schema = 3
+name = "docker"
+description = "Docker engine"
+script = "install.sh"
+
+[params.authkey]
+type = "secret"
+required = true
+
+[outputs]
+socket = "path"
+
+[health]
+check = "docker info"
+timeout = "30s"
+`
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RecipeShow("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "docker" || got.Schema != 3 || len(got.Params) != 1 || got.Params[0].Name != "authkey" || len(got.Outputs) != 1 || got.Health == nil {
+		t.Fatalf("RecipeShow = %+v, want named schema contract", got)
+	}
+}

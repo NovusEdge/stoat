@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -115,6 +116,53 @@ func TestLogsReturnsWrittenBytes(t *testing.T) {
 	}
 	if string(b) != "apply output\n" {
 		t.Errorf("apply log = %q", b)
+	}
+}
+
+// Logs is a public reader boundary. Stored secret values may appear in either
+// backend's output, so the reader must redact them before a CLI, MCP, or TUI
+// can expose the bytes.
+func TestLogsRedactsStoredSecretValues(t *testing.T) {
+	v := vm(t, "work", "")
+	const sentinel = "logs-secret-sentinel"
+	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": sentinel}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(v.ProvisionLogPath(), []byte("docker authkey="+sentinel+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Logs(v.Name, WhichApply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), sentinel) {
+		t.Fatalf("apply log leaks stored secret %q: %q", sentinel, b)
+	}
+	if !strings.Contains(string(b), "<redacted>") {
+		t.Errorf("apply log = %q, want the redaction marker", b)
+	}
+}
+
+// A malformed or insecure secret store must fail the reader with VM context;
+// silently opening raw log bytes would make the mode check meaningless.
+func TestLogsRefusesInsecureSecretStoreWithVMContext(t *testing.T) {
+	v := vm(t, "work", "")
+	path := filepath.Join(v.Dir, config.SecretsName)
+	if err := os.WriteFile(path, []byte("docker.authkey = \"sentinel\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Logs(v.Name, WhichApply); err == nil || !strings.Contains(err.Error(), "work") || !strings.Contains(err.Error(), "secrets.toml: mode 0644") {
+		t.Fatalf("Logs error = %v, want VM context and secret-file mode", err)
 	}
 }
 

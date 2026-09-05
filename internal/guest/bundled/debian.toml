@@ -29,6 +29,10 @@ stop = "systemctl stop {name}"
 restart = "systemctl restart {name}"
 status = "systemctl status {name}"
 
+[cmd]
+download = "curl -fsSL -o"
+useradd = "useradd -m -s /bin/bash {name}"
+
 # Debian's cloud kernel ships no 9p module; the cloudinit backend must not
 # rely on a 9p share mount for this guest.
 [backend.cloudinit]

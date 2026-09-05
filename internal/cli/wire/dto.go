@@ -2,6 +2,8 @@ package wire
 
 import (
 	"encoding/base64"
+	"sort"
+	"time"
 	"unicode/utf8"
 
 	"github.com/novusedge/stoat/internal/core"
@@ -97,6 +99,72 @@ type VM struct {
 	// already wrong.
 	Display string `json:"display"`
 	Error   string `json:"error,omitempty"`
+}
+
+// RecipeState is one recipe's redacted per-VM state.
+type RecipeState struct {
+	Name    string            `json:"name"`
+	Applied bool              `json:"applied"`
+	Version string            `json:"version"`
+	At      string            `json:"at"`
+	Health  string            `json:"health"`
+	Params  map[string]string `json:"params"`
+	Outputs map[string]string `json:"outputs"`
+}
+
+// VMStatus is the get/vm_status payload. RecipeStates is additive so the
+// existing VM.recipes string list remains compatible with contract v2.
+type VMStatus struct {
+	VM
+	Health       string        `json:"health"`
+	RecipeStates []RecipeState `json:"recipes_detail"`
+}
+
+// VMStatusResult is the named result for `get --json`.
+type VMStatusResult struct {
+	VM VMStatus `json:"vm"`
+}
+
+// FromVMStatus converts the stored VM status into its additive wire shape.
+func FromVMStatus(v core.VM, graphical bool) VMStatus {
+	health := string(v.Health)
+	if health == "" {
+		health = string(core.HealthUnknown)
+	}
+	out := VMStatus{VM: FromVM(v, graphical), Health: health, RecipeStates: []RecipeState{}}
+	for _, state := range v.RecipeStates {
+		params := nonNilMap(state.Params)
+		redacted := make(map[string]string, len(params)+len(state.SecretNames))
+		for name, value := range params {
+			redacted[name] = value
+		}
+		for _, name := range state.SecretNames {
+			if redacted[name] != core.SecretUnset {
+				redacted[name] = core.SecretSet
+			}
+		}
+		at := ""
+		if !state.At.IsZero() {
+			at = state.At.UTC().Format(time.RFC3339)
+		}
+		stateHealth := state.Health
+		if stateHealth == "" {
+			stateHealth = string(core.HealthUnknown)
+		}
+		out.RecipeStates = append(out.RecipeStates, RecipeState{
+			Name: state.Name, Applied: state.Applied, Version: state.Version,
+			At: at, Health: stateHealth, Params: redacted,
+			Outputs: nonNilMap(state.Outputs),
+		})
+	}
+	return out
+}
+
+func nonNilMap(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 // FromVM takes graphical (core.GraphicalSession) rather than calling it,
@@ -264,21 +332,122 @@ func FromPruneItems(ps []core.PruneItem) []PruneItem {
 // until reachable" after an apply answers about the guest before or after the
 // restart.
 type Recipe struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Reboot      bool     `json:"reboot"`
-	Depends     []string `json:"depends"`
-	Runtime     string   `json:"runtime"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Schema      int            `json:"schema"`
+	Params      []RecipeParam  `json:"params"`
+	Outputs     []RecipeOutput `json:"outputs"`
+	Health      *RecipeHealth  `json:"health"`
+	Reboot      bool           `json:"reboot"`
+	Depends     []string       `json:"depends"`
+	Runtime     string         `json:"runtime"`
+}
+
+// RecipeParam is one named recipe parameter in a machine-readable schema.
+type RecipeParam struct {
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Required bool     `json:"required"`
+	Default  string   `json:"default"`
+	Values   []string `json:"values"`
+	Help     string   `json:"help"`
+}
+
+// RecipeOutput is one named recipe output in a machine-readable schema.
+type RecipeOutput struct {
+	Name string `json:"name"`
+	Help string `json:"help"`
+}
+
+// RecipeHealth is a recipe's declared health check.
+type RecipeHealth struct {
+	Check   string `json:"check"`
+	Timeout string `json:"timeout"`
+}
+
+// RecipeSchema is one recipe's machine-readable contract.
+type RecipeSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Schema      int            `json:"schema"`
+	Runtime     string         `json:"runtime"`
+	Reboot      bool           `json:"reboot"`
+	Depends     []string       `json:"depends"`
+	Params      []RecipeParam  `json:"params"`
+	Outputs     []RecipeOutput `json:"outputs"`
+	Health      *RecipeHealth  `json:"health"`
+}
+
+// RecipeShowResult is the named JSON envelope for `recipe show`.
+type RecipeShowResult struct {
+	Recipe RecipeSchema `json:"recipe"`
+}
+
+// FromRecipeSchema converts a core recipe contract to the named wire shape.
+// Params and outputs remain sorted named lists so repeated calls are stable.
+func FromRecipeSchema(r core.Recipe) RecipeSchema {
+	s := RecipeSchema{
+		Name: r.Name, Description: r.Description, Schema: r.Schema,
+		Runtime: r.Runtime, Reboot: r.Reboot, Depends: nonNil(r.Depends),
+		Params: []RecipeParam{}, Outputs: []RecipeOutput{},
+	}
+	for _, p := range r.Params {
+		s.Params = append(s.Params, RecipeParam{
+			Name: p.Name, Type: p.Type, Required: p.Required,
+			Default: p.Default, Values: nonNil(p.Values), Help: p.Help,
+		})
+	}
+	for _, o := range r.Outputs {
+		s.Outputs = append(s.Outputs, RecipeOutput{Name: o.Name, Help: o.Help})
+	}
+	sort.Slice(s.Params, func(i, j int) bool { return s.Params[i].Name < s.Params[j].Name })
+	sort.Slice(s.Outputs, func(i, j int) bool { return s.Outputs[i].Name < s.Outputs[j].Name })
+	if r.Health != nil {
+		s.Health = &RecipeHealth{Check: r.Health.Check, Timeout: r.Health.Timeout}
+	}
+	return s
 }
 
 func FromRecipe(r core.Recipe) Recipe {
 	return Recipe{
 		Name:        r.Name,
 		Description: r.Description,
+		Schema:      r.Schema,
+		Params:      fromRecipeParams(r.Params),
+		Outputs:     fromRecipeOutputs(r.Outputs),
+		Health:      fromRecipeHealth(r.Health),
 		Reboot:      r.Reboot,
 		Depends:     nonNil(r.Depends),
 		Runtime:     r.Runtime,
 	}
+}
+
+func fromRecipeParams(params []core.RecipeParam) []RecipeParam {
+	out := make([]RecipeParam, 0, len(params))
+	for _, p := range params {
+		out = append(out, RecipeParam{
+			Name: p.Name, Type: p.Type, Required: p.Required,
+			Default: p.Default, Values: nonNil(p.Values), Help: p.Help,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return nonNil(out)
+}
+
+func fromRecipeOutputs(outputs []core.RecipeOutput) []RecipeOutput {
+	out := make([]RecipeOutput, 0, len(outputs))
+	for _, o := range outputs {
+		out = append(out, RecipeOutput{Name: o.Name, Help: o.Help})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return nonNil(out)
+}
+
+func fromRecipeHealth(health *core.RecipeHealthSpec) *RecipeHealth {
+	if health == nil {
+		return nil
+	}
+	return &RecipeHealth{Check: health.Check, Timeout: health.Timeout}
 }
 
 func FromRecipes(rs []core.Recipe) []Recipe {

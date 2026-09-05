@@ -111,6 +111,8 @@ type createCmd struct {
 	Share           string   `help:"host directory to expose in the guest"`
 	ConsolePassword string   `help:"console password; \"random\" generates one"`
 	Recipes         []string `help:"recipe names to record on the VM"`
+	Set             []string `help:"set a recipe param: <recipe>.<param>=<value>"`
+	Secret          []string `help:"set a secret recipe param"`
 	// default:"true" is load-bearing, not decoration: without it kong treats
 	// an absent --allow-exec the same as an explicit --allow-exec=false,
 	// since a bare bool flag's zero value is false. With it, the flag must
@@ -129,6 +131,9 @@ type updateCmd struct {
 	Disk    *string   `help:"disk size, absolute only and grow-only (16G)"`
 	Share   *string   `help:"host directory to expose in the guest; empty clears it"`
 	Recipes *[]string `help:"replace the recipe list; empty clears it"`
+	Set     []string  `help:"set a recipe param: <recipe>.<param>=<value>"`
+	Unset   []string  `help:"clear a recipe param back to its manifest default"`
+	Secret  []string  `help:"set a secret recipe param"`
 }
 
 type cloneCmd struct {
@@ -195,6 +200,7 @@ type pruneCmd struct {
 type waitCmd struct {
 	VM      string        `arg:"" help:"vm name"`
 	Until   string        `enum:"reachable,applied,stopped" default:"reachable" help:"state to wait for"`
+	Healthy bool          `help:"wait for every applied recipe's health check to pass"`
 	Timeout time.Duration `default:"2m" help:"give up after this long"`
 }
 
@@ -218,6 +224,7 @@ type checkRecipesCmd struct {
 type recipeCmd struct {
 	List recipeListCmd `cmd:"" help:"list installed recipes and where they live"`
 	New  recipeNewCmd  `cmd:"" help:"scaffold a recipe in the recipes directory"`
+	Show recipeShowCmd `cmd:"" help:"print one recipe's params, outputs and health check"`
 }
 
 type recipeListCmd struct{}
@@ -226,6 +233,10 @@ type recipeNewCmd struct {
 	Name    string `arg:"" help:"recipe name"`
 	OS      string `help:"target OS for a new shell recipe"`
 	Backend string `help:"\"cloudinit\" for a cloud-init fragment; shell otherwise"`
+}
+
+type recipeShowCmd struct {
+	Name string `arg:"" help:"recipe name"`
 }
 
 type recipeGuestCmd struct {
@@ -286,6 +297,11 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
 			AllowExec: &allowExec,
 		}
+		edits, err := parseParamFlags(c.Set, nil, c.Secret)
+		if err != nil {
+			return nil, err
+		}
+		a.Params = edits
 
 	case "update":
 		u := g.Update
@@ -315,8 +331,16 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 				a.Changed = append(a.Changed, f.name)
 			}
 		}
+		edits, err := parseParamFlags(u.Set, u.Unset, u.Secret)
+		if err != nil {
+			return nil, err
+		}
+		a.Params = edits
+		if len(edits) > 0 {
+			a.Changed = append(a.Changed, "params")
+		}
 		if len(a.Changed) == 0 {
-			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes")
+			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes --set --unset --secret")
 		}
 
 	case "clone":
@@ -398,7 +422,15 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		if w.Timeout <= 0 {
 			return nil, usageError("wait: --timeout must be positive")
 		}
-		a.VM, a.Until, a.Timeout = w.VM, core.Until(w.Until), w.Timeout
+		if w.Healthy {
+			if w.Until != "reachable" {
+				return nil, usageError("wait: --healthy and --until are two different waits; pass one")
+			}
+			a.Until = core.UntilHealthy
+		} else {
+			a.Until = core.Until(w.Until)
+		}
+		a.VM, a.Timeout = w.VM, w.Timeout
 
 	case "apply":
 		a.VM, a.Only, a.DryRun = g.Apply.VM, trimList(g.Apply.Only), g.Apply.DryRun
@@ -419,6 +451,10 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		n := g.Recipe.New
 		a.Cmd, a.Sub = "recipe", "new"
 		a.VM, a.OS, a.Backend = n.Name, n.OS, n.Backend
+
+	case "recipe show":
+		a.Cmd, a.Sub = "recipe", "show"
+		a.VM = g.Recipe.Show.Name
 
 	case "guest ls":
 		a.Cmd, a.Sub = "guest", "ls"

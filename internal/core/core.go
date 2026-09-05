@@ -67,6 +67,8 @@ type Spec struct {
 	Disk    string // qemu-img size, absolute only ("8G", never "+8G")
 	Share   string
 	Recipes []string
+	Params  map[string]map[string]string
+	Secrets config.Secrets
 
 	// Display is the screen preference to record in vm.toml: "" or "auto"
 	// (default), "window", or "vnc". validateDisplay is the single check
@@ -120,6 +122,16 @@ func Create(s Spec) (VM, error) {
 	}
 	if err := v.Save(); err != nil {
 		return VM{}, err
+	}
+	if err := applyParamEdits(v, Patch{SetParams: s.Params, Secrets: s.Secrets}); err != nil {
+		_ = os.RemoveAll(v.Dir)
+		return VM{}, err
+	}
+	if len(s.Params) > 0 {
+		if err := v.Save(); err != nil {
+			_ = os.RemoveAll(v.Dir)
+			return VM{}, err
+		}
 	}
 	if v.Mode == "disk" {
 		out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()

@@ -32,5 +32,9 @@ stop = "rc-service {name} stop"
 restart = "rc-service {name} restart"
 status = "rc-service {name} status"
 
+[cmd]
+download = "wget -O"
+useradd = "adduser -D {name}"
+
 [backend.cloudinit]
 skip_9p = false

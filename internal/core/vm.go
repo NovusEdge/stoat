@@ -12,6 +12,7 @@ import (
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // State is List/Get's answer at call time. It is never cached; it comes
@@ -81,6 +82,28 @@ type AppliedRecipe struct {
 	Version string
 	Hash    string
 	At      time.Time
+	Health  string
+	Outputs map[string]string
+}
+
+// SecretSet and SecretUnset are the redacted states readers expose for
+// recipe secret parameters.
+const (
+	SecretSet   = "<set>"
+	SecretUnset = "<unset>"
+)
+
+// RecipeState is one recipe's stored per-VM state. Secret values are never
+// carried here; SecretNames lets a wire boundary verify redaction.
+type RecipeState struct {
+	Name        string
+	Applied     bool
+	Version     string
+	At          time.Time
+	Health      string
+	Params      map[string]string
+	SecretNames []string
+	Outputs     map[string]string
 }
 
 // VM answers "what is this VM doing right now". It is not the on-disk
@@ -110,11 +133,13 @@ type VM struct {
 	// which keeps ticking between reloads.
 	StartedAt time.Time
 
-	RAM     int
-	CPUs    int
-	Disk    string
-	Share   string
-	Recipes []string
+	RAM          int
+	CPUs         int
+	Disk         string
+	Share        string
+	Recipes      []string
+	RecipeStates []RecipeState
+	Health       Health
 
 	SSHPort int
 	SSHUser string
@@ -215,7 +240,7 @@ func checkGuest(v *config.VM) error {
 
 // fromConfig builds the point-in-time view for a VM that parsed cleanly.
 // State and Paths are the two things config.VM cannot answer for itself.
-func fromConfig(v *config.VM) VM {
+func fromConfigUnchecked(v *config.VM) VM {
 	state := StateStopped
 	if qemu.Running(v) {
 		state = StateRunning
@@ -257,6 +282,82 @@ func fromConfig(v *config.VM) VM {
 	}
 }
 
+// fromConfigChecked adds the stored recipe state that requires reading the
+// protected secret store. Public readers use this form so a security error
+// cannot be mistaken for an empty VM state.
+func fromConfigChecked(v *config.VM) (VM, error) {
+	out := fromConfigUnchecked(v)
+	states, err := recipeStates(v)
+	if err != nil {
+		return VM{}, fmt.Errorf("%s: %w", filepath.Base(v.Dir), err)
+	}
+	out.RecipeStates = states
+	verdicts := make([]RecipeHealth, 0, len(states))
+	for _, state := range states {
+		status := HealthUnknown
+		if state.Health != "" {
+			status = Health(state.Health)
+		}
+		verdicts = append(verdicts, RecipeHealth{Name: state.Name, Status: status})
+	}
+	out.Health = VMHealth(verdicts)
+	return out, nil
+}
+
+// fromConfig retains the value-only helper used by mutating operations.
+// Public Get and List call fromConfigChecked and propagate secret-store
+// failures instead.
+func fromConfig(v *config.VM) VM {
+	out, _ := fromConfigChecked(v)
+	return out
+}
+
+// recipeStates projects one state for every configured recipe. Secret values
+// are replaced before this data leaves the core status layer.
+func recipeStates(v *config.VM) ([]RecipeState, error) {
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RecipeState, 0, len(v.Recipes))
+	for _, name := range v.Recipes {
+		applied, done := v.Applied[name]
+		state := RecipeState{
+			Name: name, Applied: done, Version: applied.Version, At: applied.At,
+			Health: applied.Health, Params: map[string]string{}, Outputs: map[string]string{},
+		}
+		if state.Health == "" {
+			state.Health = string(HealthUnknown)
+		}
+		for key, value := range applied.Outputs {
+			state.Outputs[key] = value
+		}
+		manifest, ok, manifestErr := recipes.ManifestFor(name)
+		if manifestErr != nil || !ok {
+			out = append(out, state)
+			continue
+		}
+		for _, param := range manifest.SortedParams() {
+			if param.Type == "secret" {
+				state.SecretNames = append(state.SecretNames, param.Name)
+				if secrets[name][param.Name] == "" {
+					state.Params[param.Name] = SecretUnset
+				} else {
+					state.Params[param.Name] = SecretSet
+				}
+				continue
+			}
+			if value, given := v.Params[name][param.Name]; given {
+				state.Params[param.Name] = value
+			} else {
+				state.Params[param.Name] = param.Default
+			}
+		}
+		out = append(out, state)
+	}
+	return out, nil
+}
+
 // applied converts config.VM.Applied to core's own AppliedRecipe, so core.VM
 // never carries a config type (see AppliedRecipe's doc comment). A nil input
 // returns nil rather than an empty map, matching config.VM.Applied's own
@@ -267,7 +368,11 @@ func applied(m map[string]config.AppliedRecipe) map[string]AppliedRecipe {
 	}
 	out := make(map[string]AppliedRecipe, len(m))
 	for k, v := range m {
-		out[k] = AppliedRecipe{Version: v.Version, Hash: v.Hash, At: v.At}
+		outputs := make(map[string]string, len(v.Outputs))
+		for name, value := range v.Outputs {
+			outputs[name] = value
+		}
+		out[k] = AppliedRecipe{Version: v.Version, Hash: v.Hash, At: v.At, Health: v.Health, Outputs: outputs}
 	}
 	return out
 }
@@ -333,7 +438,11 @@ func List() ([]VM, error) {
 			out = append(out, VM{Name: filepath.Base(cv.Dir), State: StateBroken, Error: err.Error()})
 			continue
 		}
-		out = append(out, fromConfig(cv))
+		view, err := fromConfigChecked(cv)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, view)
 	}
 
 	broken, err := config.ListBroken()
@@ -365,7 +474,7 @@ func Get(name string) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
-	return fromConfig(v), nil
+	return fromConfigChecked(v)
 }
 
 // Start launches VM name. It wraps qemu.Start; the actual work (pidfile,

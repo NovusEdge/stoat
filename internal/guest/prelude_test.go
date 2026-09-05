@@ -61,6 +61,105 @@ func TestPreludePython(t *testing.T) {
 	}
 }
 
+func TestPreludeDefinesCmdVerbs(t *testing.T) {
+	for _, name := range []string{"alpine", "debian", "ubuntu", "fedora", "arch"} {
+		t.Run(name, func(t *testing.T) {
+			o, ok := Lookup(name)
+			if !ok {
+				t.Fatalf("no guest %q", name)
+			}
+			got := Prelude(o, "sh")
+			for _, fn := range []string{"stoat_download()", "stoat_useradd()"} {
+				if !strings.Contains(got, fn) {
+					t.Errorf("prelude does not define %s:\n%s", fn, got)
+				}
+			}
+		})
+	}
+}
+
+// {name} becomes "$1"; a template with no placeholder gets "$@". This is
+// the same rule [svc] follows, so a recipe author learns it once.
+func TestPreludeCmdTemplateRules(t *testing.T) {
+	o := OS{
+		Name: "freebsd", Init: "rc", Shell: "/bin/sh",
+		Cmd: map[string]string{
+			"download": "fetch -o",
+			"useradd":  "pw useradd -n {name} -m",
+		},
+	}
+	got := Prelude(o, "sh")
+	if !strings.Contains(got, `stoat_download() { fetch -o "$@"; }`) {
+		t.Errorf("download verb:\n%s", got)
+	}
+	if !strings.Contains(got, `stoat_useradd() { pw useradd -n "$1" -m; }`) {
+		t.Errorf("useradd verb:\n%s", got)
+	}
+}
+
+// The python prelude defines the same names over subprocess.run.
+func TestPythonPreludeDefinesCmdVerbs(t *testing.T) {
+	o, ok := Lookup("debian")
+	if !ok {
+		t.Fatal("bundled debian missing")
+	}
+	got := Prelude(o, "python3")
+	for _, fn := range []string{"def stoat_download(", "def stoat_useradd("} {
+		if !strings.Contains(got, fn) {
+			t.Errorf("python prelude does not define %s:\n%s", fn, got)
+		}
+	}
+}
+
+func TestPythonPreludeCmdForwardsDownloadArguments(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Fatal("python3 is required to execute the public Python prelude")
+	}
+	dir := t.TempDir()
+	recorded := filepath.Join(dir, "args")
+	recorder := filepath.Join(dir, "record")
+	if err := os.WriteFile(recorder, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RECORD\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(recorder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := OS{
+		Name: "freebsd", Init: "rc", Shell: "/bin/sh",
+		Pkg: Pkg{Install: []string{"true"}},
+		Cmd: map[string]string{"download": "record"},
+	}
+	body := Prelude(o, "python3") + "\nstoat_download(\"output.bin\", \"https://example.test/a\")\n"
+	cmd := exec.Command("python3", "-c", body)
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "RECORD="+recorded)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("python prelude failed: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "output.bin\nhttps://example.test/a\n" {
+		t.Errorf("download args = %q, want output then URL", got)
+	}
+}
+
+// STOAT_OUTPUT belongs to the per-recipe execution wrapper. The shared
+// prelude also runs health and package-setup commands, which must not create
+// or truncate a recipe output file.
+func TestPreludeDoesNotInitializeStoatOutput(t *testing.T) {
+	o, ok := Lookup("alpine")
+	if !ok {
+		t.Fatal("bundled alpine missing")
+	}
+	for _, runtime := range []string{"sh", "python3"} {
+		got := Prelude(o, runtime)
+		if strings.Contains(got, "STOAT_OUTPUT") || strings.Contains(got, "/tmp/.stoat-out") {
+			t.Errorf("%s prelude initializes recipe output state:\n%s", runtime, got)
+		}
+	}
+}
+
 // WithPrelude inserts after a leading shebang line so the interpreter line
 // stays first; a body with no shebang gets the prelude in front.
 func TestWithPreludeKeepsShebangFirst(t *testing.T) {

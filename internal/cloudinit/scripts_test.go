@@ -1,9 +1,13 @@
 package cloudinit
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/novusedge/stoat/internal/guest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -155,11 +159,324 @@ func TestWrapScriptsFragmentMergesIntoSeed(t *testing.T) {
 // how the cloudinit path keeps the package index refresh and the recipe
 // verbs behaving the same as the ssh path.
 func TestWrapScriptsRunsSetupFirst(t *testing.T) {
-	got := WrapScripts([]Script{{Name: "x", Content: "#!/bin/sh\necho hi\n"}}, "P\n")
-	if !strings.Contains(got, "runcmd:\n  - sh -c 'P\nstoat_pkg_setup'\n") {
-		t.Errorf("setup not first in runcmd:\n%s", got)
+	body := WrapScripts([]Script{{Name: "x", Content: "#!/bin/sh\necho hi\n"}}, "P\n")
+	f := parseWrapped(t, body)
+	if len(f.Runcmd) != 2 {
+		t.Fatalf("runcmd = %v, want setup followed by one recipe", f.Runcmd)
 	}
-	if !strings.Contains(got, "      #!/bin/sh\n      P\n      echo hi\n") {
-		t.Errorf("prelude not after the shebang:\n%s", got)
+	if got, want := f.Runcmd[0], "sh -c 'P\nstoat_pkg_setup'"; got != want {
+		t.Errorf("setup command = %q, want preserved shell command %q", got, want)
 	}
+	if !strings.Contains(f.Runcmd[1], "/var/lib/stoat/recipes/x.sh") {
+		t.Errorf("recipe command = %q, want x recipe after setup", f.Runcmd[1])
+	}
+	if len(f.WriteFiles) != 1 {
+		t.Fatalf("write_files = %v, want one recipe script", f.WriteFiles)
+	}
+	if got, want := f.WriteFiles[0].Content, "#!/bin/sh\nP\necho hi\n"; got != want {
+		t.Errorf("script content = %q, want prelude after shebang %q", got, want)
+	}
+}
+
+// Debian's registered prelude contains real multiline shell commands. The
+// public wrapper must serialize that setup command as one valid YAML scalar so
+// cloud-init can retain and execute the package setup before the recipe.
+func TestWrapScriptsSerializesActualDebianPrelude(t *testing.T) {
+	o, ok := guest.Lookup("debian")
+	if !ok {
+		t.Fatal("debian guest definition missing")
+	}
+	prelude := guest.Prelude(o, "sh")
+	body := WrapScripts([]Script{{
+		Name:    "docker",
+		Content: "#!/bin/sh\nset -eu\nstoat_pkg_install ca-certificates\n",
+	}}, prelude)
+	f := parseWrapped(t, body)
+	if len(f.Runcmd) < 2 {
+		t.Fatalf("runcmd = %v, want setup and recipe commands", f.Runcmd)
+	}
+	if !strings.Contains(f.Runcmd[0], "stoat_pkg_setup") || !strings.Contains(f.Runcmd[0], "apt-get update") {
+		t.Fatalf("setup command lost Debian prelude semantics: %q", f.Runcmd[0])
+	}
+	if !strings.Contains(f.Runcmd[1], "/var/lib/stoat/recipes/docker.sh") {
+		t.Fatalf("recipe command missing after setup: %q", f.Runcmd[1])
+	}
+}
+
+func TestWrapScriptsNamespacesSecretsAndRemovesTheSecretFileLast(t *testing.T) {
+	body := WrapScripts([]Script{
+		{
+			Name: "docker", Content: "#!/bin/sh\necho docker\n",
+			Env:     []string{"STOAT_RECIPE=docker", "STOAT_PARAM_USER=dev"},
+			Secrets: map[string]string{"authkey": "docker-secret"},
+		},
+		{
+			Name: "tailscale", Content: "#!/bin/sh\necho tailscale\n",
+			Env:     []string{"STOAT_RECIPE=tailscale"},
+			Secrets: map[string]string{"authkey": "tailscale-secret"},
+		},
+	}, "")
+	f := parseWrapped(t, body)
+
+	var secretFile *struct {
+		Path        string
+		Permissions string
+		Content     string
+	}
+	for i := range f.WriteFiles {
+		wf := f.WriteFiles[i]
+		if wf.Path == SecretsEnvPath {
+			copy := struct {
+				Path        string
+				Permissions string
+				Content     string
+			}{wf.Path, wf.Permissions, wf.Content}
+			secretFile = &copy
+		}
+	}
+	if secretFile == nil {
+		t.Fatalf("no %s write_files entry:\n%s", SecretsEnvPath, body)
+	}
+	if secretFile.Permissions != "0600" {
+		t.Errorf("secrets permissions = %q, want 0600", secretFile.Permissions)
+	}
+	for _, want := range []string{
+		"STOAT_PARAM_DOCKER_AUTHKEY", "docker-secret",
+		"STOAT_PARAM_TAILSCALE_AUTHKEY", "tailscale-secret",
+	} {
+		if !strings.Contains(secretFile.Content, want) {
+			t.Errorf("secret file missing %q:\n%s", want, secretFile.Content)
+		}
+	}
+	if len(f.Runcmd) != 3 {
+		t.Fatalf("runcmd = %v, want two recipes plus final cleanup", f.Runcmd)
+	}
+	if !strings.Contains(f.Runcmd[0], "STOAT_PARAM_DOCKER_AUTHKEY") || !strings.Contains(f.Runcmd[1], "STOAT_PARAM_TAILSCALE_AUTHKEY") {
+		t.Errorf("recipe wrappers do not select their namespaced secrets: %v", f.Runcmd[:2])
+	}
+	if got := f.Runcmd[len(f.Runcmd)-1]; got != "rm -f "+SecretsEnvPath {
+		t.Errorf("last runcmd = %q, want secret cleanup", got)
+	}
+}
+
+func TestWrapScriptsWithoutSecretsWritesNoSecretFile(t *testing.T) {
+	f := parseWrapped(t, WrapScripts([]Script{{Name: "xfce", Content: "#!/bin/sh\n"}}, ""))
+	for _, wf := range f.WriteFiles {
+		if wf.Path == SecretsEnvPath {
+			t.Fatalf("a recipe with no secrets wrote %s", SecretsEnvPath)
+		}
+	}
+	for _, cmd := range f.Runcmd {
+		if strings.Contains(cmd, SecretsEnvPath) {
+			t.Fatalf("a recipe with no secrets references %s: %q", SecretsEnvPath, cmd)
+		}
+	}
+}
+
+func TestWrapScriptsFailureCannotWriteSuccessMarker(t *testing.T) {
+	f := parseWrapped(t, WrapScripts([]Script{{
+		Name: "docker", Content: "#!/bin/sh\nexit 1\n",
+		Env: []string{"STOAT_RECIPE=docker"},
+	}}, ""))
+	if len(f.Runcmd) != 1 {
+		t.Fatalf("runcmd = %v, want one recipe command", f.Runcmd)
+	}
+	cmd := f.Runcmd[0]
+	marker := MarkerDir + "/docker"
+	if !strings.Contains(cmd, "/tmp/.stoat-out/docker") {
+		t.Errorf("recipe output was not copied before success marking: %q", cmd)
+	}
+	markerAt := strings.Index(cmd, marker)
+	if markerAt < 0 || !strings.Contains(cmd[:markerAt], "&&") {
+		t.Errorf("success marker is not gated by the recipe/output commands: %q", cmd)
+	}
+	if strings.Contains(cmd, "; touch "+marker) {
+		t.Errorf("success marker is unconditional after a semicolon: %q", cmd)
+	}
+}
+
+func TestWrapScriptsExecutesRecipeOutputAndGatesMarker(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		script  string
+		success bool
+	}{
+		{
+			name:    "success",
+			script:  "#!/bin/sh\nset -eu\nprintf '%s\\n' 'socket=/run/demo.sock' > \"$STOAT_OUTPUT\"\n",
+			success: true,
+		},
+		{
+			name:   "failure",
+			script: "#!/bin/sh\nset -eu\nprintf '%s\\n' 'socket=/run/demo.sock' > \"$STOAT_OUTPUT\"\nexit 1\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := WrapScripts([]Script{{
+				Name:    "demo",
+				Content: tt.script,
+				Env:     []string{"STOAT_RECIPE=demo"},
+			}}, "")
+			f := parseWrapped(t, body)
+			if len(f.WriteFiles) != 1 || len(f.Runcmd) != 1 {
+				t.Fatalf("generated files/commands = %d/%d, want one each:\n%s", len(f.WriteFiles), len(f.Runcmd), body)
+			}
+
+			harness := t.TempDir()
+			writeFiles := map[string]string{
+				"/var/lib/stoat/recipes":  filepath.Join(harness, "recipes"),
+				"/var/lib/stoat/.applied": filepath.Join(harness, "applied"),
+				"/tmp/.stoat-out":         filepath.Join(harness, "out"),
+			}
+			for _, wf := range f.WriteFiles {
+				path := relocateGuestPath(wf.Path, writeFiles)
+				if !pathWithin(path, harness) {
+					t.Fatalf("write_files path escaped harness: %q", path)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(wf.Content), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			command := relocateGuestPath(f.Runcmd[0], writeFiles)
+			if !strings.Contains(command, harness) {
+				t.Fatalf("generated command was not relocated into harness: %q", command)
+			}
+			cmd := exec.Command("sh", "-eu", "-c", command)
+			if err := cmd.Run(); (err == nil) != tt.success {
+				t.Fatalf("generated recipe command error = %v, success = %v", err, tt.success)
+			}
+
+			marker := filepath.Join(harness, "applied", "demo")
+			copied := marker + ".out"
+			if tt.success {
+				if _, err := os.Stat(marker); err != nil {
+					t.Fatalf("success marker missing: %v", err)
+				}
+				got, err := os.ReadFile(copied)
+				if err != nil {
+					t.Fatalf("copied output missing: %v", err)
+				}
+				if string(got) != "socket=/run/demo.sock\n" {
+					t.Fatalf("copied output = %q", got)
+				}
+			} else {
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Errorf("failure marker stat = %v, want absent", err)
+				}
+				if _, err := os.Stat(copied); !os.IsNotExist(err) {
+					t.Errorf("failure copied output stat = %v, want absent", err)
+				}
+			}
+		})
+	}
+}
+
+// Recipe names are user-controlled directory names and may contain a dash.
+// The wrapper must translate each namespaced secret into a shell-safe,
+// collision-free environment variable before invoking the child script. This
+// executes dashed, underscored, and literal escape-shaped names so a
+// normalization scheme that aliases them cannot silently deliver one recipe's
+// secret to the other.
+func TestWrapScriptsExecutesHyphenatedSecretsAndCleansUp(t *testing.T) {
+	scripts := []Script{
+		{
+			Name:    "my-recipe",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = hyphen-secret\n",
+			Secrets: map[string]string{"token": "hyphen-secret"},
+		},
+		{
+			Name:    "my_recipe",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = underscore-secret\n",
+			Secrets: map[string]string{"token": "underscore-secret"},
+		},
+		{
+			Name:    "my_2drecipe",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = escape-shaped-secret\n",
+			Secrets: map[string]string{"token": "escape-shaped-secret"},
+		},
+		{
+			Name:    "foo",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = lower-case-secret\n",
+			Secrets: map[string]string{"token": "lower-case-secret"},
+		},
+		{
+			Name:    "Foo",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = upper-case-secret\n",
+			Secrets: map[string]string{"token": "upper-case-secret"},
+		},
+		{
+			Name:    "a-b",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_C\" = pair-left-secret\n",
+			Secrets: map[string]string{"c": "pair-left-secret"},
+		},
+		{
+			Name:    "a",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_B_C\" = pair-right-secret\n",
+			Secrets: map[string]string{"b_c": "pair-right-secret"},
+		},
+	}
+	f := parseWrapped(t, WrapScripts(scripts, ""))
+	if len(f.Runcmd) != len(scripts)+1 {
+		t.Fatalf("runcmd = %v, want two recipes plus cleanup", f.Runcmd)
+	}
+
+	harness := t.TempDir()
+	paths := map[string]string{
+		"/var/lib/stoat/recipes":  filepath.Join(harness, "recipes"),
+		"/var/lib/stoat/.applied": filepath.Join(harness, "applied"),
+		"/run/stoat":              filepath.Join(harness, "run", "stoat"),
+	}
+	for _, wf := range f.WriteFiles {
+		path := relocateGuestPath(wf.Path, paths)
+		if !pathWithin(path, harness) {
+			t.Fatalf("write_files path escaped harness: %q", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		perm := os.FileMode(0o600)
+		if wf.Permissions == "0755" {
+			perm = 0o755
+		}
+		if err := os.WriteFile(path, []byte(wf.Content), perm); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := range scripts {
+		command := relocateGuestPath(f.Runcmd[i], paths)
+		cmd := exec.Command("sh", "-eu", "-c", command)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("recipe %q command failed: %v\n%s\noutput:\n%s", scripts[i].Name, err, command, output)
+		}
+	}
+	cleanup := relocateGuestPath(f.Runcmd[len(f.Runcmd)-1], paths)
+	if cleanup != "rm -f "+paths["/run/stoat"]+"/secrets.env" {
+		t.Fatalf("last runcmd = %q, want secret cleanup", f.Runcmd[len(f.Runcmd)-1])
+	}
+	if err := exec.Command("sh", "-eu", "-c", cleanup).Run(); err != nil {
+		t.Fatalf("secret cleanup failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(paths["/run/stoat"], "secrets.env")); !os.IsNotExist(err) {
+		t.Fatalf("secret file remains after final cleanup: %v", err)
+	}
+}
+
+func relocateGuestPath(value string, replacements map[string]string) string {
+	for _, path := range []string{"/var/lib/stoat/recipes", "/var/lib/stoat/.applied", "/tmp/.stoat-out", "/run/stoat"} {
+		if replacement, ok := replacements[path]; ok {
+			value = strings.ReplaceAll(value, path, replacement)
+		}
+	}
+	return value
+}
+
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

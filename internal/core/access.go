@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
+	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/sshx"
@@ -77,6 +79,10 @@ func Logs(name string, which Which) (io.ReadCloser, error) {
 	case err != nil:
 		return nil, err
 	}
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
 
 	path := v.ProvisionLogPath()
 	if which == WhichConsole {
@@ -90,5 +96,29 @@ func Logs(name string, which Which) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return f, nil
+	b, readErr := io.ReadAll(f)
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	return io.NopCloser(bytes.NewReader([]byte(redactLog(string(b), secrets)))), nil
+}
+
+func redactLog(value string, secrets config.Secrets) string {
+	var values []string
+	for _, recipe := range secrets {
+		for _, secret := range recipe {
+			if secret != "" {
+				values = append(values, secret)
+			}
+		}
+	}
+	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	for _, secret := range values {
+		value = strings.ReplaceAll(value, secret, "<redacted>")
+	}
+	return value
 }

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
@@ -36,24 +35,28 @@ type PortForward struct {
 // with an empty string, never equal to a current script's hash, so that
 // recipe re-runs once and then carries a real hash from then on.
 type AppliedRecipe struct {
-	Version string    `toml:"version"`
-	Hash    string    `toml:"hash"`
-	At      time.Time `toml:"at"`
+	Version    string            `toml:"version"`
+	Hash       string            `toml:"hash"`
+	ScriptHash string            `toml:"script_hash"`
+	At         time.Time         `toml:"at"`
+	Outputs    map[string]string `toml:"outputs,omitempty" comment:"written by stoat; do not edit"`
+	Health     string            `toml:"health"`
 }
 
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
 type VM struct {
-	Name      string   `toml:"name"`
-	Mode      string   `toml:"mode"` // "live" | "disk" | "cloud"
-	OS        string   `toml:"os"`
-	ISO       string   `toml:"iso"` // relative to the data root
-	RAM       int      `toml:"ram"` // MB
-	CPUs      int      `toml:"cpus"`
-	Disk      string   `toml:"disk"`      // disk mode only, e.g. "8G"
-	Installed bool     `toml:"installed"` // disk mode only; flips boot order
-	Share     string   `toml:"share"`     // host dir exposed as /mnt/host
-	SSHPort   int      `toml:"sshport"`
-	Recipes   []string `toml:"recipes"`
+	Name      string                       `toml:"name"`
+	Mode      string                       `toml:"mode"` // "live" | "disk" | "cloud"
+	OS        string                       `toml:"os"`
+	ISO       string                       `toml:"iso"` // relative to the data root
+	RAM       int                          `toml:"ram"` // MB
+	CPUs      int                          `toml:"cpus"`
+	Disk      string                       `toml:"disk"`      // disk mode only, e.g. "8G"
+	Installed bool                         `toml:"installed"` // disk mode only; flips boot order
+	Share     string                       `toml:"share"`     // host dir exposed as /mnt/host
+	SSHPort   int                          `toml:"sshport"`
+	Recipes   []string                     `toml:"recipes,omitempty"`
+	Params    map[string]map[string]string `toml:"params,omitempty" comment:"written by stoat; do not edit"`
 
 	// Display is the user's screen preference: "" or "auto" (default),
 	// "window", or "vnc". "auto" opens a real qemu window on a graphical
@@ -73,7 +76,7 @@ type VM struct {
 	// vm.toml immediately but has no effect on the live process. See
 	// core.Forward and core.ErrAppliesAtNextStart, which exist so a caller
 	// cannot mistake "saved" for "live".
-	Forwards []PortForward `toml:"forwards"`
+	Forwards []PortForward `toml:"forwards,omitempty"`
 
 	// Backend is the provisioning backend: "apkovl" | "cloudinit" | "ssh".
 	// Written by the form at creation time; dispatch elsewhere in stoat
@@ -103,9 +106,51 @@ type VM struct {
 	AllowExec bool `toml:"allow_exec"`
 
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
-	Applied map[string]AppliedRecipe `toml:"applied"`
+	Applied map[string]AppliedRecipe `toml:"applied,omitempty" comment:"written by stoat; do not edit"`
 
 	Dir string `toml:"-"` // absolute path to the VM directory
+}
+
+// Param reads one stored recipe parameter.
+func (v *VM) Param(recipe, name string) (string, bool) {
+	if v == nil {
+		return "", false
+	}
+	values, ok := v.Params[recipe]
+	if !ok {
+		return "", false
+	}
+	value, ok := values[name]
+	return value, ok
+}
+
+// SetParam stores one non-secret recipe parameter.
+func (v *VM) SetParam(recipe, name, value string) {
+	if v.Params == nil {
+		v.Params = make(map[string]map[string]string)
+	}
+	if v.Params[recipe] == nil {
+		v.Params[recipe] = make(map[string]string)
+	}
+	v.Params[recipe][name] = value
+}
+
+// UnsetParam removes one stored recipe parameter.
+func (v *VM) UnsetParam(recipe, name string) {
+	if v == nil || v.Params == nil {
+		return
+	}
+	values, ok := v.Params[recipe]
+	if !ok {
+		return
+	}
+	delete(values, name)
+	if len(values) == 0 {
+		delete(v.Params, recipe)
+	}
+	if len(v.Params) == 0 {
+		v.Params = nil
+	}
 }
 
 // Root is the data root: $STOAT_HOME, or ~/.stoat.
@@ -196,12 +241,7 @@ func (v *VM) Save() error {
 	if err := os.MkdirAll(v.Dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.Create(v.path())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return toml.NewEncoder(f).Encode(v)
+	return tomlx.Encode(v.path(), v)
 }
 
 // Load reads one VM by name.

@@ -4,11 +4,14 @@
 package tomlx
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	gotoml "github.com/pelletier/go-toml/v2"
 )
 
 type options struct {
@@ -60,4 +63,100 @@ func Decode(path string, v any, opts ...Option) error {
 		fmt.Fprintf(o.warn, "%s: unknown key %q\n", path, key)
 	}
 	return nil
+}
+
+// Encode is the single TOML writer for files owned by stoat.
+func Encode(path string, v any) error {
+	var buf bytes.Buffer
+	if err := gotoml.NewEncoder(&buf).Encode(v); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	data := ownedTableComments(normalizeQuotes(buf.Bytes()))
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+// normalizeQuotes keeps files written by stoat compatible with its existing
+// examples, which use basic double-quoted strings. go-toml prefers literal
+// single-quoted strings when the value does not need escaping.
+func normalizeQuotes(data []byte) []byte {
+	var out bytes.Buffer
+	for i := 0; i < len(data); {
+		if data[i] == '"' {
+			out.WriteByte(data[i])
+			i++
+			for i < len(data) {
+				out.WriteByte(data[i])
+				if data[i] == '\\' && i+1 < len(data) {
+					i++
+					out.WriteByte(data[i])
+				} else if data[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if data[i] != '\'' || i+1 >= len(data) || data[i+1] == '\'' {
+			out.WriteByte(data[i])
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(data) && data[end] != '\'' && data[end] != '\n' {
+			end++
+		}
+		if end == len(data) || data[end] == '\n' {
+			out.WriteByte(data[i])
+			i++
+			continue
+		}
+		out.WriteByte('"')
+		for _, c := range data[i+1 : end] {
+			if c == '\\' || c == '"' {
+				out.WriteByte('\\')
+			}
+			out.WriteByte(c)
+		}
+		out.WriteByte('"')
+		i = end + 1
+	}
+	return out.Bytes()
+}
+
+// ownedTableComments repeats a struct field's ownership marker for nested
+// tables. go-toml emits a field comment once for a map, while vm.toml has one
+// owned table for each recipe and each recipe's outputs.
+func ownedTableComments(data []byte) []byte {
+	const marker = "# written by stoat; do not edit"
+	if !bytes.Contains(data, []byte(marker)) {
+		return data
+	}
+	lines := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(lines)+4)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[params") || strings.HasPrefix(trimmed, "[applied") {
+			j := len(out) - 1
+			for j >= 0 && strings.TrimSpace(out[j]) == "" {
+				j--
+			}
+			if j < 0 || !strings.Contains(out[j], marker) {
+				out = append(out, marker)
+			}
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n"))
 }

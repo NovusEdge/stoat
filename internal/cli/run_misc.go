@@ -164,6 +164,9 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, "edit it, then pick it in the new-vm form for a matching vm")
 		}
 		return ExitOK
+
+	case "show":
+		return runRecipeShow(a, stdout, stderr)
 	}
 	// Unreachable: Parse rejects any action but list/new.
 	if a.JSON {

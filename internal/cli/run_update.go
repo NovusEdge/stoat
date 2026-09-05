@@ -16,6 +16,10 @@ import (
 // requested edits core accepted, and applies_at because most of them are
 // written to vm.toml now and only take effect at the VM's next start.
 func runUpdate(a *Args, stdout, stderr io.Writer) int {
+	set, unset, secrets := paramMaps(a.Params)
+	a.Patch.SetParams = set
+	a.Patch.UnsetParams = unset
+	a.Patch.Secrets = secrets
 	v, err := core.Update(a.VM, a.Patch)
 	if err != nil {
 		return a.fail(stdout, stderr, err)

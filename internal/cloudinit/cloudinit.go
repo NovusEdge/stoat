@@ -295,7 +295,10 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	}
 
 	seedDir := filepath.Join(v.OvlDir(), "seed")
-	if err := os.MkdirAll(seedDir, 0o755); err != nil {
+	if err := os.MkdirAll(seedDir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(seedDir, 0o700); err != nil {
 		return "", err
 	}
 
@@ -303,21 +306,53 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(ud), 0o644); err != nil {
+	if err := writePrivateFile(filepath.Join(seedDir, "user-data"), []byte(ud)); err != nil {
 		return "", err
 	}
 
 	metaData := fmt.Sprintf(metaDataTemplate, "stoat-"+v.Name, v.Name)
-	if err := os.WriteFile(filepath.Join(seedDir, "meta-data"), []byte(metaData), 0o644); err != nil {
+	if err := writePrivateFile(filepath.Join(seedDir, "meta-data"), []byte(metaData)); err != nil {
 		return "", err
 	}
 
 	isoPath := filepath.Join(v.OvlDir(), "seed.iso")
-	cmd := exec.Command("xorriso", "-as", "mkisofs", "-o", isoPath, "-V", "CIDATA", "-J", "-r", seedDir)
+	iso, err := os.OpenFile(isoPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if err := iso.Chmod(0o600); err != nil {
+		_ = iso.Close()
+		return "", err
+	}
+	if err := iso.Close(); err != nil {
+		return "", err
+	}
+	xorrisoArgs := []string{"-as", "mkisofs", "-o", isoPath, "-V", "CIDATA", "-J", "-r", seedDir}
+	commandArgs := append([]string{"-c", "umask 0077; exec \"$@\"", "stoat-xorriso", "xorriso"}, xorrisoArgs...)
+	cmd := exec.Command("sh", commandArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("xorriso: %w: %s", err, out)
 	}
+	if err := os.Chmod(isoPath, 0o600); err != nil {
+		return "", err
+	}
 
 	return isoPath, nil
+}
+
+func writePrivateFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }

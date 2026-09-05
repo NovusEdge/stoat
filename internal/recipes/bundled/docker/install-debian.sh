@@ -35,3 +35,12 @@ done
 docker version --format '{{.Server.Version}}' 2>/dev/null |
     sed 's/^/docker daemon running, version /' ||
     echo "docker installed, but the daemon did not come up: check 'systemctl status docker'"
+
+user="${STOAT_PARAM_USER:-dev}"
+if ! id "$user" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$user"
+fi
+usermod -aG docker "$user"
+if [ -n "${STOAT_OUTPUT:-}" ]; then
+    printf '%s\n' 'socket=/var/run/docker.sock' >> "$STOAT_OUTPUT"
+fi

@@ -190,6 +190,10 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "allow_exec":true,"display":"vnc",
              "error":"only on a broken VM"}
 
+VMStatus    {"name":"work",...VM fields...,"health":"ok","recipes_detail":[
+             {"name":"xfce","applied":true,"version":"1.2","at":"...",
+              "health":"unknown","params":{},"outputs":{}}]}
+
 Image       {"id":"alpine-virt","os":"alpine","variant":"virt",
              "backend":"apkovl","file":"alpine-virt-3.24.1-x86_64.iso",
              "downloaded":true,"bytes":62914560,"bytes_exact":true,"byo":false}
@@ -203,7 +207,17 @@ Check       {"name":"qemu-img","ok":false,"detail":"not found",
 PruneItem   {"class":"orphaned_image","path":"/home/u/.stoat/isos/old.iso"}
 
 Recipe      {"name":"xfce","description":"XFCE desktop over SSH or at boot",
-             "reboot":false,"depends":[],"runtime":"sh"}
+             "schema":2,"runtime":"sh","reboot":false,"depends":[],
+             "params":[],"outputs":[],"health":null}
+
+RecipeSchema {"name":"docker","description":"Docker engine and the compose plugin",
+              "schema":3,"runtime":"sh","reboot":false,"depends":[],
+              "params":[RecipeParam,...],"outputs":[RecipeOutput,...],
+              "health":{"check":"docker info","timeout":"30s"}}
+RecipeParam {"name":"channel","type":"enum","required":false,
+             "default":"stable","values":["stable","test"],"help":"..."}
+RecipeOutput {"name":"socket","help":"path of the socket"}
+RecipeHealth {"check":"docker info","timeout":"30s"}
 
 RecipeIssue {"name":"docker","reason":"docker is not offered to debian/cloudinit"}
 
@@ -312,7 +326,7 @@ so a leak fails the build rather than shipping.
 | `cmd` | `data` |
 |---|---|
 | `ls` | `{"vms":[VM,...]}` |
-| `get` | `{"vm":VM}` |
+| `get` | `{"vm":VMStatus}` |
 | `create` | `{"vm":VM}` |
 | `update` | `{"vm":VM,"changed":["ram"],"applies_at":"now"}` |
 | `up` | `{"vm":VM}` (re-read after start, so `state` is authoritative) |
@@ -337,8 +351,15 @@ so a leak fails the build rather than shipping.
 | `guest ls` | `{"guests":[Guest,...]}` |
 | `guest show` | `{"guest":Guest}` |
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
-| `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
+| `recipe show` | `{"recipe":RecipeSchema}` |
+| `recipe new` | `{"path":"/home/u/.stoat/recipes/foo"}` |
 | `screenshot` | `{"vm":"work","path":"/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png","bytes":48213,"width":1280,"height":800}` |
+| `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |
+| `logs <vm>` | `{"vm":"work","which":"console","lines":[...]}` |
+| `doctor` | `{"healthy":false,"checks":[Check,...]}` |
+| `version` | `{"version":"1.2.3","contract":2}` |
+| `help` | `{"usage":"..."}` |
+| `ssh` | **refused**, see below |
 
 Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`,
 and both `guest` subcommands report `"cmd":"guest"`. Distinguish them by which
@@ -348,13 +369,18 @@ fields `data` carries.
 as "every recipe you can use": it currently includes the `.bak` files the
 one-time manifest upgrade left behind, and those are not applicable to any VM.
 Use `recipes` (which filters by OS and backend) to find something a VM can
-actually run; use `recipe list` only to find a file to edit.
-| `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |
-| `logs <vm>` | `{"vm":"work","which":"console","lines":[...]}` |
-| `doctor` | `{"healthy":false,"checks":[Check,...]}` |
-| `version` | `{"version":"1.2.3","contract":2}` |
-| `help` | `{"usage":"..."}` |
-| `ssh` | **refused**, see below |
+actually run; use `recipe list` only to find a recipe directory to inspect.
+
+`get` returns `{"vm":VMStatus}`: `VMStatus` embeds the VM fields directly;
+only the outer get result has the `vm` member. `recipes` remains the compatible
+string list, while `recipes_detail` adds stored per-recipe state. `health` is the stored aggregate
+(`ok`, `failed`, or `unknown`); it is not a live SSH check. Every detail's
+`params` and `outputs` is an object, even when empty. Secret parameters are
+`<set>` or `<unset>` and are never emitted as their value.
+
+`recipe show` and `recipes` use the same `RecipeSchema` projection. Parameters
+and outputs are named arrays sorted by name. A recipe without a health check
+has `health:null`; all list fields are `[]`, never `null`.
 
 Fields worth knowing about:
 

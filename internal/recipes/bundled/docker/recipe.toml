@@ -3,6 +3,7 @@ description = "Docker engine and the compose plugin"
 os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
 stage = "provision"
 script = "install.sh"
+schema = 3
 
 [scripts]
 alpine = "install-alpine.sh"
@@ -10,3 +11,15 @@ ubuntu = "install-debian.sh"
 debian = "install-debian.sh"
 fedora = "install-fedora.sh"
 arch = "install-arch.sh"
+
+[params.user]
+type = "string"
+default = "dev"
+help = "account to add to the docker group"
+
+[outputs]
+socket = "path of the docker socket"
+
+[health]
+check = "docker info"
+timeout = "30s"

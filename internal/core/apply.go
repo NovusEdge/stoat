@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -172,12 +173,14 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	// A cloudinit VM ran its recipes from the seed at first boot and never
 	// populated v.Applied. Read the marker files cloud-init left behind, so
 	// filterByRunMode can skip a "once" recipe instead of re-running it.
-	if err := discoverCloudInitApplied(ctx, v); err != nil {
+	discoveryWarnings, err := discoverCloudInitApplied(ctx, v)
+	if err != nil {
 		return err
 	}
 
 	runTargets, manifests, err := filterByRunMode(v, targets, explicit)
 	if err != nil {
+		appendProvisionWarnings(v, discoveryWarnings)
 		return err
 	}
 	if len(runTargets) == 0 {
@@ -186,7 +189,11 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		// nobody named explicitly. This is not a failure. It is the run
 		// mode doing what it declared, so this stays a no-op like the
 		// "nothing to run at all" case above.
+		appendProvisionWarnings(v, discoveryWarnings)
 		return nil
+	}
+	if v.Applied == nil {
+		v.Applied = make(map[string]config.AppliedRecipe, len(runTargets))
 	}
 
 	// run is v with Recipes narrowed to runTargets. config.VM is a plain
@@ -199,8 +206,10 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	run := *v
 	run.Recipes = runTargets
 
-	if err := sshx.Provision(ctx, &run); err != nil {
-		return err
+	provisionErr := sshx.Provision(ctx, &run)
+	appendProvisionWarnings(v, discoveryWarnings)
+	if provisionErr != nil {
+		return provisionErr
 	}
 
 	// Provision runs runTargets in order and stops at the first failure, so
@@ -208,7 +217,6 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	// (one ManifestFor found a manifest for) gets its applied state
 	// recorded. A v1 recipe has no version to record and stays out of
 	// Applied, as it always has.
-	var changed bool
 	rebootRecipe, needsReboot := "", false
 	for _, name := range runTargets {
 		m, ok := manifests[name]
@@ -218,12 +226,19 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		if v.Applied == nil {
 			v.Applied = make(map[string]config.AppliedRecipe, len(runTargets))
 		}
-		hash, err := recipes.ScriptHash(name, v.OS)
+		hash, err := recipeHashFor(v, m)
 		if err != nil {
 			return err
 		}
-		v.Applied[name] = config.AppliedRecipe{Version: m.Version, Hash: hash, At: time.Now()}
-		changed = true
+		scriptHash, err := recipes.ScriptHash(name, v.OS)
+		if err != nil {
+			return err
+		}
+		provisioned := run.Applied[name]
+		v.Applied[name] = config.AppliedRecipe{
+			Version: m.Version, Hash: hash, ScriptHash: scriptHash, At: time.Now(),
+			Outputs: provisioned.Outputs, Health: string(HealthUnknown),
+		}
 		if m.Reboot && !needsReboot {
 			rebootRecipe, needsReboot = name, true
 		}
@@ -242,10 +257,22 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		}
 	}
 
-	if !changed {
-		return nil
+	verdicts, healthErr := healthChecksForVM(ctx, v, runTargets)
+	if healthErr != nil {
+		if saveErr := v.Save(); saveErr != nil {
+			return saveErr
+		}
+		return healthErr
 	}
-	return v.Save()
+	if err := v.Save(); err != nil {
+		return err
+	}
+	for _, verdict := range verdicts {
+		if verdict.Status == HealthFailed {
+			return fmt.Errorf("%s: %s", verdict.Name, verdict.Detail)
+		}
+	}
+	return nil
 }
 
 // rebootAndWait reboots v's guest over ssh and waits for it to come back.
@@ -287,12 +314,18 @@ const rebootSettle = 2 * time.Second
 // fatal to the reboot itself, so this drops the error rather than aborting
 // an otherwise successful apply over a log write.
 func appendProvisionLog(v *config.VM, s string) {
-	f, err := os.OpenFile(v.ProvisionLogPath(), os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(v.ProvisionLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
 	defer func() { _ = f.Close() }()
 	_, _ = f.WriteString(s)
+}
+
+func appendProvisionWarnings(v *config.VM, warnings []string) {
+	for _, warning := range warnings {
+		appendProvisionLog(v, warning+"\n")
+	}
 }
 
 // discoverCloudInitApplied rebuilds v.Applied for a cloudinit VM from the
@@ -308,35 +341,97 @@ func appendProvisionLog(v *config.VM, s string) {
 // The recorded Hash comes from the current script on disk, not from whatever
 // cloud-init ran at creation. That is benign: recipes are idempotent, and a
 // script that has since changed reruns on this same Apply anyway.
-func discoverCloudInitApplied(ctx context.Context, v *config.VM) error {
+func discoverCloudInitApplied(ctx context.Context, v *config.VM) ([]string, error) {
 	if backend.For(v).Name() != "cloudinit" || len(v.Applied) > 0 {
-		return nil
+		return nil, nil
 	}
-	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, "ls -1 "+cloudinit.MarkerDir+" 2>/dev/null")...).Output()
+	script := fmt.Sprintf("for marker in %s/*; do case \"$marker\" in *.out) continue;; esac; [ -f \"$marker\" ] || continue; name=$(basename \"$marker\"); printf '===%%s\\n' \"$name\"; cat \"$marker.out\" 2>/dev/null; done", cloudinit.MarkerDir)
+	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, script)...).Output()
 	if err != nil {
-		return nil // marker dir missing or a transient ssh error; discover nothing
+		return nil, nil // marker dir missing or a transient ssh error; discover nothing
 	}
 
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return nil, err
+	}
 	var applied map[string]config.AppliedRecipe
-	for _, name := range strings.Fields(string(out)) {
-		hash, err := recipes.ScriptHash(name, v.OS)
-		if err != nil {
+	var warnings []string
+	outputs := cloudInitOutputs(string(out))
+	names := make([]string, 0, len(outputs))
+	for name := range outputs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body := outputs[name]
+		m, ok, manifestErr := recipes.ManifestFor(name)
+		if manifestErr != nil || !ok {
 			continue // a marker for a recipe no longer on disk
 		}
-		ver := ""
-		if m, ok, _ := recipes.ManifestFor(name); ok {
-			ver = m.Version
+		hash, hashErr := recipeHashFor(v, m)
+		if hashErr != nil {
+			hash, _ = recipes.ScriptHash(name, v.OS)
+		}
+		scriptHash, _ := recipes.ScriptHash(name, v.OS)
+		values, undeclared := sshx.ParseOutputs(m.Outputs, redactCloudSecrets(body, secrets[name]))
+		for _, output := range undeclared {
+			warnings = append(warnings, fmt.Sprintf("%s: output %q is not declared", name, output))
 		}
 		if applied == nil {
 			applied = make(map[string]config.AppliedRecipe)
 		}
-		applied[name] = config.AppliedRecipe{Version: ver, Hash: hash, At: time.Now()}
+		applied[name] = config.AppliedRecipe{
+			Version: m.Version, Hash: hash, ScriptHash: scriptHash,
+			At: time.Now(), Outputs: values, Health: string(HealthUnknown),
+		}
 	}
 	if applied == nil {
-		return nil
+		return warnings, nil
 	}
 	v.Applied = applied
-	return v.Save()
+	if err := v.Save(); err != nil {
+		return warnings, err
+	}
+	return warnings, nil
+}
+
+func cloudInitOutputs(body string) map[string]string {
+	out := map[string]string{}
+	var name string
+	var value strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "===") {
+			if name != "" {
+				out[name] = value.String()
+			}
+			name = strings.TrimSpace(strings.TrimPrefix(line, "==="))
+			value.Reset()
+			continue
+		}
+		if name != "" {
+			value.WriteString(line)
+			value.WriteByte('\n')
+		}
+	}
+	if name != "" {
+		out[name] = value.String()
+	}
+	return out
+}
+
+func redactCloudSecrets(value string, secrets map[string]string) string {
+	names := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		if secret != "" {
+			names = append(names, secret)
+		}
+	}
+	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	for _, secret := range names {
+		value = strings.ReplaceAll(value, secret, "<redacted>")
+	}
+	return value
 }
 
 // filterByRunMode narrows targets to the recipes that should actually run,
@@ -427,13 +522,16 @@ func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]re
 			}
 		case "once":
 			if applied, done := v.Applied[name]; done {
-				hash, err := recipes.ScriptHash(name, v.OS)
+				hash, err := recipeHashFor(v, m)
 				if err != nil {
 					return nil, nil, err
 				}
-				if applied.Hash == hash {
+				switch {
+				case applied.Hash == hash:
 					run, reason = false, "already applied"
-				} else {
+				case scriptUnchanged(v, m, applied):
+					reason = "params changed"
+				default:
 					reason = "script changed"
 				}
 			} else {
@@ -458,6 +556,50 @@ func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]re
 	return decisions, manifests, nil
 }
 
+// recipeHashFor computes the current combined hash for a VM's recipe. Only
+// declared secret parameters with non-empty stored values affect the hash;
+// stale keys in secrets.toml do not.
+func recipeHashFor(v *config.VM, m recipes.Manifest) (string, error) {
+	if len(m.Params) == 0 {
+		return recipes.ScriptHash(m.Name, v.OS)
+	}
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return "", err
+	}
+	params, err := recipes.Resolve(m, v.Params[m.Name], secrets[m.Name])
+	if err != nil {
+		return "", err
+	}
+	nonSecret := make(map[string]string, len(params))
+	for name, value := range params {
+		if m.Params[name].Type != "secret" {
+			nonSecret[name] = value
+		}
+	}
+	setSecrets := make(map[string]bool)
+	for _, name := range m.SecretNames() {
+		if secrets[m.Name][name] != "" {
+			setSecrets[name] = true
+		}
+	}
+	secretNames := make([]string, 0, len(setSecrets))
+	for name := range setSecrets {
+		secretNames = append(secretNames, name)
+	}
+	return recipes.RecipeHash(m.Name, v.OS, nonSecret, secretNames)
+}
+
+// scriptUnchanged distinguishes a parameter change from a changed recipe
+// body. Entries written before ScriptHash existed cannot make that claim.
+func scriptUnchanged(v *config.VM, m recipes.Manifest, applied config.AppliedRecipe) bool {
+	if applied.ScriptHash == "" {
+		return false
+	}
+	body, err := recipes.ScriptHash(m.Name, v.OS)
+	return err == nil && body == applied.ScriptHash
+}
+
 // dependencyError explains why dependent cannot run: its dependency dep is
 // neither running this pass nor already applied. A dep that is a configured
 // "manual" recipe was skipped because nobody named it; anything else is a dep
@@ -475,6 +617,12 @@ func dependencyError(dependent, dep string, manifests map[string]recipes.Manifes
 type Recipe struct {
 	Name        string // recipe name, matches the directory name
 	Description string // from recipe.toml
+	// Schema is the recipe.toml format version exposed to machine callers.
+	Schema int
+	// Params, Outputs and Health describe the recipe contract.
+	Params  []RecipeParam
+	Outputs []RecipeOutput
+	Health  *RecipeHealthSpec
 	// Reboot says the guest needs a restart before this recipe's effect is
 	// visible. A caller that waits for "reachable" after an apply sees the
 	// pre-reboot sshd and reads it as done.
@@ -485,6 +633,68 @@ type Recipe struct {
 	Depends []string
 	// Runtime is the interpreter the script runs under: "sh" or "python3".
 	Runtime string
+}
+
+// RecipeParam is one declared recipe parameter.
+type RecipeParam struct {
+	Name     string
+	Type     string
+	Default  string
+	Help     string
+	Required bool
+	Values   []string
+}
+
+// RecipeOutput is one declared recipe output.
+type RecipeOutput struct {
+	Name string
+	Help string
+}
+
+// RecipeHealthSpec is a recipe's declared health check.
+type RecipeHealthSpec struct {
+	Check   string
+	Timeout string
+}
+
+// RecipeShow is the host-side lookup for one recipe's contract.
+func RecipeShow(name string) (Recipe, error) {
+	m, ok, err := recipes.ManifestFor(name)
+	if err != nil {
+		return Recipe{}, err
+	}
+	if !ok {
+		return Recipe{}, fmt.Errorf("%w: no such recipe %q", ErrNotFound, name)
+	}
+	return fromManifest(m), nil
+}
+
+// fromManifest is the one projection shared by recipe list and recipe show.
+// Keeping the conversion here prevents the two caller surfaces from growing
+// different views of the same manifest over time.
+func fromManifest(m recipes.Manifest) Recipe {
+	r := Recipe{
+		Name: m.Name, Description: m.Description, Schema: m.Schema,
+		Reboot: m.Reboot, Depends: m.Depends, Runtime: m.Runtime,
+		Params: []RecipeParam{}, Outputs: []RecipeOutput{},
+	}
+	for _, p := range m.SortedParams() {
+		r.Params = append(r.Params, RecipeParam{
+			Name: p.Name, Type: p.Type, Default: p.Default, Help: p.Help,
+			Required: p.Required, Values: append([]string{}, p.Values...),
+		})
+	}
+	for _, o := range m.SortedOutputs() {
+		r.Outputs = append(r.Outputs, RecipeOutput{Name: o.Name, Help: o.Help})
+	}
+	if m.Health.Check != "" {
+		timeout := m.Health.Timeout
+		if timeout == "" {
+			timeout = recipes.DefaultHealthTimeout.String()
+		}
+		r.Health = &RecipeHealthSpec{Check: m.Health.Check, Timeout: timeout}
+	}
+	return r
 }
 
 // RecipeFilter selects the recipes Recipes returns: the set
@@ -508,13 +718,7 @@ func Recipes(f RecipeFilter) ([]Recipe, error) {
 	var out []Recipe
 	for _, m := range manifests {
 		if recipes.MatchesVM(&m, f.OS) {
-			out = append(out, Recipe{
-				Name:        m.Name,
-				Description: m.Description,
-				Reboot:      m.Reboot,
-				Depends:     m.Depends,
-				Runtime:     m.Runtime,
-			})
+			out = append(out, fromManifest(m))
 		}
 	}
 	return out, nil

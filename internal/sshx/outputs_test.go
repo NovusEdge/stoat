@@ -1,0 +1,293 @@
+package sshx
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/novusedge/stoat/internal/config"
+)
+
+func TestParseOutputs(t *testing.T) {
+	declared := map[string]string{"socket": "path of the docker socket"}
+	body := "socket=/var/run/docker.sock\nsock=/nope\n\n# a comment\nempty=\n"
+	vals, undeclared := ParseOutputs(declared, body)
+
+	if vals["socket"] != "/var/run/docker.sock" {
+		t.Errorf("socket = %q", vals["socket"])
+	}
+	if vals["sock"] != "/nope" {
+		t.Errorf("an undeclared output was dropped: %v", vals)
+	}
+	if len(undeclared) != 2 || !containsOutputName(undeclared, "sock") || !containsOutputName(undeclared, "empty") {
+		t.Errorf("undeclared = %v, want sock and empty", undeclared)
+	}
+	if v, ok := vals["empty"]; !ok || v != "" {
+		t.Errorf("an empty value was dropped: %v", vals)
+	}
+	if _, ok := vals["# a comment"]; ok {
+		t.Error("a comment line became an output")
+	}
+}
+
+func TestParseOutputsSplitsAtTheFirstEquals(t *testing.T) {
+	vals, _ := ParseOutputs(map[string]string{"dsn": ""}, "dsn=postgres://u:p@h/db?a=b\n")
+	if vals["dsn"] != "postgres://u:p@h/db?a=b" {
+		t.Errorf("dsn = %q", vals["dsn"])
+	}
+}
+
+func TestParseOutputsStoresUndeclaredWithEmptyDeclarationMap(t *testing.T) {
+	vals, undeclared := ParseOutputs(map[string]string{}, "socket=/var/run/docker.sock\n")
+	if vals["socket"] != "/var/run/docker.sock" {
+		t.Fatalf("socket = %q, want the emitted value", vals["socket"])
+	}
+	if len(undeclared) != 1 || undeclared[0] != "socket" {
+		t.Fatalf("undeclared = %v, want [socket]", undeclared)
+	}
+}
+
+func TestProvisionKeepsSecretOutOfSSHArgvAndLogs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	secret := "value with spaces 'quotes'; printf hacked"
+	valueFile := filepath.Join(root, "work", "guest-param")
+	installSSHRecipe(t, root, "docker", "schema = 3\nname = \"docker\"\nscript = \"install.sh\"\n[params.authkey]\ntype = \"secret\"\nrequired = true\n", "#!/bin/sh\nprintf '%s' \"$STOAT_PARAM_AUTHKEY\" > "+shellQuoteForTest(valueFile)+"\n")
+
+	vmDir := filepath.Join(root, "work")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(vmDir, "ssh-capture")
+	installSecretCheckingSSH(t, capture, valueFile, secret, true)
+	port := acceptOnly(t, "SSH-2.0-fake\r\n")
+	v := &config.VM{
+		Name: "work", Dir: vmDir, OS: "alpine", SSHPort: port,
+		Recipes: []string{"docker"}, Applied: map[string]config.AppliedRecipe{},
+	}
+	if err := config.SaveSecrets(vmDir, config.Secrets{"docker": {"authkey": secret}}); err != nil {
+		t.Fatal(err)
+	}
+
+	provisionErr := Provision(context.Background(), v)
+	if provisionErr == nil {
+		t.Fatal("Provision succeeded, want the fake recipe failure")
+	}
+	if strings.Contains(provisionErr.Error(), secret) {
+		t.Fatalf("secret leaked in Provision error: %v", provisionErr)
+	}
+	log, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), secret) {
+		t.Fatalf("secret leaked in provision log:\n%s", log)
+	}
+	captured, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(captured)
+	if !strings.Contains(text, secret) {
+		t.Fatalf("fake ssh did not observe the secret in stdin:\n%s", text)
+	}
+	value, err := os.ReadFile(valueFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(value) != secret {
+		t.Fatalf("secret changed while crossing the shell boundary: got %q, want %q", value, secret)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "ARGV:") && strings.Contains(line, secret) {
+			t.Fatalf("secret appeared in ssh argv: %q", line)
+		}
+	}
+	split := len(secret) / 2
+	for _, public := range []string{provisionErr.Error(), string(log)} {
+		for _, fragment := range []string{secret, secret[:split], secret[split:]} {
+			if strings.Contains(public, fragment) {
+				t.Fatalf("secret fragment %q leaked into public Provision sink %q", fragment, public)
+			}
+		}
+	}
+}
+
+func TestProvisionExportsOutputToChildProcess(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	childOutput := filepath.Join(root, "child-output")
+	installSSHRecipe(t, root, "child", "schema = 3\nname = \"child\"\nscript = \"install.sh\"\n", "#!/bin/sh\nsh -c 'printf \"%s\" \"$STOAT_OUTPUT\" > "+shellQuoteForTest(childOutput)+"'\n")
+	guestOutputRoot := t.TempDir()
+	installExecutingSSH(t, guestOutputRoot)
+	port := acceptOnly(t, "SSH-2.0-fake\r\n")
+	v := &config.VM{Name: "work", Dir: filepath.Join(root, "work"), OS: "alpine", SSHPort: port, Recipes: []string{"child"}}
+	if err := os.MkdirAll(v.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Provision(context.Background(), v); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(childOutput)
+	if err != nil {
+		t.Fatalf("child did not write STOAT_OUTPUT: %v", err)
+	}
+	want := filepath.Join(guestOutputRoot, "child")
+	if string(got) != want {
+		t.Fatalf("child STOAT_OUTPUT = %q, want %q", got, want)
+	}
+}
+
+func TestProvisionStoresUndeclaredOutputsEvenWhenManifestDeclaresNone(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	const secret = "output-secret-value"
+	installSSHRecipe(t, root, "docker", "schema = 3\nname = \"docker\"\nscript = \"install.sh\"\n[params.authkey]\ntype = \"secret\"\nrequired = true\n", "#!/bin/sh\necho provision\n")
+
+	vmDir := filepath.Join(root, "work")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installOutputSSH(t, "rogue="+secret+"\n")
+	port := acceptOnly(t, "SSH-2.0-fake\r\n")
+	v := &config.VM{
+		Name: "work", Dir: vmDir, OS: "alpine", SSHPort: port, SSHUser: "stoat",
+		Recipes: []string{"docker"}, Applied: map[string]config.AppliedRecipe{},
+	}
+	if err := config.SaveSecrets(vmDir, config.Secrets{"docker": {"authkey": secret}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Provision(context.Background(), v); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := v.Applied["docker"].Outputs["rogue"]
+	if !ok {
+		t.Fatalf("undeclared output was discarded: %v", v.Applied["docker"].Outputs)
+	}
+	if got == secret || strings.Contains(got, secret) {
+		t.Fatalf("secret leaked into captured output: %q", got)
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := os.ReadFile(filepath.Join(vmDir, "vm.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(persisted), secret) {
+		t.Fatal("secret leaked into vm.toml through captured output")
+	}
+	log, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), `docker: output "rogue" is not declared`) {
+		t.Fatalf("missing undeclared-output warning:\n%s", log)
+	}
+}
+
+func installSSHRecipe(t *testing.T, root, name, manifest, body string) {
+	t.Helper()
+	dir := filepath.Join(root, "recipes", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "install.sh"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func installSecretCheckingSSH(t *testing.T, capture, valueFile, secret string, failRecipe bool) {
+	t.Helper()
+	bin := t.TempDir()
+	fail := ""
+	if failRecipe {
+		split := len(secret) / 2
+		fail = fmt.Sprintf("secret=$(cat %s)\nprintf '%%s' \"$(printf '%%s' \"$secret\" | cut -c1-%d)\"\nsleep 0.05\nprintf '%%s\\n' \"$(printf '%%s' \"$secret\" | cut -c%d-)\"\nexit 1\n", shellQuoteForTest(valueFile), split, split+1)
+	}
+	script := "#!/bin/sh\n" +
+		"input=$(cat)\n" + "printf 'ARGV:%s\\n' \"$*\" >> " + shellQuoteForTest(capture) + "\n" +
+		"printf 'STDIN:%s\\n' \"$input\" >> " + shellQuoteForTest(capture) + "\n" +
+		"case \"$input\" in *STOAT_RECIPE=docker*)\n" +
+		"printf '%s' \"$input\" | sh -s\n" + fail + ";; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installExecutingSSH(t *testing.T, outputRoot string) {
+	t.Helper()
+	bin := t.TempDir()
+	root := strings.ReplaceAll(outputRoot, "#", "\\#")
+	script := "#!/bin/sh\ninput=$(cat)\ncase \"$input\" in *'STOAT_RECIPE=child'*) safe=$(printf '%s' \"$input\" | sed 's#/tmp/.stoat-out#" + root + "#g'); printf '%s' \"$safe\" | sh -s;; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func containsOutputName(names []string, want string) bool {
+	for _, name := range names {
+		if name == want {
+			return true
+		}
+	}
+	return false
+}
+
+// installOutputSSH models real ssh: it joins the argv after the user@host
+// spec into one space-separated string and, only for the output read-back
+// command (the "/tmp/.stoat-out/docker" path), hands that string to
+// /bin/sh -c the way a real remote login shell re-splits it. A script built
+// from several unquoted argv elements (the bug this guards against) falls
+// apart here exactly as it would over a real connection: only the first word
+// after "-c" reaches the inner "sh -c", and any escalation prefix covers only
+// that word, not the rest of the line. Every other ssh call Provision makes
+// (bootstrap, package refresh, recipe run) still no-ops, since this dev host
+// has no real guest to run them against.
+//
+// The fake sudo strips leading flags and sets FAKE_SUDO before exec'ing the
+// rest of argv; the fake rm refuses to run unless FAKE_SUDO is set, standing
+// in for a root-owned output directory an unprivileged rm cannot touch.
+func installOutputSSH(t *testing.T, output string) {
+	t.Helper()
+	bin := t.TempDir()
+	sshScript := "#!/bin/sh\n" +
+		"found=0\nremote=\"\"\n" +
+		"for a in \"$@\"; do\n" +
+		"\tif [ \"$found\" = 0 ]; then\n" +
+		"\t\tcase \"$a\" in *@*) found=1 ;; esac\n" +
+		"\t\tcontinue\n" +
+		"\tfi\n" +
+		"\tif [ -z \"$remote\" ]; then remote=$a; else remote=\"$remote $a\"; fi\n" +
+		"done\n" +
+		"case \"$remote\" in\n" +
+		"\t*/tmp/.stoat-out/docker*) exec sh -c \"$remote\" ;;\n" +
+		"esac\n" +
+		"exit 0\n"
+	sudoScript := "#!/bin/sh\n" +
+		"while [ $# -gt 0 ]; do\n" +
+		"\tcase \"$1\" in -*) shift ;; *) break ;; esac\n" +
+		"done\n" +
+		"FAKE_SUDO=1 exec \"$@\"\n"
+	rmScript := "#!/bin/sh\n" +
+		"if [ -z \"$FAKE_SUDO\" ]; then\n" +
+		"\tprintf \"rm: cannot remove '%s': Permission denied\\n\" \"$2\" >&2\n" +
+		"\texit 1\n" +
+		"fi\n"
+	catScript := "#!/bin/sh\nprintf '%s' " + shellQuoteForTest(output) + "\n"
+	for name, script := range map[string]string{"ssh": sshScript, "sudo": sudoScript, "rm": rmScript, "cat": catScript} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}

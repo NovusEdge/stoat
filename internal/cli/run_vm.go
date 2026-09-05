@@ -146,9 +146,14 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
+	redactor, err := newSecretRedactor(v.Paths.Dir, stdout)
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
 	done := make(chan error, 1)
 	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{}) }()
-	if err := streamFile(v.Paths.ApplyLog, stdout, done); err != nil {
+	if err := streamFile(v.Paths.ApplyLog, redactor, done); err != nil {
+		_ = redactor.Flush()
 		if errors.Is(err, core.ErrProvisionInProgress) {
 			// A concurrent `apply` already holds the lock; that run owns the
 			// error. `up` still started the VM, so this is not a failure of
@@ -156,6 +161,9 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s: an apply is already running\n", a.VM)
 			return ExitOK
 		}
+		return a.fail(stdout, stderr, err)
+	}
+	if err := redactor.Flush(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 	fmt.Fprintf(stdout, "%s: recipes applied\n", a.VM)
@@ -275,6 +283,9 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 // what came back. There was no create subcommand before core existed, because
 // everything it needed lived inside the TUI's form.
 func runCreate(a *Args, stdout, stderr io.Writer) int {
+	set, _, secrets := paramMaps(a.Params)
+	a.Spec.Params = set
+	a.Spec.Secrets = secrets
 	v, err := core.Create(a.Spec)
 	if err != nil {
 		if a.JSON {

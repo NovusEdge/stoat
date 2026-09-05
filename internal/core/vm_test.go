@@ -82,6 +82,87 @@ func TestGetKnownVM(t *testing.T) {
 	}
 }
 
+// A VM with an unreadable secrets file must fail with its VM context instead
+// of becoming an apparently empty or healthy VM.
+func TestGetRefusesInsecureSecretsWithVMContext(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201, Recipes: []string{"docker"}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(v.Dir, config.SecretsName)
+	if err := os.WriteFile(path, []byte("docker.authkey = \"sentinel\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Get(v.Name)
+	if err == nil || !strings.Contains(err.Error(), "work") || !strings.Contains(err.Error(), "secrets.toml: mode 0644") {
+		t.Fatalf("Get error = %v, want VM context and secret-file mode", err)
+	}
+}
+
+// List applies the same secret-store read policy as Get; one insecure VM must
+// not silently disappear from the result.
+func TestListRefusesInsecureSecretsWithVMContext(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201, Recipes: []string{"docker"}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(v.Dir, config.SecretsName)
+	if err := os.WriteFile(path, []byte("docker.authkey = \"sentinel\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := List()
+	if err == nil || !strings.Contains(err.Error(), "work") || !strings.Contains(err.Error(), "secrets.toml: mode 0644") {
+		t.Fatalf("List error = %v, want VM context and secret-file mode", err)
+	}
+}
+
+// An absent secrets file remains the valid empty-store case.
+func TestGetWithoutSecretsFileRemainsReadable(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Get(v.Name)
+	if err != nil {
+		t.Fatalf("Get without secrets.toml = %v, want nil", err)
+	}
+	if got.Health != HealthUnknown {
+		t.Errorf("Health = %q, want unknown", got.Health)
+	}
+}
+
+// Stored health is a host-side status read. Get must not rerun SSH health
+// checks merely to render a VM whose applied state already records a result.
+func TestGetUsesStoredRecipeHealthWithoutSSH(t *testing.T) {
+	root(t)
+	v := &config.VM{
+		Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201,
+		Recipes: []string{"docker"},
+		Applied: map[string]config.AppliedRecipe{"docker": {Health: string(HealthOK)}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Get(v.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Health != HealthOK {
+		t.Errorf("Health = %q, want %q", got.Health, HealthOK)
+	}
+}
+
 func TestGetUnknownVM(t *testing.T) {
 	root(t)
 	if _, err := Get("nope"); !errors.Is(err, ErrNotFound) {

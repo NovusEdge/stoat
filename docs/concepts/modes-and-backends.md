@@ -95,6 +95,11 @@ recipes already ran at first boot, and that changing them means recreating
 the VM (the seed isn't rebuilt on later starts, since by then the overlay
 holds real guest state you don't want thrown away).
 
+The host seed artifacts remain in the VM directory for inspection and later
+diagnosis. Stoat creates seed directories with mode `0700` and seed files with
+mode `0600` before writing their bytes; it does not promise to delete or
+detach those artifacts after boot.
+
 ## Comparison
 
 | | `live` | `disk` | `cloud` |

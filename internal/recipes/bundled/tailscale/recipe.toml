@@ -3,6 +3,7 @@ description = "Tailscale daemon, installed and started (join manually)"
 os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
 stage = "provision"
 script = "install.sh"
+schema = 3
 
 [scripts]
 alpine = "install-alpine.sh"
@@ -10,3 +11,12 @@ ubuntu = "install-debian.sh"
 debian = "install-debian.sh"
 fedora = "install-fedora.sh"
 arch = "install-arch.sh"
+
+[params.authkey]
+type = "secret"
+required = true
+help = "auth key used to join the tailnet"
+
+[health]
+check = "tailscale version"
+timeout = "30s"

@@ -127,7 +127,7 @@ func TestRecipeGolden(t *testing.T) {
 		Runtime:     "sh",
 	}
 	got := marshal(t, FromRecipe(r))
-	want := `{"name":"xfce","description":"XFCE desktop environment","reboot":true,"depends":["devtools"],"runtime":"sh"}`
+	want := `{"name":"xfce","description":"XFCE desktop environment","schema":0,"params":[],"outputs":[],"health":null,"reboot":true,"depends":["devtools"],"runtime":"sh"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -138,9 +138,75 @@ func TestRecipeGolden(t *testing.T) {
 // on null.
 func TestRecipeNilDependsIsEmptyList(t *testing.T) {
 	got := marshal(t, FromRecipe(core.Recipe{Name: "xfce"}))
-	want := `{"name":"xfce","description":"","reboot":false,"depends":[],"runtime":""}`
+	want := `{"name":"xfce","description":"","schema":0,"params":[],"outputs":[],"health":null,"reboot":false,"depends":[],"runtime":""}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestFromRecipeSchemaShape(t *testing.T) {
+	got := FromRecipeSchema(core.Recipe{
+		Name: "docker", Description: "Docker engine", Schema: 3, Runtime: "sh",
+		Params: []core.RecipeParam{
+			{Name: "channel", Type: "enum", Default: "stable", Values: []string{"stable", "test"}},
+			{Name: "authkey", Type: "secret", Required: true},
+		},
+		Outputs: []core.RecipeOutput{{Name: "socket", Help: "path of the docker socket"}},
+		Health:  &core.RecipeHealthSpec{Check: "docker info", Timeout: "30s"},
+	})
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"docker","description":"Docker engine","schema":3,"runtime":"sh","reboot":false,"depends":[],"params":[` +
+		`{"name":"authkey","type":"secret","required":true,"default":"","values":[],"help":""},` +
+		`{"name":"channel","type":"enum","required":false,"default":"stable","values":["stable","test"],"help":""}],` +
+		`"outputs":[{"name":"socket","help":"path of the docker socket"}],` +
+		`"health":{"check":"docker info","timeout":"30s"}}`
+	if string(b) != want {
+		t.Errorf("got  %s\nwant %s", b, want)
+	}
+}
+
+// A recipe without a health check emits null, never an empty object: a
+// consumer must distinguish "no check declared" from a blank check.
+func TestFromRecipeSchemaNullHealth(t *testing.T) {
+	b, err := json.Marshal(FromRecipeSchema(core.Recipe{Name: "xfce", Schema: 2}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"health":null`) {
+		t.Errorf("got %s", b)
+	}
+}
+
+// List and show are two views of one projection. Their shared recipe fields
+// must agree, including sorted, non-null parameter and output lists.
+func TestRecipeListAndShowProjectionAgree(t *testing.T) {
+	r := core.Recipe{
+		Name: "docker", Description: "Docker", Schema: 3, Runtime: "sh",
+		Depends: []string{"base"},
+		Params:  []core.RecipeParam{{Name: "user", Type: "string", Default: "dev"}},
+		Outputs: []core.RecipeOutput{{Name: "socket", Help: "socket"}},
+		Health:  &core.RecipeHealthSpec{Check: "docker info", Timeout: "30s"},
+	}
+	list := FromRecipe(r)
+	show := FromRecipeSchema(r)
+	if list.Name != show.Name || list.Description != show.Description || list.Schema != show.Schema || list.Runtime != show.Runtime || list.Reboot != show.Reboot {
+		t.Fatalf("list=%+v show=%+v disagree on shared recipe fields", list, show)
+	}
+	listParams, _ := json.Marshal(list.Params)
+	showParams, _ := json.Marshal(show.Params)
+	if string(listParams) != string(showParams) {
+		t.Fatalf("list and show params disagree: list=%s show=%s", listParams, showParams)
+	}
+	listOutputs, _ := json.Marshal(list.Outputs)
+	showOutputs, _ := json.Marshal(show.Outputs)
+	if string(listOutputs) != string(showOutputs) {
+		t.Fatalf("list and show outputs disagree: list=%s show=%s", listOutputs, showOutputs)
+	}
+	if strings.Contains(marshal(t, list), "null") || strings.Contains(marshal(t, show), "null") {
+		t.Fatalf("recipe projections contain a null list: list=%s show=%s", marshal(t, list), marshal(t, show))
 	}
 }
 
@@ -221,6 +287,83 @@ func TestEmptySlicesMarshalAsEmptyArrayNeverNull(t *testing.T) {
 	}
 	if !strings.Contains(vm, `"forwards":[]`) {
 		t.Errorf("VM.forwards did not marshal as []: %s", vm)
+	}
+}
+
+func TestFromVMStatusRedactsSecrets(t *testing.T) {
+	got := FromVMStatus(core.VM{
+		Name: "work", OS: "alpine", Mode: "live",
+		RecipeStates: []core.RecipeState{{
+			Name: "docker", Applied: true, Version: "1.2.0", Health: string(core.HealthOK),
+			Params:      map[string]string{"user": "dev", "authkey": core.SecretSet},
+			SecretNames: []string{"authkey"},
+			Outputs:     map[string]string{"socket": "/var/run/docker.sock"},
+		}},
+		Health: core.HealthOK,
+	}, false)
+
+	if len(got.RecipeStates) != 1 {
+		t.Fatalf("recipe states = %#v, want one redacted state", got.RecipeStates)
+	}
+	p := got.RecipeStates[0].Params
+	if p["authkey"] != "<set>" {
+		t.Errorf("authkey = %q, want <set>", p["authkey"])
+	}
+	if p["user"] != "dev" {
+		t.Errorf("user = %q, want dev", p["user"])
+	}
+}
+
+// The wire redactor keys off the manifest's secret-name list, not the value
+// core happened to provide: a raw core secret must not cross this boundary.
+func TestFromVMStatusRedactsEvenWhenCorePassesARawSecret(t *testing.T) {
+	got := FromVMStatus(core.VM{
+		Name: "work",
+		RecipeStates: []core.RecipeState{{
+			Name: "tailscale", Applied: true,
+			Params: map[string]string{"authkey": "tskey-SENTINEL"}, SecretNames: []string{"authkey"},
+		}},
+	}, false)
+	if len(got.RecipeStates) != 1 {
+		t.Fatalf("recipe states = %#v, want one redacted state", got.RecipeStates)
+	}
+	if v := got.RecipeStates[0].Params["authkey"]; v != "<set>" {
+		t.Errorf("authkey = %q, want <set>", v)
+	}
+}
+
+func TestFromVMStatusPreservesSetAndUnsetSecretMarkers(t *testing.T) {
+	got := FromVMStatus(core.VM{
+		Name: "work",
+		RecipeStates: []core.RecipeState{{
+			Name:        "docker",
+			Params:      map[string]string{"set_token": core.SecretSet, "unset_token": core.SecretUnset},
+			SecretNames: []string{"set_token", "unset_token"},
+		}},
+	}, false)
+	if len(got.RecipeStates) != 1 {
+		t.Fatalf("recipe states = %#v, want one state", got.RecipeStates)
+	}
+	params := got.RecipeStates[0].Params
+	if params["set_token"] != core.SecretSet || params["unset_token"] != core.SecretUnset {
+		t.Fatalf("secret markers = %#v, want set/unset markers", params)
+	}
+}
+
+// Empty status maps marshal as {}, never null: a caller iterating them must
+// not branch on a second representation of "no values".
+func TestVMStatusEmptyMapsAreObjects(t *testing.T) {
+	b, err := json.Marshal(FromVMStatus(core.VM{
+		Name: "work", RecipeStates: []core.RecipeState{{Name: "xfce"}},
+	}, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(FromVMStatus(core.VM{Name: "work"}, false).RecipeStates) != 0 {
+		t.Fatal("empty recipe states were not normalized")
+	}
+	if !strings.Contains(string(b), `"params":{}`) || !strings.Contains(string(b), `"outputs":{}`) {
+		t.Errorf("got %s", b)
 	}
 }
 

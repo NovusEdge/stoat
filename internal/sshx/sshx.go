@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -224,6 +225,31 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 // react. This bounds that grace period rather than waiting on it forever.
 const recipeShutdownGrace = 5 * time.Second
 
+// healthShutdownGrace is deliberately short: a health probe has no recipe
+// state to preserve after its context expires, and a TERM-ignoring probe must
+// not extend Wait's single health budget by the normal recipe grace period.
+const healthShutdownGrace = 100 * time.Millisecond
+
+// RunCheck runs one command inside v's guest through the guest prelude, as
+// the recipe's ssh user and under the guest's escalation. The command is
+// sent over stdin so it does not become a local ssh argv element.
+func RunCheck(ctx context.Context, v *config.VM, command string, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var prelude string
+	if o, ok := guest.Lookup(v.OS); ok {
+		prelude = guest.Prelude(o, "sh")
+	}
+	body := prelude + "\n" + command + "\n"
+	cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = healthShutdownGrace
+	cmd.Stdin = strings.NewReader(body)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // Provision runs each of v's recipes over ssh, streaming output to
 // last-provision.log. The detail view tails that file on a ticker, so there
 // is no channel plumbing between this and the UI.
@@ -315,6 +341,18 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			return err
 		}
 		fmt.Fprintf(log, "\n%s\n", RecipeMarker(name))
+		m, haveManifest, err := recipes.ManifestFor(name)
+		if err != nil {
+			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
+			return err
+		}
+		input, secrets, err := recipeInput(v, name, m, haveManifest, runtime, body)
+		if err != nil {
+			redacted := redactString(err.Error(), secrets)
+			fmt.Fprintf(log, "FAILED: recipe %s: %s\n", name, redacted)
+			return fmt.Errorf("recipe %s: %s", name, redacted)
+		}
+		redactor := newRedactingWriter(log, secrets)
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
 			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
@@ -337,10 +375,11 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 		cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, recipes.InterpreterArgs(runtime))...)...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = recipeShutdownGrace
-		cmd.Stdin = strings.NewReader(guest.WithPrelude(body, preludeFor(v, runtime)))
-		cmd.Stdout = log
-		cmd.Stderr = log
+		cmd.Stdin = strings.NewReader(input)
+		cmd.Stdout = redactor
+		cmd.Stderr = redactor
 		if err := cmd.Run(); err != nil {
+			_ = redactor.Flush()
 			// ctx being the cause is reported as CANCELLED, not a plain recipe
 			// FAILED. waitApplied (internal/core/wait.go) treats only a final
 			// "done" line as success, so either wording leaves the recipe
@@ -348,13 +387,196 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			// caller sniffing Logs' text, must not read a cancellation as if
 			// the recipe itself had failed.
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				fmt.Fprintf(log, "CANCELLED: recipe %s: %v\n", name, ctxErr)
+				fmt.Fprintf(log, "CANCELLED: recipe %s: %s\n", name, redactString(ctxErr.Error(), secrets))
 				return ctxErr
 			}
-			fmt.Fprintf(log, "FAILED: recipe %s: %v\n", name, err)
-			return fmt.Errorf("recipe %s: %w", name, err)
+			_ = redactor.Flush()
+			redacted := redactString(err.Error(), secrets)
+			fmt.Fprintf(log, "FAILED: recipe %s: %s\n", name, redacted)
+			return fmt.Errorf("recipe %s: %s", name, redacted)
+		}
+		if err := redactor.Flush(); err != nil {
+			return err
+		}
+		if haveManifest && m.Schema >= 3 {
+			if err := collectOutputs(ctx, v, name, m, secrets, log); err != nil {
+				redacted := redactString(err.Error(), secrets)
+				fmt.Fprintf(log, "FAILED: recipe %s: reading outputs: %s\n", name, redacted)
+				return fmt.Errorf("recipe %s: reading outputs: %s", name, redacted)
+			}
 		}
 	}
 	fmt.Fprintln(log, "\ndone")
 	return nil
+}
+
+// recipeInput wraps a recipe with its resolved environment and per-recipe
+// output file setup. Secret values travel through stdin and never through ssh
+// argv. The Python form sets os.environ before the shared prelude runs.
+func recipeInput(v *config.VM, name string, m recipes.Manifest, haveManifest bool, runtime, body string) (string, []string, error) {
+	params := map[string]string{}
+	secrets := []string{}
+	if haveManifest && len(m.Params) > 0 {
+		stored, err := config.LoadSecrets(v.Dir)
+		if err != nil {
+			return "", nil, err
+		}
+		resolved, err := recipes.Resolve(m, v.Params[name], stored[name])
+		if err != nil {
+			return "", nil, err
+		}
+		for param, value := range resolved {
+			params[param] = value
+			if m.Params[param].Type == "secret" {
+				if value != "" {
+					secrets = append(secrets, value)
+				}
+				continue
+			}
+		}
+	}
+	env := recipes.Env(name, params)
+	path := OutputDir + "/" + name
+	prelude := preludeFor(v, runtime)
+	if runtime == "python3" {
+		var b strings.Builder
+		b.WriteString("import os\n")
+		for _, kv := range env {
+			key, value, _ := strings.Cut(kv, "=")
+			fmt.Fprintf(&b, "os.environ[%q] = %q\n", key, value)
+		}
+		if !haveManifest || m.Schema < 3 {
+			b.WriteString(guest.WithPrelude(body, prelude))
+			return b.String(), secrets, nil
+		}
+		fmt.Fprintf(&b, "os.environ[\"STOAT_OUTPUT\"] = %q\n", path)
+		fmt.Fprintf(&b, "os.makedirs(%q, mode=0o700, exist_ok=True)\n", OutputDir)
+		b.WriteString("open(os.environ[\"STOAT_OUTPUT\"], \"w\").close()\n")
+		b.WriteString(guest.WithPrelude(body, prelude))
+		return b.String(), secrets, nil
+	}
+	var b strings.Builder
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		fmt.Fprintf(&b, "export %s=%s\n", key, shellValue(value))
+	}
+	if !haveManifest || m.Schema < 3 {
+		b.WriteString(guest.WithPrelude(body, prelude))
+		return b.String(), secrets, nil
+	}
+	fmt.Fprintf(&b, "export STOAT_OUTPUT=%s\n", shellPath(path))
+	fmt.Fprintf(&b, "mkdir -p %s && chmod 700 %s && : > \"$STOAT_OUTPUT\"\n", shellPath(OutputDir), shellPath(OutputDir))
+	b.WriteString(guest.WithPrelude(body, prelude))
+	return b.String(), secrets, nil
+}
+
+func shellValue(value string) string {
+	for _, r := range value {
+		if !(r == '_' || r == '-' || r == '.' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			if !strings.ContainsRune(value, '"') {
+				var b strings.Builder
+				b.WriteByte('"')
+				for _, r := range value {
+					if r == '\\' || r == '$' || r == '`' {
+						b.WriteByte('\\')
+					}
+					b.WriteRune(r)
+				}
+				b.WriteByte('"')
+				return b.String()
+			}
+			return guest.ShQuote(value)
+		}
+	}
+	return value
+}
+
+// shellPath leaves simple paths readable for command diagnostics and quotes
+// every path containing shell syntax.
+func shellPath(path string) string {
+	for _, r := range path {
+		if !(r == '/' || r == '.' || r == '-' || r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return guest.ShQuote(path)
+		}
+	}
+	return path
+}
+
+// redactingWriter keeps a suffix between writes so a secret split across two
+// process writes is removed before either part reaches the apply log.
+type redactingWriter struct {
+	dst     io.Writer
+	secrets []string
+	pending string
+	keep    int
+}
+
+func newRedactingWriter(dst io.Writer, secrets []string) *redactingWriter {
+	max := 0
+	for _, secret := range secrets {
+		if len(secret) > max {
+			max = len(secret)
+		}
+	}
+	if max > 0 {
+		max--
+	}
+	return &redactingWriter{dst: dst, secrets: sortedSecrets(secrets), keep: max}
+}
+
+func (w *redactingWriter) Write(p []byte) (int, error) {
+	data := w.pending + string(p)
+	cut := len(data) - w.keep
+	if cut > 0 {
+		for _, secret := range w.secrets {
+			if secret == "" {
+				continue
+			}
+			for start := strings.Index(data, secret); start >= 0; {
+				end := start + len(secret)
+				if start < cut && end > cut {
+					cut = start
+				}
+				next := strings.Index(data[start+1:], secret)
+				if next < 0 {
+					break
+				}
+				start += next + 1
+			}
+		}
+	}
+	if cut < 0 {
+		cut = 0
+	}
+	if _, err := io.WriteString(w.dst, redactString(data[:cut], w.secrets)); err != nil {
+		return 0, err
+	}
+	w.pending = data[cut:]
+	return len(p), nil
+}
+
+func (w *redactingWriter) Flush() error {
+	if w.pending == "" {
+		return nil
+	}
+	_, err := io.WriteString(w.dst, redactString(w.pending, w.secrets))
+	w.pending = ""
+	return err
+}
+
+func redactString(value string, secrets []string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			value = strings.ReplaceAll(value, secret, "<redacted>")
+		}
+	}
+	return value
+}
+
+// sortedSecrets provides stable redaction replacement order when secrets
+// overlap, replacing the longest value first.
+func sortedSecrets(secrets []string) []string {
+	out := append([]string(nil), secrets...)
+	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
 }

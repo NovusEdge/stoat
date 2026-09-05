@@ -117,10 +117,11 @@ type Args struct {
 
 	// Until and Timeout belong to "wait"; Which belongs to "logs"; Only
 	// belongs to "apply" and carries the names for "check-recipes".
-	Until   core.Until
-	Timeout time.Duration
-	Which   core.Which
-	Only    []string
+	Until         core.Until
+	UntilExplicit bool
+	Timeout       time.Duration
+	Which         core.Which
+	Only          []string
 
 	// Patch belongs to "update", and Changed names the flags that were
 	// actually GIVEN. core.Patch is all pointers so "not set" differs from
@@ -129,6 +130,18 @@ type Args struct {
 	// nil pointer, and `--share ""` is a pointer to the empty string.
 	Patch   core.Patch
 	Changed []string
+	Params  []ParamEdit
+}
+
+// ParamEdit is one recipe parameter edit parsed from create or update flags.
+// Secret values are resolved at the run boundary, not while Parse interprets
+// argv, so parsing remains free of prompts and environment reads.
+type ParamEdit struct {
+	Recipe string
+	Param  string
+	Value  string
+	Secret bool
+	Unset  bool
 }
 
 // usageError marks a Parse failure as an exit-2 condition. Every Parse
@@ -206,7 +219,22 @@ func Parse(args []string) (*Args, error) {
 	if perr != nil {
 		return nil, usageError(perr.Error())
 	}
-	return g.toArgs(commandPath(ctx))
+	a, err := g.toArgs(commandPath(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if a.Cmd == "wait" {
+		for _, arg := range args {
+			if arg == "--until" || strings.HasPrefix(arg, "--until=") {
+				a.UntilExplicit = true
+				break
+			}
+		}
+		if a.Until == core.UntilHealthy && a.UntilExplicit {
+			return nil, usageError("wait: --healthy and --until are two different waits; pass one")
+		}
+	}
+	return a, nil
 }
 
 // parseExec handles `exec <vm> <cmd>...` without kong. Kong's passthrough is
@@ -326,6 +354,13 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		// rather than an error. Forcing Quiet here is what suppresses the prose
 		// lines: they are all already gated on it.
 		a.Quiet = true
+	}
+	if len(a.Params) > 0 {
+		resolved, err := resolveParamEdits(a.Params, stdin, stderr, !jsonMode && streamIsTTY(stdin))
+		if err != nil {
+			return a.failMsg(stdout, stderr, core.ErrInvalidSpec, err.Error())
+		}
+		a.Params = resolved
 	}
 
 	switch a.Cmd {

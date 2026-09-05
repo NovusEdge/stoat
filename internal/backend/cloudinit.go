@@ -98,6 +98,10 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 // renders: each recipe's manifest, then the script body for v.OS. A recipe
 // with no recipe.toml went missing since create time and errors here.
 func recipeScripts(v *config.VM) ([]cloudinit.Script, error) {
+	stored, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading recipe secrets: %w", err)
+	}
 	var scripts []cloudinit.Script
 	for _, name := range v.Recipes {
 		m, ok, err := recipes.ManifestFor(name)
@@ -111,7 +115,26 @@ func recipeScripts(v *config.VM) ([]cloudinit.Script, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading recipe %s: %w", name, err)
 		}
-		scripts = append(scripts, cloudinit.Script{Name: name, Content: body})
+		resolved, err := recipes.Resolve(m, v.Params[name], stored[name])
+		if err != nil {
+			return nil, fmt.Errorf("resolving recipe %s: %w", name, err)
+		}
+		nonSecrets := make(map[string]string)
+		secrets := make(map[string]string)
+		for param, value := range resolved {
+			if m.Params[param].Type == "secret" {
+				if value != "" {
+					secrets[param] = value
+				}
+				continue
+			}
+			nonSecrets[param] = value
+		}
+		var env []string
+		if m.Schema >= 3 {
+			env = recipes.Env(name, nonSecrets)
+		}
+		scripts = append(scripts, cloudinit.Script{Name: name, Content: body, Env: env, Secrets: secrets})
 	}
 	return scripts, nil
 }

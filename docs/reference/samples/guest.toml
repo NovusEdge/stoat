@@ -1,0 +1,36 @@
+# Every field in a guest definition. A guest file describes the image and its
+# package/service surface; recipes consume these facts through the prelude.
+schema            = 1                 # int; required fixed value 1; guest author writes.
+name              = "alpine"         # string; required; guest author writes.
+shell             = "/bin/ash"       # string; required; guest author writes the login shell.
+init              = "openrc"         # string; required; guest author writes: systemd, openrc, or rc.
+installer         = "setup-alpine"   # string; default empty means "the installer"; guest author writes.
+default_backend   = "apkovl"         # string; default none; guest author writes the create-time backend.
+default_ssh_user  = "root"           # string; default none; guest author writes the create-time SSH user.
+escalate          = ["sudo", "-n"]   # string[]; default []; guest author writes root escalation argv.
+capabilities      = ["apk"]          # string[]; default []; guest author writes recipe capabilities; init is appended.
+aliases           = []                # string[]; default []; guest author writes alternate script keys.
+filename_hints    = ["alpine"]       # string[]; default []; guest author writes BYO-image filename hints.
+seed_packages     = ["sudo"]         # string[]; default []; guest author writes cloud-init seed packages.
+
+[pkg]
+setup             = "apk update"     # string; default empty; guest author writes the package-index prelude.
+install           = ["apk", "--wait", "60", "add"] # string[]; default []; guest author writes install argv.
+env               = {}                # map[string]string; default {}; guest author writes prelude environment.
+scaffold_setup    = "setup-apkrepos -c -1" # string; default empty; guest author writes scaffold comment text.
+scaffold_install  = "apk add "       # string; default empty; guest author writes scaffold install text.
+runtime_packages  = { python3 = "python3" } # map[string]string; default {}; guest author writes runtime packages.
+
+[svc]
+enable  = "rc-update add {name} default" # string; required; guest author writes service-enable template.
+start   = "rc-service {name} start"      # string; required; guest author writes service-start template.
+stop    = "rc-service {name} stop"       # string; required; guest author writes service-stop template.
+restart = "rc-service {name} restart"    # string; required; guest author writes service-restart template.
+status  = "rc-service {name} status"     # string; required; guest author writes service-status template.
+
+[cmd]
+download = "wget -O"                 # string; default empty; guest author writes the image download command.
+useradd  = "adduser -D {name}"       # string; default empty; guest author writes the account command.
+
+[backend.cloudinit]
+skip_9p = false                       # bool; default false; cloud-init backend owner writes this opaque setting.
