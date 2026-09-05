@@ -25,7 +25,9 @@ import (
 // label, target_os and shared. Three fields deleted is exactly the case this
 // number exists for. There is no v1 compatibility path anywhere: a clean
 // break, so nothing has to reason about which shape it is looking at.
-const ContractVersion = 2
+// v3: recipe list changed shape. dir became roots, a list of {path, scope},
+// and recipes became a list of RecipeEntry objects rather than names.
+const ContractVersion = 3
 
 // Event types (§2, §4). "result" is the one terminal type; every other type
 // is non-terminal and a consumer MUST ignore any type it does not recognize.

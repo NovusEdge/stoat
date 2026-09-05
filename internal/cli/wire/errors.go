@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/gitx"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 )
@@ -25,6 +26,8 @@ const (
 	CodeBroken               Code = "broken"
 	CodeNameTaken            Code = "name_taken"
 	CodeInvalidSpec          Code = "invalid_spec"
+	CodeInUse                Code = "in_use"
+	CodeGitRequired          Code = "git_required"
 	CodeImageNotDownloaded   Code = "image_not_downloaded"
 	CodeRecipeNotApplicable  Code = "recipe_not_applicable"
 	CodeNotRunning           Code = "not_running"
@@ -65,7 +68,7 @@ const (
 func Codes() []Code {
 	out := []Code{
 		CodeNotFound, CodeBroken, CodeNameTaken, CodeInvalidSpec,
-		CodeImageNotDownloaded, CodeRecipeNotApplicable, CodeNotRunning,
+		CodeImageNotDownloaded, CodeRecipeNotApplicable, CodeInUse, CodeGitRequired, CodeNotRunning,
 		CodeAlreadyRunning, CodeNoDisk, CodeImmutableField, CodeDiskShrink,
 		CodeCannotReach, CodeUnknownLog, CodeTimeout, CodeCanceled,
 		CodeUsage, CodeConfirmationRequired, CodeInternal,
@@ -104,6 +107,8 @@ var codeTable = []struct {
 	{CodeBroken, core.ErrBroken},
 	{CodeNameTaken, core.ErrNameTaken},
 	{CodeInvalidSpec, core.ErrInvalidSpec},
+	{CodeInUse, core.ErrInUse},
+	{CodeGitRequired, gitx.ErrNoGit},
 	{CodeImageNotDownloaded, core.ErrImageNotDownloaded},
 	{CodeRecipeNotApplicable, core.ErrRecipeNotApplicable},
 	{CodeNotRunning, core.ErrNotRunning},

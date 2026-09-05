@@ -125,31 +125,60 @@ func splitTail(b []byte, n int) []string {
 	return lines
 }
 
-// runRecipe implements "recipe list" and "recipe new". Authoring a recipe has
+// runRecipe implements the recipe subcommands. Authoring a recipe has
 // always been "put a correctly named file in the recipes directory": the
 // only real problem was that nothing told you so, or what the name had to be.
-func runRecipe(a *Args, stdout, stderr io.Writer) int {
+func runRecipe(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch a.Sub {
 	case "list":
-		names, err := recipes.Installed()
+		manifests, err := recipes.ListManifests()
 		if err != nil {
 			return a.fail(stdout, stderr, err)
 		}
-		if a.JSON {
-			if names == nil {
-				names = []string{}
-			}
-			return a.ok(stdout, map[string]any{"dir": recipes.Dir(), "recipes": names})
+		out := wire.RecipeList{Roots: make([]wire.RecipeRoot, 0), Recipes: make([]wire.RecipeEntry, 0, len(manifests))}
+		for _, root := range recipes.Roots() {
+			out.Roots = append(out.Roots, wire.RecipeRoot{Path: root.Path, Scope: root.Scope})
 		}
-		fmt.Fprintln(stdout, recipes.Dir())
-		if len(names) == 0 {
+		for _, m := range manifests {
+			scope, err := recipes.ScopeOf(m.Name)
+			if err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+			e := wire.RecipeEntry{Name: m.Name, Description: m.Description, Scope: scope}
+			pin, ok, err := recipePin(m.Name, scope)
+			if err != nil {
+				return a.fail(stdout, stderr, err)
+			}
+			if ok {
+				e.Source, e.Ref, e.Commit = pin.Source, pin.Ref, short(pin.Commit)
+			}
+			out.Recipes = append(out.Recipes, e)
+		}
+		if a.JSON {
+			return a.ok(stdout, out)
+		}
+		fmt.Fprintf(stdout, "%-20s %-9s %-8s %s\n", "NAME", "SCOPE", "COMMIT", "DESCRIPTION")
+		if len(out.Recipes) == 0 {
 			fmt.Fprintln(stdout, "  (none)")
 			return ExitOK
 		}
-		for _, n := range names {
-			fmt.Fprintln(stdout, "  "+n)
+		for _, e := range out.Recipes {
+			fmt.Fprintf(stdout, "%-20s %-9s %-8s %s\n", e.Name, e.Scope, e.Commit, e.Description)
 		}
 		return ExitOK
+
+	case "add":
+		return runRecipeAdd(a, stdin, stdout, stderr)
+	case "lock":
+		return runRecipeLock(a, stdout, stderr)
+	case "sync":
+		return runRecipeSync(a, stdout, stderr)
+	case "update":
+		return runRecipeUpdate(a, stdout, stderr)
+	case "rm":
+		return runRecipeRM(a, stdin, stdout, stderr)
+	case "search":
+		return runRecipeSearch(a, stdout, stderr)
 
 	case "new":
 		path, err := recipes.New(a.VM, a.OS, a.Backend)
@@ -168,7 +197,7 @@ func runRecipe(a *Args, stdout, stderr io.Writer) int {
 	case "show":
 		return runRecipeShow(a, stdout, stderr)
 	}
-	// Unreachable: Parse rejects any action but list/new.
+	// Unreachable: Parse rejects any action but the declared recipe commands.
 	if a.JSON {
 		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.UsageError("recipe: unknown action "+a.Sub))
 		return ExitUsage

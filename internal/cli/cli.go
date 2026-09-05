@@ -251,11 +251,17 @@ func preserveRecipeSearchTerm(args []string) []string {
 		if args[i] != "recipe" || args[i+1] != "search" || args[i+2] == "--" {
 			continue
 		}
-		if strings.HasPrefix(args[i+2], "-") && args[i+2] != "--refresh" {
+		for j := i + 2; j < len(args); j++ {
+			if args[j] == "--refresh" {
+				continue
+			}
+			if !strings.HasPrefix(args[j], "-") || args[j] == "--" {
+				break
+			}
 			out := make([]string, 0, len(args)+1)
-			out = append(out, args[:i+2]...)
+			out = append(out, args[:j]...)
 			out = append(out, "--")
-			out = append(out, args[i+2:]...)
+			out = append(out, args[j:]...)
 			return out
 		}
 	}
@@ -462,7 +468,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	case "rm":
 		return runRM(a, stdin, stdout, stderr)
 	case "recipe":
-		return runRecipe(a, stdout, stderr)
+		return runRecipe(a, stdin, stdout, stderr)
 	case "guest":
 		return runGuest(a, stdout, stderr)
 	case "logs":
