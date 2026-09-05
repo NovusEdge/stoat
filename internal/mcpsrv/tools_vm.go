@@ -154,10 +154,6 @@ func (s *srv) registerVM(server *mcp.Server) {
 				return wire.VM{}, err
 			}
 			patch, err := corePatch(name, in)
-			// A future logging or tracing middleware reads req.GetParams(),
-			// not this local in, so clearing it here does not by itself stop
-			// a leak; corePatch has already copied what it needs into patch.
-			in.Secrets = nil
 			if err != nil {
 				return wire.VM{}, err
 			}
