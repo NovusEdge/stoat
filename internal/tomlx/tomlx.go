@@ -65,6 +65,18 @@ func Decode(path string, v any, opts ...Option) error {
 	return nil
 }
 
+// Defined reports whether every key in keys (a dotted path, e.g. "a", "b")
+// is present in path's TOML, independent of any Go struct. config.Load uses
+// it to tell an explicit legacy key from a field a decode seeded itself.
+func Defined(path string, keys ...string) (bool, error) {
+	var scratch map[string]any
+	md, err := toml.DecodeFile(path, &scratch)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	return md.IsDefined(keys...), nil
+}
+
 // Encode is the single TOML writer for files owned by stoat.
 func Encode(path string, v any) error {
 	var buf bytes.Buffer

@@ -257,15 +257,31 @@ func (v *VM) Save() error {
 // Load reads one VM by name.
 func Load(name string) (*VM, error) {
 	dir := filepath.Join(Root(), name)
+	path := filepath.Join(dir, "vm.toml")
 	// Absent allow_exec means true; the seed survives the decode, a written
 	// false overrides it.
 	v := &VM{AllowExec: true}
-	if err := tomlx.Decode(filepath.Join(dir, "vm.toml"), v, tomlx.Warn(UnknownKeyWriter)); err != nil {
+	if err := tomlx.Decode(path, v, tomlx.Warn(UnknownKeyWriter)); err != nil {
 		return nil, err
 	}
 	v.Dir = dir
 	v.Share = Expand(v.Share)
+	if v.AgentAccess == "" {
+		v.AgentAccess = legacyAgentAccess(path, v.AllowExec)
+	}
 	return v, nil
+}
+
+// legacyAgentAccess maps a vm.toml written before agent_access existed to a
+// level. v.AllowExec is already seeded true for an absent key (the comment
+// above Load), so it alone cannot tell that case apart from an explicit
+// `allow_exec = true`; only the latter earns "exec". Everything else,
+// including an absent key, is "manage".
+func legacyAgentAccess(path string, allowExec bool) string {
+	if defined, err := tomlx.Defined(path, "allow_exec"); err == nil && defined && allowExec {
+		return "exec"
+	}
+	return "manage"
 }
 
 // List returns every VM in the data root, sorted by name.
