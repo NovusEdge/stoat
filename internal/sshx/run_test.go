@@ -79,8 +79,14 @@ func TestRunDoesNotEscalateForRoot(t *testing.T) {
 	if _, _, _, err := sshx.Run(context.Background(), v, true, []string{"id"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(calls.Calls()[0].Remote, alpineEscalate(t)) {
-		t.Fatalf("escalated for a root ssh user: %q", calls.Calls()[0].Remote)
+	// The fake ssh logs its whole argv space joined, so a suffix check on
+	// "'id'" alone would also pass an escalated "'sudo' '-n' 'id'": both
+	// strings end in "'id'". Comparing the whole line against Args with the
+	// bare quoted argv is the only check that catches a prefix Run should
+	// not have added.
+	want := strings.Join(sshx.Args(v, sshx.Quote([]string{"id"})), " ")
+	if got := calls.Calls()[0].Remote; got != want {
+		t.Fatalf("ssh argv = %q, want %q (root must not escalate)", got, want)
 	}
 }
 
