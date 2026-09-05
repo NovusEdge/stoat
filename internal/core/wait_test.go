@@ -383,6 +383,50 @@ func TestWaitHealthyUsesOneGlobalBudgetForSequentialChecks(t *testing.T) {
 	}
 }
 
+// A single probe can time out after writing diagnostic output. Wait must keep
+// that named, redacted failure instead of returning a bare context deadline.
+func TestWaitHealthyRetainsSingleCheckDetailWhenInternalBudgetExpires(t *testing.T) {
+	dir := root(t)
+	const (
+		recipe = "single-blocked"
+		secret = "single-health-blocking-secret-7c2"
+	)
+	writeHealthRecipeWithCheckTimeoutNamed(t, dir, recipe, "100ms", "single-health-check")
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{recipe},
+		Applied: map[string]config.AppliedRecipe{recipe: {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveSecrets(v.Dir, config.Secrets{recipe: {"token": secret}}); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installSingleBlockingHealthSSH(t, secret)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil {
+		t.Fatal("Wait healthy succeeded with a single check that exceeded its internal budget")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait healthy returned bare deadline for internal health timeout: %v", err)
+	}
+	for _, want := range []string{recipe, "single-health-detail", "<redacted>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Wait healthy error = %v, want %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Wait healthy error leaked stored secret: %v", err)
+	}
+}
+
 // A child that ignores SIGTERM must still be reaped promptly when a health
 // check's context expires. The PID is the fake ssh process itself, so a
 // passing implementation cannot leave an owned descendant behind.
@@ -524,6 +568,17 @@ func installSequentialHealthSSH(t *testing.T, callsPath string) {
 	t.Helper()
 	bin := t.TempDir()
 	script := "#!/bin/sh\nbody=$(cat)\ncalls=0\nif [ -f " + shellQuoteCoreTest(callsPath) + " ]; then calls=$(cat " + shellQuoteCoreTest(callsPath) + "); fi\ncalls=$((calls + 1))\nprintf '%s\\n' \"$calls\" > " + shellQuoteCoreTest(callsPath) + "\ncase \"$body\" in\n*health-one-check*) printf '%s\\n' first-health-detail >&2; exit 1;;\n*health-two-check*) if [ \"$calls\" -ge 4 ]; then while :; do :; done; fi; exit 0;;\nesac\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installSingleBlockingHealthSSH(t *testing.T, secret string) {
+	t.Helper()
+	bin := t.TempDir()
+	detail := shellQuoteCoreTest("single-health-detail " + secret)
+	script := "#!/bin/sh\nbody=$(cat)\ncase \"$body\" in\n*'single-health-check'*) printf '%s\\n' " + detail + " >&2; trap '' TERM; while :; do :; done;;\nesac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
