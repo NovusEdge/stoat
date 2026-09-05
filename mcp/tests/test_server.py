@@ -193,9 +193,10 @@ def test_forward_refuses_a_pair_that_kong_reads_as_a_flag(fake_client):
     assert fake_client.calls == []
 
 
-def test_search_recipes_preserves_a_leading_dash_as_data(fake_client):
-    server.search_recipes("-tail")
-    assert fake_client.calls == [("recipe", "search", "-tail")]
+@pytest.mark.parametrize("term", ["-tail", "--refresh", "--"])
+def test_search_recipes_preserves_a_leading_dash_as_data(fake_client, term):
+    server.search_recipes(term)
+    assert fake_client.calls == [("recipe", "search", "--", term)]
 
 
 def test_add_recipe_accepts_a_slash_containing_ref_and_uses_variadic_argv(fake_client):
@@ -208,6 +209,9 @@ def test_add_recipe_accepts_a_slash_containing_ref_and_uses_variadic_argv(fake_c
     [
         lambda: server.add_recipe("https://github.com/x/stoat-tailscale"),
         lambda: server.add_recipe("tailscale@../escape"),
+        lambda: server.add_recipe("tailscale@feature..topic"),
+        lambda: server.add_recipe("tailscale@feature/.hidden"),
+        lambda: server.add_recipe("tailscale@feature/topic.lock"),
         lambda: server.add_recipe("-y"),
         lambda: server.update_recipe("tailscale@v1.2"),
         lambda: server.remove_recipe("../tailscale"),

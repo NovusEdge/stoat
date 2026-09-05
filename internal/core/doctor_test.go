@@ -44,10 +44,10 @@ func TestDoctorStructure(t *testing.T) {
 		}
 	}
 
-	// The union of both prior doctors' checks must be present: the four
+	// The union of both prior doctors' checks must be present: the five
 	// installer binChecks plus /dev/kvm. Losing one silently is the failure to
 	// catch.
-	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "/dev/kvm"}
+	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "git", "/dev/kvm"}
 	for _, name := range want {
 		if !seen[name] {
 			t.Errorf("Doctor() is missing the %q check", name)

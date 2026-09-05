@@ -168,7 +168,7 @@ func TestRecipeUpdateTargetedAndAllUseReturnedNames(t *testing.T) {
 	}
 }
 
-func TestRecipeRMForceDoesNotBypassConfirmationAndRefusesVMUse(t *testing.T) {
+func TestRecipeRMPreflightsVMUseBeforeConfirmationAndPreservesDisk(t *testing.T) {
 	cliRoot(t)
 	t.Chdir(t.TempDir())
 	src := cliRecipeRepo(t, "demo", "#!/bin/sh\necho demo\n")
@@ -178,21 +178,65 @@ func TestRecipeRMForceDoesNotBypassConfirmationAndRefusesVMUse(t *testing.T) {
 	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"demo"}}).Save(); err != nil {
 		t.Fatal(err)
 	}
-
-	code, objs := runJSON(t, "recipe", "rm", "demo", "--global")
-	if code != ExitFail || result(t, objs)["error"].(map[string]any)["code"] != string(wire.CodeConfirmationRequired) {
-		t.Fatalf("rm without -y = %d, %v; want confirmation_required", code, objs)
-	}
-	code, objs = runJSON(t, "recipe", "rm", "demo", "--global", "--force")
-	if code != ExitFail || result(t, objs)["error"].(map[string]any)["code"] != string(wire.CodeConfirmationRequired) {
-		t.Fatalf("--force without -y = %d, %v; want confirmation_required", code, objs)
-	}
-	if code, _ = runJSON(t, "recipe", "rm", "demo", "--global", "--force", "-y"); code != ExitOK {
-		t.Fatal("--force -y should remove a recipe used by a VM")
+	if err := (&config.VM{Name: "other", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201, Recipes: []string{"demo"}}).Save(); err != nil {
+		t.Fatal(err)
 	}
 	scope, err := recipes.ScopeFor(true)
 	if err != nil {
 		t.Fatal(err)
+	}
+	lockBefore, err := os.ReadFile(scope.LockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmBefore, err := os.ReadFile(filepath.Join(config.Root(), "work", "vm.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cachePath := filepath.Join(scope.CachePath, "demo")
+	if _, err := os.Stat(filepath.Join(cachePath, "recipe.toml")); err != nil {
+		t.Fatalf("add did not create recipe cache: %v", err)
+	}
+
+	assertPreserved := func(label string) {
+		t.Helper()
+		lockAfter, readErr := os.ReadFile(scope.LockPath)
+		if readErr != nil || string(lockAfter) != string(lockBefore) {
+			t.Fatalf("%s changed lock: %v", label, readErr)
+		}
+		vmAfter, readErr := os.ReadFile(filepath.Join(config.Root(), "work", "vm.toml"))
+		if readErr != nil || string(vmAfter) != string(vmBefore) {
+			t.Fatalf("%s changed VM declaration: %v", label, readErr)
+		}
+		if _, readErr := os.Stat(filepath.Join(cachePath, "recipe.toml")); readErr != nil {
+			t.Fatalf("%s removed recipe cache: %v", label, readErr)
+		}
+	}
+
+	code, objs := runJSON(t, "recipe", "rm", "demo", "--global")
+	errObj := result(t, objs)["error"].(map[string]any)
+	if code != ExitFail || errObj["code"] != string(wire.CodeInUse) {
+		t.Fatalf("in-use rm without -y = %d, %v; want in_use before confirmation", code, objs)
+	}
+	if message, _ := errObj["message"].(string); !strings.Contains(message, "work") || !strings.Contains(message, "other") {
+		t.Fatalf("in-use message = %q, want every VM name", message)
+	}
+	assertPreserved("in-use rm without -y")
+
+	code, objs = runJSON(t, "recipe", "rm", "demo", "--global", "-y")
+	errObj = result(t, objs)["error"].(map[string]any)
+	if code != ExitFail || errObj["code"] != string(wire.CodeInUse) {
+		t.Fatalf("in-use rm with -y = %d, %v; want in_use", code, objs)
+	}
+	assertPreserved("in-use rm with -y")
+
+	code, objs = runJSON(t, "recipe", "rm", "demo", "--global", "--force")
+	if code != ExitFail || result(t, objs)["error"].(map[string]any)["code"] != string(wire.CodeConfirmationRequired) {
+		t.Fatalf("--force without -y = %d, %v; want confirmation_required", code, objs)
+	}
+	assertPreserved("forced rm without -y")
+	if code, _ = runJSON(t, "recipe", "rm", "demo", "--global", "--force", "-y"); code != ExitOK {
+		t.Fatal("--force -y should remove a recipe used by a VM")
 	}
 	lock, err := scope.Lock()
 	if err != nil {
@@ -200,6 +244,18 @@ func TestRecipeRMForceDoesNotBypassConfirmationAndRefusesVMUse(t *testing.T) {
 	}
 	if _, ok := lock.Recipes["demo"]; ok {
 		t.Fatal("forced removal left the lock entry")
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("forced removal left recipe cache: %v", err)
+	}
+
+	free := cliRecipeRepo(t, "free", "#!/bin/sh\necho free\n")
+	if code, _ := runJSON(t, "recipe", "add", free, "-y", "--global"); code != ExitOK {
+		t.Fatal("free recipe add failed")
+	}
+	code, objs = runJSON(t, "recipe", "rm", "free", "--global")
+	if code != ExitFail || result(t, objs)["error"].(map[string]any)["code"] != string(wire.CodeConfirmationRequired) {
+		t.Fatalf("removable rm without -y = %d, %v; want confirmation_required", code, objs)
 	}
 }
 
@@ -319,6 +375,107 @@ func TestRecipeVersionAndEmptyRemoteListsUseContractThreeAndArrays(t *testing.T)
 			t.Fatalf("%v data.recipes = %#v, want non-null array", argv, dataOf(t, objs)["recipes"])
 		}
 	}
+}
+
+func TestRecipeJSONRemoteResultShapesUseFullPinsAndMinimalRemoval(t *testing.T) {
+	t.Run("empty batch", func(t *testing.T) {
+		cliRoot(t)
+		t.Chdir(t.TempDir())
+		code, objs := runJSON(t, "recipe", "update", "--global")
+		if code != ExitOK {
+			t.Fatalf("empty update exit = %d: %v", code, objs)
+		}
+		data := dataOf(t, objs)
+		if len(data) != 1 {
+			t.Fatalf("empty update data = %v, want exactly recipes", data)
+		}
+		rows, ok := data["recipes"].([]any)
+		if !ok || rows == nil || len(rows) != 0 {
+			t.Fatalf("empty update recipes = %#v, want []", data["recipes"])
+		}
+	})
+
+	t.Run("add list update remove", func(t *testing.T) {
+		cliRoot(t)
+		t.Chdir(t.TempDir())
+		src := cliRecipeRepo(t, "demo", "#!/bin/sh\necho v1\n")
+
+		code, objs := runJSON(t, "recipe", "add", src, "-y", "--global")
+		if code != ExitOK {
+			t.Fatalf("add exit = %d: %v", code, objs)
+		}
+		add := dataOf(t, objs)
+		if got := len(add); got != 5 {
+			t.Fatalf("add data has %d fields (%v), want name/source/ref/commit/scope", got, add)
+		}
+		for _, key := range []string{"name", "source", "ref", "commit", "scope"} {
+			if _, ok := add[key]; !ok {
+				t.Errorf("add data omitted %q: %v", key, add)
+			}
+		}
+		if add["name"] != "demo" || add["source"] != src || add["scope"] != "global" {
+			t.Errorf("add metadata = %v", add)
+		}
+		addCommit, _ := add["commit"].(string)
+		if len(addCommit) != 40 {
+			t.Fatalf("add commit = %q, want full commit", addCommit)
+		}
+
+		code, objs = runJSON(t, "recipe", "list")
+		if code != ExitOK {
+			t.Fatalf("list exit = %d: %v", code, objs)
+		}
+		list := dataOf(t, objs)
+		rows, _ := list["recipes"].([]any)
+		var row map[string]any
+		for _, raw := range rows {
+			candidate, _ := raw.(map[string]any)
+			if candidate["name"] == "demo" {
+				row = candidate
+				break
+			}
+		}
+		if row == nil {
+			t.Fatalf("list recipes omitted demo: %#v", list["recipes"])
+		}
+		if len(row) != 6 || row["name"] != "demo" || row["description"] != "demo recipe" || row["source"] != src || row["scope"] != "global" {
+			t.Fatalf("list row = %v, want named pin metadata", row)
+		}
+		listCommit, _ := row["commit"].(string)
+		if len(listCommit) != 7 || listCommit != addCommit[:7] {
+			t.Fatalf("list commit = %q, want seven-character prefix %q", listCommit, addCommit[:7])
+		}
+
+		v2 := testutil.GitCommit(t, src, map[string]string{"install.sh": "#!/bin/sh\necho v2\n"}, "")
+		code, objs = runJSON(t, "recipe", "update", "demo", "--global")
+		if code != ExitOK {
+			t.Fatalf("update exit = %d: %v", code, objs)
+		}
+		update := dataOf(t, objs)
+		updateRows, _ := update["recipes"].([]any)
+		if len(updateRows) != 1 {
+			t.Fatalf("update rows = %#v, want one row", update["recipes"])
+		}
+		updated, _ := updateRows[0].(map[string]any)
+		updatedCommit, _ := updated["commit"].(string)
+		if len(updatedCommit) != 40 || updatedCommit != v2 {
+			t.Fatalf("update commit = %q, want full %q", updatedCommit, v2)
+		}
+
+		code, objs = runJSON(t, "recipe", "rm", "demo", "--global", "-y")
+		if code != ExitOK {
+			t.Fatalf("remove exit = %d: %v", code, objs)
+		}
+		removed := dataOf(t, objs)
+		if len(removed) != 2 || removed["name"] != "demo" || removed["scope"] != "global" {
+			t.Fatalf("remove data = %v, want exactly name and scope", removed)
+		}
+		for _, forbidden := range []string{"source", "ref", "commit"} {
+			if _, present := removed[forbidden]; present {
+				t.Errorf("remove data exposed empty %q field: %v", forbidden, removed)
+			}
+		}
+	})
 }
 
 func TestRecipeApplyStaleProjectLockUsesTypedRepairCode(t *testing.T) {

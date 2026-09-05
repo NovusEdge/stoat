@@ -265,6 +265,7 @@ func TestDoneListsEveryProblemWithItsFix(t *testing.T) {
 	m.binPath = "/home/x/.local/bin/stoat"
 	m.checks = []Check{
 		{Name: "qemu-img", OK: true, Detail: "/usr/bin"},
+		{Name: "git", Optional: true, Detail: "not found", Fix: []string{"sudo pacman -S --needed git"}},
 		{Name: "xorriso", OK: false, Detail: "not found", Fix: []string{"sudo pacman -S --needed libisoburn"}},
 		{Name: "/dev/kvm", OK: false, Detail: "permission denied", Fix: []string{`sudo usermod -aG kvm "$USER"`}},
 	}
@@ -273,6 +274,8 @@ func TestDoneListsEveryProblemWithItsFix(t *testing.T) {
 	for _, want := range []string{
 		"v0.3.1",
 		"/home/x/.local/bin/stoat",
+		"git",
+		"sudo pacman -S --needed git",
 		"xorriso",
 		"sudo pacman -S --needed libisoburn",
 		"/dev/kvm",
@@ -291,6 +294,9 @@ func TestDoneListsEveryProblemWithItsFix(t *testing.T) {
 	}
 	if strings.Contains(advice, "qemu-img") {
 		t.Errorf("the advice section lists a passing check:\n%s", advice)
+	}
+	if !strings.Contains(advice, "git") || !strings.Contains(advice, "sudo pacman -S --needed git") {
+		t.Errorf("the advice section omits optional Git repair guidance:\n%s", advice)
 	}
 }
 

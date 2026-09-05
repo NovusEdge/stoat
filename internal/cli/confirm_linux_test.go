@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/testutil"
 	"golang.org/x/sys/unix"
 )
@@ -66,9 +69,129 @@ func TestRecipeURLPreviewUsesManifestFieldsOnATTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := string(buf[:n])
+	normalized := strings.ReplaceAll(output, "\r\n", "\n")
+	start := strings.Index(normalized, "name: demo")
+	if start < 0 {
+		t.Fatalf("TTY output has no manifest preview: %q", output)
+	}
+	preview, _, ok := strings.Cut(normalized[start:], "install demo from ")
+	if !ok {
+		t.Fatalf("TTY output has no confirmation prompt: %q", output)
+	}
+	if want := "name: demo\nos: alpine\nrequires: git\nparam: channel (enum)\n"; preview != want {
+		t.Fatalf("TTY preview = %q, want exactly %q", preview, want)
+	}
+	if strings.Contains(preview, "description:") {
+		t.Fatalf("TTY preview exposed unapproved description field: %q", preview)
+	}
 	for _, want := range []string{"demo", "alpine", "git", "channel"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("TTY preview missing %q: %q", want, output)
 		}
+	}
+}
+
+func TestRecipeURLNonTTYFilesRefuseBeforePreviewAndMutation(t *testing.T) {
+	cliRoot(t)
+	t.Chdir(t.TempDir())
+	src := cliRecipeRepo(t, "demo", "#!/bin/sh\necho demo\n")
+	trace := filepath.Join(t.TempDir(), "git-trace.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	cases := []struct {
+		name       string
+		stdin      func(t *testing.T) *os.File
+		stdoutNull bool
+		args       []string
+	}{
+		{name: "dev-null", stdin: func(t *testing.T) *os.File {
+			f, err := os.Open("/dev/null")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = f.Close() })
+			return f
+		}, stdoutNull: true},
+		{name: "pipe", stdin: func(t *testing.T) *os.File {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
+			return r
+		}},
+		{name: "json-dev-null", stdin: func(t *testing.T) *os.File {
+			f, err := os.Open("/dev/null")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = f.Close() })
+			return f
+		}, args: []string{"--json"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_ = os.Remove(trace)
+			root := cliRoot(t)
+			t.Chdir(t.TempDir())
+			stdin := tc.stdin(t)
+			stdoutPath := filepath.Join(t.TempDir(), "stdout")
+			var err error
+			var stdout *os.File
+			if tc.stdoutNull {
+				stdout, err = os.OpenFile("/dev/null", os.O_WRONLY, 0)
+			} else {
+				stdout, err = os.Create(stdoutPath)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stdout.Close() })
+			args := append(append([]string{}, tc.args...), "recipe", "add", src, "--global")
+			if tc.name == "pipe" {
+				args = append([]string{"--quiet"}, args...)
+			}
+			var errOut bytes.Buffer
+			code := Main(args, "test", stdin, stdout, &errOut)
+			if err := stdout.Close(); err != nil {
+				t.Fatal(err)
+			}
+			var body []byte
+			if !tc.stdoutNull {
+				body, err = os.ReadFile(stdoutPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code != ExitFail {
+				t.Fatalf("non-TTY URL add exit = %d, want ExitFail; stdout=%q stderr=%q", code, body, errOut.String())
+			}
+			if tc.name == "json-dev-null" {
+				var envelope map[string]any
+				if err := json.Unmarshal(bytes.TrimSpace(body), &envelope); err != nil {
+					t.Fatalf("JSON refusal is not one envelope: %v; output=%q", err, body)
+				}
+				errObj, _ := envelope["error"].(map[string]any)
+				if errObj["code"] != string(wire.CodeConfirmationRequired) {
+					t.Fatalf("JSON refusal code = %v, want %q", errObj["code"], wire.CodeConfirmationRequired)
+				}
+			} else if !tc.stdoutNull && len(body) != 0 {
+				t.Fatalf("quiet non-TTY refusal wrote preview/prompt prose: %q", body)
+			}
+			scope, err := recipes.ScopeFor(true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(scope.LockPath); !os.IsNotExist(err) {
+				t.Fatalf("non-TTY refusal mutated global lock under %s: %v", root, err)
+			}
+			if _, err := os.Stat(trace); err == nil {
+				traceBody, readErr := os.ReadFile(trace)
+				if readErr != nil || len(traceBody) > 0 {
+					t.Fatalf("non-TTY refusal triggered Git preview trace: %q", traceBody)
+				}
+			}
+		})
 	}
 }
