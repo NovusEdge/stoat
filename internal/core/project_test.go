@@ -110,3 +110,118 @@ func TestSpecForWritesTheExpectedVMToml(t *testing.T) {
 		t.Errorf("shares = %+v", v.Shares)
 	}
 }
+
+func TestDiffReportsEveryMutableField(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	p := projectDir(t, fullDecl)
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-declare with every mutable field changed.
+	changed := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 4
+ram     = 4096
+recipes = ["docker", "devtools"]
+agent_access = "exec"
+
+[vms.dev.params.docker]
+user = "build"
+`
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName), []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drift, err := Diff(p2, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]bool{ // field -> needs restart
+		"cpus": true, "ram": true, "shares": true,
+		"recipes": false, "params": false, "agent_access": false,
+	}
+	got := map[string]bool{}
+	for _, d := range drift {
+		if d.Key != "dev" {
+			t.Errorf("drift key = %q, want dev", d.Key)
+		}
+		got[d.Field] = d.NeedsRestart
+	}
+	for f, restart := range want {
+		r, ok := got[f]
+		if !ok {
+			t.Errorf("no drift reported for %s: %+v", f, drift)
+			continue
+		}
+		if r != restart {
+			t.Errorf("%s needs_restart = %v, want %v", f, r, restart)
+		}
+	}
+	for _, d := range drift {
+		if d.Field == "cpus" && (d.From != "2" || d.To != "4") {
+			t.Errorf("cpus drift = %+v, want 2 -> 4", d)
+		}
+	}
+}
+
+func TestDiffOnAnUnchangedDeclarationIsEmpty(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	p := projectDir(t, fullDecl)
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	drift, err := Diff(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drift) != 0 {
+		t.Errorf("drift = %+v, want none", drift)
+	}
+}
+
+func TestDiffRefusesAnImageChange(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\n")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName),
+		[]byte("schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"deb13-cloud\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Diff(p2, "dev")
+	if err == nil {
+		t.Fatal("Diff accepted an image change")
+	}
+	want := "dev: image changed (alpine-virt -> deb13-cloud); run stoat rm dev and stoat up"
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q", err.Error(), want)
+	}
+}
