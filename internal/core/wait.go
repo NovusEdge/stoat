@@ -32,10 +32,14 @@ const (
 	UntilApplied Until = "applied"
 	// UntilStopped is qemu.Running turning false.
 	UntilStopped Until = "stopped"
+	// UntilHealthy is every applied recipe's health check passing.
+	UntilHealthy Until = "healthy"
 )
 
 // Untils returns every state Wait can block for.
-func Untils() []Until { return []Until{UntilReachable, UntilApplied, UntilStopped} }
+func Untils() []Until {
+	return []Until{UntilReachable, UntilApplied, UntilStopped, UntilHealthy}
+}
 
 // Valid reports whether u is one of Untils(). Wait calls it before it loads
 // the VM, so a typo fails with the reason rather than with "not found".

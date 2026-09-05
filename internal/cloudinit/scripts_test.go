@@ -339,6 +339,72 @@ func TestWrapScriptsExecutesRecipeOutputAndGatesMarker(t *testing.T) {
 	}
 }
 
+// Recipe names are user-controlled directory names and may contain a dash.
+// The wrapper must translate each namespaced secret into a shell-safe,
+// collision-free environment variable before invoking the child script. This
+// executes both a dashed and underscored name so a normalization scheme that
+// aliases them cannot silently deliver one recipe's secret to the other.
+func TestWrapScriptsExecutesHyphenatedSecretsAndCleansUp(t *testing.T) {
+	scripts := []Script{
+		{
+			Name:    "my-recipe",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = hyphen-secret\n",
+			Secrets: map[string]string{"token": "hyphen-secret"},
+		},
+		{
+			Name:    "my_recipe",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = underscore-secret\n",
+			Secrets: map[string]string{"token": "underscore-secret"},
+		},
+	}
+	f := parseWrapped(t, WrapScripts(scripts, ""))
+	if len(f.Runcmd) != len(scripts)+1 {
+		t.Fatalf("runcmd = %v, want two recipes plus cleanup", f.Runcmd)
+	}
+
+	harness := t.TempDir()
+	paths := map[string]string{
+		"/var/lib/stoat/recipes":  filepath.Join(harness, "recipes"),
+		"/var/lib/stoat/.applied": filepath.Join(harness, "applied"),
+		"/run/stoat":              filepath.Join(harness, "run", "stoat"),
+	}
+	for _, wf := range f.WriteFiles {
+		path := relocateGuestPath(wf.Path, paths)
+		if !pathWithin(path, harness) {
+			t.Fatalf("write_files path escaped harness: %q", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		perm := os.FileMode(0o600)
+		if wf.Permissions == "0755" {
+			perm = 0o755
+		}
+		if err := os.WriteFile(path, []byte(wf.Content), perm); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := range scripts {
+		command := relocateGuestPath(f.Runcmd[i], paths)
+		cmd := exec.Command("sh", "-eu", "-c", command)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("recipe %q command failed: %v\n%s\noutput:\n%s", scripts[i].Name, err, command, output)
+		}
+	}
+	cleanup := relocateGuestPath(f.Runcmd[len(f.Runcmd)-1], paths)
+	if cleanup != "rm -f "+paths["/run/stoat"]+"/secrets.env" {
+		t.Fatalf("last runcmd = %q, want secret cleanup", f.Runcmd[len(f.Runcmd)-1])
+	}
+	if err := exec.Command("sh", "-eu", "-c", cleanup).Run(); err != nil {
+		t.Fatalf("secret cleanup failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(paths["/run/stoat"], "secrets.env")); !os.IsNotExist(err) {
+		t.Fatalf("secret file remains after final cleanup: %v", err)
+	}
+}
+
 func relocateGuestPath(value string, replacements map[string]string) string {
 	for _, path := range []string{"/var/lib/stoat/recipes", "/var/lib/stoat/.applied", "/tmp/.stoat-out", "/run/stoat"} {
 		if replacement, ok := replacements[path]; ok {

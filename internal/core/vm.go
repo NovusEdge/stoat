@@ -83,6 +83,26 @@ type AppliedRecipe struct {
 	At      time.Time
 }
 
+// SecretSet and SecretUnset are the redacted states readers expose for
+// recipe secret parameters.
+const (
+	SecretSet   = "<set>"
+	SecretUnset = "<unset>"
+)
+
+// RecipeState is one recipe's stored per-VM state. Secret values are never
+// carried here; SecretNames lets a wire boundary verify redaction.
+type RecipeState struct {
+	Name        string
+	Applied     bool
+	Version     string
+	At          time.Time
+	Health      string
+	Params      map[string]string
+	SecretNames []string
+	Outputs     map[string]string
+}
+
 // VM answers "what is this VM doing right now". It is not the on-disk
 // record. config.VM is vm.toml: what was asked for, valid the instant it was
 // last saved. It says nothing about "is it running" on its own; that needs
@@ -110,11 +130,13 @@ type VM struct {
 	// which keeps ticking between reloads.
 	StartedAt time.Time
 
-	RAM     int
-	CPUs    int
-	Disk    string
-	Share   string
-	Recipes []string
+	RAM          int
+	CPUs         int
+	Disk         string
+	Share        string
+	Recipes      []string
+	RecipeStates []RecipeState
+	Health       Health
 
 	SSHPort int
 	SSHUser string

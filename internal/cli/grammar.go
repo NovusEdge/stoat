@@ -200,6 +200,7 @@ type pruneCmd struct {
 type waitCmd struct {
 	VM      string        `arg:"" help:"vm name"`
 	Until   string        `enum:"reachable,applied,stopped" default:"reachable" help:"state to wait for"`
+	Healthy bool          `help:"wait for every applied recipe's health check to pass"`
 	Timeout time.Duration `default:"2m" help:"give up after this long"`
 }
 

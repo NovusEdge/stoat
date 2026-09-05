@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,6 +141,71 @@ func TestLogsVMTailsAndSelectsWhich(t *testing.T) {
 	lines, _ := data["lines"].([]any)
 	if len(lines) != 2 || lines[0] != "two" || lines[1] != "three" {
 		t.Errorf("lines = %v, want the last two", lines)
+	}
+}
+
+// Both public VM log selectors pass through the same redaction boundary. Keep
+// this at the CLI sink so a correct core reader cannot be bypassed by JSON
+// line handling or tailing.
+func TestLogsJSONRedactsStoredSecretsForConsoleAndApply(t *testing.T) {
+	dir := cliRoot(t)
+	v := saveVM(t, &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200})
+	const sentinel = "cli-logs-secret-sentinel"
+	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": sentinel}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "work", "console.log"), []byte("console "+sentinel+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "work", "last-provision.log"), []byte("apply "+sentinel+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, which := range []core.Which{core.WhichConsole, core.WhichApply} {
+		t.Run(string(which), func(t *testing.T) {
+			code, objs := runJSON(t, "logs", "work", "--which", string(which))
+			if code != ExitOK {
+				t.Fatalf("exit = %d: %v", code, objs)
+			}
+			lines, _ := dataOf(t, objs)["lines"].([]any)
+			if len(lines) != 1 {
+				t.Fatalf("lines = %#v, want one redacted line", lines)
+			}
+			line, _ := lines[0].(string)
+			if strings.Contains(line, sentinel) {
+				t.Fatalf("logs %s leak stored secret %q: %q", which, sentinel, line)
+			}
+			if !strings.Contains(line, "<redacted>") {
+				t.Errorf("logs %s = %q, want the redaction marker", which, line)
+			}
+			if _, err := json.Marshal(objs); err != nil {
+				t.Fatalf("logs %s result is not JSON-marshalable: %v", which, err)
+			}
+		})
+	}
+}
+
+// The CLI must preserve the secret-store refusal and identify the VM rather
+// than falling back to raw console bytes when a reader is insecure.
+func TestLogsJSONPropagatesInsecureSecretStoreWithVMContext(t *testing.T) {
+	cliRoot(t)
+	v := saveVM(t, &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200})
+	path := filepath.Join(v.Dir, config.SecretsName)
+	if err := os.WriteFile(path, []byte("docker.authkey = \"sentinel\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, objs := runJSON(t, "logs", "work", "--which", "console")
+	if code != ExitFail {
+		t.Fatalf("exit = %d, want %d: %v", code, ExitFail, objs)
+	}
+	errObj, _ := result(t, objs)["error"].(map[string]any)
+	message, _ := errObj["message"].(string)
+	if !strings.Contains(message, "work") || !strings.Contains(message, "secrets.toml: mode 0644") {
+		t.Errorf("error.message = %q, want VM context and secret-file mode", message)
 	}
 }
 

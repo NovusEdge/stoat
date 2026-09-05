@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,5 +270,133 @@ func TestWaitCtxDeadlineExceeded(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("took %s past a 200ms deadline, want well under a second past it", elapsed)
+	}
+}
+
+// A VM with no applied recipes that declare health is healthy as soon as ssh
+// answers: no later check can change the result.
+func TestWaitHealthyWithNoChecksReturnsOnReachable(t *testing.T) {
+	root(t)
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: port}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := Wait(ctx, v.Name, UntilHealthy); err != nil {
+		t.Fatalf("Wait healthy = %v, want nil", err)
+	}
+}
+
+// The first failing recipe is named and retains the check's last output line,
+// so a caller can act on the reported failure rather than a generic timeout.
+func TestWaitHealthyNamesFirstFailureAndDetail(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipe(t, dir, true)
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{"docker"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installHealthSSH(t, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil || !strings.Contains(err.Error(), "docker: health check failed") || !strings.Contains(err.Error(), "cannot connect to the docker daemon") {
+		t.Fatalf("Wait healthy error = %v, want named check detail", err)
+	}
+}
+
+// The global healthy deadline honors a declared timeout shorter than the old
+// 30s fallback; it must not wait for a separate budget per recipe.
+func TestWaitHealthyUsesLongestDeclaredTimeout(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithTimeout(t, dir, "50ms")
+	port, stopSSH := fakeSSHD(t, 0)
+	defer stopSSH()
+	v := &config.VM{
+		Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1,
+		SSHPort: port, Recipes: []string{"docker"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	installHealthSSH(t, false)
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil {
+		t.Fatal("Wait healthy succeeded with a failing check")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Wait healthy took %s, want the 50ms health budget", elapsed)
+	}
+}
+
+func TestHealthTimeoutUsesLongestDeclaredTimeoutWithoutMinimum(t *testing.T) {
+	dir := root(t)
+	writeHealthRecipeWithTimeoutNamed(t, dir, "docker", "50ms")
+	writeHealthRecipeWithTimeoutNamed(t, dir, "tailscale", "2s")
+	v := &config.VM{
+		Name: "work", OS: "alpine", Recipes: []string{"docker", "tailscale"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}, "tailscale": {}},
+	}
+	if got, want := HealthTimeout(v), 2*time.Second; got != want {
+		t.Fatalf("HealthTimeout = %s, want longest declared timeout %s", got, want)
+	}
+	writeHealthRecipeWithTimeoutNamed(t, dir, "docker", "50ms")
+	v.Applied = map[string]config.AppliedRecipe{"docker": {}}
+	if got, want := HealthTimeout(v), 50*time.Millisecond; got != want {
+		t.Fatalf("HealthTimeout = %s, want declared timeout %s (not the 30s default)", got, want)
+	}
+}
+
+// Parent cancellation survives the reachability and health boundaries rather
+// than being converted into a recipe failure.
+func TestWaitHealthyPropagatesCancellation(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2399}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Wait(ctx, v.Name, UntilHealthy); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait healthy error = %v, want context.Canceled", err)
+	}
+}
+
+func writeHealthRecipeWithTimeout(t *testing.T, rootDir, timeout string) {
+	writeHealthRecipeWithTimeoutNamed(t, rootDir, "docker", timeout)
+}
+
+func writeHealthRecipeWithTimeoutNamed(t *testing.T, rootDir, name, timeout string) {
+	t.Helper()
+	d := filepath.Join(rootDir, "recipes", name)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "schema = 3\nname = \"" + name + "\"\nscript = \"install.sh\"\n\n[health]\ncheck = \"docker info\"\ntimeout = \"" + timeout + "\"\n"
+	if err := os.WriteFile(filepath.Join(d, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "install.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }

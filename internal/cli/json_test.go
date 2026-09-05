@@ -3,12 +3,15 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // runJSON runs Main with --json and returns every stdout line decoded. It
@@ -74,6 +77,9 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		{name: "prune", argv: []string{"prune"}, ok: true, exit: ExitOK},
 		{name: "logs", argv: []string{"logs"}, ok: true, exit: ExitOK},
 		{name: "recipe list", argv: []string{"recipe", "list"}, ok: true, exit: ExitOK},
+		{name: "wait healthy and until", argv: []string{"wait", "work", "--healthy", "--until", "applied"}, code: wire.CodeUsage, exit: ExitUsage},
+		{name: "recipe show", argv: []string{"recipe", "show", "docker"}, ok: true, exit: ExitOK},
+		{name: "recipe show unknown", argv: []string{"recipe", "show", "nope"}, code: wire.CodeNotFound, exit: ExitFail},
 		{name: "guest ls", argv: []string{"guest", "ls"}, ok: true, exit: ExitOK},
 		{name: "guest show", argv: []string{"guest", "show", "alpine"}, ok: true, exit: ExitOK},
 		{name: "guest show unknown", argv: []string{"guest", "show", "plan9"}, code: wire.CodeNotFound, exit: ExitFail},
@@ -104,6 +110,11 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cliRoot(t)
+			if tt.name == "recipe show" {
+				if err := recipes.Install(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
 				t.Fatal(err)
 			}
@@ -170,6 +181,38 @@ func TestJSONEmptyListsAreArraysNotNull(t *testing.T) {
 	}
 }
 
+// Recipe show is a caller boundary, so pin the named contract payload rather
+// than accepting a generic map whose fields can drift from recipe list.
+func TestJSONRecipeShowCarriesNamedContract(t *testing.T) {
+	cliRoot(t)
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+	code, objs := runJSON(t, "recipe", "show", "docker")
+	if code != ExitOK {
+		t.Fatalf("recipe show exit = %d, want %d: %v", code, ExitOK, objs)
+	}
+	data, ok := result(t, objs)["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("recipe show data = %#v, want object", result(t, objs)["data"])
+	}
+	show, ok := data["recipe"].(map[string]any)
+	if !ok {
+		t.Fatalf("recipe show data.recipe = %#v, want named object", data["recipe"])
+	}
+	for _, field := range []string{"name", "schema", "params", "outputs", "health"} {
+		if _, exists := show[field]; !exists {
+			t.Errorf("recipe show omitted %q: %v", field, show)
+		}
+	}
+	if _, ok := show["params"].([]any); !ok {
+		t.Errorf("recipe show params = %#v, want array", show["params"])
+	}
+	if _, ok := show["outputs"].([]any); !ok {
+		t.Errorf("recipe show outputs = %#v, want array", show["outputs"])
+	}
+}
+
 // The three fields that must never reach the wire. Asserted here, outside
 // package wire, because this is the path a real consumer sees: the DTO could
 // be correct and a run body could still hand raw core types to the encoder.
@@ -188,6 +231,76 @@ func TestJSONNeverLeaksHostPathsOrConsolePassword(t *testing.T) {
 		if bytes.Contains(raw, []byte(leak)) {
 			t.Errorf("ls output leaks %q: %s", leak, raw)
 		}
+	}
+}
+
+// Get is a real wire sink, not just a DTO unit test: a stored secret must be
+// represented by the redacted marker in the status detail and never by the
+// value loaded from secrets.toml.
+func TestJSONGetRedactsStoredSecretValue(t *testing.T) {
+	dir := cliRoot(t)
+	recipeDir := filepath.Join(dir, "recipes", "redaction")
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(`schema = 3
+name = "redaction"
+script = "install.sh"
+
+[params.token]
+type = "secret"
+required = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"redaction"}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	const sentinel = "synthetic-secret-sentinel"
+	if err := config.SaveSecrets(v.Dir, config.Secrets{"redaction": {"token": sentinel}}); err != nil {
+		t.Fatal(err)
+	}
+
+	code, objs := runJSON(t, "get", "work")
+	if code != ExitOK {
+		t.Fatalf("get exit = %d, want %d: %v", code, ExitOK, objs)
+	}
+	raw, err := json.Marshal(objs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(sentinel)) {
+		t.Fatalf("get output leaked secret %q: %s", sentinel, raw)
+	}
+	if !bytes.Contains(raw, []byte(`"recipes_detail"`)) || !bytes.Contains(raw, []byte(`"token":"<set>"`)) {
+		t.Fatalf("get output lacks redacted recipe detail: %s", raw)
+	}
+}
+
+// List must not silently omit a VM merely because its secret store is
+// unreadable. The error remains tied to the VM so a caller can repair the
+// right directory.
+func TestJSONListPropagatesInsecureSecretErrorWithVMContext(t *testing.T) {
+	dir := cliRoot(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "work", config.SecretsName)
+	if err := os.WriteFile(path, []byte("[redaction]\ntoken = \"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, objs := runJSON(t, "ls")
+	if code != ExitFail {
+		t.Fatalf("ls exit = %d, want %d: %v", code, ExitFail, objs)
+	}
+	raw, _ := json.Marshal(objs)
+	if !bytes.Contains(raw, []byte("work")) || !bytes.Contains(raw, []byte(config.SecretsName)) {
+		t.Fatalf("insecure secret error lacks VM context: %s", raw)
 	}
 }
 

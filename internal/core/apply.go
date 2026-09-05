@@ -617,6 +617,12 @@ func dependencyError(dependent, dep string, manifests map[string]recipes.Manifes
 type Recipe struct {
 	Name        string // recipe name, matches the directory name
 	Description string // from recipe.toml
+	// Schema is the recipe.toml format version exposed to machine callers.
+	Schema int
+	// Params, Outputs and Health describe the recipe contract.
+	Params  []RecipeParam
+	Outputs []RecipeOutput
+	Health  *RecipeHealthSpec
 	// Reboot says the guest needs a restart before this recipe's effect is
 	// visible. A caller that waits for "reachable" after an apply sees the
 	// pre-reboot sshd and reads it as done.
@@ -627,6 +633,33 @@ type Recipe struct {
 	Depends []string
 	// Runtime is the interpreter the script runs under: "sh" or "python3".
 	Runtime string
+}
+
+// RecipeParam is one declared recipe parameter.
+type RecipeParam struct {
+	Name     string
+	Type     string
+	Default  string
+	Help     string
+	Required bool
+	Values   []string
+}
+
+// RecipeOutput is one declared recipe output.
+type RecipeOutput struct {
+	Name string
+	Help string
+}
+
+// RecipeHealthSpec is a recipe's declared health check.
+type RecipeHealthSpec struct {
+	Check   string
+	Timeout string
+}
+
+// RecipeShow is the host-side lookup for one recipe's contract.
+func RecipeShow(name string) (Recipe, error) {
+	return Recipe{}, fmt.Errorf("%w: no such recipe %q", ErrNotFound, name)
 }
 
 // RecipeFilter selects the recipes Recipes returns: the set

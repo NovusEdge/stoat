@@ -1,0 +1,18 @@
+schema = 3
+name = "redaction"
+description = "e2e secret redaction probe"
+os = ["alpine"]
+script = "install.sh"
+run = "once"
+
+[params.token]
+type = "secret"
+required = true
+help = "synthetic e2e sentinel"
+
+[outputs]
+socket = "synthetic output"
+
+[health]
+check = "true"
+timeout = "5s"

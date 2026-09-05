@@ -2,9 +2,11 @@ package cli
 
 import (
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 // TestWaitMissingVM covers the ordinary core.Get-style not_found path:
@@ -75,10 +77,27 @@ func TestParseWaitUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"wait", "work", "--until", "bogus"},
 		{"wait", "work", "--timeout", "0"},
+		{"wait", "work", "--healthy", "--until", "reachable"},
+		{"wait", "work", "--healthy", "--until", "applied"},
+		{"wait", "work", "--healthy", "--until", "stopped"},
+		{"wait", "work", "--until", "reachable", "--healthy"},
 	} {
 		if _, err := Parse(args); err == nil {
 			t.Errorf("Parse(%v) accepted, want a usage error", args)
 		}
+	}
+}
+
+func TestParseWaitHealthySelectsTheHealthEvent(t *testing.T) {
+	a, err := Parse([]string{"wait", "work", "--healthy", "--timeout", "7s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Until != core.UntilHealthy {
+		t.Fatalf("Until = %q, want %q", a.Until, core.UntilHealthy)
+	}
+	if a.Timeout != 7*time.Second {
+		t.Fatalf("Timeout = %s, want 7s", a.Timeout)
 	}
 }
 

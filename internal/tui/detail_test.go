@@ -232,6 +232,37 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 }
 
+// The TUI detail pane is a sink in its own right. It must render stored
+// recipe state through the redacted core projection, even when a lower layer
+// accidentally hands it a raw value.
+func TestDetailRendersRecipeSecretsAsMarkers(t *testing.T) {
+	const sentinel = "synthetic-secret-sentinel"
+	m := model{
+		screen: screenDetail,
+		width:  100,
+		height: 40,
+		detail: detailModel{vm: core.VM{
+			Name:    "work",
+			Mode:    "live",
+			State:   core.StateStopped,
+			Recipes: []string{"redaction"},
+			RecipeStates: []core.RecipeState{{
+				Name:        "redaction",
+				Applied:     true,
+				Params:      map[string]string{"token": sentinel},
+				SecretNames: []string{"token"},
+			}},
+		}},
+	}
+	out := ansi.Strip(m.viewDetail())
+	if strings.Contains(out, sentinel) {
+		t.Fatalf("detail pane leaked secret value: %s", out)
+	}
+	if !strings.Contains(out, "<set>") {
+		t.Fatalf("detail pane lacks redacted secret marker: %s", out)
+	}
+}
+
 // This VM runs with no graphical session (the test sets no Display and no
 // WAYLAND_DISPLAY/DISPLAY), so qemu.DisplayKind falls back to vnc regardless
 // of mode. The detail screen must surface the VNC socket as the actual way

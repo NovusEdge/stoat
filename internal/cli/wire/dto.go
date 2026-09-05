@@ -99,6 +99,30 @@ type VM struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// RecipeState is one recipe's redacted per-VM state.
+type RecipeState struct {
+	Name    string            `json:"name"`
+	Applied bool              `json:"applied"`
+	Version string            `json:"version"`
+	At      string            `json:"at"`
+	Health  string            `json:"health"`
+	Params  map[string]string `json:"params"`
+	Outputs map[string]string `json:"outputs"`
+}
+
+// VMStatus is the get/vm_status payload. RecipeStates is additive so the
+// existing VM.recipes string list remains compatible with contract v2.
+type VMStatus struct {
+	VM
+	Health       string        `json:"health"`
+	RecipeStates []RecipeState `json:"recipes_detail"`
+}
+
+// FromVMStatus converts the stored VM status into its additive wire shape.
+func FromVMStatus(v core.VM, graphical bool) VMStatus {
+	return VMStatus{VM: FromVM(v, graphical), Health: string(v.Health), RecipeStates: []RecipeState{}}
+}
+
 // FromVM takes graphical (core.GraphicalSession) rather than calling it,
 // keeping this constructor pure: FromVMs would otherwise re-answer a
 // host-wide question once per VM in the list, and a test of this file would
@@ -264,17 +288,63 @@ func FromPruneItems(ps []core.PruneItem) []PruneItem {
 // until reachable" after an apply answers about the guest before or after the
 // restart.
 type Recipe struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Reboot      bool     `json:"reboot"`
-	Depends     []string `json:"depends"`
-	Runtime     string   `json:"runtime"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Schema      int            `json:"schema"`
+	Params      []RecipeParam  `json:"params"`
+	Outputs     []RecipeOutput `json:"outputs"`
+	Health      *RecipeHealth  `json:"health"`
+	Reboot      bool           `json:"reboot"`
+	Depends     []string       `json:"depends"`
+	Runtime     string         `json:"runtime"`
 }
+
+// RecipeParam is one named recipe parameter in a machine-readable schema.
+type RecipeParam struct {
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Required bool     `json:"required"`
+	Default  string   `json:"default"`
+	Values   []string `json:"values"`
+	Help     string   `json:"help"`
+}
+
+// RecipeOutput is one named recipe output in a machine-readable schema.
+type RecipeOutput struct {
+	Name string `json:"name"`
+	Help string `json:"help"`
+}
+
+// RecipeHealth is a recipe's declared health check.
+type RecipeHealth struct {
+	Check   string `json:"check"`
+	Timeout string `json:"timeout"`
+}
+
+// RecipeSchema is one recipe's machine-readable contract.
+type RecipeSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Schema      int            `json:"schema"`
+	Runtime     string         `json:"runtime"`
+	Reboot      bool           `json:"reboot"`
+	Depends     []string       `json:"depends"`
+	Params      []RecipeParam  `json:"params"`
+	Outputs     []RecipeOutput `json:"outputs"`
+	Health      *RecipeHealth  `json:"health"`
+}
+
+// FromRecipeSchema converts a core recipe contract to the named wire shape.
+func FromRecipeSchema(core.Recipe) RecipeSchema { return RecipeSchema{} }
 
 func FromRecipe(r core.Recipe) Recipe {
 	return Recipe{
 		Name:        r.Name,
 		Description: r.Description,
+		Schema:      r.Schema,
+		Params:      []RecipeParam{},
+		Outputs:     []RecipeOutput{},
+		Health:      nil,
 		Reboot:      r.Reboot,
 		Depends:     nonNil(r.Depends),
 		Runtime:     r.Runtime,

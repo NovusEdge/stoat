@@ -88,6 +88,45 @@ func TestParseUpdateNeedsAtLeastOneFlag(t *testing.T) {
 	}
 }
 
+func TestParseUpdateRecipeContractFlagsMatchE2EInvocation(t *testing.T) {
+	a, err := Parse([]string{"update", "work", "--recipes", "xfce,docker,redaction", "--set", "docker.user=dev", "--secret", "redaction.token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Patch.Recipes == nil || !reflect.DeepEqual(*a.Patch.Recipes, []string{"xfce", "docker", "redaction"}) {
+		t.Fatalf("Recipes = %v, want comma-separated three-recipe list", a.Patch.Recipes)
+	}
+	if len(a.Params) != 2 || a.Params[0].Recipe != "docker" || a.Params[0].Param != "user" || a.Params[1].Recipe != "redaction" || !a.Params[1].Secret {
+		t.Fatalf("Params = %+v, want non-secret set plus secret target", a.Params)
+	}
+}
+
+// Keep every command shape used by scripts/e2e.sh reachable through the
+// public parser. This catches a stale script flag before a real VM run; it
+// deliberately stops at Parse and never starts QEMU or executes a guest.
+func TestParseE2ECommandShapes(t *testing.T) {
+	commands := [][]string{
+		{"create", "e2e", "--image", "alpine", "--mode", "disk", "--ram", "2048", "--cpus", "2", "--recipes", "xfce"},
+		{"up", "e2e"},
+		{"exec", "e2e", "--", "sh", "-c", "test -s /mnt/work/.installed"},
+		{"update", "e2e", "--recipes", "xfce,docker,redaction", "--set", "docker.user=dev", "--secret", "redaction.token"},
+		{"apply", "e2e"},
+		{"wait", "e2e", "--healthy", "--timeout", "90s"},
+		{"get", "e2e"},
+		{"update", "e2e", "--set", "docker.user=e2e-rerun"},
+		{"apply", "e2e", "--dry-run"},
+		{"down", "e2e"},
+		{"rm", "e2e", "-y"},
+	}
+	for _, argv := range commands {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			if _, err := Parse(argv); err != nil {
+				t.Fatalf("Parse(%q) = %v", argv, err)
+			}
+		})
+	}
+}
+
 // End to end against a real data root: the field asked for changes, and the
 // one that was never mentioned survives. This is the regression that a
 // Parse-only test cannot prove, since it is core.Update that does the write.
