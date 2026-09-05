@@ -27,6 +27,9 @@ import (
 // break, so nothing has to reason about which shape it is looking at.
 // v3: recipe list changed shape. dir became roots, a list of {path, scope},
 // and recipes became a list of RecipeEntry objects rather than names.
+// allow_exec also becomes agent_access with four levels, and the MCP server
+// moves into this binary, so a tool output is a wire DTO rather than a
+// re-parse of a --json line.
 const ContractVersion = 3
 
 // Event types (§2, §4). "result" is the one terminal type; every other type

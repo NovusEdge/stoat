@@ -144,6 +144,12 @@ func TestSplitJSONFlag(t *testing.T) {
 	}
 }
 
+func TestContractVersionIsThree(t *testing.T) {
+	if ContractVersion != 3 {
+		t.Fatalf("ContractVersion = %d, want 3", ContractVersion)
+	}
+}
+
 func slicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
