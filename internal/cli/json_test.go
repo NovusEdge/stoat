@@ -187,6 +187,33 @@ func TestJSONEmptyListsAreArraysNotNull(t *testing.T) {
 	}
 }
 
+// TestLSJSONDataDecodesAsWireVMList pins ls --json's data as wire.VMList's
+// exact shape (the house rule: --json data is a wire struct, never an inline
+// map[string]any). DisallowUnknownFields catches a stray or renamed top-level
+// key that a looser map could carry silently; decoding into the real
+// wire.VMList type, not a lookalike, ties this assertion to that struct
+// rather than to whatever shape the current call site happens to produce.
+func TestLSJSONDataDecodesAsWireVMList(t *testing.T) {
+	dir := projectRoot(t, twoVMs)
+	if err := (&config.VM{Name: "myrepo-dev", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200, Project: dir}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	_, objs := runJSON(t, "ls")
+	raw, err := json.Marshal(result(t, objs)["data"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var list wire.VMList
+	if err := dec.Decode(&list); err != nil {
+		t.Fatalf("ls --json data does not decode as wire.VMList: %v\n%s", err, raw)
+	}
+	if len(list.VMs) != 1 || list.VMs[0].Name != "myrepo-dev" || list.VMs[0].Key != "dev" {
+		t.Errorf("ls --json vms = %+v, want one entry for myrepo-dev/dev", list.VMs)
+	}
+}
+
 // Recipe show is a caller boundary, so pin the named contract payload rather
 // than accepting a generic map whose fields can drift from recipe list.
 func TestJSONRecipeShowCarriesNamedContract(t *testing.T) {

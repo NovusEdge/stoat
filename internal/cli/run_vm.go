@@ -33,7 +33,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		vms = kept
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vms": wire.FromVMs(vms, core.GraphicalSession())})
+		return a.ok(stdout, wire.VMList{VMs: wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
 	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
