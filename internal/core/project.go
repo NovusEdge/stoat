@@ -230,6 +230,25 @@ func renderParams(m map[string]map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
+// removedParams finds recipe.param entries that vm.toml has and the
+// declaration no longer states, so Reconcile unsets them instead of leaving a
+// stale value that Diff reports as drift on every later stoat up.
+func removedParams(have, want map[string]map[string]string) map[string][]string {
+	var out map[string][]string
+	for recipe, params := range have {
+		for name := range params {
+			if _, ok := want[recipe][name]; ok {
+				continue
+			}
+			if out == nil {
+				out = make(map[string][]string)
+			}
+			out[recipe] = append(out[recipe], name)
+		}
+	}
+	return out
+}
+
 // AttachKeys fills VM.Key from p for every VM p declares. A VM no declaration
 // names keeps an empty Key, which is what tells ls it is a global VM.
 func AttachKeys(vms []VM, p *project.Project) {
@@ -272,7 +291,8 @@ func Reconcile(p *project.Project, key string) (Reconciled, error) {
 	}
 	r := Reconciled{Key: key, Name: spec.Name}
 
-	if _, err := load(spec.Name); errors.Is(err, ErrNotFound) {
+	v, err := load(spec.Name)
+	if errors.Is(err, ErrNotFound) {
 		if _, err := Create(spec); err != nil {
 			return Reconciled{}, err
 		}
@@ -310,10 +330,8 @@ func Reconcile(p *project.Project, key string) (Reconciled, error) {
 			shares := spec.Shares
 			patch.Shares = &shares
 		case "params":
-			// SetParams, not Params: the recipe-contract plan splits the
-			// patch into SetParams and UnsetParams. A declaration states the
-			// full set it wants, so nothing here unsets.
 			patch.SetParams = spec.Params
+			patch.UnsetParams = removedParams(v.Params, spec.Params)
 		case "agent_access":
 			access := spec.AgentAccess
 			patch.AgentAccess = &access
