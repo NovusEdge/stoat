@@ -858,6 +858,34 @@ type Job struct {
 	Started time.Time `json:"started"`
 }
 
+// MCPInstall is the `mcp install` command's output.
+type MCPInstall struct {
+	Client string `json:"client"`
+	Path   string `json:"path,omitempty"`
+	JSON   string `json:"json"`
+}
+
+// MCPClient is one row of MCPDoctor.Clients: whether the named MCP client
+// has a stoat entry and whether that entry points at the binary that is
+// running. A stale entry launches a different stoat than the one that wrote
+// it, which is the failure `mcp doctor` exists to name.
+type MCPClient struct {
+	Client    string `json:"client"`
+	Path      string `json:"path,omitempty"`
+	Installed bool   `json:"installed"`
+	Command   string `json:"command,omitempty"`
+	Current   bool   `json:"current"`
+}
+
+// MCPDoctor is the `mcp doctor` command's output.
+type MCPDoctor struct {
+	Contract  int         `json:"contract"`
+	Version   string      `json:"version"`
+	Transport string      `json:"transport"`
+	Binary    string      `json:"binary"`
+	Clients   []MCPClient `json:"clients"`
+}
+
 // JobList is the list_jobs tool's output.
 type JobList struct {
 	Jobs []Job `json:"jobs"`

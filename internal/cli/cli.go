@@ -30,6 +30,7 @@ import (
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
+	"github.com/novusedge/stoat/internal/mcpsrv"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -136,6 +137,15 @@ type Args struct {
 	Patch   core.Patch
 	Changed []string
 	Params  []ParamEdit
+
+	// HTTP, Limits, Client, Project and Print belong to "mcp". HTTP is the
+	// loopback address for "mcp serve --http"; empty means stdio. Client,
+	// Project and Print belong to "mcp install".
+	HTTP    string
+	Limits  mcpsrv.Limits
+	Client  string
+	Project bool
+	Print   bool
 }
 
 // ParamEdit is one recipe parameter edit parsed from create or update flags.
@@ -491,6 +501,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runUpdate(a, stdout, stderr)
 	case "doctor":
 		return runDoctor(a, stdout, stderr)
+	case "mcp":
+		return runMCP(a, version, stdout, stderr)
 	default:
 		// Unreachable: Parse already rejected anything not handled above.
 		fmt.Fprintln(stderr, "stoat: unknown subcommand", a.Cmd)

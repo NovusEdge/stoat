@@ -7,6 +7,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/mcpsrv"
 )
 
 // The kong grammar: one struct per subcommand, tags instead of a hand-written
@@ -60,9 +61,34 @@ type grammar struct {
 	Logs       logsCmd       `cmd:"" help:"tail a VM's log, or stoat's own"`
 	Screenshot screenshotCmd `cmd:"" help:"write the VM's screen to a PNG"`
 	Doctor     doctorCmd     `cmd:"" help:"check host prerequisites"`
+	MCP        mcpCmd        `cmd:"" name:"mcp" help:"serve MCP, or configure a client to launch it"`
 	Version    versionCmd    `cmd:"" help:"print the stoat version"`
 	Help       helpCmd       `cmd:"" help:"show this message"`
 }
+
+// mcpCmd defaults to serve, because every MCP client launches the server as
+// "stoat mcp" with no subcommand.
+type mcpCmd struct {
+	Serve   mcpServeCmd   `cmd:"" default:"withargs" help:"serve MCP over stdio"`
+	Install mcpInstallCmd `cmd:"" help:"write an MCP client's config entry"`
+	Doctor  mcpDoctorCmd  `cmd:"" help:"report contract, transport and client entries"`
+}
+
+type mcpServeCmd struct {
+	HTTP      string  `name:"http" help:"serve streamable HTTP on this loopback address instead of stdio"`
+	ToolBurst int     `name:"tool-burst" default:"30" help:"per-tool rate limit burst"`
+	ToolRate  float64 `name:"tool-rate" default:"0.5" help:"per-tool refill, calls per second"`
+	Burst     int     `name:"burst" default:"60" help:"shared rate limit burst"`
+	Rate      float64 `name:"rate" default:"2" help:"shared refill, calls per second"`
+}
+
+type mcpInstallCmd struct {
+	Client  string `arg:"" enum:"claude-code,claude-desktop,cursor,vscode" help:"which client's config to write"`
+	Project bool   `help:"write .mcp.json in the current directory instead of the user's config"`
+	Print   bool   `help:"print the JSON instead of writing a file"`
+}
+
+type mcpDoctorCmd struct{}
 
 type helpCmd struct{}
 
@@ -550,6 +576,20 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "screenshot":
 		a.VM, a.Out = g.Screenshot.VM, g.Screenshot.Out
+
+	case "mcp serve":
+		m := g.MCP.Serve
+		a.Cmd, a.Sub = "mcp", "serve"
+		a.HTTP = m.HTTP
+		a.Limits = mcpsrv.Limits{ToolBurst: m.ToolBurst, ToolRate: m.ToolRate, Burst: m.Burst, Rate: m.Rate}
+
+	case "mcp install":
+		i := g.MCP.Install
+		a.Cmd, a.Sub = "mcp", "install"
+		a.Client, a.Project, a.Print = i.Client, i.Project, i.Print
+
+	case "mcp doctor":
+		a.Cmd, a.Sub = "mcp", "doctor"
 
 	default:
 		return nil, usageError("unknown subcommand " + path)
