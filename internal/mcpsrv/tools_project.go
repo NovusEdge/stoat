@@ -101,6 +101,7 @@ func (s *srv) registerProject(server *mcp.Server) {
 		"Run the configured recipes of every VM the stoat.toml in this server's working directory declares, in declaration order. A recipe body is arbitrary guest code, so each VM needs agent_access manage or higher and a VM below that fails its own entry. It stops at the first failure and reports every later VM as skipped. Mutating: it runs recipe scripts inside each guest, and it reaches outside this process.",
 		func(ctx context.Context, _ projectIn) (wire.ProjectRun, error) {
 			return s.fanOut(func(name, _ string) error {
+				// Mirrors apply_recipes' row in table_test.go: LevelManage.
 				if err := requireAccess(name, LevelManage); err != nil {
 					return err
 				}
