@@ -157,18 +157,9 @@ func recipeCommand(s Script, path, marker string) string {
 	}
 	output := "/tmp/.stoat-out/" + s.Name
 	if len(s.Env) > 0 {
-		outputDir := output[:strings.LastIndex(output, "/")]
-		fmt.Fprintf(&b, "STOAT_OUTPUT=%s && export STOAT_OUTPUT && mkdir -p %s && chmod 700 %s && : > \"$STOAT_OUTPUT\" && ", guest.ShQuote(output), guest.ShQuote(outputDir), guest.ShQuote(outputDir))
+		fmt.Fprintf(&b, "STOAT_OUTPUT=%s && export STOAT_OUTPUT && mkdir -p /tmp/.stoat-out && chmod 700 /tmp/.stoat-out && : > \"$STOAT_OUTPUT\" && ", guest.ShQuote(output))
 	}
-	markerDir := MarkerDir
-	if slash := strings.LastIndex(marker, "/"); slash > 0 {
-		markerDir = marker[:slash]
-	}
-	markerDirArg := markerDir
-	if markerDir != MarkerDir {
-		markerDirArg = guest.ShQuote(markerDir)
-	}
-	fmt.Fprintf(&b, "%s && mkdir -p %s && ", path, markerDirArg)
+	fmt.Fprintf(&b, "%s && mkdir -p %s && ", path, MarkerDir)
 	if len(s.Env) > 0 {
 		fmt.Fprintf(&b, "if [ -f %s ]; then cp %s %s.out; fi && ", output, output, marker)
 	}

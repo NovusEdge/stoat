@@ -113,18 +113,18 @@ func waitHealthy(ctx context.Context, v *config.VM) error {
 	var first RecipeHealth
 	for {
 		verdicts, err := HealthChecks(healthCtx, v.Name)
+		first = firstHealthFailure(verdicts)
 		if err != nil {
-			if ctx.Err() != nil && first.Name != "" && errors.Is(err, context.DeadlineExceeded) {
-				return fmt.Errorf("%w: %s", ctx.Err(), healthFailure(first))
+			if callerErr := ctx.Err(); callerErr != nil {
+				if first.Name != "" {
+					return fmt.Errorf("%w: %s", callerErr, healthFailure(first))
+				}
+				return callerErr
+			}
+			if first.Name != "" && errors.Is(healthCtx.Err(), context.DeadlineExceeded) {
+				return healthFailure(first)
 			}
 			return err
-		}
-		first = RecipeHealth{}
-		for _, verdict := range verdicts {
-			if verdict.Status == HealthFailed {
-				first = verdict
-				break
-			}
 		}
 		if first.Name == "" {
 			return nil
@@ -145,6 +145,15 @@ func waitHealthy(ctx context.Context, v *config.VM) error {
 		case <-timer.C:
 		}
 	}
+}
+
+func firstHealthFailure(verdicts []RecipeHealth) RecipeHealth {
+	for _, verdict := range verdicts {
+		if verdict.Status == HealthFailed {
+			return verdict
+		}
+	}
+	return RecipeHealth{}
 }
 
 func healthFailure(verdict RecipeHealth) error {

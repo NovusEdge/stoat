@@ -32,23 +32,25 @@ type RecipeHealth struct {
 }
 
 // healthChecksForVM runs checks for the named recipes in order and records
-// each verdict on an existing applied entry. It does not save v.
+// each verdict on an existing applied entry. It does not save v. If ctx ends
+// during a later check, completed verdicts are returned with the context error
+// so callers can preserve an earlier failure's actionable detail.
 func healthChecksForVM(ctx context.Context, v *config.VM, names []string) ([]RecipeHealth, error) {
 	out := make([]RecipeHealth, 0, len(names))
 	for _, name := range names {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return out, err
 		}
 		m, ok, err := recipes.ManifestFor(name)
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		verdict := RecipeHealth{Name: name, Status: HealthUnknown}
 		if ok && m.Health.Check != "" {
 			text, runErr := sshx.RunCheck(ctx, v, m.Health.Check, m.Health.Duration())
 			if runErr != nil {
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return out, err
 				}
 				stored, loadErr := config.LoadSecrets(v.Dir)
 				if loadErr != nil {
