@@ -199,6 +199,8 @@ display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
 
 At project scope, `<name>` is optional. A named VM is reconciled against its `stoat.toml` declaration before it starts, the same change `stoat update` would make. With no name, every declared VM is reconciled, then started, in declaration order; a VM that fails to reconcile or start stops the run, and every later VM is reported skipped.
 
+On a Debian cloud VM, `shares` do not mount; see [the project file](project-file.md#shares).
+
 ### Where the screen is
 
 A VM gets a real QEMU window by default, on a host with a graphical session. Set `display = "vnc"` in `vm.toml` (or cycle it with the `d` key in the TUI) to keep a VM headless instead. QEMU then starts with `-display none` and a VNC server bound to a unix socket in the VM's directory; `-display none` cannot be undone on a running QEMU, so binding VNC at launch keeps a misbehaving guest recoverable.
