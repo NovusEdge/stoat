@@ -118,10 +118,13 @@ func TestParameterizedRecipeSelectionOpensMaskedForm(t *testing.T) {
 			t.Errorf("parameter form omitted %q:\n%s", field, rendered)
 		}
 	}
-	for _, defaultValue := range []string{"stable", "2375", "true", "dev"} {
+	for _, defaultValue := range []string{"stable", "2375", "true"} {
 		if !strings.Contains(rendered, defaultValue) {
 			t.Errorf("parameter form omitted manifest default %q:\n%s", defaultValue, rendered)
 		}
+	}
+	if strings.Contains(rendered, "dev") {
+		t.Errorf("parameter form invented a user default not declared by the manifest:\n%s", rendered)
 	}
 	const sentinel = "synthetic-secret-sentinel"
 	m = typeParamText(m, sentinel)

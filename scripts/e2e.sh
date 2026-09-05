@@ -45,6 +45,10 @@ capture_failure_evidence() {
 	if ! "$STOAT" logs "$VM" --which apply >"$evidence/provision.log" 2>&1; then
 		printf 'provision log capture failed; see %s/provision.log\n' "$evidence" >&2
 	fi
+	if [ -f "$STOAT_HOME/$VM/e2e-apply.log" ]; then
+		cp "$STOAT_HOME/$VM/e2e-apply.log" "$evidence/apply-output.log" \
+			|| printf 'apply output copy failed; see %s/%s/e2e-apply.log\n' "$STOAT_HOME" "$VM" >&2
+	fi
 	printf 'failure evidence retained at %s\n' "$evidence" >&2
 }
 
@@ -150,7 +154,26 @@ chmod 755 "$redaction_dst/install.sh"
 
 say "assert: docker recipe contract"
 "$STOAT" update "$VM" --recipes xfce,docker,redaction --set docker.user=dev --secret redaction.token
-"$STOAT" apply "$VM"
+apply_output="$STOAT_HOME/$VM/e2e-apply.log"
+if ! "$STOAT" apply "$VM" >"$apply_output" 2>&1; then
+	cat "$apply_output" >&2
+	fail "recipe apply failed; see $apply_output"
+fi
+grep -Fq '<redacted>' "$apply_output" \
+	|| fail "apply output omitted the redaction marker"
+if grep -Fq "$E2E_SECRET" "$apply_output"; then
+	fail "secret sentinel reached apply output"
+fi
+
+console_logs=$("$STOAT" logs "$VM" --which console 2>&1) \
+	|| fail "console log reader failed"
+apply_logs=$("$STOAT" logs "$VM" --which apply 2>&1) \
+	|| fail "apply log reader failed"
+if printf '%s\n%s\n' "$console_logs" "$apply_logs" | grep -Fq "$E2E_SECRET"; then
+	fail "secret sentinel reached CLI log readers"
+fi
+printf '%s\n' "$apply_logs" | grep -Fq '<redacted>' \
+	|| fail "apply log reader omitted the redaction marker"
 "$STOAT" wait "$VM" --healthy --timeout 90s
 
 status=$(
