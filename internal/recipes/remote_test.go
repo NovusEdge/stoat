@@ -43,6 +43,20 @@ func localIndex(t *testing.T, entries string) string {
 	return index
 }
 
+func rewriteGitURLToBareRepo(t *testing.T, prefix, repo string) {
+	t.Helper()
+	emptyGlobal := filepath.Join(t.TempDir(), "empty.gitconfig")
+	if err := os.WriteFile(emptyGlobal, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := "file://" + filepath.ToSlash(filepath.Dir(repo)) + "/"
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", emptyGlobal)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url."+base+".insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", prefix)
+}
+
 func TestParseRefSplitsIndexNamesURLsAndSCPLikeSources(t *testing.T) {
 	tests := []struct {
 		input, source, ref string
@@ -53,6 +67,10 @@ func TestParseRefSplitsIndexNamesURLsAndSCPLikeSources(t *testing.T) {
 		{input: "tailscale@feature/x", source: "tailscale", ref: "feature/x"},
 		{input: "https://example.test/stoat-demo@v1.2", source: "https://example.test/stoat-demo", ref: "v1.2", url: true},
 		{input: "https://example.test/x/stoat-demo@feature/x", source: "https://example.test/x/stoat-demo", ref: "feature/x", url: true},
+		{input: "ssh://git@example.test/x/stoat-demo.git", source: "ssh://git@example.test/x/stoat-demo.git", url: true},
+		{input: "ssh://git@example.test/x/stoat-demo.git@feature/topic", source: "ssh://git@example.test/x/stoat-demo.git", ref: "feature/topic", url: true},
+		{input: "https://user@example.test/x/stoat-demo.git", source: "https://user@example.test/x/stoat-demo.git", url: true},
+		{input: "https://user@example.test/x/stoat-demo.git@feature/topic", source: "https://user@example.test/x/stoat-demo.git", ref: "feature/topic", url: true},
 		{input: "git@example.test:x/stoat-demo.git", source: "git@example.test:x/stoat-demo.git", url: true},
 		{input: "git@example.test:x/stoat-demo.git@main", source: "git@example.test:x/stoat-demo.git", ref: "main", url: true},
 		{input: "git@example.test:x/stoat-demo.git@feature/x", source: "git@example.test:x/stoat-demo.git", ref: "feature/x", url: true},
@@ -135,44 +153,64 @@ func TestAddByIndexNameUsesTheLocalIndexAndDefaultBranch(t *testing.T) {
 
 func TestAddReportsUnknownNamesAndMissingRefs(t *testing.T) {
 	tests := []struct {
-		name      string
-		inputKind string
-		want      string
+		name       string
+		inputKind  string
+		wantSource string
+		wantRef    string
 	}{
-		{name: "unknown index name", want: `no recipe "tailscal" in the index; run stoat recipe search tailscal`},
-		{name: "missing ref", inputKind: "missing-ref", want: `x/stoat-tailscale: no tag or branch "does-not-exist"`},
-		{name: "transport failure", inputKind: "transport", want: "git clone"},
+		{name: "unknown index name", inputKind: "unknown"},
+		{name: "missing ref over HTTPS", inputKind: "https-missing-ref", wantSource: "https://github.com/x/stoat-tailscale", wantRef: "does-not-exist"},
+		{name: "missing ref over scp", inputKind: "scp-missing-ref", wantSource: "git@github.com:x/stoat-tailscale", wantRef: "does-not-exist"},
+		{name: "transport failure", inputKind: "transport", wantSource: "missing.git", wantRef: "main"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			remoteRoot(t)
 			input := "tailscal"
-			var src string
 			switch tc.inputKind {
-			case "missing-ref":
-				src = namedRecipeRepo(t, "stoat-tailscale", "stoat-tailscale")
-				path := filepath.Join(t.TempDir(), "x", "stoat-tailscale")
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			case "https-missing-ref", "scp-missing-ref":
+				src := namedRecipeRepo(t, "stoat-tailscale", "stoat-tailscale")
+				repo := filepath.Join(filepath.Dir(src), "stoat-tailscale")
+				if err := os.Rename(src, repo); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Rename(src, path); err != nil {
-					t.Fatal(err)
+				prefix := "https://github.com/x/"
+				if tc.inputKind == "scp-missing-ref" {
+					prefix = "git@github.com:x/"
 				}
-				input = filepath.ToSlash(filepath.Join("x", "stoat-tailscale")) + "@does-not-exist"
-				t.Chdir(filepath.Dir(filepath.Dir(path)))
+				rewriteGitURLToBareRepo(t, prefix, repo)
+				input = tc.wantSource + "@" + tc.wantRef
 			case "transport":
-				input = "missing.git@main"
+				input = tc.wantSource + "@" + tc.wantRef
 			}
 			s, err := ScopeFor(true)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = Add(s, input, false)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("Add(%q) = %v, want error containing %q", input, err, tc.want)
+			if err == nil {
+				t.Fatalf("Add(%q) = nil, want an error", input)
 			}
-			if tc.inputKind == "transport" && strings.Contains(err.Error(), "no tag or branch") {
-				t.Fatalf("transport failure was misclassified as a missing ref: %v", err)
+			switch tc.inputKind {
+			case "unknown":
+				want := `no recipe "tailscal" in the index; run stoat recipe search tailscal`
+				if err.Error() != want {
+					t.Fatalf("Add(%q) = %q, want %q", input, err, want)
+				}
+			case "https-missing-ref", "scp-missing-ref":
+				want := `x/stoat-tailscale: no tag or branch "does-not-exist"`
+				if err.Error() != want {
+					t.Fatalf("Add(%q) = %q, want exact missing-ref error %q", input, err, want)
+				}
+			case "transport":
+				for _, want := range []string{"git clone", tc.wantSource, tc.wantRef} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("Add(%q) = %q, want transport context %q", input, err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "no tag or branch") {
+					t.Fatalf("transport failure was misclassified as a missing ref: %v", err)
+				}
 			}
 		})
 	}
