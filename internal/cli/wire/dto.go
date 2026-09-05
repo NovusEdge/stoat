@@ -862,3 +862,29 @@ type Job struct {
 type JobList struct {
 	Jobs []Job `json:"jobs"`
 }
+
+// MCPInstall is the mcp install subcommand's output. Path is empty for
+// --print, since nothing was written.
+type MCPInstall struct {
+	Client string `json:"client"`
+	Path   string `json:"path,omitempty"`
+	JSON   string `json:"json"`
+}
+
+// MCPClient is one client's row in an mcp doctor report.
+type MCPClient struct {
+	Client    string `json:"client"`
+	Path      string `json:"path,omitempty"`
+	Installed bool   `json:"installed"`
+	Command   string `json:"command,omitempty"`
+	Current   bool   `json:"current"`
+}
+
+// MCPDoctor is the mcp doctor subcommand's output.
+type MCPDoctor struct {
+	Contract  int         `json:"contract"`
+	Version   string      `json:"version"`
+	Transport string      `json:"transport"`
+	Binary    string      `json:"binary"`
+	Clients   []MCPClient `json:"clients"`
+}
