@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -176,5 +177,48 @@ func TestLSMarksAMissingProjectDirectory(t *testing.T) {
 	m, _ := vms[0].(map[string]any)
 	if m["project_missing"] != true {
 		t.Errorf("project_missing = %v, want true", m["project_missing"])
+	}
+}
+
+func TestNewRefusesAtProjectScope(t *testing.T) {
+	projectRoot(t, twoVMs)
+	code, objs := runJSON(t, "new", "scratch", "--image", "alpine-virt")
+	if code != ExitFail {
+		t.Errorf("exit = %d, want %d", code, ExitFail)
+	}
+	errObj, _ := result(t, objs)["error"].(map[string]any)
+	msg, _ := errObj["message"].(string)
+	want := "a stoat.toml is present; declare the VM there and run stoat up, or pass --global"
+	if !strings.Contains(msg, want) {
+		t.Errorf("message = %q, want it to contain %q", msg, want)
+	}
+	if _, err := config.Load("scratch"); err == nil {
+		t.Error("scratch was created at project scope")
+	}
+}
+
+func TestNewGlobalBypassesTheRefusal(t *testing.T) {
+	projectRoot(t, twoVMs)
+	haveImage(t, os.Getenv("STOAT_HOME"), "alpine-virt-3.24.1-x86_64.iso")
+	code, _ := runJSON(t, "new", "scratch", "--image", "alpine-virt", "--global")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d", code, ExitOK)
+	}
+	v, err := config.Load("scratch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Project != "" {
+		t.Errorf("project = %q, want empty for a --global VM", v.Project)
+	}
+}
+
+// create is the old spelling and keeps working, with the same refusal.
+func TestCreateIsTheSameCommandAsNew(t *testing.T) {
+	projectRoot(t, twoVMs)
+	haveImage(t, os.Getenv("STOAT_HOME"), "alpine-virt-3.24.1-x86_64.iso")
+	code, _ := runJSON(t, "create", "scratch", "--image", "alpine-virt", "--global")
+	if code != ExitOK {
+		t.Errorf("exit = %d, want %d", code, ExitOK)
 	}
 }
