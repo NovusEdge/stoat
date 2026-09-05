@@ -15,9 +15,10 @@ import (
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
-// DefaultIndexURL is the curated index STOAT_INDEX overrides. Git accepts a
-// filesystem path as a URL, which keeps tests local.
-const DefaultIndexURL = "https://github.com/novusedge/stoat-recipes"
+// DefaultIndexURL is the curated index STOAT_INDEX overrides: index.toml at
+// the root of the stoat repository itself, fetched as a shallow clone. Git
+// accepts a filesystem path as a URL, which keeps tests local.
+const DefaultIndexURL = "https://github.com/NovusEdge/stoat"
 
 const indexStampName = ".fetched"
 const indexSourceName = ".source"

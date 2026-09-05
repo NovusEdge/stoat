@@ -27,18 +27,18 @@ asks for confirmation. `-y` skips that prompt:
 stoat recipe add https://github.com/example/stoat-my-tools@main -y
 ```
 
-The default index is configured as
-`https://github.com/novusedge/stoat-recipes`, but that repository currently
-returns 404 and is not operational. Set `STOAT_INDEX` to a reachable Git
-repository containing `index.toml` until a published index is available:
+The default index is `index.toml` at the root of the stoat repository,
+`https://github.com/NovusEdge/stoat`, fetched as a shallow clone. To add a
+recipe to it, open a pull request that adds an entry under `[recipes]`. Set
+`STOAT_INDEX` to any Git repository or local directory that holds an
+`index.toml` to use your own:
 
 ```sh
-export STOAT_INDEX=/path/to/stoat-recipes
+export STOAT_INDEX=/path/to/my-index
 stoat recipe search my-tools
 ```
 
-Stoat does not create or publish that repository. Index refreshes are cached
-for 24 hours; `--refresh` forces a new fetch.
+Index refreshes are cached for 24 hours; `--refresh` forces a new fetch.
 
 List installed recipes and their scope and short commit pin:
 

@@ -1,0 +1,8 @@
+# The curated recipe index. stoat recipe add <name> and stoat recipe search
+# read this file from a shallow clone of this repository. An entry maps a
+# name to the git repository that holds that recipe: recipe.toml at its root,
+# scripts beside it, one recipe per repository. The user's stoat.lock pins the
+# commit, so a change here never moves an existing VM's recipe.
+schema = 1
+
+[recipes]
