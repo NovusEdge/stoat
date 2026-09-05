@@ -70,6 +70,33 @@ func TestListDirCapsEntries(t *testing.T) {
 	}
 }
 
+// TestListDirKeepsANameWithASpace pins that ls -A output is split on
+// newline. A whitespace split reports "my file" as two entries.
+func TestListDirKeepsANameWithASpace(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "observe")
+	testutil.FakeSSH(t, `case "$1" in
+  ls) printf 'my file\nplain\n';;
+  stat) shift 3; for p do printf '%s\tregular file\t3\t81a4\t1\n' "$p"; done;;
+esac`)
+	res := callTool(t, "list_dir", map[string]any{"vm": "dev", "path": "/d"})
+	if res.IsError {
+		t.Fatalf("list_dir failed: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out struct {
+		Entries []struct {
+			Name string `json:"name"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Entries) != 2 || out.Entries[0].Name != "/d/my file" {
+		t.Fatalf("got %+v, want two entries the first of which is /d/my file", out.Entries)
+	}
+}
+
 func TestPSCapsRows(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	writeVM(t, "dev", "observe")

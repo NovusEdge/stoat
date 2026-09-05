@@ -177,7 +177,7 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 			if code != 0 {
 				return wire.DirListing{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
 			}
-			names := capNames(strings.Fields(string(nameOut)))
+			names := capNames(splitNames(nameOut))
 			if len(names) == 0 {
 				return wire.DirListing{Entries: []wire.DirEntry{}}, nil
 			}
@@ -459,6 +459,19 @@ func runToResult(ctx context.Context, v *config.VM, root bool, argv []string) (w
 		return wire.CommandResult{}, err
 	}
 	return wire.CommandResult{Stdout: string(out), Stderr: string(errb), ExitCode: code}, nil
+}
+
+// splitNames reads ls -A's output. ls writes one name per line when its
+// stdout is a pipe, so the split is on newline: splitting on whitespace
+// turns "my file" into two entries that then both fail to stat.
+func splitNames(raw []byte) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func capNames(names []string) []string {
