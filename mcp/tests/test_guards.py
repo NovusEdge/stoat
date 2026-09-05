@@ -373,3 +373,37 @@ def test_check_flag_free_rejects_a_short_flag_and_empty_values():
 def test_check_flag_free_passes_ordinary_values():
     assert check_flag_free(["8080:80", "2222:22"], "pairs") == ["8080:80", "2222:22"]
     assert check_flag_free([], "pairs") == []
+
+
+# ---------------------------------------------------------------------------
+# recipe index names
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ref", ["tailscale", "tailscale@v1.2", "x-y@main", "tailscale@feature/topic"]
+)
+def test_check_index_name_accepts_name_and_optional_ref(ref: str) -> None:
+    from stoat_mcp import guards
+
+    assert guards.check_index_name(ref) == ref
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "https://github.com/x/stoat-tailscale",
+        "git@github.com:x/r.git",
+        "../../etc/passwd",
+        "a/b",
+        "-y",
+        "tailscale@../x",
+        "tailscale@",
+        "",
+    ],
+)
+def test_check_index_name_rejects_urls_paths_options_and_bad_refs(ref: str) -> None:
+    from stoat_mcp import guards
+
+    with pytest.raises(GuardRejection):
+        guards.check_index_name(ref)

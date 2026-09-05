@@ -112,7 +112,16 @@ func TestPruneItemGolden(t *testing.T) {
 func TestHostCheckGolden(t *testing.T) {
 	c := core.HostCheck{Name: "qemu-img", OK: false, Detail: "not found", Fix: []string{"sudo", "pacman", "-S", "qemu-img"}}
 	got := marshal(t, FromHostCheck(c))
-	want := `{"name":"qemu-img","ok":false,"detail":"not found","fix":["sudo","pacman","-S","qemu-img"]}`
+	want := `{"name":"qemu-img","ok":false,"detail":"not found","fix":["sudo","pacman","-S","qemu-img"],"optional":false}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestHostCheckOptionalGolden(t *testing.T) {
+	c := core.HostCheck{Name: "git", Detail: "not found", Fix: []string{"sudo", "pacman", "-S", "git"}, Optional: true}
+	got := marshal(t, FromHostCheck(c))
+	want := `{"name":"git","ok":false,"detail":"not found","fix":["sudo","pacman","-S","git"],"optional":true}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

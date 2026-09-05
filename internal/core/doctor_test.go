@@ -79,3 +79,20 @@ func TestDoctorNoSSHKeygenCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorCarriesOptionalGitFailure(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, c := range Doctor() {
+		if c.Name != "git" {
+			continue
+		}
+		if !c.Optional {
+			t.Fatal("Doctor() lost git's optional marker")
+		}
+		if len(c.Fix) == 0 {
+			t.Fatal("optional git failure has no install guidance")
+		}
+		return
+	}
+	t.Fatal("Doctor() has no git check")
+}

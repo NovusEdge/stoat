@@ -24,18 +24,22 @@ EXPECTED_ANNOTATIONS = {
     "list_recipes": {"readOnlyHint": True, "destructiveHint": False},
     "check_recipes": {"readOnlyHint": True, "destructiveHint": False},
     "logs": {"readOnlyHint": True, "destructiveHint": False},
+    "search_recipes": {"readOnlyHint": True, "destructiveHint": False},
     "doctor": {"readOnlyHint": True, "destructiveHint": False},
     "plan_recipes": {"readOnlyHint": True, "destructiveHint": False},
     "create": {"readOnlyHint": False, "destructiveHint": False},
     "start": {"readOnlyHint": False, "destructiveHint": False},
     "stop": {"readOnlyHint": False, "destructiveHint": False},
     "update": {"readOnlyHint": False, "destructiveHint": False},
+    "add_recipe": {"readOnlyHint": False, "destructiveHint": False},
+    "update_recipe": {"readOnlyHint": False, "destructiveHint": False},
     "clone": {"readOnlyHint": False, "destructiveHint": False},
     "snapshot": {"readOnlyHint": False, "destructiveHint": False},
     "forward": {"readOnlyHint": False, "destructiveHint": False},
     "wait": {"readOnlyHint": False, "destructiveHint": False},
     "destroy": {"readOnlyHint": False, "destructiveHint": True},
     "prune": {"readOnlyHint": False, "destructiveHint": True},
+    "remove_recipe": {"readOnlyHint": False, "destructiveHint": True},
     "restore": {"readOnlyHint": False, "destructiveHint": True},
     # A recipe body is arbitrary guest code, so apply_recipes carries exec's
     # hints and exec's allow_exec check.
@@ -187,3 +191,41 @@ def test_forward_refuses_a_pair_that_kong_reads_as_a_flag(fake_client):
     with pytest.raises(ToolError):
         server.forward("work", pairs=["--clear"])
     assert fake_client.calls == []
+
+
+def test_search_recipes_preserves_a_leading_dash_as_data(fake_client):
+    server.search_recipes("-tail")
+    assert fake_client.calls == [("recipe", "search", "-tail")]
+
+
+def test_add_recipe_accepts_a_slash_containing_ref_and_uses_variadic_argv(fake_client):
+    server.add_recipe("tailscale", ref="feature/topic")
+    assert fake_client.calls == [("recipe", "add", "tailscale@feature/topic", "-y")]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: server.add_recipe("https://github.com/x/stoat-tailscale"),
+        lambda: server.add_recipe("tailscale@../escape"),
+        lambda: server.add_recipe("-y"),
+        lambda: server.update_recipe("tailscale@v1.2"),
+        lambda: server.remove_recipe("../tailscale"),
+        lambda: server.remove_recipe("-y"),
+    ],
+)
+def test_recipe_tools_refuse_unsafe_names_before_cli(call, fake_client):
+    with pytest.raises(ToolError):
+        call()
+    assert fake_client.calls == []
+
+
+def test_update_and_remove_recipe_use_plain_names_and_remove_has_no_force(fake_client):
+    server.update_recipe("tailscale")
+    server.update_recipe()
+    server.remove_recipe("tailscale")
+    assert fake_client.calls == [
+        ("recipe", "update", "tailscale"),
+        ("recipe", "update"),
+        ("recipe", "rm", "tailscale", "-y"),
+    ]

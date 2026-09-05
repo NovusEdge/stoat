@@ -77,6 +77,11 @@ type Args struct {
 	// OS and Backend belong to "recipe new"; VM carries the recipe name
 	// there, since it is the same "one positional argument" slot.
 	Sub     string
+	Global  bool
+	Force   bool
+	Refresh bool
+	Ref     string
+	Names   []string
 	OS      string
 	Backend string
 

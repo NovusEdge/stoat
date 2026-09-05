@@ -287,10 +287,11 @@ func FromSnapshots(ss []core.Snapshot) []Snapshot {
 
 // HostCheck is core.HostCheck for the wire.
 type HostCheck struct {
-	Name   string   `json:"name"`
-	OK     bool     `json:"ok"`
-	Detail string   `json:"detail"`
-	Fix    []string `json:"fix"`
+	Name     string   `json:"name"`
+	OK       bool     `json:"ok"`
+	Detail   string   `json:"detail"`
+	Fix      []string `json:"fix"`
+	Optional bool     `json:"optional"`
 }
 
 func FromHostCheck(c core.HostCheck) HostCheck {

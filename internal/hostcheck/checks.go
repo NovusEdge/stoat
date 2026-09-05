@@ -11,10 +11,11 @@ import (
 // each command directly instead of parsing one. Today nothing runs it: the
 // installer only prints it.
 type Check struct {
-	Name   string
-	OK     bool
-	Detail string   // "/usr/bin", "not found", "permission denied"
-	Fix    []string // shell commands, already distro-resolved; empty when OK
+	Name     string
+	OK       bool
+	Detail   string   // "/usr/bin", "not found", "permission denied"
+	Fix      []string // shell commands, already distro-resolved; empty when OK
+	Optional bool
 }
 
 // binChecks are the executables stoat shells out to. qemu-system-x86_64 and

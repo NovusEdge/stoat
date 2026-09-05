@@ -8,10 +8,11 @@ import (
 // CLI and MCP server render it their own way. Named HostCheck, not hostcheck's
 // bare Check, so a caller importing both reads them as distinct types.
 type HostCheck struct {
-	Name   string
-	OK     bool
-	Detail string   // "/usr/bin", "not found", "permission denied"
-	Fix    []string // shell commands, already distro-resolved; empty when OK
+	Name     string
+	OK       bool
+	Detail   string   // "/usr/bin", "not found", "permission denied"
+	Fix      []string // shell commands, already distro-resolved; empty when OK
+	Optional bool
 }
 
 // Doctor probes every host dependency and reports it as data, printing

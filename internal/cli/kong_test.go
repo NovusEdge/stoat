@@ -56,6 +56,57 @@ func TestKongFlagNamingSurface(t *testing.T) {
 	}
 }
 
+func TestParseRecipeSubcommands(t *testing.T) {
+	tests := []struct {
+		argv []string
+		sub  string
+		want func(*Args) bool
+	}{
+		{[]string{"recipe", "add", "tailscale@v1.2"}, "add", func(a *Args) bool { return a.Ref == "tailscale@v1.2" && !a.Global }},
+		{[]string{"recipe", "add", "tailscale", "--global", "-y"}, "add", func(a *Args) bool { return a.Global && a.Yes }},
+		{[]string{"recipe", "lock"}, "lock", func(a *Args) bool { return !a.Global }},
+		{[]string{"recipe", "sync", "--global"}, "sync", func(a *Args) bool { return a.Global }},
+		{[]string{"recipe", "update"}, "update", func(a *Args) bool { return len(a.Names) == 0 }},
+		{[]string{"recipe", "update", "tailscale"}, "update", func(a *Args) bool { return len(a.Names) == 1 && a.Names[0] == "tailscale" }},
+		{[]string{"recipe", "rm", "tailscale", "--force"}, "rm", func(a *Args) bool { return a.Force && a.Names[0] == "tailscale" }},
+		{[]string{"recipe", "search", "tail"}, "search", func(a *Args) bool { return a.Ref == "tail" }},
+		{[]string{"recipe", "search", "-tail"}, "search", func(a *Args) bool { return a.Ref == "-tail" }},
+		{[]string{"recipe", "ls"}, "list", func(a *Args) bool { return true }},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.argv, " "), func(t *testing.T) {
+			a, err := Parse(tt.argv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if a.Cmd != "recipe" || a.Sub != tt.sub {
+				t.Fatalf("cmd/sub = %q/%q, want recipe/%q", a.Cmd, a.Sub, tt.sub)
+			}
+			if !tt.want(a) {
+				t.Errorf("args = %+v", a)
+			}
+		})
+	}
+}
+
+func TestParseRecipeFlagsDoNotChangeUnrelatedCommands(t *testing.T) {
+	a, err := Parse([]string{"guest", "ls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Cmd != "guest" || a.Sub != "ls" {
+		t.Fatalf("guest ls = %+v, want the existing command", a)
+	}
+
+	a, err = Parse([]string{"recipe", "new", "demo", "--os", "alpine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Cmd != "recipe" || a.Sub != "new" || a.VM != "demo" || a.OS != "alpine" {
+		t.Fatalf("recipe new = %+v, want the existing scaffold command", a)
+	}
+}
+
 // TestKongFlagNamingSurfacePopulatesTheRightField goes one step further than
 // acceptance: --cpus must land on the CPUs field, not merely parse without
 // error. A wrong name tag (e.g. pointing --cpus at RAM) would pass the

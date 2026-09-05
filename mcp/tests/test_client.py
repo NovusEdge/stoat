@@ -146,6 +146,22 @@ def test_missing_data_field_is_an_empty_dict(client):
     assert data == {}
 
 
+def test_check_contract_accepts_the_remote_recipe_v3_handshake(tmp_path):
+    path = tmp_path / "fake-stoat"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            print('{"v":3,"type":"result","cmd":"version","ok":true,"data":{"contract":3,"version":"x"}}')
+            """
+        )
+    )
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+    c = Client(binary=str(path), default_timeout=10.0)
+    assert c.check_contract() == 3
+
+
 def test_check_contract_raises_on_mismatch(tmp_path):
     path = tmp_path / "fake-stoat"
     path.write_text(

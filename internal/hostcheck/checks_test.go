@@ -113,6 +113,27 @@ func TestRunChecksUnknownDistroHasNoCommand(t *testing.T) {
 	}
 }
 
+func TestRunChecksReportsGitAsOptionalWithDistroFix(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	checks := RunChecks(DistroArch)
+	for _, c := range checks {
+		if c.Name != "git" {
+			continue
+		}
+		if !c.Optional {
+			t.Fatal("git is required by recipe commands but must be optional for host readiness")
+		}
+		if c.OK {
+			t.Fatal("git unexpectedly found with an empty PATH")
+		}
+		if got := strings.Join(c.Fix, " "); !strings.Contains(got, "git") || !strings.Contains(got, "pacman") {
+			t.Fatalf("git fix = %v, want an actionable Arch install command", c.Fix)
+		}
+		return
+	}
+	t.Fatal("RunChecks omitted the optional git check")
+}
+
 func TestKVMCheckAt(t *testing.T) {
 	dir := t.TempDir()
 
@@ -187,5 +208,17 @@ func TestProblems(t *testing.T) {
 	got := Problems(cs)
 	if len(got) != 2 || got[0].Name != "b" || got[1].Name != "d" {
 		t.Errorf("Problems() = %+v, want the two failures b and d", got)
+	}
+}
+
+func TestProblemsExcludesOptionalFailuresFromReadiness(t *testing.T) {
+	cs := []Check{
+		{Name: "git", OK: false, Optional: true, Fix: []string{"install git"}},
+		{Name: "qemu-img", OK: false, Fix: []string{"install qemu-img"}},
+		{Name: "ssh", OK: true, Optional: false},
+	}
+	got := Problems(cs)
+	if len(got) != 1 || got[0].Name != "qemu-img" {
+		t.Fatalf("Problems() = %+v, want only required qemu-img failure", got)
 	}
 }
