@@ -56,17 +56,40 @@ func TestLoadLockRejectsANewerSchema(t *testing.T) {
 }
 
 func TestSaveLockLeavesPreviousLockWhenReplacementFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based replacement failure is unavailable to root")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stoat.lock")
+	foreignPath := filepath.Join(dir, "keep.me")
+	foreign := []byte("caller-owned\n")
 	old := Lock{Schema: LockSchema, Recipes: map[string]LockEntry{
 		"old": {Source: "source", Ref: "main", Commit: "old", Added: "now"},
 	}}
 	if err := SaveLock(path, old); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(path+".tmp", 0o755); err != nil {
+	if err := os.WriteFile(foreignPath, foreign, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) == 0 {
+		t.Fatal("initial lock is empty")
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Error(err)
+		}
+	})
 
 	newLock := Lock{Schema: LockSchema, Recipes: map[string]LockEntry{
 		"new": {Source: "source", Ref: "main", Commit: "new", Added: "now"},
@@ -74,14 +97,18 @@ func TestSaveLockLeavesPreviousLockWhenReplacementFails(t *testing.T) {
 	if err := SaveLock(path, newLock); err == nil {
 		t.Fatal("SaveLock unexpectedly replaced a lock after staging failed")
 	}
-	got, err := LoadLock(path)
+	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Recipes["old"] != old.Recipes["old"] {
-		t.Errorf("previous lock = %+v, want %+v", got.Recipes, old.Recipes)
+	if string(got) != string(before) {
+		t.Errorf("previous lock bytes changed from %q to %q", before, got)
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("failed staging file remains: %v", err)
+	got, err = os.ReadFile(foreignPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(foreign) {
+		t.Errorf("foreign artifact changed from %q to %q", foreign, got)
 	}
 }
