@@ -203,6 +203,12 @@ func loadIndex(dir string) (Index, error) {
 		idx.Recipes = map[string]IndexEntry{}
 	}
 	for name, entry := range idx.Recipes {
+		if err := validateRecipeName(name); err != nil {
+			return Index{}, err
+		}
+		if entry.Source == "" {
+			return Index{}, fmt.Errorf("recipe %q: missing source", name)
+		}
 		entry.Name = name
 		idx.Recipes[name] = entry
 	}
@@ -241,6 +247,9 @@ func SearchIndex(term string) ([]IndexEntry, error) {
 
 // IndexLookup refreshes the index and returns one entry by name.
 func IndexLookup(name string) (IndexEntry, bool, error) {
+	if err := validateRecipeName(name); err != nil {
+		return IndexEntry{}, false, err
+	}
 	unlock, err := lockIndex()
 	if err != nil {
 		return IndexEntry{}, false, err

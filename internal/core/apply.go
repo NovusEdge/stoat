@@ -230,7 +230,7 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		if err != nil {
 			return err
 		}
-		scriptHash, err := recipes.ScriptHash(name, v.OS)
+		scriptHash, err := m.ScriptHash(v.OS)
 		if err != nil {
 			return err
 		}
@@ -371,9 +371,9 @@ func discoverCloudInitApplied(ctx context.Context, v *config.VM) ([]string, erro
 		}
 		hash, hashErr := recipeHashFor(v, m)
 		if hashErr != nil {
-			hash, _ = recipes.ScriptHash(name, v.OS)
+			hash, _ = m.ScriptHash(v.OS)
 		}
-		scriptHash, _ := recipes.ScriptHash(name, v.OS)
+		scriptHash, _ := m.ScriptHash(v.OS)
 		values, undeclared := sshx.ParseOutputs(m.Outputs, redactCloudSecrets(body, secrets[name]))
 		for _, output := range undeclared {
 			warnings = append(warnings, fmt.Sprintf("%s: output %q is not declared", name, output))
@@ -490,15 +490,20 @@ type recipeDecision struct {
 // reports every decision). It raises the same errors either way: a missing
 // recipe.toml, a dependency cycle, or an unsatisfiable dependency.
 func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]recipeDecision, map[string]recipes.Manifest, error) {
-	if err := SyncRecipes(); err != nil {
+	snapshot, err := recipes.RepairSnapshot()
+	if err != nil {
+		if errors.Is(err, recipes.ErrLockOutOfDate) {
+			return nil, nil, fmt.Errorf("%w; run stoat recipe lock", ErrLockOutOfDate)
+		}
 		return nil, nil, err
 	}
 	manifests := make(map[string]recipes.Manifest, len(targets))
+	byName := make(map[string]recipes.Manifest, len(snapshot.Manifests))
+	for _, manifest := range snapshot.Manifests {
+		byName[manifest.Name] = manifest
+	}
 	for _, name := range targets {
-		m, ok, err := recipes.ManifestFor(name)
-		if err != nil {
-			return nil, nil, err
-		}
+		m, ok := byName[name]
 		if !ok {
 			return nil, nil, fmt.Errorf("%w: recipe %q has no recipe.toml", ErrRecipeNotApplicable, name)
 		}
@@ -564,7 +569,7 @@ func planRecipes(v *config.VM, targets []string, explicit map[string]bool) ([]re
 // stale keys in secrets.toml do not.
 func recipeHashFor(v *config.VM, m recipes.Manifest) (string, error) {
 	if len(m.Params) == 0 {
-		return recipes.ScriptHash(m.Name, v.OS)
+		return m.ScriptHash(v.OS)
 	}
 	secrets, err := config.LoadSecrets(v.Dir)
 	if err != nil {
@@ -599,7 +604,7 @@ func scriptUnchanged(v *config.VM, m recipes.Manifest, applied config.AppliedRec
 	if applied.ScriptHash == "" {
 		return false
 	}
-	body, err := recipes.ScriptHash(m.Name, v.OS)
+	body, err := m.ScriptHash(v.OS)
 	return err == nil && body == applied.ScriptHash
 }
 

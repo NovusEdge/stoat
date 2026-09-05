@@ -308,6 +308,19 @@ func List(osName, _ string) ([]string, error) {
 // parse is claimed by its root and logged, so a lower-priority recipe cannot
 // replace it.
 func ListManifests() ([]Manifest, error) {
+	locks, err := lockRecipeScopes(false)
+	if err != nil {
+		return nil, err
+	}
+	manifests, readErr := listManifestsLocked()
+	unlockErr := unlockRecipeScopes(locks)
+	if readErr != nil {
+		return nil, readErr
+	}
+	return manifests, unlockErr
+}
+
+func listManifestsLocked() ([]Manifest, error) {
 	seen := map[string]bool{}
 	var out []Manifest
 	for _, root := range Roots() {

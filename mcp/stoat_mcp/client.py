@@ -19,8 +19,11 @@ from __future__ import annotations
 
 import json
 import os
+import selectors
+import signal
 import shutil
 import subprocess
+import time
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
@@ -102,16 +105,27 @@ class Client:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
+            text=False,
+            bufsize=0,
+            start_new_session=(os.name == "posix"),
         )
+        effective_timeout = timeout if timeout is not None else self.default_timeout
+        deadline = None if effective_timeout is None else time.monotonic() + effective_timeout
+        selector: selectors.BaseSelector | None = None
+        returncode: int | None = None
         try:
             assert proc.stdout is not None
-            for line in proc.stdout:
-                stdout_lines.append(line)
-                obj = _decode(line)
+            selector = selectors.DefaultSelector()
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            buffer = bytearray()
+
+            def consume(line: bytes) -> None:
+                nonlocal result
+                decoded = line.decode("utf-8", errors="replace")
+                stdout_lines.append(decoded)
+                obj = _decode(decoded)
                 if obj is None:
-                    continue
+                    return
                 kind = obj.get("type")
                 if kind == "result":
                     # Keep the LAST one. The contract guarantees exactly one,
@@ -119,15 +133,43 @@ class Client:
                     # violation degrades to "used the final answer" instead of
                     # "silently used a stale one".
                     result = obj
-                    continue
+                    return
                 if on_event is not None and kind in (EVENT_PROGRESS, EVENT_STAGE, EVENT_LOG):
                     on_event(kind, obj.get("data") or {})
                 # Any other type is skipped: rule 3.
-            returncode = proc.wait(timeout=timeout if timeout is not None else self.default_timeout)
+
+            while True:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    raise subprocess.TimeoutExpired(proc.args, effective_timeout)
+                if not selector.select(remaining):
+                    raise subprocess.TimeoutExpired(proc.args, effective_timeout)
+                chunk = os.read(proc.stdout.fileno(), 4096)
+                if not chunk:
+                    if buffer:
+                        consume(bytes(buffer))
+                    break
+                buffer.extend(chunk)
+                while True:
+                    try:
+                        end = buffer.index(10)
+                    except ValueError:
+                        break
+                    consume(bytes(buffer[: end + 1]))
+                    del buffer[: end + 1]
+
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            returncode = proc.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            _terminate_owned_process_group(proc)
+            raise
         finally:
             if proc.poll() is None:
-                proc.kill()
-                proc.wait()
+                _terminate_owned_process_group(proc)
+            if selector is not None:
+                selector.close()
+            if proc.stdout is not None:
+                proc.stdout.close()
 
         if result is None:
             raise StoatCrashed(returncode, "".join(stdout_lines))
@@ -144,6 +186,7 @@ class Client:
         # payload; an empty dict is the honest reading, not an error.
         return result.get("data") or {}
 
+
     def stream(self, *args: str, timeout: float | None = None) -> Iterator[tuple[str, dict[str, Any]]]:
         """Run a command, yielding every event including the terminal result.
 
@@ -159,6 +202,31 @@ class Client:
         )
         yield from events
         yield ("result", data)
+
+
+def _terminate_owned_process_group(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate this invocation and descendants without touching other jobs."""
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    elif proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        pass
+    if os.name == "posix":
+        try:
+            # The leader can exit after TERM while a descendant ignores it.
+            # Escalate the owned group even when proc.wait already returned.
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif proc.poll() is None:
+        proc.kill()
+    proc.wait()
 
 
 def _decode(line: str) -> dict[str, Any] | None:

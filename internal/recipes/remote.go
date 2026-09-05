@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/novusedge/stoat/internal/gitx"
@@ -18,6 +17,18 @@ import (
 
 // ErrDirty identifies a cache checkout with uncommitted changes.
 var ErrDirty = errors.New("local changes")
+
+// ErrLockOutOfDate identifies a project declaration that is not pinned.
+var ErrLockOutOfDate = errors.New("stoat.lock is out of date")
+
+// RemoveInUse reports a recipe that became referenced after confirmation.
+type RemoveInUse struct {
+	Users []string
+}
+
+func (e *RemoveInUse) Error() string {
+	return fmt.Sprintf("recipe is used by %s", strings.Join(e.Users, ", "))
+}
 
 // ParseRef splits an index name or repository URL from its optional ref.
 // Scp-style URLs retain the username because their first at-sign is followed
@@ -61,7 +72,11 @@ func nameFromURL(source string) string {
 func resolveSource(in string) (name, source, gitRef string, err error) {
 	source, gitRef, isURL := ParseRef(in)
 	if isURL {
-		return nameFromURL(source), source, gitRef, nil
+		name := nameFromURL(source)
+		if err := validateRecipeName(name); err != nil {
+			return "", "", "", err
+		}
+		return name, source, gitRef, nil
 	}
 	entry, ok, err := IndexLookup(source)
 	if err != nil {
@@ -97,12 +112,22 @@ func Preview(source, gitRef string) (Manifest, string, error) {
 		}
 		return Manifest{}, "", err
 	}
+	if err := validateRecipeName(m.Name); err != nil {
+		if removeErr := os.RemoveAll(tmp); removeErr != nil {
+			return Manifest{}, "", fmt.Errorf("%w; remove preview: %v", err, removeErr)
+		}
+		return Manifest{}, "", err
+	}
 	return m, tmp, nil
 }
 
 func refError(source, gitRef string, err error) error {
 	if errors.Is(err, gitx.ErrNoRef) {
-		return fmt.Errorf("%s: no tag or branch %q", refLabel(source), gitRef)
+		kind := "tag or branch"
+		if isHexCommit(gitRef) {
+			kind = "tag, branch, or commit"
+		}
+		return fmt.Errorf("%s: no %s %q", refLabel(source), kind, gitRef)
 	}
 	return err
 }
@@ -145,7 +170,10 @@ func Add(s Scope, in string, force bool) (LockEntry, error) {
 		return LockEntry{}, err
 	}
 	defer func() { _ = os.RemoveAll(stageRoot) }()
-	stageCache := filepath.Join(stageRoot, name)
+	stageCache, err := recipeTarget(stageRoot, name)
+	if err != nil {
+		return LockEntry{}, err
+	}
 	if err := gitx.Clone(source, gitRef, stageCache); err != nil {
 		return LockEntry{}, refError(source, gitRef, err)
 	}
@@ -230,7 +258,12 @@ func prepareAddArtifacts(s Scope, name string, lock Lock, input, source, gitRef,
 	artifacts = append(artifacts, artifact{target: s.LockPath, stage: lockStage})
 
 	if s.Name != "project" {
-		return append(artifacts, artifact{target: filepath.Join(s.CachePath, name), stage: stageCache, isDir: true}), cleanup, nil
+		target, err := recipeTarget(s.CachePath, name)
+		if err != nil {
+			_ = cleanup()
+			return nil, func() error { return nil }, err
+		}
+		return append(artifacts, artifact{target: target, stage: stageCache, isDir: true}), cleanup, nil
 	}
 	decls, err := s.Decls()
 	if err != nil {
@@ -291,7 +324,12 @@ func prepareAddArtifacts(s Scope, name string, lock Lock, input, source, gitRef,
 	if ignore != nil {
 		artifacts = append(artifacts, *ignore)
 	}
-	return append(artifacts, artifact{target: filepath.Join(s.CachePath, name), stage: stageCache, isDir: true}), cleanup, nil
+	target, err := recipeTarget(s.CachePath, name)
+	if err != nil {
+		_ = cleanup()
+		return nil, func() error { return nil }, err
+	}
+	return append(artifacts, artifact{target: target, stage: stageCache, isDir: true}), cleanup, nil
 }
 
 func joinCleanup(first, second func() error) func() error {
@@ -426,34 +464,44 @@ func makeBackupPath(parent string) (string, error) {
 }
 
 func lockScope(s Scope) (func() error, error) {
-	coordinationDir := s.Dir
-	if s.Name == "project" {
-		coordinationDir = filepath.Dir(s.CachePath)
-	}
-	if err := os.MkdirAll(coordinationDir, 0o755); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(filepath.Join(coordinationDir, "recipe.lock"), os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return func() error {
-		unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		closeErr := f.Close()
-		if unlockErr != nil {
-			return unlockErr
-		}
-		return closeErr
-	}, nil
+	return lockScopeMode(s, true)
 }
 
 // LockAll resolves every project declaration to a fresh commit and persists
 // the result under the scope coordination lock. It does not touch the cache.
 func LockAll(s Scope) (Lock, error) {
+	// Resolve index names before entering the scope lock. The index lock and a
+	// scope lock have no shared acquisition order, so they must never nest.
+	decls, err := s.Decls()
+	if err != nil {
+		return Lock{}, err
+	}
+	indexEntries := make(map[string]IndexEntry)
+	if s.Name == "global" {
+		old, loadErr := s.Lock()
+		if loadErr != nil {
+			return Lock{}, loadErr
+		}
+		decls = make(map[string]Decl, len(old.Recipes))
+		for name, entry := range old.Recipes {
+			decls[name] = Decl{Source: entry.Source, Ref: entry.Ref}
+		}
+	}
+	for name, decl := range decls {
+		if err := validateRecipeName(name); err != nil {
+			return Lock{}, err
+		}
+		if decl.Source == "" {
+			entry, ok, lookupErr := IndexLookup(name)
+			if lookupErr != nil {
+				return Lock{}, lookupErr
+			}
+			if !ok {
+				return Lock{}, fmt.Errorf("no recipe %q in the index; run stoat recipe search %s", name, name)
+			}
+			indexEntries[name] = entry
+		}
+	}
 	unlock, err := lockScope(s)
 	if err != nil {
 		return Lock{}, err
@@ -463,7 +511,7 @@ func LockAll(s Scope) (Lock, error) {
 	if err != nil {
 		return Lock{}, err
 	}
-	decls, err := s.Decls()
+	decls, err = s.Decls()
 	if err != nil {
 		return Lock{}, err
 	}
@@ -483,10 +531,7 @@ func LockAll(s Scope) (Lock, error) {
 		decl := decls[name]
 		source := decl.Source
 		if source == "" {
-			entry, ok, lookupErr := IndexLookup(name)
-			if lookupErr != nil {
-				return Lock{}, lookupErr
-			}
+			entry, ok := indexEntries[name]
 			if !ok {
 				return Lock{}, fmt.Errorf("no recipe %q in the index; run stoat recipe search %s", name, name)
 			}
@@ -530,8 +575,15 @@ func Sync(s Scope) error {
 		return err
 	}
 	defer func() { _ = unlock() }()
+	return syncLocked(s)
+}
+
+func syncLocked(s Scope) error {
 	lock, err := s.Lock()
 	if err != nil {
+		return err
+	}
+	if err := validateRemoteLock(lock); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(s.CachePath), 0o755); err != nil {
@@ -551,7 +603,10 @@ func Sync(s Scope) error {
 	artifacts := make([]artifact, 0, len(names))
 	for _, name := range names {
 		entry := lock.Recipes[name]
-		dst := filepath.Join(s.CachePath, name)
+		dst, targetErr := recipeTarget(s.CachePath, name)
+		if targetErr != nil {
+			return targetErr
+		}
 		matches, matchErr := cacheMatches(dst, name, entry)
 		if matchErr != nil {
 			return matchErr
@@ -559,7 +614,10 @@ func Sync(s Scope) error {
 		if matches {
 			continue
 		}
-		stage := filepath.Join(stageRoot, name)
+		stage, targetErr := recipeTarget(stageRoot, name)
+		if targetErr != nil {
+			return targetErr
+		}
 		if err := gitx.CloneFull(entry.Source, stage); err != nil {
 			return err
 		}
@@ -577,11 +635,15 @@ func Sync(s Scope) error {
 			return readErr
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			if !entry.IsDir() {
 				continue
 			}
 			if _, ok := lock.Recipes[entry.Name()]; !ok {
-				artifacts = append(artifacts, artifact{target: filepath.Join(s.CachePath, entry.Name()), remove: true, isDir: true})
+				target, targetErr := containedPath(s.CachePath, entry.Name())
+				if targetErr != nil {
+					return targetErr
+				}
+				artifacts = append(artifacts, artifact{target: target, remove: true, isDir: true})
 			}
 		}
 	}
@@ -618,6 +680,19 @@ func cacheMatches(path, name string, entry LockEntry) (bool, error) {
 // StaleLock reports the first project declaration that is absent or differs
 // from its lock pin. Global scope has no declaration and is never stale here.
 func StaleLock(s Scope) (string, bool, error) {
+	unlock, err := lockScopeMode(s, false)
+	if err != nil {
+		return "", false, err
+	}
+	name, stale, readErr := staleLockLocked(s)
+	unlockErr := unlock()
+	if readErr != nil {
+		return "", false, readErr
+	}
+	return name, stale, unlockErr
+}
+
+func staleLockLocked(s Scope) (string, bool, error) {
 	decls, err := s.Decls()
 	if err != nil {
 		return "", false, err
@@ -641,6 +716,102 @@ func StaleLock(s Scope) (string, bool, error) {
 	return "", false, nil
 }
 
+func cacheCurrentScope(scope Scope, lock Lock) (bool, error) {
+	entries, err := os.ReadDir(scope.CachePath)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if os.IsNotExist(err) {
+		return len(lock.Recipes) == 0, nil
+	}
+	for name, entry := range lock.Recipes {
+		path, targetErr := recipeTarget(scope.CachePath, name)
+		if targetErr != nil {
+			return false, targetErr
+		}
+		if _, statErr := os.Lstat(path); statErr != nil {
+			if os.IsNotExist(statErr) {
+				return false, nil
+			}
+			return false, statErr
+		}
+		dirty, dirtyErr := gitx.Dirty(path)
+		if dirtyErr != nil {
+			return false, dirtyErr
+		}
+		if dirty {
+			return false, fmt.Errorf("%s: %w; copy it to a local recipe first", name, ErrDirty)
+		}
+		have, revErr := gitx.RevParse(path, "HEAD")
+		if revErr != nil {
+			return false, revErr
+		}
+		if have != entry.Commit {
+			return false, nil
+		}
+		if validateErr := ValidateTree(path, name); validateErr != nil {
+			return false, validateErr
+		}
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, ok := lock.Recipes[entry.Name()]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func repairProjectLocked(scope Scope) error {
+	if scope.Name != "project" {
+		return nil
+	}
+	if name, stale, err := staleLockLocked(scope); err != nil {
+		return err
+	} else if stale {
+		return fmt.Errorf("%w: %s; run stoat recipe lock", ErrLockOutOfDate, name)
+	}
+	lock, err := scope.Lock()
+	if err != nil {
+		return err
+	}
+	if err := validateRemoteLock(lock); err != nil {
+		return err
+	}
+	fresh, err := cacheCurrentScope(scope, lock)
+	if err != nil {
+		return err
+	}
+	if fresh {
+		return nil
+	}
+	return syncLocked(scope)
+}
+
+// SyncProject performs the project read-may-repair transaction under one
+// exclusive scope lock. Global state is not touched outside project scope.
+func SyncProject() error {
+	scope, err := ScopeFor(false)
+	if err != nil {
+		return err
+	}
+	if scope.Name != "project" {
+		return nil
+	}
+	unlock, err := lockScope(scope)
+	if err != nil {
+		return err
+	}
+	repairErr := repairProjectLocked(scope)
+	unlockErr := unlock()
+	if repairErr != nil {
+		return repairErr
+	}
+	return unlockErr
+}
+
 // Update stages every requested ref, validates every resulting tree, and
 // publishes the cache and lock together. A dirty or unreadable checkout is
 // never replaced implicitly.
@@ -652,6 +823,9 @@ func Update(s Scope, names []string) ([]LockEntry, error) {
 	defer func() { _ = unlock() }()
 	lock, err := s.Lock()
 	if err != nil {
+		return nil, err
+	}
+	if err := validateRemoteLock(lock); err != nil {
 		return nil, err
 	}
 	if len(names) == 0 {
@@ -668,11 +842,17 @@ func Update(s Scope, names []string) ([]LockEntry, error) {
 	artifacts := make([]artifact, 0, len(names)+1)
 	result := make([]LockEntry, 0, len(names))
 	for _, name := range names {
+		if err := validateRecipeName(name); err != nil {
+			return nil, err
+		}
 		entry, ok := lock.Recipes[name]
 		if !ok {
 			return nil, fmt.Errorf("%s is not a remote recipe in this scope", name)
 		}
-		dir := filepath.Join(s.CachePath, name)
+		dir, targetErr := recipeTarget(s.CachePath, name)
+		if targetErr != nil {
+			return nil, targetErr
+		}
 		if _, statErr := os.Lstat(dir); statErr != nil {
 			if !os.IsNotExist(statErr) {
 				return nil, statErr
@@ -686,7 +866,10 @@ func Update(s Scope, names []string) ([]LockEntry, error) {
 				return nil, fmt.Errorf("%s: %w; copy it to a local recipe first", name, ErrDirty)
 			}
 		}
-		stage := filepath.Join(stageRoot, name)
+		stage, targetErr := recipeTarget(stageRoot, name)
+		if targetErr != nil {
+			return nil, targetErr
+		}
 		if err := gitx.Clone(entry.Source, entry.Ref, stage); err != nil {
 			return nil, refError(entry.Source, entry.Ref, err)
 		}
@@ -721,6 +904,19 @@ func Update(s Scope, names []string) ([]LockEntry, error) {
 // of them. A malformed declaration or persistence failure leaves all three
 // active artifacts in place.
 func Remove(s Scope, name string) error {
+	return removeChecked(s, name, nil)
+}
+
+// RemoveChecked revalidates a caller's mutable precondition while holding the
+// scope lock, after any confirmation prompt has already returned.
+func RemoveChecked(s Scope, name string, users func() ([]string, error)) error {
+	return removeChecked(s, name, users)
+}
+
+func removeChecked(s Scope, name string, users func() ([]string, error)) error {
+	if err := validateRecipeName(name); err != nil {
+		return err
+	}
 	unlock, err := lockScope(s)
 	if err != nil {
 		return err
@@ -730,8 +926,20 @@ func Remove(s Scope, name string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateRemoteLock(lock); err != nil {
+		return err
+	}
 	if _, ok := lock.Recipes[name]; !ok {
 		return fmt.Errorf("%s is not a remote recipe in this scope", name)
+	}
+	if users != nil {
+		current, usersErr := users()
+		if usersErr != nil {
+			return usersErr
+		}
+		if len(current) > 0 {
+			return &RemoveInUse{Users: current}
+		}
 	}
 	delete(lock.Recipes, name)
 	stageRoot, err := os.MkdirTemp(filepath.Dir(s.CachePath), ".stoat-recipe-remove-*")
@@ -744,7 +952,11 @@ func Remove(s Scope, name string) error {
 		return err
 	}
 	defer func() { _ = lockCleanup() }()
-	artifacts := []artifact{lockArtifact, {target: filepath.Join(s.CachePath, name), remove: true, isDir: true}}
+	target, err := recipeTarget(s.CachePath, name)
+	if err != nil {
+		return err
+	}
+	artifacts := []artifact{lockArtifact, {target: target, remove: true, isDir: true}}
 	if s.Name == "project" {
 		projectArtifact, projectCleanup, err := prepareProjectWithout(s, name, stageRoot)
 		if err != nil {

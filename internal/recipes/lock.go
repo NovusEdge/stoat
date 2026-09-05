@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,8 +22,9 @@ type Lock struct {
 	Recipes map[string]LockEntry `toml:"recipes"`
 }
 
-// LockEntry is one recipe's pin. Ref is the tag or branch the user asked for.
-// Commit is the full sha that ref resolved to when the lock was written.
+// LockEntry is one recipe's pin. Ref is the tag, branch, or commit the user
+// asked for. Commit is the full sha that ref resolved to when the lock was
+// written.
 type LockEntry struct {
 	// Name is the resolved recipe name returned by add/update. It is not
 	// persisted in stoat.lock because the map key already carries it.
@@ -52,7 +54,35 @@ func LoadLock(path string) (Lock, error) {
 	if l.Recipes == nil {
 		l.Recipes = map[string]LockEntry{}
 	}
+	for name := range l.Recipes {
+		if err := validateRecipeName(name); err != nil {
+			return Lock{}, err
+		}
+	}
 	return l, nil
+}
+
+func validateRemoteLock(l Lock) error {
+	for name, entry := range l.Recipes {
+		if err := validateRecipeName(name); err != nil {
+			return err
+		}
+		if entry.Source == "" {
+			return fmt.Errorf("recipe %q: missing source", name)
+		}
+		if len(entry.Commit) != 40 || !isHexCommit(entry.Commit) {
+			return fmt.Errorf("recipe %q: commit must be a full 40-character hexadecimal commit", name)
+		}
+	}
+	return nil
+}
+
+func isHexCommit(commit string) bool {
+	if len(commit) != 40 {
+		return false
+	}
+	_, err := hex.DecodeString(commit)
+	return err == nil
 }
 
 // SaveLock writes l with the do-not-edit header above it. The completed file

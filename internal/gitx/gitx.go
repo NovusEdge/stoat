@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -13,6 +14,8 @@ var (
 	ErrNoGit = errors.New("git is not installed")
 	ErrNoRef = errors.New("no such tag or branch")
 )
+
+var fullCommitRef = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 // Available reports whether git is on PATH.
 func Available() bool {
@@ -23,6 +26,12 @@ func Available() bool {
 // Clone makes a shallow clone of url at ref into dst. An empty ref takes the
 // remote's default branch.
 func Clone(url, ref, dst string) error {
+	if fullCommitRef.MatchString(ref) {
+		if err := CloneFull(url, dst); err != nil {
+			return err
+		}
+		return Checkout(dst, ref)
+	}
 	args := []string{"clone", "--quiet", "--depth", "1"}
 	if ref != "" {
 		args = append(args, "--branch", ref)
@@ -46,7 +55,7 @@ func CloneFull(url, dst string) error {
 // Checkout moves dir's work tree to rev and detaches HEAD.
 func Checkout(dir, rev string) error {
 	out, err := run(dir, "checkout", "--quiet", "--detach", rev)
-	if err != nil && strings.Contains(strings.ToLower(out), "did not match any file") {
+	if err != nil && (strings.Contains(strings.ToLower(out), "did not match any file") || strings.Contains(strings.ToLower(out), "unable to read tree")) {
 		return fmt.Errorf("%w %q", ErrNoRef, rev)
 	}
 	return err

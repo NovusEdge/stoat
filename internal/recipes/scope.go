@@ -94,6 +94,9 @@ func (s Scope) Decls() (map[string]Decl, error) {
 		return nil, fmt.Errorf("%s: recipes must be a table", ProjectFile)
 	}
 	for name, v := range recipes {
+		if err := validateRecipeName(name); err != nil {
+			return nil, err
+		}
 		d, err := declFrom(name, v)
 		if err != nil {
 			return nil, err
@@ -143,6 +146,9 @@ func stringMap(value any) (map[string]any, bool) {
 // SetDecl writes one entry into stoat.toml's [recipes] table. The global scope
 // has no declaration file, so it does nothing.
 func (s Scope) SetDecl(name string, d Decl) error {
+	if err := validateRecipeName(name); err != nil {
+		return err
+	}
 	return s.editDecls(func(m map[string]any) {
 		if d.Source == "" {
 			m[name] = d.Ref
@@ -154,6 +160,9 @@ func (s Scope) SetDecl(name string, d Decl) error {
 
 // RemoveDecl deletes one entry from stoat.toml's [recipes] table.
 func (s Scope) RemoveDecl(name string) error {
+	if err := validateRecipeName(name); err != nil {
+		return err
+	}
 	return s.editDecls(func(m map[string]any) { delete(m, name) })
 }
 

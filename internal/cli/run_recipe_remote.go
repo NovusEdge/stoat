@@ -83,7 +83,7 @@ func runRecipeSync(a *Args, stdout, stderr io.Writer) int {
 	if err := recipes.Sync(s); err != nil {
 		return a.fail(stdout, stderr, recipeGitError(err, "sync"))
 	}
-	l, err := s.Lock()
+	l, err := recipes.ReadLock(s)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
@@ -138,7 +138,7 @@ func runRecipeRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
-	lock, err := s.Lock()
+	lock, err := recipes.ReadLock(s)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
@@ -159,7 +159,16 @@ func runRecipeRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if ok, code := confirm(a, stdin, stdout, stderr, "remove recipe "+name+"?"); !ok {
 		return code
 	}
-	if err := recipes.Remove(s, name); err != nil {
+	var users func() ([]string, error)
+	if !a.Force {
+		users = func() ([]string, error) { return core.RecipeUsers(name) }
+	}
+	if err := recipes.RemoveChecked(s, name, users); err != nil {
+		var inUse *recipes.RemoveInUse
+		if errors.As(err, &inUse) {
+			return a.failMsg(stdout, stderr, core.ErrInUse,
+				fmt.Sprintf("%s is used by %s; pass --force to remove it anyway", name, strings.Join(inUse.Users, ", ")))
+		}
 		return a.fail(stdout, stderr, recipeGitError(err, "remove"))
 	}
 	if a.JSON {
@@ -204,20 +213,4 @@ func recipeGitError(err error, operation string) error {
 		}
 	}
 	return fmt.Errorf("%w: git is required for recipe %s; install it: %s", gitx.ErrNoGit, operation, fix)
-}
-
-func recipePin(name, scopeName string) (recipes.LockEntry, bool, error) {
-	if scopeName != "project" && scopeName != "global" {
-		return recipes.LockEntry{}, false, nil
-	}
-	s, err := recipes.ScopeFor(scopeName == "global")
-	if err != nil {
-		return recipes.LockEntry{}, false, err
-	}
-	l, err := s.Lock()
-	if err != nil {
-		return recipes.LockEntry{}, false, err
-	}
-	e, ok := l.Recipes[name]
-	return e, ok, nil
 }

@@ -11,6 +11,9 @@ import (
 // ValidateTree checks a cloned recipe before it becomes an active cache
 // entry. It validates the manifest and every script path the manifest names.
 func ValidateTree(dir, name string) error {
+	if err := validateRecipeName(name); err != nil {
+		return err
+	}
 	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err
@@ -93,6 +96,9 @@ func within(root, path string) bool {
 // CheckCollision rejects local, bundled, and same-scope remote recipes. A
 // remote recipe in another scope may shadow the lower-priority entry.
 func CheckCollision(name, scope string) error {
+	if err := validateRecipeName(name); err != nil {
+		return err
+	}
 	if scope == "global" || scope == "project" {
 		target, err := ScopeFor(scope == "global")
 		if err != nil {
@@ -108,11 +114,13 @@ func CheckCollision(name, scope string) error {
 			}
 		}
 	}
-	have, err := ScopeOf(name)
+	// Add already holds the target scope's exclusive lock. Resolve the
+	// collision from that locked snapshot instead of nesting another flock.
+	_, have, found, err := resolvePath(name)
 	if err != nil {
 		return err
 	}
-	if have == "" {
+	if !found || have == "" {
 		return nil
 	}
 	if have == "local" || have == "bundled" {

@@ -131,25 +131,18 @@ func splitTail(b []byte, n int) []string {
 func runRecipe(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch a.Sub {
 	case "list":
-		manifests, err := recipes.ListManifests()
+		snapshot, err := recipes.ListSnapshot()
 		if err != nil {
 			return a.fail(stdout, stderr, err)
 		}
-		out := wire.RecipeList{Roots: make([]wire.RecipeRoot, 0), Recipes: make([]wire.RecipeEntry, 0, len(manifests))}
-		for _, root := range recipes.Roots() {
+		out := wire.RecipeList{Roots: make([]wire.RecipeRoot, 0, len(snapshot.Roots)), Recipes: make([]wire.RecipeEntry, 0, len(snapshot.Manifests))}
+		for _, root := range snapshot.Roots {
 			out.Roots = append(out.Roots, wire.RecipeRoot{Path: root.Path, Scope: root.Scope})
 		}
-		for _, m := range manifests {
-			scope, err := recipes.ScopeOf(m.Name)
-			if err != nil {
-				return a.fail(stdout, stderr, err)
-			}
+		for _, m := range snapshot.Manifests {
+			scope := snapshot.Scopes[m.Name]
 			e := wire.RecipeEntry{Name: m.Name, Description: m.Description, Scope: scope}
-			pin, ok, err := recipePin(m.Name, scope)
-			if err != nil {
-				return a.fail(stdout, stderr, err)
-			}
-			if ok {
+			if pin, ok := snapshot.Pins[m.Name]; ok {
 				e.Source, e.Ref, e.Commit = pin.Source, pin.Ref, short(pin.Commit)
 			}
 			out.Recipes = append(out.Recipes, e)

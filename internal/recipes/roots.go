@@ -36,15 +36,30 @@ func Roots() []Root {
 // ResolvePath finds name's recipe directory and the scope it belongs to. The
 // first root that both holds the directory and owns the name wins.
 func ResolvePath(name string) (path, scope string, ok bool, err error) {
-	return resolvePath(name)
+	locks, err := lockRecipeScopes(false)
+	if err != nil {
+		return "", "", false, err
+	}
+	path, scope, ok, readErr := resolvePath(name)
+	unlockErr := unlockRecipeScopes(locks)
+	if readErr != nil {
+		return "", "", false, readErr
+	}
+	if unlockErr != nil {
+		return "", "", false, unlockErr
+	}
+	return path, scope, ok, nil
 }
 
 func resolvePath(name string) (path, scope string, ok bool, err error) {
-	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
-		return "", "", false, nil
+	if err := validateRecipeName(name); err != nil {
+		return "", "", false, err
 	}
 	for _, root := range Roots() {
-		d := filepath.Join(root.Path, name)
+		d, targetErr := recipeTarget(root.Path, name)
+		if targetErr != nil {
+			return "", "", false, targetErr
+		}
 		if _, statErr := os.Stat(filepath.Join(d, "recipe.toml")); statErr != nil {
 			if os.IsNotExist(statErr) {
 				continue
@@ -64,8 +79,16 @@ func resolvePath(name string) (path, scope string, ok bool, err error) {
 
 // ScopeOf returns name's scope, or "" when no root holds it.
 func ScopeOf(name string) (string, error) {
-	_, scope, _, err := resolvePath(name)
-	return scope, err
+	locks, err := lockRecipeScopes(false)
+	if err != nil {
+		return "", err
+	}
+	_, scope, _, readErr := resolvePath(name)
+	unlockErr := unlockRecipeScopes(locks)
+	if readErr != nil {
+		return "", readErr
+	}
+	return scope, unlockErr
 }
 
 // owns reports whether a name found under root carries root's label.
