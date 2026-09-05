@@ -3,6 +3,7 @@ package mcpsrv
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
@@ -96,11 +97,44 @@ func register[In, Out any](server *mcp.Server, name string, c class, description
 	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		out, err := h(ctx, in)
 		if err != nil {
-			var zero Out
-			return toolError(err), zero, nil
+			return toolError(err), zeroOut[Out](), nil
 		}
 		return nil, out, nil
 	})
+}
+
+// zeroOut builds Out's zero value with every nil map and slice field
+// replaced by an empty one. The SDK validates a tool's output against its
+// generated schema even on the error path, and a field without an
+// `omitempty` tag is required as an object or array there; Out's bare zero
+// value carries nil for those and fails that check.
+func zeroOut[Out any]() Out {
+	var out Out
+	fillEmpty(reflect.ValueOf(&out).Elem())
+	return out
+}
+
+func fillEmpty(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				fillEmpty(v.Field(i))
+			}
+		}
+	case reflect.Map:
+		if v.IsNil() {
+			v.Set(reflect.MakeMap(v.Type()))
+		}
+	case reflect.Slice:
+		if v.IsNil() {
+			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+		}
+	case reflect.Pointer:
+		if !v.IsNil() {
+			fillEmpty(v.Elem())
+		}
+	}
 }
 
 // toolError renders an error the way the CLI prints it. wire.MapError gives

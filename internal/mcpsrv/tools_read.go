@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 type emptyIn struct{}
@@ -142,29 +143,39 @@ func (s *srv) registerRead(server *mcp.Server) {
 			return wire.ApplyPlanList{Plan: wire.FromApplyPlans(plans)}, nil
 		})
 
-	// Stubs: Task 14 implements these bodies over core.Guests, core.Guest
-	// and core.RecipeShow.
 	register(server, "list_guests", classRead,
 		"List every guest OS definition stoat knows: name, init system, package manager, default backend and whether the definition is bundled, a user file, or a user file merged over a bundled one. It reads the guest definitions only. Read-only.",
 		func(ctx context.Context, _ emptyIn) (wire.GuestList, error) {
-			return wire.GuestList{}, nil
+			// core.Guests returns no error: the bundled set is embedded and
+			// a user file that fails to parse was already refused at startup.
+			return wire.GuestList{Guests: wire.FromGuests(core.Guests())}, nil
 		})
 
 	register(server, "guest_info", classRead,
 		"Show one guest OS definition in full: init system, shell, escalate argv, capabilities, aliases, seed packages, the package manager verbs, the service verbs and the per-backend tables. Use it to learn what pkg_install and svc will run on a VM before you call them. Read-only.",
-		func(ctx context.Context, _ nameIn) (wire.Guest, error) {
-			// The generated output schema requires the map fields as objects,
-			// not null, so the stub sets them empty rather than nil.
-			return wire.Guest{
-				Svc: map[string]string{}, Cmd: map[string]string{}, Backend: map[string]map[string]any{},
-				Pkg: wire.GuestPkg{Env: map[string]string{}, RuntimePackages: map[string]string{}},
-			}, nil
+		func(ctx context.Context, in nameIn) (wire.Guest, error) {
+			g, err := core.Guest(in.Name)
+			if err != nil {
+				return wire.Guest{}, err
+			}
+			return wire.FromGuest(g), nil
 		})
 
 	register(server, "recipe_schema", classRead,
 		"Show one recipe's contract: its params with type, default and help, its declared outputs, and its health check. Read it before update sets params on a VM. Read-only.",
-		func(ctx context.Context, _ nameIn) (wire.RecipeSchema, error) {
-			return wire.RecipeSchema{}, nil
+		func(ctx context.Context, in nameIn) (wire.RecipeSchema, error) {
+			// The CLI's dispatch loop installs bundled recipes to the data
+			// root before every command; the mcp server has no equivalent
+			// entrypoint yet, so a bundled recipe is otherwise invisible to
+			// ManifestFor on a data root nothing has touched yet.
+			if err := recipes.Install(); err != nil {
+				return wire.RecipeSchema{}, err
+			}
+			r, err := core.RecipeShow(in.Name)
+			if err != nil {
+				return wire.RecipeSchema{}, err
+			}
+			return wire.FromRecipeSchema(r), nil
 		})
 }
 
