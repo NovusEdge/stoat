@@ -34,6 +34,13 @@ func TestSaveLockRoundTrips(t *testing.T) {
 	if !strings.HasPrefix(b, "# stoat.lock: written by stoat; do not edit\n") {
 		t.Errorf("lock has no header comment:\n%s", b)
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("new lock mode = %o, want 644", got)
+	}
 }
 
 func TestLoadLockMissingFileIsEmpty(t *testing.T) {

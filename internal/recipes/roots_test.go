@@ -2,6 +2,7 @@ package recipes
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,7 +27,10 @@ func TestRootsOrderAndShadowing(t *testing.T) {
 		"name = \"shared\"\n")
 	writeFile(t, filepath.Join(wd, "stoat.lock"), "schema = 1\n[recipes.shared]\nsource = \"s\"\nref = \"main\"\ncommit = \"abc\"\nadded = \"now\"\n")
 
-	path, scope, ok := ResolvePath("shared")
+	path, scope, ok, err := ResolvePath("shared")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("shared did not resolve")
 	}
@@ -52,9 +56,44 @@ func TestScopeOfLabelsHomeEntries(t *testing.T) {
 		"schema = 1\n[recipes.tailscale]\nsource = \"s\"\nref = \"v1\"\ncommit = \"abc\"\nadded = \"now\"\n")
 
 	for name, want := range map[string]string{"mine": "local", "docker": "bundled", "tailscale": "global"} {
-		if got := ScopeOf(name); got != want {
+		got, err := ScopeOf(name)
+		if err != nil {
+			t.Fatalf("ScopeOf(%q): %v", name, err)
+		}
+		if got != want {
 			t.Errorf("ScopeOf(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestGlobalLockErrorsSurfaceAtResolutionBoundaries(t *testing.T) {
+	for name, lock := range map[string]string{
+		"newer":   "schema = 2\n",
+		"corrupt": "schema = [\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("STOAT_HOME", home)
+			t.Chdir(t.TempDir())
+			seedRecipe(t, filepath.Join(home, "recipes"), "tailscale")
+			writeFile(t, filepath.Join(home, "stoat.lock"), lock)
+
+			_, _, ok, err := ResolvePath("tailscale")
+			if err == nil {
+				t.Fatalf("ResolvePath error = nil, ok = %v", ok)
+			}
+			if name == "newer" && !strings.Contains(err.Error(), "schema 2 is newer than this stoat (1)") {
+				t.Fatalf("ResolvePath error = %v", err)
+			}
+
+			scope, err := ScopeOf("tailscale")
+			if err == nil {
+				t.Fatalf("ScopeOf error = nil, scope = %q", scope)
+			}
+			if name == "newer" && !strings.Contains(err.Error(), "schema 2 is newer than this stoat (1)") {
+				t.Fatalf("ScopeOf error = %v", err)
+			}
+		})
 	}
 }
 

@@ -66,6 +66,32 @@ func TestRefreshIndexIsSkippedWhenFresh(t *testing.T) {
 	}
 }
 
+func TestRefreshIndexUsesChangedSourceWhenCacheIsFresh(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("STOAT_HOME", home)
+	t.Chdir(t.TempDir())
+	sourceA := testutil.GitRepo(t, map[string]string{"index.toml": sampleIndex})
+	sourceB := testutil.GitRepo(t, map[string]string{"index.toml": `schema = 1
+
+[recipes.other]
+source = "https://example.invalid/x/stoat-other"
+description = "only from source B"
+os = ["alpine"]
+`})
+	t.Setenv("STOAT_INDEX", sourceA)
+	if err := RefreshIndex(true); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STOAT_INDEX", sourceB)
+	got, err := SearchIndex("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "other" {
+		t.Fatalf("fresh cache after source change = %+v, want source B", got)
+	}
+}
+
 func TestRefreshIndexFetchesAStaleIndex(t *testing.T) {
 	indexRoot(t)
 	if err := RefreshIndex(true); err != nil {

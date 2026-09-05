@@ -85,6 +85,13 @@ xfce = { source = "https://github.com/x/stoat-xfce", ref = "main" }
 }
 
 func TestSetDeclAndRemoveDecl(t *testing.T) {
+	type projectDocument struct {
+		VM struct {
+			Name string `toml:"name"`
+		} `toml:"vm"`
+		Recipes map[string]string `toml:"recipes"`
+	}
+
 	wd := t.TempDir()
 	writeFile(t, filepath.Join(wd, "stoat.toml"), `[vm]
 name = "alpha"
@@ -102,12 +109,11 @@ name = "alpha"
 	}
 	checkProjectData := func() {
 		t.Helper()
-		var project map[string]any
-		if err := tomlx.Decode(filepath.Join(wd, "stoat.toml"), &project); err != nil {
+		var project projectDocument
+		if err := tomlx.Decode(filepath.Join(wd, "stoat.toml"), &project, tomlx.Reject); err != nil {
 			t.Fatal(err)
 		}
-		vm, ok := project["vm"].(map[string]any)
-		if !ok || vm["name"] != "alpha" {
+		if project.VM.Name != "alpha" {
 			t.Fatalf("unrelated project data was lost: %+v", project)
 		}
 	}
@@ -130,6 +136,48 @@ name = "alpha"
 		t.Errorf("decls = %+v, want tailscale gone", d)
 	}
 	checkProjectData()
+}
+
+func TestSetDeclAndSavePreserveExistingFileModes(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, "stoat.toml")
+	writeFile(t, configPath, "[recipes]\n")
+	if err := os.Chmod(configPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(wd)
+	s, err := ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(Lock{Schema: LockSchema, Recipes: map[string]LockEntry{
+		"old": {Source: "source", Ref: "main", Commit: "old", Added: "now"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(s.LockPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetDecl("tailscale", Decl{Ref: "v1.2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(Lock{Schema: LockSchema, Recipes: map[string]LockEntry{
+		"new": {Source: "source", Ref: "main", Commit: "new", Added: "now"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]os.FileMode{
+		configPath: 0o644,
+		s.LockPath: 0o600,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", path, got, want)
+		}
+	}
 }
 
 func TestIgnoreStoatDirAppendsOnceInAGitCheckout(t *testing.T) {
