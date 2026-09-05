@@ -257,7 +257,14 @@ Guest       {"name":"fedora","init":"systemd","shell":"/bin/bash",
              "svc":{"enable":"systemctl enable {name}", ...},
              "cmd":{},"backend":{"cloudinit":{"skip_9p":false}},
              "source":"bundled"}
+
+MCPClient   {"client":"cursor","path":"/home/u/.cursor/mcp.json",
+             "installed":true,"command":"/home/u/.local/bin/stoat",
+             "current":true}
 ```
+
+`MCPClient.current` is false when the client's entry names a different
+binary than the running one, which is the stale entry `mcp doctor` reports.
 
 `RecipeEntry` has `name`, `description`, `scope`, `source`, `ref`, and
 `commit`. `scope` is one of `bundled`, `local`, `global`, or `project`; only
@@ -400,6 +407,8 @@ so a leak fails the build rather than shipping.
 | `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |
 | `logs <vm>` | `{"vm":"work","which":"console","lines":[...]}` |
 | `doctor` | `{"healthy":false,"checks":[Check,...]}` |
+| `mcp doctor` | `{"contract":3,"version":"1.2.3","transport":"stdio","binary":"/home/u/.local/bin/stoat","clients":[MCPClient,...]}` |
+| `mcp install` | `{"client":"cursor","path":"/home/u/.cursor/mcp.json","json":"{...}"}` |
 | `version` | `{"version":"1.2.3","contract":3}` |
 | `help` | `{"usage":"..."}` |
 | `ssh` | **refused**, see below |
