@@ -36,24 +36,27 @@ type PortForward struct {
 // with an empty string, never equal to a current script's hash, so that
 // recipe re-runs once and then carries a real hash from then on.
 type AppliedRecipe struct {
-	Version string    `toml:"version"`
-	Hash    string    `toml:"hash"`
-	At      time.Time `toml:"at"`
+	Version string            `toml:"version"`
+	Hash    string            `toml:"hash"`
+	At      time.Time         `toml:"at"`
+	Outputs map[string]string `toml:"outputs"`
+	Health  string            `toml:"health"`
 }
 
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
 type VM struct {
-	Name      string   `toml:"name"`
-	Mode      string   `toml:"mode"` // "live" | "disk" | "cloud"
-	OS        string   `toml:"os"`
-	ISO       string   `toml:"iso"` // relative to the data root
-	RAM       int      `toml:"ram"` // MB
-	CPUs      int      `toml:"cpus"`
-	Disk      string   `toml:"disk"`      // disk mode only, e.g. "8G"
-	Installed bool     `toml:"installed"` // disk mode only; flips boot order
-	Share     string   `toml:"share"`     // host dir exposed as /mnt/host
-	SSHPort   int      `toml:"sshport"`
-	Recipes   []string `toml:"recipes"`
+	Name      string                       `toml:"name"`
+	Mode      string                       `toml:"mode"` // "live" | "disk" | "cloud"
+	OS        string                       `toml:"os"`
+	ISO       string                       `toml:"iso"` // relative to the data root
+	RAM       int                          `toml:"ram"` // MB
+	CPUs      int                          `toml:"cpus"`
+	Disk      string                       `toml:"disk"`      // disk mode only, e.g. "8G"
+	Installed bool                         `toml:"installed"` // disk mode only; flips boot order
+	Share     string                       `toml:"share"`     // host dir exposed as /mnt/host
+	SSHPort   int                          `toml:"sshport"`
+	Recipes   []string                     `toml:"recipes"`
+	Params    map[string]map[string]string `toml:"params" comment:"written by stoat; do not edit"`
 
 	// Display is the user's screen preference: "" or "auto" (default),
 	// "window", or "vnc". "auto" opens a real qemu window on a graphical
@@ -107,6 +110,17 @@ type VM struct {
 
 	Dir string `toml:"-"` // absolute path to the VM directory
 }
+
+// Param reads one stored recipe parameter.
+func (v *VM) Param(recipe, name string) (string, bool) {
+	return "", false
+}
+
+// SetParam stores one non-secret recipe parameter.
+func (v *VM) SetParam(recipe, name, value string) {}
+
+// UnsetParam removes one stored recipe parameter.
+func (v *VM) UnsetParam(recipe, name string) {}
 
 // Root is the data root: $STOAT_HOME, or ~/.stoat.
 func Root() string {
