@@ -7,6 +7,10 @@ import "errors"
 // errors.Is reaches the sentinel through core's own wrapping.
 //
 // ErrNoXattr lives in xattr.go, beside the probe that raises it.
+//
+// ErrAlreadyRunning duplicates core.ErrAlreadyRunning by necessity: core
+// imports qemu, so qemu cannot name core's sentinel. wire maps both to
+// already_running.
 var (
 	ErrBinaryMissing      = errors.New("qemu binary not found")
 	ErrKVMUnusable        = errors.New("/dev/kvm not usable")
@@ -17,4 +21,5 @@ var (
 	ErrMonitorRejected   = errors.New("qemu monitor rejected the command")
 	ErrNoConsolePassword = errors.New("no console password set")
 	ErrShareInvalid      = errors.New("share is not a directory")
+	ErrAlreadyRunning    = errors.New("already running")
 )

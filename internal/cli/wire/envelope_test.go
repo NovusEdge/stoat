@@ -63,7 +63,7 @@ func TestEmitterErrorResultOmitsData(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected an error object, got %v", got["error"])
 	}
-	if errObj["code"] != CodeConfirmationRequired {
+	if errObj["code"] != string(CodeConfirmationRequired) {
 		t.Errorf("code = %v, want %s", errObj["code"], CodeConfirmationRequired)
 	}
 }

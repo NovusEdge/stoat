@@ -104,7 +104,7 @@ func diskWritten(v *config.VM) bool {
 // nothing and tracks the process by pidfile.
 func Start(v *config.VM) error {
 	if Running(v) {
-		return fmt.Errorf("%s is already running", v.Name)
+		return fmt.Errorf("%w: %s is already running", ErrAlreadyRunning, v.Name)
 	}
 	_ = os.Remove(v.MonitorPath())
 	// The interactive install happens inside the guest, where stoat can't

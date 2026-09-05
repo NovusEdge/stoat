@@ -63,7 +63,7 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		name string
 		argv []string
 		ok   bool
-		code string // error.code when ok is false
+		code wire.Code // error.code when ok is false
 		exit int
 	}{
 		{name: "ls", argv: []string{"ls"}, ok: true, exit: ExitOK},
@@ -139,7 +139,7 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 			if errObj == nil {
 				t.Fatalf("failed result has no error object: %v", res)
 			}
-			if errObj["code"] != tt.code {
+			if errObj["code"] != string(tt.code) {
 				t.Errorf("error.code = %v, want %q", errObj["code"], tt.code)
 			}
 			if msg, _ := errObj["message"].(string); msg == "" {

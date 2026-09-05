@@ -16,7 +16,7 @@ import (
 func TestMapErrorEveryCoreSentinel(t *testing.T) {
 	tests := []struct {
 		err  error
-		code string
+		code Code
 	}{
 		{fmt.Errorf("%w: work", core.ErrNotFound), CodeNotFound},
 		{fmt.Errorf("%w: work: parse fail", core.ErrBroken), CodeBroken},
@@ -36,7 +36,7 @@ func TestMapErrorEveryCoreSentinel(t *testing.T) {
 		{ErrConfirmationRequired, CodeConfirmationRequired},
 	}
 	for _, tt := range tests {
-		t.Run(tt.code, func(t *testing.T) {
+		t.Run(string(tt.code), func(t *testing.T) {
 			got := MapError(tt.err)
 			if got == nil {
 				t.Fatal("MapError returned nil for a non-nil error")
@@ -147,7 +147,7 @@ func TestCodesAreSnakeCaseUniqueAndSorted(t *testing.T) {
 // reaches a consumer as "internal" with prose, which is the shape this whole
 // table exists to remove.
 func TestEveryQemuSentinelHasOneRow(t *testing.T) {
-	want := map[error]string{
+	want := map[error]Code{
 		qemu.ErrBinaryMissing:      CodeQemuMissing,
 		qemu.ErrKVMUnusable:        CodeKVMUnusable,
 		qemu.ErrStartFailed:        CodeQemuStartFailed,
@@ -156,6 +156,9 @@ func TestEveryQemuSentinelHasOneRow(t *testing.T) {
 		qemu.ErrNoConsolePassword:  CodeNoConsolePassword,
 		qemu.ErrShareInvalid:       CodeShareInvalid,
 		qemu.ErrNoXattr:            CodeNoXattr,
+		// No new code: core.ErrAlreadyRunning already names this condition,
+		// and qemu cannot import core to reuse the sentinel itself.
+		qemu.ErrAlreadyRunning: CodeAlreadyRunning,
 	}
 	for sentinel, code := range want {
 		got := MapError(fmt.Errorf("%w: subject", sentinel))
@@ -167,7 +170,7 @@ func TestEveryQemuSentinelHasOneRow(t *testing.T) {
 
 // Each iso sentinel has exactly one row in codeTable.
 func TestEveryISOSentinelHasOneRow(t *testing.T) {
-	want := map[error]string{
+	want := map[error]Code{
 		iso.ErrDownloadFailed:   CodeDownloadFailed,
 		iso.ErrDownloadStalled:  CodeDownloadStalled,
 		iso.ErrChecksumMismatch: CodeChecksumMismatch,
