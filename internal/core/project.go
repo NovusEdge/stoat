@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -142,7 +143,7 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		return nil, fmt.Errorf("%w: %s: image changed (%s -> %s); run stoat rm %s and stoat up",
 			ErrImmutableDeclaration, key, imageName(was), img.id(), key)
 	}
-	declaredDisk := spec.Disk
+	declaredDisk := strings.TrimSpace(spec.Disk)
 	if declaredDisk == "" {
 		mode, err := modeFor(img.backend, "")
 		if err != nil {
@@ -193,15 +194,23 @@ func declaredImage(v *config.VM) string {
 // match (a BYO image, or an absolute Base path) is returned as recorded.
 func imageName(field string) string {
 	rel := strings.TrimPrefix(field, "isos/")
-	if rel == field {
-		return field
+	prefixed := rel != field
+	if !prefixed {
+		// A cloudinit image's stored field is img.abs, an absolute path with
+		// no "isos/" prefix (Diff and Create both set it that way). Match on
+		// its basename so a cloud VM's image-changed error names the catalog
+		// id too, not the resolved file path.
+		rel = filepath.Base(field)
 	}
 	for _, e := range iso.Catalog() {
 		if MatchLocal(e, []string{rel}) == rel {
 			return e.ID
 		}
 	}
-	return rel
+	if prefixed {
+		return rel
+	}
+	return field
 }
 
 // renderShares is the comparable form of a share list: guest mountpoint and
