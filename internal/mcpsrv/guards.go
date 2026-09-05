@@ -161,27 +161,50 @@ func stripForbidden(patch map[string]any) map[string]any {
 
 // checkIndexName splits "<name>" or "<name>@<ref>" from the recipe index. A
 // URL is refused here rather than in core: add_recipe is the tool an agent
-// reaches, and a URL is a repository nobody curated.
+// reaches, and a URL is a repository nobody curated. The name has no
+// separator; the ref may hold slashes, because a branch is named
+// "feature/topic".
 func checkIndexName(ref string) (string, string, error) {
 	if strings.TrimSpace(ref) == "" {
 		return "", "", fmt.Errorf("recipe name is required")
-	}
-	if strings.ContainsAny(ref, ":/\\") {
-		return "", "", fmt.Errorf("invalid recipe name %q: index names only, not a URL", ref)
 	}
 	name, gitRef, hasRef := strings.Cut(ref, "@")
 	if strings.Contains(gitRef, "@") {
 		return "", "", fmt.Errorf("invalid recipe name %q: at most one @ref", ref)
 	}
 	if !indexNameRE.MatchString(name) {
-		return "", "", fmt.Errorf("invalid recipe name %q: must match %s", name, indexNameRE)
+		return "", "", fmt.Errorf("invalid recipe name %q: index names only, not a URL, and it must match %s", ref, indexNameRE)
 	}
 	if hasRef {
-		if !gitRefRE.MatchString(gitRef) || strings.Contains(gitRef, "..") {
-			return "", "", fmt.Errorf("invalid ref %q for recipe %q", gitRef, name)
+		if err := checkGitRef(gitRef); err != nil {
+			return "", "", fmt.Errorf("invalid ref %q for recipe %q: %w", gitRef, name, err)
 		}
 	}
 	return name, gitRef, nil
+}
+
+// checkGitRef bounds the ref add_recipe pins. The rules are git's own
+// check-ref-format rules that matter here: no traversal, no component that
+// git itself refuses.
+func checkGitRef(ref string) error {
+	if !gitRefRE.MatchString(ref) {
+		return fmt.Errorf("must match %s", gitRefRE)
+	}
+	if strings.Contains(ref, "..") {
+		return fmt.Errorf("contains a traversal")
+	}
+	for _, part := range strings.Split(ref, "/") {
+		if part == "" {
+			return fmt.Errorf("has an empty path component")
+		}
+		if strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".") {
+			return fmt.Errorf("component %q starts or ends with a dot", part)
+		}
+		if strings.HasSuffix(part, ".lock") {
+			return fmt.Errorf("component %q ends with .lock", part)
+		}
+	}
+	return nil
 }
 
 func checkParamName(name string) (string, error) {

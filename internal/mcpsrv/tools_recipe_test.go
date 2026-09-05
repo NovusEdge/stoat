@@ -23,7 +23,7 @@ func TestAddRecipeRefusesAURL(t *testing.T) {
 			continue
 		}
 		raw, _ := json.Marshal(res.Content)
-		if !strings.Contains(string(raw), "index names only") && !strings.Contains(string(raw), "invalid recipe name") {
+		if !strings.Contains(string(raw), "invalid recipe name") && !strings.Contains(string(raw), "invalid ref") {
 			t.Errorf("add_recipe(%q) refusal did not name the guard: %s", ref, raw)
 		}
 	}

@@ -204,6 +204,7 @@ func TestCheckIndexName(t *testing.T) {
 			{"tailscale", "tailscale", ""},
 			{"tailscale@v1.2", "tailscale", "v1.2"},
 			{"my-recipe@main", "my-recipe", "main"},
+			{"tailscale@feature/topic", "tailscale", "feature/topic"},
 		} {
 			name, ref, err := checkIndexName(c.in)
 			if err != nil || name != c.name || ref != c.ref {
@@ -215,7 +216,9 @@ func TestCheckIndexName(t *testing.T) {
 		for _, s := range []string{
 			"", "https://github.com/x/y", "git@github.com:x/y.git",
 			"x/y", "../evil", "a@b@c", "tailscale@", "@v1", "Tailscale",
-			"tail scale", "tailscale@../evil",
+			"tail scale", "tailscale@../evil", "-y", "tailscale@feature..topic",
+			"tailscale@feature/.hidden", "tailscale@feature/topic.lock",
+			"tailscale@feature/",
 		} {
 			if _, _, err := checkIndexName(s); err == nil {
 				t.Errorf("checkIndexName(%q) accepted", s)
