@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -22,10 +23,11 @@ cpus  = 4
 [vms.ci]
 image = "alpine-virt"
 `)
+	haveImage(t, os.Getenv("STOAT_HOME"), "alpine-virt-3.24.1-x86_64.iso")
 	// dev exists at 2 cpus, so the declaration drifts by two.
 	if err := (&config.VM{
-		Name: "myrepo-dev", Mode: "live", ISO: "alpine-virt.iso",
-		RAM: 4096, CPUs: 2, SSHPort: 2200, Project: ".",
+		Name: "myrepo-dev", Mode: "live", ISO: "isos/alpine-virt-3.24.1-x86_64.iso",
+		RAM: 4096, CPUs: 2, SSHPort: 2200,
 	}).Save(); err != nil {
 		t.Fatal(err)
 	}
