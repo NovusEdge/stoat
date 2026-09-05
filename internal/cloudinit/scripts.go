@@ -137,7 +137,7 @@ func recipeCommand(s Script, path, marker string) string {
 	}
 	output := "/tmp/.stoat-out/" + s.Name
 	if len(s.Env) > 0 {
-		fmt.Fprintf(&b, "mkdir -p /tmp/.stoat-out && chmod 700 /tmp/.stoat-out && : > %s && ", output)
+		fmt.Fprintf(&b, "STOAT_OUTPUT=%s && export STOAT_OUTPUT && mkdir -p /tmp/.stoat-out && chmod 700 /tmp/.stoat-out && : > \"$STOAT_OUTPUT\" && ", guest.ShQuote(output))
 	}
 	fmt.Fprintf(&b, "%s && mkdir -p %s && ", path, MarkerDir)
 	if len(s.Env) > 0 {

@@ -71,10 +71,18 @@ func healthChecksForVM(ctx context.Context, v *config.VM, names []string) ([]Rec
 }
 
 // HealthChecks checks the named VM's applied recipes in configured order.
-// The public operation is implemented by the recipe-health follow-up; the
-// loaded-VM runner above remains the Apply-local mechanical seam.
 func HealthChecks(ctx context.Context, name string) ([]RecipeHealth, error) {
-	return nil, nil
+	v, err := load(name)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(v.Applied))
+	for _, recipe := range v.Recipes {
+		if _, ok := v.Applied[recipe]; ok {
+			names = append(names, recipe)
+		}
+	}
+	return healthChecksForVM(ctx, v, names)
 }
 
 // VMHealth folds verdicts into one VM result.

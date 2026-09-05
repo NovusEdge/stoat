@@ -327,7 +327,9 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	if err := iso.Close(); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("xorriso", "-as", "mkisofs", "-o", isoPath, "-V", "CIDATA", "-J", "-r", seedDir)
+	xorrisoArgs := []string{"-as", "mkisofs", "-o", isoPath, "-V", "CIDATA", "-J", "-r", seedDir}
+	commandArgs := append([]string{"-c", "umask 0077; exec \"$@\"", "stoat-xorriso", "xorriso"}, xorrisoArgs...)
+	cmd := exec.Command("sh", commandArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("xorriso: %w: %s", err, out)

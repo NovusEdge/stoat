@@ -459,7 +459,7 @@ func recipeInput(v *config.VM, name string, m recipes.Manifest, haveManifest boo
 		b.WriteString(guest.WithPrelude(body, prelude))
 		return b.String(), secrets, nil
 	}
-	fmt.Fprintf(&b, "STOAT_OUTPUT=%s\n", shellPath(path))
+	fmt.Fprintf(&b, "export STOAT_OUTPUT=%s\n", shellPath(path))
 	fmt.Fprintf(&b, "mkdir -p %s && chmod 700 %s && : > \"$STOAT_OUTPUT\"\n", shellPath(OutputDir), shellPath(OutputDir))
 	b.WriteString(guest.WithPrelude(body, prelude))
 	return b.String(), secrets, nil

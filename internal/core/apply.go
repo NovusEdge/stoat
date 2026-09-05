@@ -173,12 +173,14 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	// A cloudinit VM ran its recipes from the seed at first boot and never
 	// populated v.Applied. Read the marker files cloud-init left behind, so
 	// filterByRunMode can skip a "once" recipe instead of re-running it.
-	if err := discoverCloudInitApplied(ctx, v); err != nil {
+	discoveryWarnings, err := discoverCloudInitApplied(ctx, v)
+	if err != nil {
 		return err
 	}
 
 	runTargets, manifests, err := filterByRunMode(v, targets, explicit)
 	if err != nil {
+		appendProvisionWarnings(v, discoveryWarnings)
 		return err
 	}
 	if len(runTargets) == 0 {
@@ -187,6 +189,7 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		// nobody named explicitly. This is not a failure. It is the run
 		// mode doing what it declared, so this stays a no-op like the
 		// "nothing to run at all" case above.
+		appendProvisionWarnings(v, discoveryWarnings)
 		return nil
 	}
 	if v.Applied == nil {
@@ -203,8 +206,10 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 	run := *v
 	run.Recipes = runTargets
 
-	if err := sshx.Provision(ctx, &run); err != nil {
-		return err
+	provisionErr := sshx.Provision(ctx, &run)
+	appendProvisionWarnings(v, discoveryWarnings)
+	if provisionErr != nil {
+		return provisionErr
 	}
 
 	// Provision runs runTargets in order and stops at the first failure, so
@@ -309,12 +314,18 @@ const rebootSettle = 2 * time.Second
 // fatal to the reboot itself, so this drops the error rather than aborting
 // an otherwise successful apply over a log write.
 func appendProvisionLog(v *config.VM, s string) {
-	f, err := os.OpenFile(v.ProvisionLogPath(), os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(v.ProvisionLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
 	defer func() { _ = f.Close() }()
 	_, _ = f.WriteString(s)
+}
+
+func appendProvisionWarnings(v *config.VM, warnings []string) {
+	for _, warning := range warnings {
+		appendProvisionLog(v, warning+"\n")
+	}
 }
 
 // discoverCloudInitApplied rebuilds v.Applied for a cloudinit VM from the
@@ -330,22 +341,30 @@ func appendProvisionLog(v *config.VM, s string) {
 // The recorded Hash comes from the current script on disk, not from whatever
 // cloud-init ran at creation. That is benign: recipes are idempotent, and a
 // script that has since changed reruns on this same Apply anyway.
-func discoverCloudInitApplied(ctx context.Context, v *config.VM) error {
+func discoverCloudInitApplied(ctx context.Context, v *config.VM) ([]string, error) {
 	if backend.For(v).Name() != "cloudinit" || len(v.Applied) > 0 {
-		return nil
+		return nil, nil
 	}
 	script := fmt.Sprintf("for marker in %s/*; do case \"$marker\" in *.out) continue;; esac; [ -f \"$marker\" ] || continue; name=$(basename \"$marker\"); printf '===%%s\\n' \"$name\"; cat \"$marker.out\" 2>/dev/null; done", cloudinit.MarkerDir)
 	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, script)...).Output()
 	if err != nil {
-		return nil // marker dir missing or a transient ssh error; discover nothing
+		return nil, nil // marker dir missing or a transient ssh error; discover nothing
 	}
 
 	secrets, err := config.LoadSecrets(v.Dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var applied map[string]config.AppliedRecipe
-	for name, body := range cloudInitOutputs(string(out)) {
+	var warnings []string
+	outputs := cloudInitOutputs(string(out))
+	names := make([]string, 0, len(outputs))
+	for name := range outputs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body := outputs[name]
 		m, ok, manifestErr := recipes.ManifestFor(name)
 		if manifestErr != nil || !ok {
 			continue // a marker for a recipe no longer on disk
@@ -355,7 +374,10 @@ func discoverCloudInitApplied(ctx context.Context, v *config.VM) error {
 			hash, _ = recipes.ScriptHash(name, v.OS)
 		}
 		scriptHash, _ := recipes.ScriptHash(name, v.OS)
-		values, _ := sshx.ParseOutputs(m.Outputs, redactCloudSecrets(body, secrets[name]))
+		values, undeclared := sshx.ParseOutputs(m.Outputs, redactCloudSecrets(body, secrets[name]))
+		for _, output := range undeclared {
+			warnings = append(warnings, fmt.Sprintf("%s: output %q is not declared", name, output))
+		}
 		if applied == nil {
 			applied = make(map[string]config.AppliedRecipe)
 		}
@@ -365,10 +387,13 @@ func discoverCloudInitApplied(ctx context.Context, v *config.VM) error {
 		}
 	}
 	if applied == nil {
-		return nil
+		return warnings, nil
 	}
 	v.Applied = applied
-	return v.Save()
+	if err := v.Save(); err != nil {
+		return warnings, err
+	}
+	return warnings, nil
 }
 
 func cloudInitOutputs(body string) map[string]string {

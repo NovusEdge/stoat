@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -114,8 +115,9 @@ func Update(name string, p Patch) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
+	work := cloneConfigVM(v)
 
-	if err := checkImmutable(v, p); err != nil {
+	if err := checkImmutable(work, p); err != nil {
 		return VM{}, err
 	}
 
@@ -123,43 +125,53 @@ func Update(name string, p Patch) (VM, error) {
 		if *p.RAM < 256 {
 			return VM{}, fmt.Errorf("%w: ram must be at least 256 MB", ErrInvalidSpec)
 		}
-		v.RAM = *p.RAM
+		work.RAM = *p.RAM
 	}
 	if p.CPUs != nil {
 		if *p.CPUs < 1 {
 			return VM{}, fmt.Errorf("%w: cpus must be at least 1", ErrInvalidSpec)
 		}
-		v.CPUs = *p.CPUs
+		work.CPUs = *p.CPUs
 	}
 	if p.Share != nil {
-		v.Share = strings.TrimSpace(*p.Share)
+		work.Share = strings.TrimSpace(*p.Share)
 	}
 	if p.Recipes != nil {
-		v.Recipes = *p.Recipes
+		work.Recipes = append([]string(nil), (*p.Recipes)...)
 	}
-	if err := applyParamEdits(v, p); err != nil {
+	var stored config.Secrets
+	if hasParamEdits(p) {
+		stored, err = config.LoadSecrets(work.Dir)
+		if err != nil {
+			return VM{}, err
+		}
+	}
+	var stagedSecrets config.Secrets
+	var secretTouched bool
+	err = stageParamEdits(work, p, stored, &stagedSecrets, &secretTouched)
+	if err != nil {
 		return VM{}, err
 	}
 	if p.Installed != nil {
-		v.Installed = *p.Installed
+		work.Installed = *p.Installed
 	}
 	if p.Display != nil {
 		if err := validateDisplay(*p.Display); err != nil {
 			return VM{}, err
 		}
-		v.Display = *p.Display
+		work.Display = *p.Display
 	}
 
-	if p.SSHPort != nil && *p.SSHPort != v.SSHPort {
-		if err := validateSSHPort(v, *p.SSHPort); err != nil {
+	if p.SSHPort != nil && *p.SSHPort != work.SSHPort {
+		if err := validateSSHPort(work, *p.SSHPort); err != nil {
 			return VM{}, err
 		}
-		v.SSHPort = *p.SSHPort
+		work.SSHPort = *p.SSHPort
 	}
 
 	resizeTo := ""
-	if p.Disk != nil && *p.Disk != v.Disk {
-		resizeTo, err = validateDiskGrow(v, *p.Disk)
+	if p.Disk != nil && *p.Disk != work.Disk {
+		resizeTo, err = validateDiskGrow(work, *p.Disk)
 		if err != nil {
 			return VM{}, err
 		}
@@ -169,23 +181,41 @@ func Update(name string, p Patch) (VM, error) {
 	// saveEdit. If qemu-img fails, vm.toml still describes the disk that
 	// exists, not one that doesn't.
 	if resizeTo != "" {
-		out, err := exec.Command("qemu-img", "resize", v.DiskPath(), resizeTo).CombinedOutput()
+		out, err := exec.Command("qemu-img", "resize", work.DiskPath(), resizeTo).CombinedOutput()
 		if err != nil {
 			return VM{}, fmt.Errorf("qemu-img resize: %s", strings.TrimSpace(string(out)))
 		}
-		v.Disk = resizeTo
+		work.Disk = resizeTo
 	}
 
-	if err := v.Save(); err != nil {
+	if err := commitUpdate(v, work, stagedSecrets, secretTouched); err != nil {
 		return VM{}, err
 	}
-	return fromConfig(v), nil
+	return fromConfig(work), nil
 }
 
 // applyParamEdits validates and applies parameter changes. Non-secret values
 // stay in vm.toml; secret values stay in secrets.toml and are removed when an
 // unset edit names a secret parameter.
 func applyParamEdits(v *config.VM, p Patch) error {
+	stored, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		return err
+	}
+	var staged config.Secrets
+	var touched bool
+	if err := stageParamEdits(v, p, stored, &staged, &touched); err != nil {
+		return err
+	}
+	if touched {
+		return config.SaveSecrets(v.Dir, staged)
+	}
+	return nil
+}
+
+func stageParamEdits(v *config.VM, p Patch, stored config.Secrets, stagedOut *config.Secrets, touchedOut *bool) error {
+	*stagedOut = cloneSecrets(stored)
+	*touchedOut = false
 	if len(p.SetParams) == 0 && len(p.UnsetParams) == 0 && len(p.Secrets) == 0 {
 		return nil
 	}
@@ -258,31 +288,166 @@ func applyParamEdits(v *config.VM, p Patch) error {
 			}
 		}
 	}
-	var stored config.Secrets
+	staged := cloneSecrets(stored)
 	if secretTouched {
-		var err error
-		stored, err = config.LoadSecrets(v.Dir)
-		if err != nil {
-			return err
-		}
 		for recipe, names := range p.UnsetParams {
 			m, _ := manifestForVM(v, recipe)
 			for _, name := range names {
 				if m.Params[name].Type == "secret" {
-					delete(stored[recipe], name)
+					delete(staged[recipe], name)
 				}
 			}
 		}
 		for recipe, values := range p.Secrets {
-			if stored[recipe] == nil {
-				stored[recipe] = map[string]string{}
+			if staged[recipe] == nil {
+				staged[recipe] = map[string]string{}
 			}
 			for name, value := range values {
-				stored[recipe][name] = value
+				staged[recipe][name] = value
 			}
 		}
-		if err := config.SaveSecrets(v.Dir, stored); err != nil {
+	}
+	*stagedOut = staged
+	*touchedOut = secretTouched
+	return nil
+}
+
+func hasParamEdits(p Patch) bool {
+	return len(p.SetParams) > 0 || len(p.UnsetParams) > 0 || len(p.Secrets) > 0
+}
+
+func cloneSecrets(in config.Secrets) config.Secrets {
+	if in == nil {
+		return config.Secrets{}
+	}
+	out := make(config.Secrets, len(in))
+	for recipe, values := range in {
+		if values == nil {
+			continue
+		}
+		out[recipe] = make(map[string]string, len(values))
+		for name, value := range values {
+			out[recipe][name] = value
+		}
+	}
+	return out
+}
+
+func cloneConfigVM(in *config.VM) *config.VM {
+	out := *in
+	out.Recipes = append([]string(nil), in.Recipes...)
+	out.Forwards = append([]config.PortForward(nil), in.Forwards...)
+	if in.Params != nil {
+		out.Params = make(map[string]map[string]string, len(in.Params))
+		for recipe, values := range in.Params {
+			out.Params[recipe] = make(map[string]string, len(values))
+			for name, value := range values {
+				out.Params[recipe][name] = value
+			}
+		}
+	}
+	return &out
+}
+
+// commitUpdate stages both on-disk representations, then swaps them into
+// place with backups so a failure of the second replacement restores the
+// first. The original inodes retain their modes and ownership on rollback.
+func commitUpdate(original, updated *config.VM, secrets config.Secrets, secretTouched bool) error {
+	stageDir, err := os.MkdirTemp(original.Dir, ".update-stage-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stageDir) }()
+
+	stagedVM := cloneConfigVM(updated)
+	stagedVM.Dir = stageDir
+	if err := stagedVM.Save(); err != nil {
+		return err
+	}
+	vmTarget := filepath.Join(original.Dir, "vm.toml")
+	// The previous single-file Save opened vm.toml for writing, so a
+	// read-only target failed even when its directory allowed replacement.
+	// Probe that same permission boundary before the atomic swap; otherwise a
+	// rename would silently bypass the target's mode and turn a failed update
+	// into a successful one.
+	if f, err := os.OpenFile(vmTarget, os.O_WRONLY, 0); err != nil {
+		return err
+	} else if err := f.Close(); err != nil {
+		return err
+	}
+	if info, statErr := os.Stat(vmTarget); statErr == nil {
+		if err := os.Chmod(filepath.Join(stageDir, "vm.toml"), info.Mode().Perm()); err != nil {
 			return err
+		}
+	}
+
+	stagedSecrets := filepath.Join(stageDir, config.SecretsName)
+	secretTarget := filepath.Join(original.Dir, config.SecretsName)
+	if secretTouched {
+		if err := config.SaveSecrets(stageDir, secrets); err != nil {
+			return err
+		}
+		if info, statErr := os.Stat(secretTarget); statErr == nil {
+			if _, stageErr := os.Stat(stagedSecrets); stageErr == nil {
+				if err := os.Chmod(stagedSecrets, info.Mode().Perm()); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	vmBackup := filepath.Join(stageDir, "vm.toml.old")
+	secretBackup := filepath.Join(stageDir, config.SecretsName+".old")
+	vmHadOld := false
+	secretHadOld := false
+	vmInstalled := false
+	secretInstalled := false
+	rollback := func() {
+		if secretInstalled {
+			_ = os.Remove(secretTarget)
+		}
+		if vmInstalled {
+			_ = os.Remove(vmTarget)
+		}
+		if secretHadOld {
+			_ = os.Rename(secretBackup, secretTarget)
+		}
+		if vmHadOld {
+			_ = os.Rename(vmBackup, vmTarget)
+		}
+	}
+
+	if err := os.Rename(vmTarget, vmBackup); err != nil {
+		return err
+	}
+	vmHadOld = true
+	if secretTouched {
+		if _, statErr := os.Stat(secretTarget); statErr == nil {
+			if err := os.Rename(secretTarget, secretBackup); err != nil {
+				rollback()
+				return err
+			}
+			secretHadOld = true
+		} else if !os.IsNotExist(statErr) {
+			rollback()
+			return statErr
+		}
+	}
+	if err := os.Rename(filepath.Join(stageDir, "vm.toml"), vmTarget); err != nil {
+		rollback()
+		return err
+	}
+	vmInstalled = true
+	if secretTouched {
+		if _, statErr := os.Stat(stagedSecrets); statErr == nil {
+			if err := os.Rename(stagedSecrets, secretTarget); err != nil {
+				rollback()
+				return err
+			}
+			secretInstalled = true
+		} else if !os.IsNotExist(statErr) {
+			rollback()
+			return statErr
 		}
 	}
 	return nil
