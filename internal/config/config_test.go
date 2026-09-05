@@ -12,6 +12,37 @@ import (
 	"time"
 )
 
+// TestAgentAccessFromLegacyAllowExec pins the mapping from vm.toml's old
+// allow_exec key to the new agent_access levels, and that an explicit
+// agent_access always wins over allow_exec: a file round-tripped through an
+// older stoat can still carry both keys.
+func TestAgentAccessFromLegacyAllowExec(t *testing.T) {
+	for _, c := range []struct{ toml, want string }{
+		{"name = \"x\"\nallow_exec = true\n", "exec"},
+		{"name = \"x\"\nallow_exec = false\n", "manage"},
+		{"name = \"x\"\n", "manage"},
+		{"name = \"x\"\nagent_access = \"observe\"\n", "observe"},
+		{"name = \"x\"\nagent_access = \"none\"\nallow_exec = true\n", "none"},
+	} {
+		root := t.TempDir()
+		t.Setenv("STOAT_HOME", root)
+		dir := filepath.Join(root, "x")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "vm.toml"), []byte(c.toml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		v, err := Load("x")
+		if err != nil {
+			t.Fatalf("%q: %v", c.toml, err)
+		}
+		if v.AgentAccess != c.want {
+			t.Errorf("%q: AgentAccess = %q, want %q", c.toml, v.AgentAccess, c.want)
+		}
+	}
+}
+
 func TestLoadWarnsUnknownKeyToStderr(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -41,19 +72,20 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 
 	want := &VM{
-		Name:      "alpine-live",
-		Mode:      "live",
-		ISO:       "isos/alpine-standard-3.24.1-x86_64.iso",
-		RAM:       4096,
-		CPUs:      4,
-		Disk:      "8G",
-		Installed: true,
-		Share:     "/home/someone/vms",
-		SSHPort:   2201,
-		Recipes:   []string{"xfce"},
-		Forwards:  []PortForward{{HostPort: 8080, GuestPort: 80}},
-		Display:   "window",
-		Dir:       filepath.Join(Root(), "alpine-live"),
+		Name:        "alpine-live",
+		Mode:        "live",
+		ISO:         "isos/alpine-standard-3.24.1-x86_64.iso",
+		RAM:         4096,
+		CPUs:        4,
+		Disk:        "8G",
+		Installed:   true,
+		Share:       "/home/someone/vms",
+		SSHPort:     2201,
+		Recipes:     []string{"xfce"},
+		Forwards:    []PortForward{{HostPort: 8080, GuestPort: 80}},
+		Display:     "window",
+		AgentAccess: "manage",
+		Dir:         filepath.Join(Root(), "alpine-live"),
 	}
 	if err := want.Save(); err != nil {
 		t.Fatal(err)
@@ -99,16 +131,17 @@ func TestSaveLoadRoundtripCloudVM(t *testing.T) {
 	}
 
 	want := &VM{
-		Name:    "ubuntu-cloud",
-		Mode:    "cloud",
-		OS:      "ubuntu-24.04",
-		RAM:     2048,
-		CPUs:    2,
-		SSHPort: 2202,
-		Backend: "cloudinit",
-		Base:    "/home/someone/.stoat/base/ubuntu-24.04.qcow2",
-		SSHUser: "ubuntu",
-		Dir:     filepath.Join(Root(), "ubuntu-cloud"),
+		Name:        "ubuntu-cloud",
+		Mode:        "cloud",
+		OS:          "ubuntu-24.04",
+		RAM:         2048,
+		CPUs:        2,
+		SSHPort:     2202,
+		Backend:     "cloudinit",
+		Base:        "/home/someone/.stoat/base/ubuntu-24.04.qcow2",
+		SSHUser:     "ubuntu",
+		AgentAccess: "manage",
+		Dir:         filepath.Join(Root(), "ubuntu-cloud"),
 	}
 	if err := want.Save(); err != nil {
 		t.Fatal(err)
@@ -139,7 +172,8 @@ func TestSaveLoadRoundtripApplied(t *testing.T) {
 		Applied: map[string]AppliedRecipe{
 			"xfce": {Version: "1.2.3", At: at},
 		},
-		Dir: filepath.Join(Root(), "alpine-live"),
+		AgentAccess: "manage",
+		Dir:         filepath.Join(Root(), "alpine-live"),
 	}
 	if err := want.Save(); err != nil {
 		t.Fatal(err)

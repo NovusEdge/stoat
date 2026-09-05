@@ -12,6 +12,7 @@ capabilities      = ["apk"]          # string[]; default []; guest author writes
 aliases           = []                # string[]; default []; guest author writes alternate script keys.
 filename_hints    = ["alpine"]       # string[]; default []; guest author writes BYO-image filename hints.
 seed_packages     = ["sudo"]         # string[]; default []; guest author writes cloud-init seed packages.
+log_path          = "/var/log/messages" # string; default empty; tail_log's fallback when a systemd unit has no journal.
 
 [pkg]
 setup             = "apk update"     # string; default empty; guest author writes the package-index prelude.

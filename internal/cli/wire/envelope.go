@@ -1,9 +1,7 @@
 // Package wire is the JSON contract stoat's --json mode speaks (see
-// docs/design/json-contract-draft.md). It exists because the MCP server is
-// Python + fastmcp in a separate process and reaches internal/core only by
-// running the stoat binary and reading its output: everything a Python
-// caller would otherwise have to regex, guess at, or reconstruct is defined
-// here instead.
+// docs/design/json-contract-draft.md). internal/mcpsrv reuses these same
+// DTOs as MCP tool output, so the --json contract and the MCP schema are one
+// set of types and cannot drift apart.
 //
 // This package holds the envelope (§2), the error code table (§2), the DTOs
 // (§3) and the argv scan (§1). It does not touch internal/cli/cli.go: wiring
@@ -27,6 +25,9 @@ import (
 // break, so nothing has to reason about which shape it is looking at.
 // v3: recipe list changed shape. dir became roots, a list of {path, scope},
 // and recipes became a list of RecipeEntry objects rather than names.
+// allow_exec also becomes agent_access with four levels, and the MCP server
+// moves into this binary, so a tool output is a wire DTO rather than a
+// re-parse of a --json line.
 const ContractVersion = 3
 
 // Event types (§2, §4). "result" is the one terminal type; every other type

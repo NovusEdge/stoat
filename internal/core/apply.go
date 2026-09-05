@@ -665,6 +665,15 @@ type RecipeHealthSpec struct {
 	Timeout string
 }
 
+// EnsureRecipes installs the bundled recipe set into the data root. The
+// CLI's dispatch loop calls recipes.Install before every command; a caller
+// with no equivalent entrypoint, such as mcpsrv, calls this once at startup
+// so a bundled recipe is not invisible to RecipeShow and Recipes on a data
+// root nothing else has touched yet.
+func EnsureRecipes() error {
+	return recipes.Install()
+}
+
 // RecipeShow is the host-side lookup for one recipe's contract.
 func RecipeShow(name string) (Recipe, error) {
 	m, ok, err := recipes.ManifestFor(name)

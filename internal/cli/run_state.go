@@ -3,37 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
 )
-
-// parseForwards reads "8080:80" pairs, host port first: the spelling docker
-// and ssh -L both use, so the ordering is the one a user already has in their
-// fingers. Getting it backwards silently binds the wrong port, so the error
-// names the whole offending argument rather than just complaining about a
-// number.
-func parseForwards(pairs []string) ([]core.PortForward, error) {
-	var out []core.PortForward
-	for _, p := range pairs {
-		host, guest, ok := strings.Cut(p, ":")
-		if !ok {
-			return nil, fmt.Errorf("%q is not a HOST:GUEST port pair", p)
-		}
-		h, err := strconv.Atoi(strings.TrimSpace(host))
-		if err != nil {
-			return nil, fmt.Errorf("%q: host port %q is not a number", p, host)
-		}
-		g, err := strconv.Atoi(strings.TrimSpace(guest))
-		if err != nil {
-			return nil, fmt.Errorf("%q: guest port %q is not a number", p, guest)
-		}
-		out = append(out, core.PortForward{HostPort: h, GuestPort: g})
-	}
-	return out, nil
-}
 
 // runForward shows, sets, or clears a VM's port forwards. core.Forward reports
 // whether they are live NOW; when they are not, saying so is the whole point:

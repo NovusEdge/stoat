@@ -182,6 +182,11 @@ type VM struct {
 	// Spec.AllowExec's doc comment for who enforces it.
 	AllowExec bool
 
+	// AgentAccess is vm.toml's agent_access, already resolved by config.Load
+	// so a pre-existing vm.toml with no agent_access key reads as "manage"
+	// (or "exec", mapped from a legacy allow_exec = true) here too.
+	AgentAccess string
+
 	Paths Paths
 
 	// Error is populated only when State is StateBroken, and holds
@@ -271,6 +276,7 @@ func fromConfigUnchecked(v *config.VM) VM {
 		Forwards:        v.Forwards,
 		Installed:       v.Installed,
 		AllowExec:       v.AllowExec,
+		AgentAccess:     v.AgentAccess,
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),
@@ -494,6 +500,16 @@ func Start(name string) error {
 		return fmt.Errorf("%w: %s", ErrAlreadyRunning, name)
 	}
 	return qemu.Start(v)
+}
+
+// EnsureRunning refuses with ErrNotRunning when v is not running. It exists
+// so a caller above core, such as mcpsrv, answers the same error Stop and
+// Exec give without importing qemu.Running itself.
+func EnsureRunning(v *config.VM) error {
+	if !qemu.Running(v) {
+		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
+	}
+	return nil
 }
 
 // Stop powers down VM name. qemu.Stop treats "already stopped" as a

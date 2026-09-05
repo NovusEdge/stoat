@@ -7,6 +7,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/mcpsrv"
 )
 
 // The kong grammar: one struct per subcommand, tags instead of a hand-written
@@ -60,9 +61,34 @@ type grammar struct {
 	Logs       logsCmd       `cmd:"" help:"tail a VM's log, or stoat's own"`
 	Screenshot screenshotCmd `cmd:"" help:"write the VM's screen to a PNG"`
 	Doctor     doctorCmd     `cmd:"" help:"check host prerequisites"`
+	MCP        mcpCmd        `cmd:"" name:"mcp" help:"serve MCP, or configure a client to launch it"`
 	Version    versionCmd    `cmd:"" help:"print the stoat version"`
 	Help       helpCmd       `cmd:"" help:"show this message"`
 }
+
+// mcpCmd defaults to serve, because every MCP client launches the server as
+// "stoat mcp" with no subcommand.
+type mcpCmd struct {
+	Serve   mcpServeCmd   `cmd:"" default:"withargs" help:"serve MCP over stdio"`
+	Install mcpInstallCmd `cmd:"" help:"write an MCP client's config entry"`
+	Doctor  mcpDoctorCmd  `cmd:"" help:"report contract, transport and client entries"`
+}
+
+type mcpServeCmd struct {
+	HTTP      string  `name:"http" help:"serve streamable HTTP on this loopback address instead of stdio"`
+	ToolBurst int     `name:"tool-burst" default:"30" help:"per-tool rate limit burst"`
+	ToolRate  float64 `name:"tool-rate" default:"0.5" help:"per-tool refill, calls per second"`
+	Burst     int     `name:"burst" default:"60" help:"shared rate limit burst"`
+	Rate      float64 `name:"rate" default:"2" help:"shared refill, calls per second"`
+}
+
+type mcpInstallCmd struct {
+	Client  string `arg:"" enum:"claude-code,claude-desktop,cursor,vscode" help:"which client's config to write"`
+	Project bool   `help:"write .mcp.json in the current directory instead of the user's config"`
+	Print   bool   `help:"print the JSON instead of writing a file"`
+}
+
+type mcpDoctorCmd struct{}
 
 type helpCmd struct{}
 
@@ -113,13 +139,13 @@ type createCmd struct {
 	Recipes         []string `help:"recipe names to record on the VM"`
 	Set             []string `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Secret          []string `help:"set a secret recipe param"`
-	// default:"true" is load-bearing, not decoration: without it kong treats
-	// an absent --allow-exec the same as an explicit --allow-exec=false,
-	// since a bare bool flag's zero value is false. With it, the flag must
-	// be passed AND given =false to turn exec off; --allow-exec alone (no
-	// value) sets true, matching every other bool flag. Verified by running
-	// `stoat create --help` and `stoat create x --image y --allow-exec=false`.
-	AllowExec bool `default:"true" help:"allow exec/copy_to/copy_from on this VM (enforced by the MCP server, not stoat itself)"`
+	// AllowExec is a hidden alias of --agent-access, and both are pointers
+	// so toArgs can tell "not given" from every real value, the same
+	// pointer trick updateCmd's fields use (see grammar's type comment).
+	// true maps to the exec level, false to manage; an explicit
+	// --agent-access always wins over this alias.
+	AllowExec   *bool   `name:"allow-exec" hidden:"" help:"alias of --agent-access exec (true) or manage (false)"`
+	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.
@@ -134,6 +160,9 @@ type updateCmd struct {
 	Set     []string  `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Unset   []string  `help:"clear a recipe param back to its manifest default"`
 	Secret  []string  `help:"set a secret recipe param"`
+	// AgentAccess is unrestricted here: only the MCP update tool may lower,
+	// never raise, a VM's level. The CLI and TUI may do either.
+	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"change what an MCP agent may do in this VM"`
 }
 
 type cloneCmd struct {
@@ -325,15 +354,32 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "create":
 		c := g.Create
 		a.VM = c.Name
-		// c.AllowExec is never ambiguous here: kong's default:"true" means
-		// the flag is always either true or false, never absent, so a fresh
-		// pointer to it is exactly the "explicitly given" value Spec wants.
-		allowExec := c.AllowExec
+		// Absent --allow-exec keeps Spec.AllowExec's own default of true
+		// (see Spec.AllowExec's doc comment); given, it also sets the
+		// access level, per --allow-exec's alias contract.
+		allowExec := true
+		if c.AllowExec != nil {
+			allowExec = *c.AllowExec
+		}
+		// An explicit --agent-access always wins over the hidden
+		// --allow-exec alias; only when it is unset does --allow-exec pick
+		// the level, and only when neither is given is the default manage.
+		access := "manage"
+		switch {
+		case c.AgentAccess != nil:
+			access = *c.AgentAccess
+		case c.AllowExec != nil:
+			access = "manage"
+			if *c.AllowExec {
+				access = "exec"
+			}
+		}
 		a.Spec = core.Spec{
 			Name: c.Name, Image: c.Image, OS: c.OS, Backend: c.Backend, Mode: c.Mode,
 			RAM: c.RAM, CPUs: c.CPUs, Disk: c.Disk, Share: c.Share,
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
-			AllowExec: &allowExec,
+			AllowExec:   &allowExec,
+			AgentAccess: access,
 		}
 		edits, err := parseParamFlags(c.Set, nil, c.Secret)
 		if err != nil {
@@ -346,7 +392,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.VM = u.VM
 		a.Patch = core.Patch{
 			RAM: u.RAM, CPUs: u.CPUs, SSHPort: u.SSHPort,
-			Disk: u.Disk, Share: u.Share,
+			Disk: u.Disk, Share: u.Share, AgentAccess: u.AgentAccess,
 		}
 		if u.Recipes != nil {
 			// The POINTER carries "was it given"; the slice it points at
@@ -362,7 +408,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			name string
 			set  bool
 		}{
-			{"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"ram", u.RAM != nil},
+			{"agent_access", u.AgentAccess != nil}, {"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"ram", u.RAM != nil},
 			{"recipes", u.Recipes != nil}, {"share", u.Share != nil}, {"ssh_port", u.SSHPort != nil},
 		} {
 			if f.set {
@@ -434,7 +480,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		if f.Clear && len(f.Pairs) > 0 {
 			return nil, usageError("forward: --clear takes no port pairs")
 		}
-		fwds, err := parseForwards(f.Pairs)
+		fwds, err := core.ParseForwards(f.Pairs)
 		if err != nil {
 			return nil, usageError("forward: " + err.Error())
 		}
@@ -537,6 +583,20 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "screenshot":
 		a.VM, a.Out = g.Screenshot.VM, g.Screenshot.Out
+
+	case "mcp serve":
+		m := g.MCP.Serve
+		a.Cmd, a.Sub = "mcp", "serve"
+		a.HTTP = m.HTTP
+		a.Limits = mcpsrv.Limits{ToolBurst: m.ToolBurst, ToolRate: m.ToolRate, Burst: m.Burst, Rate: m.Rate}
+
+	case "mcp install":
+		i := g.MCP.Install
+		a.Cmd, a.Sub = "mcp", "install"
+		a.Client, a.Project, a.Print = i.Client, i.Project, i.Print
+
+	case "mcp doctor":
+		a.Cmd, a.Sub = "mcp", "doctor"
 
 	default:
 		return nil, usageError("unknown subcommand " + path)

@@ -128,11 +128,29 @@ func TestParse(t *testing.T) {
 	}
 }
 
-// TestParseCreateAllowExecDefaultsTrue pins that an omitted --allow-exec
-// still produces Spec.AllowExec pointing at true. A nil pointer would hide
-// a kong misconfiguration that made the flag look unset. false would be
-// Go's bool zero value, the regression AllowExec's default guards against.
+// TestParseCreateAllowExecDefaultsTrue pins that a bare --allow-exec, with
+// no value, still produces Spec.AllowExec pointing at true: AllowExec is a
+// *bool with no kong default tag, so a bare flag relies on kong's ordinary
+// bool parsing, not a default value. It also maps to the exec agent_access
+// level, --allow-exec's alias contract.
 func TestParseCreateAllowExecDefaultsTrue(t *testing.T) {
+	got, err := Parse([]string{"create", "work", "--image", "alpine", "--allow-exec"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.AllowExec == nil || !*got.Spec.AllowExec {
+		t.Errorf("create --allow-exec: Spec.AllowExec = %v, want a pointer to true", got.Spec.AllowExec)
+	}
+	if got.Spec.AgentAccess != "exec" {
+		t.Errorf("create --allow-exec: Spec.AgentAccess = %q, want %q", got.Spec.AgentAccess, "exec")
+	}
+}
+
+// TestParseCreateAllowExecOmittedDefaultsToManage pins that omitting both
+// --allow-exec and --agent-access still gives Spec.AllowExec a pointer to
+// true (see Spec.AllowExec's doc comment), while Spec.AgentAccess defaults
+// to manage: only a given --allow-exec maps to exec.
+func TestParseCreateAllowExecOmittedDefaultsToManage(t *testing.T) {
 	got, err := Parse([]string{"create", "work", "--image", "alpine"})
 	if err != nil {
 		t.Fatal(err)
@@ -140,11 +158,13 @@ func TestParseCreateAllowExecDefaultsTrue(t *testing.T) {
 	if got.Spec.AllowExec == nil || !*got.Spec.AllowExec {
 		t.Errorf("create with no --allow-exec: Spec.AllowExec = %v, want a pointer to true", got.Spec.AllowExec)
 	}
+	if got.Spec.AgentAccess != "manage" {
+		t.Errorf("create with no --allow-exec: Spec.AgentAccess = %q, want %q", got.Spec.AgentAccess, "manage")
+	}
 }
 
 // TestParseCreateAllowExecFalse pins that --allow-exec=false is how a
-// caller turns it off; kong's bool default:"true" makes a bare --allow-exec
-// (no value) mean true, matching every other bool flag.
+// caller turns it off, mapping to the manage agent_access level.
 func TestParseCreateAllowExecFalse(t *testing.T) {
 	got, err := Parse([]string{"create", "work", "--image", "alpine", "--allow-exec=false"})
 	if err != nil {
@@ -152,6 +172,22 @@ func TestParseCreateAllowExecFalse(t *testing.T) {
 	}
 	if got.Spec.AllowExec == nil || *got.Spec.AllowExec {
 		t.Errorf("create --allow-exec=false: Spec.AllowExec = %v, want a pointer to false", got.Spec.AllowExec)
+	}
+	if got.Spec.AgentAccess != "manage" {
+		t.Errorf("create --allow-exec=false: Spec.AgentAccess = %q, want %q", got.Spec.AgentAccess, "manage")
+	}
+}
+
+// TestParseCreateAgentAccessWinsOverAllowExec pins that an explicit
+// --agent-access overrides the hidden --allow-exec alias, so a caller who
+// passes both is not silently downgraded by the legacy flag.
+func TestParseCreateAgentAccessWinsOverAllowExec(t *testing.T) {
+	got, err := Parse([]string{"create", "work", "--image", "alpine", "--allow-exec", "--agent-access", "observe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.AgentAccess != "observe" {
+		t.Errorf("create --allow-exec --agent-access observe: Spec.AgentAccess = %q, want %q", got.Spec.AgentAccess, "observe")
 	}
 }
 

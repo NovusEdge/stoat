@@ -97,6 +97,10 @@ type VM struct {
 	Installed bool          `json:"installed"`
 	Forwards  []PortForward `json:"forwards"`
 	AllowExec bool          `json:"allow_exec"`
+	// AgentAccess mirrors config.VM.AgentAccess: none, observe, manage or
+	// exec. Additive alongside AllowExec, which stays for existing readers;
+	// see internal/mcpsrv's access levels for who enforces it.
+	AgentAccess string `json:"agent_access,omitempty"`
 	// Display is "window" or "vnc" ("" on a broken VM, like every other field
 	// a broken vm.toml cannot supply). Emitted rather than left for a
 	// consumer to derive from mode and installed: a host with no graphical
@@ -178,21 +182,22 @@ func nonNilMap(m map[string]string) map[string]string {
 // answer it differently depending on the machine it ran on.
 func FromVM(v core.VM, graphical bool) VM {
 	return VM{
-		Name:      v.Name,
-		OS:        v.OS,
-		Mode:      v.Mode,
-		Backend:   v.Backend,
-		State:     string(v.State),
-		CPUs:      v.CPUs,
-		RAMMB:     v.RAM,
-		Disk:      v.Disk,
-		Share:     v.Share,
-		Recipes:   nonNil(v.Recipes),
-		SSHPort:   v.SSHPort,
-		SSHUser:   v.SSHUser,
-		Installed: v.Installed,
-		Forwards:  FromPortForwards(v.Forwards),
-		AllowExec: v.AllowExec,
+		Name:        v.Name,
+		OS:          v.OS,
+		Mode:        v.Mode,
+		Backend:     v.Backend,
+		State:       string(v.State),
+		CPUs:        v.CPUs,
+		RAMMB:       v.RAM,
+		Disk:        v.Disk,
+		Share:       v.Share,
+		Recipes:     nonNil(v.Recipes),
+		SSHPort:     v.SSHPort,
+		SSHUser:     v.SSHUser,
+		Installed:   v.Installed,
+		Forwards:    FromPortForwards(v.Forwards),
+		AllowExec:   v.AllowExec,
+		AgentAccess: v.AgentAccess,
 		// DisplayKind, not DisplayFor: this constructor must not go looking at
 		// PATH, which DisplayFor does once per VM it is handed.
 		Display: core.DisplayKind(v, graphical),
@@ -681,6 +686,56 @@ func FromShot(vm string, s core.Shot) Screenshot {
 	return Screenshot{VM: vm, Path: s.Path, Bytes: s.Bytes, Width: s.Width, Height: s.Height}
 }
 
+// VMList is the ls command's data and the list_vms tool's output.
+type VMList struct {
+	VMs []VM `json:"vms"`
+}
+
+// ImageList is the list_images tool's output.
+type ImageList struct {
+	Images []Image `json:"images"`
+}
+
+// RecipeCatalog is the list_recipes tool's output and the `recipes` command's
+// data: the recipes stoat can apply, filtered by OS or backend. It is not
+// RecipeList, which is `recipe list`'s data and whose entries are
+// RecipeEntry rows about provenance.
+type RecipeCatalog struct {
+	Recipes []Recipe `json:"recipes"`
+}
+
+// RecipeIssueList is the check_recipes tool's output.
+type RecipeIssueList struct {
+	Issues []RecipeIssue `json:"issues"`
+}
+
+// ApplyPlanList is the plan_recipes tool's output.
+type ApplyPlanList struct {
+	Plan []ApplyPlan `json:"plan"`
+}
+
+// LogTail is the logs tool's output.
+type LogTail struct {
+	Lines []string `json:"lines"`
+}
+
+// DoctorReport is the doctor tool's output. Healthy is false when any check
+// failed and is not itself Optional.
+type DoctorReport struct {
+	Healthy bool        `json:"healthy"`
+	Checks  []HostCheck `json:"checks"`
+}
+
+func FromDoctor(cs []core.HostCheck) DoctorReport {
+	r := DoctorReport{Healthy: true, Checks: FromHostChecks(cs)}
+	for _, c := range r.Checks {
+		if !c.OK && !c.Optional {
+			r.Healthy = false
+		}
+	}
+	return r
+}
+
 // GuestList is `guest ls` data.
 type GuestList struct {
 	Guests []Guest `json:"guests"`
@@ -689,4 +744,149 @@ type GuestList struct {
 // GuestShow is `guest show` data.
 type GuestShow struct {
 	Guest Guest `json:"guest"`
+}
+
+// SnapshotList is the snapshot and restore tools' output.
+type SnapshotList struct {
+	Snapshots []Snapshot `json:"snapshots"`
+}
+
+// ForwardList is the forward tool's output.
+type ForwardList struct {
+	Forwards []PortForward `json:"forwards"`
+}
+
+// PruneList is the prune tool's output.
+type PruneList struct {
+	Items  []PruneItem `json:"items"`
+	DryRun bool        `json:"dry_run"`
+}
+
+// WaitResult is the wait tool's output.
+type WaitResult struct {
+	VM      string `json:"vm"`
+	Until   string `json:"until"`
+	Healthy bool   `json:"healthy"`
+}
+
+// ApplyResult is what an apply left behind, so a caller does not have to
+// call vm_status to find out.
+type ApplyResult struct {
+	VM      string        `json:"vm"`
+	Recipes []RecipeState `json:"recipes_detail"`
+}
+
+func FromApplyResult(v core.VM) ApplyResult {
+	return ApplyResult{VM: v.Name, Recipes: FromVMStatus(v, false).RecipeStates}
+}
+
+// FileContent is the read_file and job_output tools' output.
+type FileContent struct {
+	Content   string `json:"content"`
+	Encoding  string `json:"encoding,omitempty"`
+	Size      int64  `json:"size"`
+	Truncated bool   `json:"truncated"`
+}
+
+// DirEntry is the list_dir and stat tools' per-file output.
+type DirEntry struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Size  int64  `json:"size"`
+	Mode  string `json:"mode"`
+	MTime int64  `json:"mtime"`
+}
+
+// DirListing is the list_dir tool's output.
+type DirListing struct {
+	Entries   []DirEntry `json:"entries"`
+	Truncated bool       `json:"truncated"`
+}
+
+// Process is one row of the ps tool's output.
+type Process struct {
+	PID     int    `json:"pid"`
+	PPID    int    `json:"ppid"`
+	User    string `json:"user"`
+	Elapsed string `json:"elapsed,omitempty"`
+	Command string `json:"command"`
+}
+
+// ProcessList is the ps tool's output.
+type ProcessList struct {
+	Processes []Process `json:"processes"`
+	Truncated bool      `json:"truncated"`
+}
+
+// CommandResult is the output of a fixed-verb in-VM tool: svc, svc_status,
+// pkg_install, useradd, write_file's chmod, exec and exec_bg's siblings.
+// Unlike ExecResult, it assumes text output; a guest verb this narrow never
+// returns binary.
+type CommandResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// CopyResult is the copy_to and copy_from tools' output.
+type CopyResult struct {
+	VM       string `json:"vm"`
+	Local    string `json:"local"`
+	Remote   string `json:"remote"`
+	ToRemote bool   `json:"to_remote"`
+}
+
+// JobStarted is the exec_bg tool's output.
+type JobStarted struct {
+	JobID string `json:"job_id"`
+	Dir   string `json:"dir"`
+}
+
+// JobStatus is the job_status tool's output.
+type JobStatus struct {
+	JobID    string `json:"job_id"`
+	State    string `json:"state"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// Job is one list_jobs row.
+type Job struct {
+	JobID   string    `json:"job_id"`
+	Argv    []string  `json:"argv"`
+	User    string    `json:"user"`
+	CWD     string    `json:"cwd,omitempty"`
+	Started time.Time `json:"started"`
+}
+
+// MCPInstall is the `mcp install` command's output.
+type MCPInstall struct {
+	Client string `json:"client"`
+	Path   string `json:"path,omitempty"`
+	JSON   string `json:"json"`
+}
+
+// MCPClient is one row of MCPDoctor.Clients: whether the named MCP client
+// has a stoat entry and whether that entry points at the binary that is
+// running. A stale entry launches a different stoat than the one that wrote
+// it, which is the failure `mcp doctor` exists to name.
+type MCPClient struct {
+	Client    string `json:"client"`
+	Path      string `json:"path,omitempty"`
+	Installed bool   `json:"installed"`
+	Command   string `json:"command,omitempty"`
+	Current   bool   `json:"current"`
+}
+
+// MCPDoctor is the `mcp doctor` command's output.
+type MCPDoctor struct {
+	Contract  int         `json:"contract"`
+	Version   string      `json:"version"`
+	Transport string      `json:"transport"`
+	Binary    string      `json:"binary"`
+	Clients   []MCPClient `json:"clients"`
+}
+
+// JobList is the list_jobs tool's output.
+type JobList struct {
+	Jobs []Job `json:"jobs"`
 }

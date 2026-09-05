@@ -105,6 +105,13 @@ type VM struct {
 	// cannot tell "false" from "not written".
 	AllowExec bool `toml:"allow_exec"`
 
+	// AgentAccess is what an MCP agent may do in this VM: none, observe,
+	// manage or exec. AllowExec stays for CLI/core callers that already read
+	// it; the MCP server gates on this field instead. Empty means no
+	// vm.toml value was ever written; core.Create fills in "manage" for a
+	// VM it creates.
+	AgentAccess string `toml:"agent_access,omitempty"`
+
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
 	Applied map[string]AppliedRecipe `toml:"applied,omitempty" comment:"written by stoat; do not edit"`
 
@@ -250,15 +257,33 @@ func (v *VM) Save() error {
 // Load reads one VM by name.
 func Load(name string) (*VM, error) {
 	dir := filepath.Join(Root(), name)
+	path := filepath.Join(dir, "vm.toml")
 	// Absent allow_exec means true; the seed survives the decode, a written
 	// false overrides it.
 	v := &VM{AllowExec: true}
-	if err := tomlx.Decode(filepath.Join(dir, "vm.toml"), v, tomlx.Warn(UnknownKeyWriter)); err != nil {
+	defined, err := tomlx.DecodeDefined(path, v, []string{"allow_exec"}, tomlx.Warn(UnknownKeyWriter))
+	if err != nil {
 		return nil, err
 	}
 	v.Dir = dir
 	v.Share = Expand(v.Share)
+	if v.AgentAccess == "" {
+		v.AgentAccess = legacyAgentAccess(defined[0], v.AllowExec)
+	}
 	return v, nil
+}
+
+// legacyAgentAccess maps a vm.toml written before agent_access existed to a
+// level. v.AllowExec is already seeded true for an absent key (the comment
+// above Load), so it alone cannot tell that case apart from an explicit
+// `allow_exec = true`; only allowExecDefined tells them apart, and only the
+// explicit case earns "exec". Everything else, including an absent key, is
+// "manage".
+func legacyAgentAccess(allowExecDefined, allowExec bool) string {
+	if allowExecDefined && allowExec {
+		return "exec"
+	}
+	return "manage"
 }
 
 // List returns every VM in the data root, sorted by name.
