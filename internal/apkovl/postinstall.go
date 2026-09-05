@@ -49,8 +49,26 @@ const extlinuxTimeoutFix = `	conf="$target/boot/extlinux.conf"
 	fi
 `
 
-// workMountFix and issueFix are stubs. Tasks 9 and 10 each replace one body
-// with the sh fragment that closes its issue.
-const workMountFix = ``
+// workMountFix repairs the installed fstab's 9p lines (issue #60).
+//
+// setup-disk writes the target's fstab from the live system's mounts, and
+// stoat's shares sit under /mnt, the same directory setup-disk mounts the
+// target on, so the work share lands as "work /work 9p ... 0 2". busybox
+// fsck then has no fsck.9p helper, and /work does not exist on the target,
+// so the guest prints a failed mount on every boot.
+//
+// awk rewrites only lines whose type field is 9p; every other line prints
+// unchanged, comments included.
+const workMountFix = `	fstab="$target/etc/fstab"
+	if [ -f "$fstab" ]; then
+		awk '$3 == "9p" { $2 = "/mnt/" $1; $5 = "0"; $6 = "0" } { print }' "$fstab" > "$fstab.stoat" &&
+			mv "$fstab.stoat" "$fstab"
+		awk '$3 == "9p" { print $2 }' "$fstab" | while read -r d; do
+			mkdir -p "$target$d"
+		done
+	fi
+`
 
+// issueFix is a stub. Task 10 replaces its body with the sh fragment that
+// closes issue #61.
 const issueFix = ``
