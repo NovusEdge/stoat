@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -260,6 +261,27 @@ func removedParams(have, want map[string]map[string]string, keep []string) map[s
 	return out
 }
 
+// filterSecrets keeps only the recipes recipes still names. project.Secrets
+// reads every recipe table under a VM's key in secrets.toml regardless of
+// which recipes the declaration currently applies, so a recipe dropped from
+// [vms.x].recipes still shows up in spec.Secrets. Handing that unfiltered to
+// Update fails manifestForVM's lookup with ErrRecipeNotApplicable, because
+// the Recipes patch has already removed the recipe from the VM's own list by
+// the time stageParamEdits validates against it.
+func filterSecrets(secrets config.Secrets, recipes []string) config.Secrets {
+	kept := make(map[string]bool, len(recipes))
+	for _, r := range recipes {
+		kept[r] = true
+	}
+	out := config.Secrets{}
+	for recipe, values := range secrets {
+		if kept[recipe] {
+			out[recipe] = values
+		}
+	}
+	return out
+}
+
 // AttachKeys fills VM.Key from p for every VM p declares. A VM no declaration
 // names keeps an empty Key, which is what tells ls it is a global VM.
 func AttachKeys(vms []VM, p *project.Project) {
@@ -318,8 +340,16 @@ func Reconcile(p *project.Project, key string) (Reconciled, error) {
 		return Reconciled{}, err
 	}
 	r.Drift = drift
-	if len(drift) == 0 && len(spec.Secrets) == 0 {
-		return r, nil
+
+	secrets := filterSecrets(spec.Secrets, spec.Recipes)
+	if len(drift) == 0 {
+		stored, err := config.LoadSecrets(v.Dir)
+		if err != nil {
+			return Reconciled{}, err
+		}
+		if reflect.DeepEqual(secrets, stored) {
+			return r, nil
+		}
 	}
 
 	patch := Patch{}
@@ -348,7 +378,7 @@ func Reconcile(p *project.Project, key string) (Reconciled, error) {
 			patch.AgentAccess = &access
 		}
 	}
-	patch.Secrets = spec.Secrets
+	patch.Secrets = secrets
 	if _, err := Update(spec.Name, patch); err != nil {
 		return Reconciled{}, err
 	}
