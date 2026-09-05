@@ -9,7 +9,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.5
 	charm.land/log/v2 v2.0.0
 	github.com/BurntSushi/toml v1.6.0
-	github.com/alecthomas/kong v1.16.0
+	github.com/alecthomas/kong v1.16.1
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/modelcontextprotocol/go-sdk v1.7.0
