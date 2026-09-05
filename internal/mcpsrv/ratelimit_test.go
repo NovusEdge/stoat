@@ -2,6 +2,7 @@ package mcpsrv
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -74,9 +75,11 @@ func TestRateLimiter(t *testing.T) {
 			}
 		}
 		// Nine shared tokens must be left: one spent by the call that
-		// succeeded, none by the five refusals.
+		// succeeded, none by the five refusals. Each cold call uses its own
+		// tool name so its own per-tool bucket (ToolBurst 1) never refuses
+		// it; only the shared bucket is under test here.
 		for i := range 9 {
-			if err := l.check("cold", start); err != nil {
+			if err := l.check(fmt.Sprintf("cold-%d", i), start); err != nil {
 				t.Fatalf("cold call %d refused, so a refusal spent a shared token: %v", i, err)
 			}
 		}
