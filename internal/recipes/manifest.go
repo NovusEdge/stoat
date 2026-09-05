@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/tomlx"
@@ -14,6 +15,7 @@ import (
 // (docs/recipe-spec-v2.md): a directory holding one manifest and one or
 // more shell scripts, replacing the old flat "<name>.<os>.sh" files.
 type Manifest struct {
+	Schema      int               `toml:"schema"`
 	Name        string            `toml:"name"`
 	Description string            `toml:"description"`
 	Version     string            `toml:"version"`
@@ -27,9 +29,40 @@ type Manifest struct {
 	Reboot      bool              `toml:"reboot"`  // guest needs a reboot after this recipe to take effect
 	Runtime     string            `toml:"runtime"` // "sh" | "python3", the interpreter the script runs under
 	Depends     []string          `toml:"depends"` // recipe names that must run before this one
+	Params      map[string]Param  `toml:"params"`
+	Outputs     map[string]string `toml:"outputs"`
+	Health      Health            `toml:"health"`
 
 	dir string // recipe directory, set by ParseManifest; scripts resolve against it
 }
+
+// Param is one declared input of a schema-3 recipe.
+type Param struct {
+	Name     string   `toml:"name"`
+	Type     string   `toml:"type"`
+	Default  string   `toml:"default"`
+	Help     string   `toml:"help"`
+	Required bool     `toml:"required"`
+	Values   []string `toml:"values"`
+}
+
+// Output is one declared result of a recipe.
+type Output struct {
+	Name string
+	Help string
+}
+
+// Health is a recipe's health-check command.
+type Health struct {
+	Check   string `toml:"check"`
+	Timeout string `toml:"timeout"`
+}
+
+// Duration returns the configured health timeout.
+func (h Health) Duration() time.Duration { return 0 }
+
+// SecretNames returns the names of secret parameters.
+func (m Manifest) SecretNames() []string { return nil }
 
 var validStages = map[string]bool{"install": true, "provision": true}
 
