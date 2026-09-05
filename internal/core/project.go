@@ -143,9 +143,19 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		return nil, fmt.Errorf("%w: %s: image changed (%s -> %s); run stoat rm %s and stoat up",
 			ErrImmutableDeclaration, key, imageName(was), img.id(), key)
 	}
-	if (spec.Disk != "" || v.Disk != "") && spec.Disk != v.Disk {
+	declaredDisk := spec.Disk
+	if declaredDisk == "" {
+		mode, err := modeFor(img.backend, "")
+		if err != nil {
+			return nil, err
+		}
+		if mode != "live" {
+			declaredDisk = DefaultDisk
+		}
+	}
+	if declaredDisk != v.Disk {
 		return nil, fmt.Errorf("%w: %s: disk changed (%s -> %s); run stoat rm %s and stoat up",
-			ErrImmutableDeclaration, key, v.Disk, spec.Disk, key)
+			ErrImmutableDeclaration, key, v.Disk, declaredDisk, key)
 	}
 
 	var out []Drift
