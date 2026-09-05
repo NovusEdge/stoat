@@ -197,6 +197,108 @@ func writeProvisionLog(v *config.VM, content string) error {
 	return os.WriteFile(v.ProvisionLogPath(), []byte(content), 0o644)
 }
 
+// The cloud-init backend never writes a host apply log (recipe-system-fixes
+// design, §3): its recipes run from cloud-init's own runcmd, and
+// discoverCloudInitApplied records completion straight into v.Applied over
+// ssh. waitApplied's log check can therefore never see "done" for a cloud
+// VM; UntilApplied must resolve from v.Applied instead.
+func TestWaitAppliedCloudResolvesWhenAllRecipesRecorded(t *testing.T) {
+	root(t)
+	v := &config.VM{
+		Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2310,
+		Recipes: []string{"docker"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := Wait(ctx, "work", UntilApplied); err != nil {
+		t.Fatalf("Wait = %v, want nil (docker already recorded applied, no host log exists)", err)
+	}
+	if elapsed := time.Since(start); elapsed > pollInterval {
+		t.Errorf("took %s, want near-instant (already applied)", elapsed)
+	}
+}
+
+// A recipe missing from v.Applied must keep Wait blocked; UntilApplied
+// cannot resolve on a partial match (e.g. any recorded recipe) for a cloud
+// VM with more than one recipe configured.
+func TestWaitAppliedCloudKeepsWaitingWhileRecipeNotYetApplied(t *testing.T) {
+	root(t)
+	v := &config.VM{
+		Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2311,
+		Recipes: []string{"docker", "tailscale"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := Wait(ctx, "work", UntilApplied)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded (tailscale not yet applied)", err)
+	}
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Errorf("took %s, want it to actually wait out the 300ms deadline", elapsed)
+	}
+}
+
+// waitApplied must reload vm.toml on every poll: the discovery that
+// populates v.Applied for a cloud VM runs in a separate process (apply),
+// so the copy Wait first loaded goes stale the moment that process saves.
+func TestWaitAppliedCloudPollsUntilVMTomlRecordsRemainingRecipe(t *testing.T) {
+	root(t)
+	v := &config.VM{
+		Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2312,
+		Recipes: []string{"docker", "tailscale"},
+		Applied: map[string]config.AppliedRecipe{"docker": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		time.Sleep(2 * pollInterval)
+		v.Applied["tailscale"] = config.AppliedRecipe{}
+		_ = v.Save()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := Wait(ctx, "work", UntilApplied); err != nil {
+		t.Fatalf("Wait did not observe vm.toml recording tailscale applied: %v", err)
+	}
+}
+
+// Recording a recipe applied in vm.toml must not short-circuit the ssh
+// path: it stays log-based, so a stale or missing apply log still blocks
+// Wait even when v.Applied already lists every recipe.
+func TestWaitAppliedSSHIgnoresAppliedMapWithoutLogDone(t *testing.T) {
+	root(t)
+	v := &config.VM{
+		Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2313,
+		Recipes: []string{"devtools.alpine.sh"},
+		Applied: map[string]config.AppliedRecipe{"devtools.alpine.sh": {}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	err := Wait(ctx, "work", UntilApplied)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded (no apply log written yet)", err)
+	}
+}
+
 func TestWaitStoppedPollsUntilProcessExits(t *testing.T) {
 	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2305}
