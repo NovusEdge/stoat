@@ -24,6 +24,9 @@ type Lock struct {
 // LockEntry is one recipe's pin. Ref is the tag or branch the user asked for.
 // Commit is the full sha that ref resolved to when the lock was written.
 type LockEntry struct {
+	// Name is the resolved recipe name returned by add/update. It is not
+	// persisted in stoat.lock because the map key already carries it.
+	Name   string `toml:"-"`
 	Source string `toml:"source"`
 	Ref    string `toml:"ref"`
 	Commit string `toml:"commit"`
