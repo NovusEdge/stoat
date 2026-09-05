@@ -45,6 +45,32 @@ func TestRefreshIndexClonesAndLoads(t *testing.T) {
 	}
 }
 
+// The default index is this repository's own index.toml, so the file at the
+// repo root must load through the same shallow clone and Reject decode a
+// user gets, with no entries required.
+func TestRepoRootIndexLoads(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "index.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	t.Setenv("STOAT_INDEX", testutil.GitRepo(t, map[string]string{"index.toml": string(body)}))
+	if err := RefreshIndex(true); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx.Schema != indexSchema {
+		t.Fatalf("schema = %d, want %d", idx.Schema, indexSchema)
+	}
+	if !strings.HasPrefix(DefaultIndexURL, "https://github.com/NovusEdge/stoat") {
+		t.Fatalf("DefaultIndexURL = %q, want this repository", DefaultIndexURL)
+	}
+}
+
 func TestRefreshIndexIsSkippedWhenFresh(t *testing.T) {
 	indexRoot(t)
 	if err := RefreshIndex(true); err != nil {
