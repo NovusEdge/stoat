@@ -43,6 +43,10 @@ type nameIn struct {
 	Name string `json:"name" jsonschema:"name to look up"`
 }
 
+type searchIn struct {
+	Term string `json:"term" jsonschema:"text to match against recipe names and descriptions"`
+}
+
 func (s *srv) registerRead(server *mcp.Server) {
 	register(server, "list_vms", classRead,
 		"List every VM stoat manages, one entry per VM: name, OS, mode, state, resources, disk, share, ssh port, agent access level, recipes, and port forwards. A VM whose vm.toml failed to parse is listed with state broken and an error message rather than hidden. Read-only: it touches no VM and changes nothing on the host.",
@@ -176,6 +180,19 @@ func (s *srv) registerRead(server *mcp.Server) {
 				return wire.RecipeSchema{}, err
 			}
 			return wire.FromRecipeSchema(r), nil
+		})
+
+	register(server, "search_recipes", classRead,
+		"Search the recipe index by name and description. It refreshes the local index copy when that copy is older than 24 hours. It installs nothing. Read-only.",
+		func(ctx context.Context, in searchIn) (wire.RecipeSearch, error) {
+			if err := checkFlagFree([]string{in.Term}, "term"); err != nil {
+				return wire.RecipeSearch{}, err
+			}
+			rs, err := core.SearchRecipes(in.Term)
+			if err != nil {
+				return wire.RecipeSearch{}, err
+			}
+			return wire.RecipeSearch{Recipes: wire.FromIndexEntries(rs)}, nil
 		})
 }
 

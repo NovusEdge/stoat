@@ -72,3 +72,29 @@ func TestRecipeSchemaListsParams(t *testing.T) {
 		t.Fatalf("recipe_schema(docker) params missing user default dev: %s", raw)
 	}
 }
+
+func TestSearchRecipesRefusesAFlagTerm(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if res := callTool(t, "search_recipes", map[string]any{"term": "--refresh"}); !res.IsError {
+		t.Fatal("search_recipes accepted a term that reads as a flag")
+	}
+}
+
+func TestVMStatusReportsRecipes(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	res := callTool(t, "vm_status", map[string]any{"vm": "dev"})
+	if res.IsError {
+		t.Fatalf("vm_status failed: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out struct {
+		RecipeStates []any `json:"recipes_detail"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.RecipeStates == nil {
+		t.Fatalf("recipes_detail is null, want an empty list: %s", raw)
+	}
+}

@@ -74,11 +74,4 @@ var forbiddenInputFields = []string{"share", "base", "iso", "console_password", 
 
 // pending names tools a later task registers. Every entry is removed by the
 // task that adds the tool; Task 18 asserts the list is empty.
-//
-// Tasks 7, 10, 11, 12 and 15 own the rest of this chunk's tools and are gone
-// from this map already: their tests assert real registration, which does
-// not exist yet, so TestEveryTableToolIsRegistered fails for them until
-// their implementer lands.
-var pending = map[string]string{
-	"search_recipes": "Task 14",
-}
+var pending = map[string]string{}

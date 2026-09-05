@@ -13,6 +13,12 @@ import (
 // ErrLockOutOfDate identifies a project declaration that is not pinned.
 var ErrLockOutOfDate = errors.New("stoat.lock is out of date")
 
+// SearchRecipes matches the curated index by name and description. It
+// refreshes the local index copy when that copy is older than a day.
+func SearchRecipes(term string) ([]recipes.IndexEntry, error) {
+	return recipes.SearchIndex(term)
+}
+
 // SyncRecipes validates the current project pin and repairs its cache only
 // when a lock entry is missing or no longer matches the active checkout.
 // Global recipe state is not touched by an apply in a non-project directory.
