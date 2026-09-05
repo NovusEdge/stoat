@@ -2,6 +2,7 @@ package sshx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -42,8 +44,16 @@ func collectOutputs(ctx context.Context, v *config.VM, name string, m recipes.Ma
 	path := OutputDir + "/" + name
 	quoted := shellPath(path)
 	script := fmt.Sprintf("cat %s 2>/dev/null; rm -f %s", quoted, quoted)
-	out, err := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-c", script})...)...).Output()
+	// ssh joins its remote argv with spaces and the login shell re-splits
+	// it, so a multi-word script must travel as one already-quoted argv
+	// element or only its first word ends up under the escalation prefix.
+	remote := []string{"sh -c " + guest.ShQuote(script)}
+	out, err := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, remote)...)...).Output()
 	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
 		return err
 	}
 	values, undeclared := ParseOutputs(m.Outputs, redactString(string(out), secrets))
