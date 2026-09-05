@@ -557,8 +557,167 @@ func StaleLock(s Scope) (string, bool, error) {
 	return "", false, nil
 }
 
-func Update(Scope, []string) ([]LockEntry, error) {
-	return nil, errors.New("remote recipe update is not implemented")
+// Update stages every requested ref, validates every resulting tree, and
+// publishes the cache and lock together. A dirty or unreadable checkout is
+// never replaced implicitly.
+func Update(s Scope, names []string) ([]LockEntry, error) {
+	unlock, err := lockScope(s)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unlock() }()
+	lock, err := s.Lock()
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		for name := range lock.Recipes {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+	}
+	stageRoot, err := os.MkdirTemp(filepath.Dir(s.CachePath), ".stoat-recipe-update-*")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(stageRoot) }()
+	artifacts := make([]artifact, 0, len(names)+1)
+	result := make([]LockEntry, 0, len(names))
+	for _, name := range names {
+		entry, ok := lock.Recipes[name]
+		if !ok {
+			return nil, fmt.Errorf("%s is not a remote recipe in this scope", name)
+		}
+		dir := filepath.Join(s.CachePath, name)
+		dirty, dirtyErr := gitx.Dirty(dir)
+		if dirtyErr != nil {
+			return nil, dirtyErr
+		}
+		if dirty {
+			return nil, fmt.Errorf("%s: %w; copy it to a local recipe first", name, ErrDirty)
+		}
+		stage := filepath.Join(stageRoot, name)
+		if err := gitx.Clone(entry.Source, entry.Ref, stage); err != nil {
+			return nil, refError(entry.Source, entry.Ref, err)
+		}
+		if err := ValidateTree(stage, name); err != nil {
+			return nil, err
+		}
+		commit, err := gitx.RevParse(stage, "HEAD")
+		if err != nil {
+			return nil, err
+		}
+		entry.Name = name
+		entry.Commit = commit
+		persistEntry := entry
+		persistEntry.Name = ""
+		lock.Recipes[name] = persistEntry
+		result = append(result, entry)
+		artifacts = append(artifacts, artifact{target: dir, stage: stage, isDir: true})
+	}
+	lockArtifact, lockCleanup, err := prepareLockArtifact(s, lock, stageRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lockCleanup() }()
+	artifacts = append(artifacts, lockArtifact)
+	if err := publishArtifacts(artifacts); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
-func Remove(Scope, string) error { return errors.New("remote recipe remove is not implemented") }
+// Remove stages a lock, declaration, and cache removal before publishing any
+// of them. A malformed declaration or persistence failure leaves all three
+// active artifacts in place.
+func Remove(s Scope, name string) error {
+	unlock, err := lockScope(s)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unlock() }()
+	lock, err := s.Lock()
+	if err != nil {
+		return err
+	}
+	if _, ok := lock.Recipes[name]; !ok {
+		return fmt.Errorf("%s is not a remote recipe in this scope", name)
+	}
+	delete(lock.Recipes, name)
+	stageRoot, err := os.MkdirTemp(filepath.Dir(s.CachePath), ".stoat-recipe-remove-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stageRoot) }()
+	lockArtifact, lockCleanup, err := prepareLockArtifact(s, lock, stageRoot)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lockCleanup() }()
+	artifacts := []artifact{lockArtifact, {target: filepath.Join(s.CachePath, name), remove: true, isDir: true}}
+	if s.Name == "project" {
+		projectArtifact, projectCleanup, err := prepareProjectWithout(s, name, stageRoot)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = projectCleanup() }()
+		artifacts = append(artifacts, projectArtifact)
+	}
+	return publishArtifacts(artifacts)
+}
+
+func prepareLockArtifact(s Scope, lock Lock, stageRoot string) (artifact, func() error, error) {
+	stageDir, err := os.MkdirTemp(filepath.Dir(s.LockPath), ".stoat-lock-stage-*")
+	if err != nil {
+		return artifact{}, func() error { return nil }, err
+	}
+	cleanup := func() error { return os.RemoveAll(stageDir) }
+	stage := filepath.Join(stageDir, "stoat.lock")
+	if err := SaveLock(stage, lock); err != nil {
+		_ = cleanup()
+		return artifact{}, func() error { return nil }, err
+	}
+	if mode, err := existingFileMode(s.LockPath); err != nil {
+		_ = cleanup()
+		return artifact{}, func() error { return nil }, err
+	} else if mode != 0 {
+		if err := os.Chmod(stage, mode); err != nil {
+			_ = cleanup()
+			return artifact{}, func() error { return nil }, err
+		}
+	}
+	return artifact{target: s.LockPath, stage: stage}, cleanup, nil
+}
+
+func prepareProjectWithout(s Scope, name, stageRoot string) (artifact, func() error, error) {
+	var project map[string]any
+	if err := tomlx.Decode(s.ConfigPath, &project, tomlx.Warn(io.Discard)); err != nil {
+		return artifact{}, func() error { return nil }, err
+	}
+	raw, ok := project["recipes"].(map[string]any)
+	if !ok {
+		return artifact{}, func() error { return nil }, fmt.Errorf("%s: recipes must be a table", ProjectFile)
+	}
+	delete(raw, name)
+	project["recipes"] = raw
+	stageDir, err := os.MkdirTemp(filepath.Dir(s.ConfigPath), ".stoat-project-stage-*")
+	if err != nil {
+		return artifact{}, func() error { return nil }, err
+	}
+	cleanup := func() error { return os.RemoveAll(stageDir) }
+	stage := filepath.Join(stageDir, "stoat.toml")
+	if err := tomlx.Encode(stage, project); err != nil {
+		_ = cleanup()
+		return artifact{}, func() error { return nil }, err
+	}
+	if mode, err := existingFileMode(s.ConfigPath); err != nil {
+		_ = cleanup()
+		return artifact{}, func() error { return nil }, err
+	} else if mode != 0 {
+		if err := os.Chmod(stage, mode); err != nil {
+			_ = cleanup()
+			return artifact{}, func() error { return nil }, err
+		}
+	}
+	return artifact{target: s.ConfigPath, stage: stage}, cleanup, nil
+}
