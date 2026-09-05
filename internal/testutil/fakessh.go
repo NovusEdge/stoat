@@ -43,7 +43,10 @@ func FakeSSH(t *testing.T, script string) *SSHCalls {
 	logPath := filepath.Join(dir, "calls.log")
 	body := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
-		"remote=\"${@: -1}\"\n" +
+		// "${@: -1}" is bash-only; dash (Ubuntu's /bin/sh) rejects it with
+		// "Bad substitution". This loop is the POSIX way to read the last
+		// positional argument.
+		"for remote do :; done\n" +
 		"eval \"set -- $remote\"\n" +
 		script + "\n"
 	binPath := filepath.Join(dir, "ssh")
