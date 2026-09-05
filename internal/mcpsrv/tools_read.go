@@ -54,6 +54,7 @@ func (s *srv) registerRead(server *mcp.Server) {
 			if err != nil {
 				return wire.VMList{}, err
 			}
+			core.AttachKeys(vms, s.proj)
 			return wire.VMList{VMs: wire.FromVMs(vms, core.GraphicalSession())}, nil
 		})
 
