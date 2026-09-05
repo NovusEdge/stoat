@@ -424,16 +424,14 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 // svcArgv renders the guest file's [svc] template and passes the service
 // name as $1. The template is the constant and the name is a positional
 // argument, so no tool input reaches the guest shell as syntax.
-//
-// A guest stoat does not know still gets a template: systemctl is the init
-// system most guests run, the same "assume the most common answer" rule
-// sshx.escalate applies for an unrecognized OS's privilege escalation.
 func svcArgv(v *config.VM, action, name string) ([]string, error) {
-	tmpl := "systemctl " + action + " {name}"
-	if os, ok := guest.Lookup(v.OS); ok {
-		if t := os.Svc.Get(action); t != "" {
-			tmpl = t
-		}
+	os, ok := guest.Lookup(v.OS)
+	if !ok {
+		return nil, fmt.Errorf("unknown guest %q; run stoat guest ls", v.OS)
+	}
+	tmpl := os.Svc.Get(action)
+	if tmpl == "" {
+		return nil, fmt.Errorf("guest %q declares no svc.%s", v.OS, action)
 	}
 	return []string{"sh", "-c", renderVerb(tmpl), "stoat_svc", name}, nil
 }
