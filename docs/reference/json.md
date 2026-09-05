@@ -1,12 +1,17 @@
 # JSON Output Reference
 
-`--json` turns any subcommand into a machine interface. It exists because
-stoat's MCP server is a separate Python process that reaches `internal/core`
-only by running this binary and reading its output, so everything a caller
-would otherwise regex, guess at, or reconstruct is defined here instead.
+`--json` turns any subcommand into a machine interface, so everything a
+caller would otherwise regex, guess at, or reconstruct is defined here
+instead.
 
 This document is the contract. The human-facing CLI is documented in
 [cli.md](cli.md).
+
+`stoat mcp` serves the same contract over MCP from inside the same binary.
+Every tool's output type in `internal/mcpsrv` is a `wire` struct, the same Go
+type the matching `--json` command emits, so the two cannot drift: the MCP
+schema is generated from these types, not maintained separately. See
+`internal/mcpsrv/table_test.go` for the tool table.
 
 ```
 stoat --json ls
@@ -190,7 +195,7 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "share":"/home/u/src","recipes":["xfce"],
              "ssh_port":2200,"ssh_user":"stoat","installed":false,
              "forwards":[{"host_port":8080,"guest_port":80}],
-             "allow_exec":true,"display":"vnc",
+             "allow_exec":true,"agent_access":"manage","display":"vnc",
              "error":"only on a broken VM"}
 
 VMStatus    {"name":"work",...VM fields...,"health":"ok","recipes_detail":[
@@ -276,6 +281,12 @@ does not need to special-case an old VM. It is a recorded fact, not an
 enforced one: `stoat exec`/`cp` do not check it, so a consumer that must
 refuse exec on a VM with `allow_exec:false` (the MCP server) has to check it
 itself before calling.
+
+`agent_access` supersedes `allow_exec` with four levels (`none`, `observe`,
+`manage`, `exec`) instead of a boolean; each level includes every tool the
+ones below it allow. `allow_exec:true` loads as `exec`, `false` as `manage`,
+so an old VM keeps its meaning under the new field. `stoat mcp`'s
+`requireAccess` is what enforces it; `stoat exec`/`cp` still do not.
 
 `Snapshot.size_display` and `created_display` are named that way because they
 are qemu's own formatted table output. They are opaque. Do not parse them.
@@ -526,3 +537,9 @@ contents of any `*_display` field, or the absence of fields it does not know.
 a list of `{path, scope}` in search order, and `recipes` became a list of
 `RecipeEntry` objects rather than names. A consumer that read
 `data.recipes[]` as strings reads `data.recipes[].name` instead.
+
+The same version also adds `agent_access` to `VM`, additive alongside
+`allow_exec`, and moves the MCP server from a separate Python process into
+`stoat mcp` in this binary. Neither change removes or repurposes a field, so
+neither bumped the version on its own; they are noted here only because they
+landed in the same branch as the `recipe list` change.
