@@ -822,3 +822,11 @@ type CommandResult struct {
 	Stderr   string `json:"stderr"`
 	ExitCode int    `json:"exit_code"`
 }
+
+// CopyResult is the copy_to and copy_from tools' output.
+type CopyResult struct {
+	VM       string `json:"vm"`
+	Local    string `json:"local"`
+	Remote   string `json:"remote"`
+	ToRemote bool   `json:"to_remote"`
+}

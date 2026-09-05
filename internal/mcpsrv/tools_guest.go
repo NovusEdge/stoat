@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -11,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -38,6 +41,40 @@ type tailLogIn struct {
 	Path  string `json:"path,omitempty" jsonschema:"absolute path of a log file to tail instead of a unit"`
 	Lines int    `json:"lines,omitempty" jsonschema:"how many lines to return, capped at 2000"`
 }
+
+type writeFileIn struct {
+	VM      string `json:"vm" jsonschema:"name of the VM"`
+	Path    string `json:"path" jsonschema:"absolute path in the guest; the parent directory must already exist"`
+	Content string `json:"content" jsonschema:"the file's new content"`
+	Mode    string `json:"mode,omitempty" jsonschema:"octal file mode such as 0644, which is the default"`
+	Append  bool   `json:"append,omitempty" jsonschema:"append instead of replacing the file"`
+}
+
+type copyIn struct {
+	VM     string `json:"vm" jsonschema:"name of the VM"`
+	Local  string `json:"local" jsonschema:"host path, which must resolve under this VM's own shared directory"`
+	Remote string `json:"remote" jsonschema:"absolute path in the guest"`
+}
+
+type pkgInstallIn struct {
+	VM       string   `json:"vm" jsonschema:"name of the VM"`
+	Packages []string `json:"packages" jsonschema:"package names for the guest's own package manager"`
+}
+
+type svcIn struct {
+	VM     string `json:"vm" jsonschema:"name of the VM"`
+	Name   string `json:"name" jsonschema:"service name"`
+	Action string `json:"action" jsonschema:"enable, start, stop or restart"`
+}
+
+type useraddIn struct {
+	VM   string `json:"vm" jsonschema:"name of the VM"`
+	Name string `json:"name" jsonschema:"account name to create"`
+}
+
+var svcActions = []string{"enable", "start", "stop", "restart"}
+
+var modeRE = regexp.MustCompile(`^0?[0-7]{3}$`)
 
 // readSize clamps a caller's max_bytes. 0 means the caller did not set a
 // limit, which reads as "the full clamp", not "the smallest possible read".
@@ -270,6 +307,117 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 		})
 }
 
+func (s *srv) registerGuestWrite(server *mcp.Server) {
+	register(server, "write_file", classExec,
+		"Write a file inside a VM's guest filesystem over ssh. The path must be absolute and its parent directory must already exist. mode defaults to 0644. With append=true the content is added to the end instead of replacing the file. It needs agent_access manage or higher, and it refuses when the VM is not running. It overwrites whatever was there, and that is not reversible from here. It reaches outside this process.",
+		func(ctx context.Context, in writeFileIn) (wire.CommandResult, error) {
+			v, err := guestVM(in.VM, LevelManage)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			path, err := checkGuestPath(in.Path)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			mode := in.Mode
+			if mode == "" {
+				mode = "0644"
+			}
+			if !modeRE.MatchString(mode) {
+				return wire.CommandResult{}, fmt.Errorf("invalid mode %q: three or four octal digits", mode)
+			}
+			// tee rather than a redirect: a redirect is shell syntax the
+			// tool would have to build around the path.
+			argv := []string{"tee", path}
+			if in.Append {
+				argv = []string{"tee", "-a", path}
+			}
+			_, errb, code, err := sshx.Run(ctx, v, true, argv, strings.NewReader(in.Content))
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			if code != 0 {
+				return wire.CommandResult{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
+			}
+			return runToResult(ctx, v, true, []string{"chmod", mode, path})
+		})
+
+	register(server, "copy_to", classExec,
+		"Copy a file from the host into a VM's guest filesystem. The host path must resolve under that VM's own shared directory, and anything else is refused before stoat runs. It needs agent_access manage or higher. It overwrites whatever was at the guest destination, and that is not reversible from here. It reaches outside this process.",
+		s.copyHandler(true))
+
+	register(server, "copy_from", classExec,
+		"Copy a file out of a VM's guest filesystem to the host. The host destination must resolve under that VM's own shared directory, and anything else is refused before stoat runs. It needs agent_access manage or higher. It overwrites whatever was at the host destination, and that is not reversible from here. It reaches outside this process.",
+		s.copyHandler(false))
+
+	register(server, "pkg_install", classExec,
+		"Install packages in a VM with the guest's own package manager, taken from the guest definition. It refreshes the package index first. Package names are passed as positional arguments and a name that reads as a flag is refused. It needs agent_access manage or higher. It reaches outside this process, since the package manager downloads.",
+		func(ctx context.Context, in pkgInstallIn) (wire.CommandResult, error) {
+			v, err := guestVM(in.VM, LevelManage)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			if len(in.Packages) == 0 {
+				return wire.CommandResult{}, fmt.Errorf("packages is required")
+			}
+			if err := checkFlagFree(in.Packages, "packages"); err != nil {
+				return wire.CommandResult{}, err
+			}
+			os, ok := guest.Lookup(v.OS)
+			if !ok {
+				return wire.CommandResult{}, fmt.Errorf("unknown guest %q; run stoat guest ls", v.OS)
+			}
+			// pkg.setup is the distro's own index refresh and carries no
+			// tool input, so running it as the guest file wrote it is safe.
+			if _, _, code, err := sshx.Run(ctx, v, true, []string{"sh", "-c", os.Pkg.Setup}, nil); err != nil {
+				return wire.CommandResult{}, err
+			} else if code != 0 {
+				return wire.CommandResult{}, fmt.Errorf("%s: package index refresh exited %d", v.Name, code)
+			}
+			return runToResult(ctx, v, true, append(append([]string{}, os.Pkg.Install...), in.Packages...))
+		})
+
+	register(server, "svc", classExec,
+		"Enable, start, stop or restart a service in a VM, using the init system's own verb from the guest definition. The service name is passed as a positional argument, never as shell syntax. It needs agent_access manage or higher.",
+		func(ctx context.Context, in svcIn) (wire.CommandResult, error) {
+			v, err := guestVM(in.VM, LevelManage)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			if !slices.Contains(svcActions, in.Action) {
+				return wire.CommandResult{}, fmt.Errorf("invalid action %q: one of enable, start, stop, restart", in.Action)
+			}
+			name, err := checkSvcName(in.Name)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			argv, err := svcArgv(v, in.Action, name)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			return runToResult(ctx, v, true, argv)
+		})
+
+	register(server, "useradd", classExec,
+		"Create an account in a VM, using the guest definition's own useradd verb. The account name is passed as a positional argument. It needs agent_access manage or higher.",
+		func(ctx context.Context, in useraddIn) (wire.CommandResult, error) {
+			v, err := guestVM(in.VM, LevelManage)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			name, err := checkSvcName(in.Name)
+			if err != nil {
+				return wire.CommandResult{}, err
+			}
+			o, ok := guest.Lookup(v.OS)
+			if !ok || o.Cmd["useradd"] == "" {
+				return wire.CommandResult{}, fmt.Errorf("guest %q declares no cmd.useradd", v.OS)
+			}
+			return runToResult(ctx, v, true,
+				[]string{"sh", "-c", renderVerb(o.Cmd["useradd"]), "stoat_useradd", name})
+		})
+}
+
 // svcArgv renders the guest file's [svc] template and passes the service
 // name as $1. The template is the constant and the name is a positional
 // argument, so no tool input reaches the guest shell as syntax.
@@ -358,4 +506,38 @@ func parsePS(raw []byte) []wire.Process {
 		out = append(out, p)
 	}
 	return out
+}
+
+// copyHandler builds copy_to and copy_from. They differ only in direction,
+// and both confine the host side to the VM's own shared directory.
+func (s *srv) copyHandler(toRemote bool) func(context.Context, copyIn) (wire.CopyResult, error) {
+	return func(ctx context.Context, in copyIn) (wire.CopyResult, error) {
+		name, err := checkVMName(in.VM)
+		if err != nil {
+			return wire.CopyResult{}, err
+		}
+		if err := requireAccess(name, LevelManage); err != nil {
+			return wire.CopyResult{}, err
+		}
+		local, err := checkHostPath(in.Local, name)
+		if err != nil {
+			return wire.CopyResult{}, err
+		}
+		remote, err := checkGuestPath(in.Remote)
+		if err != nil {
+			return wire.CopyResult{}, err
+		}
+		if toRemote {
+			err = core.CopyTo(ctx, name, local, remote)
+		} else {
+			err = core.CopyFrom(ctx, name, remote, local)
+		}
+		if err != nil {
+			return wire.CopyResult{}, err
+		}
+		// The result echoes the host path this server authorised. The 9p
+		// mapped-xattr defence and this guard are independent, and neither
+		// covers the other.
+		return wire.CopyResult{VM: name, Local: local, Remote: remote, ToRemote: toRemote}, nil
+	}
 }
