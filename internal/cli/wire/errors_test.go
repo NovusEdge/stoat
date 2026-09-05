@@ -1,7 +1,9 @@
 package wire
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -11,6 +13,7 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 func TestMapErrorEveryCoreSentinel(t *testing.T) {
@@ -48,6 +51,76 @@ func TestMapErrorEveryCoreSentinel(t *testing.T) {
 				t.Errorf("message = %q, want %q", got.Message, tt.err.Error())
 			}
 		})
+	}
+}
+
+func TestMapErrorLockOutOfDateUsesADedicatedCode(t *testing.T) {
+	err := fmt.Errorf("%w; run stoat recipe lock", core.ErrLockOutOfDate)
+	got := MapError(err)
+	if got == nil {
+		t.Fatal("MapError returned nil for ErrLockOutOfDate")
+	}
+	if got.Code != CodeLockOutOfDate {
+		t.Errorf("code = %q, want %q", got.Code, CodeLockOutOfDate)
+	}
+	if got.Message != err.Error() {
+		t.Errorf("message = %q, want %q", got.Message, err.Error())
+	}
+}
+
+func TestLockOutOfDateCodeSurvivesPublicJSONResultBoundary(t *testing.T) {
+	var output bytes.Buffer
+	err := fmt.Errorf("%w: project recipes are stale", core.ErrLockOutOfDate)
+	if writeErr := NewEmitter(&output).ResultErr("recipe sync", MapError(err)); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	var result struct {
+		Type  string `json:"type"`
+		OK    bool   `json:"ok"`
+		Error struct {
+			Code    Code   `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &result); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if result.Type != TypeResult || result.OK {
+		t.Fatalf("result boundary = type %q, ok %v; want result, false", result.Type, result.OK)
+	}
+	if result.Error.Code != CodeLockOutOfDate || result.Error.Message != err.Error() {
+		t.Fatalf("JSON error = %+v, want code %q and original message", result.Error, CodeLockOutOfDate)
+	}
+}
+
+// TestRejectedRecipeTreeSurvivesTheJSONResultBoundary pins the envelope a
+// user sees for a mismatched recipe.toml: invalid_spec, not the internal
+// escape hatch (recipes.ErrInvalidTree previously carried no sentinel).
+func TestRejectedRecipeTreeSurvivesTheJSONResultBoundary(t *testing.T) {
+	err := fmt.Errorf("%w: source.q494eV: recipe.toml is named %q", recipes.ErrInvalidTree, "tailscale")
+	var output bytes.Buffer
+	if writeErr := NewEmitter(&output).ResultErr("recipe", MapError(err)); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	var result struct {
+		Type  string `json:"type"`
+		OK    bool   `json:"ok"`
+		Error struct {
+			Code    Code   `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &result); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if result.OK {
+		t.Fatal("result.ok = true, want false")
+	}
+	if result.Error.Code != CodeInvalidSpec {
+		t.Fatalf("error.code = %q, want %q", result.Error.Code, CodeInvalidSpec)
+	}
+	if result.Error.Message != err.Error() {
+		t.Fatalf("error.message = %q, want %q", result.Error.Message, err.Error())
 	}
 }
 

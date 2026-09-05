@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 import textwrap
+import threading
+import time
 
 import pytest
 
@@ -144,6 +147,128 @@ def test_blank_lines_are_skipped(client):
 def test_missing_data_field_is_an_empty_dict(client):
     data = client.run("no-data")
     assert data == {}
+
+
+def test_timeout_covers_open_stdout_and_cleans_owned_descendants(tmp_path):
+    pid_path = tmp_path / "child.pid"
+    parent_pid_path = tmp_path / "parent.pid"
+    child_code = textwrap.dedent(
+        f"""
+        import signal
+        import time
+        # The group leader exits on TERM; this owned descendant requires KILL.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        time.sleep(2.0)
+        """
+    )
+    fake = tmp_path / "fake-stoat-timeout"
+    fake.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import subprocess
+            import sys
+            import time
+
+            args = sys.argv[1:]
+            cmd = args[1] if len(args) > 1 else args[0]
+            if cmd != "hold-open":
+                raise SystemExit(2)
+            with open({str(parent_pid_path)!r}, "w", encoding="ascii") as pid_file:
+                pid_file.write(str(os.getpid()))
+            child = subprocess.Popen([sys.executable, "-c", {child_code!r}])
+            with open({str(pid_path)!r}, "w", encoding="ascii") as pid_file:
+                pid_file.write(str(child.pid))
+            print(json.dumps({{"v": 3, "type": "progress", "cmd": cmd, "data": {{"stage": "started"}}}}), flush=True)
+            time.sleep(1.0)
+            """
+        )
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    seen: list[tuple[str, dict]] = []
+    event_seen = threading.Event()
+    outcome: dict[str, object] = {}
+
+    def on_event(kind: str, payload: dict) -> None:
+        seen.append((kind, payload))
+        event_seen.set()
+
+    def invoke() -> None:
+        started = time.monotonic()
+        try:
+            Client(binary=str(fake), default_timeout=10.0).run(
+                "hold-open",
+                timeout=0.25,
+                on_event=on_event,
+            )
+        except BaseException as exc:  # capture the worker result for the assertion below
+            outcome["error"] = exc
+        finally:
+            outcome["elapsed"] = time.monotonic() - started
+
+    worker = threading.Thread(target=invoke, daemon=True)
+    worker.start()
+
+    def process_state(pid: int) -> str | None:
+        try:
+            with open(f"/proc/{pid}/stat", encoding="ascii") as stat_file:
+                fields = stat_file.read().split()
+        except FileNotFoundError:
+            return None
+        return fields[2] if len(fields) > 2 else None
+
+    def cleanup_owned_processes() -> None:
+        pids: list[int] = []
+        for path in (parent_pid_path, pid_path):
+            if path.exists():
+                try:
+                    pids.append(int(path.read_text(encoding="ascii")))
+                except ValueError:
+                    pass
+        for pid in pids:
+            if process_state(pid) not in (None, "Z"):
+                os.kill(pid, 9)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and any(process_state(pid) not in (None, "Z") for pid in pids):
+            time.sleep(0.01)
+        worker.join(timeout=2.0)
+
+    try:
+        assert event_seen.wait(timeout=2.0), "fixture did not reach its startup handshake"
+        worker.join(timeout=3.0)
+        assert not worker.is_alive(), "Client.run worker did not return within its bounded fixture lifetime"
+        assert isinstance(outcome.get("error"), subprocess.TimeoutExpired)
+        assert float(outcome["elapsed"]) < 1.5
+        assert seen == [("progress", {"stage": "started"})]
+
+        child_pid = int(pid_path.read_text(encoding="ascii"))
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and process_state(child_pid) not in (None, "Z"):
+            time.sleep(0.01)
+        if process_state(child_pid) not in (None, "Z"):
+            pytest.fail(f"owned child process {child_pid} survived Client.run timeout")
+    finally:
+        cleanup_owned_processes()
+        assert not worker.is_alive(), "owned subprocess cleanup left Client.run blocked"
+
+
+def test_check_contract_accepts_the_remote_recipe_v3_handshake(tmp_path):
+    path = tmp_path / "fake-stoat"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            print('{"v":3,"type":"result","cmd":"version","ok":true,"data":{"contract":3,"version":"x"}}')
+            """
+        )
+    )
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+    c = Client(binary=str(path), default_timeout=10.0)
+    assert c.check_contract() == 3
 
 
 def test_check_contract_raises_on_mismatch(tmp_path):

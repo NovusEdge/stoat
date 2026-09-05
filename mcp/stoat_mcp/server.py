@@ -34,6 +34,7 @@ from typing import Any, Literal, TypeVar
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
+from . import guards
 from .client import Client, argv_for_bool
 from .errors import ContractMismatch, GuardRejection, StoatCrashed, StoatError
 from .guards import (
@@ -215,6 +216,21 @@ def list_images() -> dict[str, Any]:
 @_guarded("list_recipes")
 def list_recipes(os: str | None = None, backend: str | None = None) -> dict[str, Any]:
     argv = ["recipes", *_flag("os", os), *_flag("backend", backend)]
+    return get_client().run(*argv)
+
+
+@mcp.tool(
+    name="search_recipes",
+    description="Search the curated recipe index by name or description. Read-only.",
+    annotations={"readOnlyHint": True, "destructiveHint": False},
+)
+@_guarded("search_recipes")
+def search_recipes(term: str = "") -> dict[str, Any]:
+    argv = ["recipe", "search"]
+    if term.startswith("-"):
+        argv.extend(("--", term))
+    elif term:
+        argv.append(term)
     return get_client().run(*argv)
 
 
@@ -439,6 +455,53 @@ def update(
     if "recipes" in patch:
         argv += _recipes_flag(patch["recipes"])  # type: ignore[arg-type]
     return get_client().run(*argv)
+
+
+@mcp.tool(
+    name="add_recipe",
+    description="Install a recipe from the curated index and pin its commit.",
+    annotations={"readOnlyHint": False, "destructiveHint": False},
+)
+@_guarded("add_recipe")
+def add_recipe(name: str, ref: str | None = None) -> dict[str, Any]:
+    if ref is None:
+        spec = guards.check_index_name(name)
+    else:
+        base = guards.check_index_name(name)
+        if "@" in base:
+            raise GuardRejection("add_recipe name and ref must be separate")
+        spec = guards.check_index_name(f"{base}@{ref}")
+    return get_client().run("recipe", "add", spec, "-y")
+
+
+@mcp.tool(
+    name="update_recipe",
+    description="Fetch a remote recipe's ref again and repin it, or update every remote recipe.",
+    annotations={"readOnlyHint": False, "destructiveHint": False},
+)
+@_guarded("update_recipe")
+def update_recipe(name: str | None = None) -> dict[str, Any]:
+    argv = ["recipe", "update"]
+    if name is not None:
+        argv.append(_plain_recipe_name(name, "update_recipe"))
+    return get_client().run(*argv)
+
+
+@mcp.tool(
+    name="remove_recipe",
+    description="Remove a remote recipe, its lock entry and its cache directory.",
+    annotations={"readOnlyHint": False, "destructiveHint": True},
+)
+@_guarded("remove_recipe")
+def remove_recipe(name: str) -> dict[str, Any]:
+    return get_client().run("recipe", "rm", _plain_recipe_name(name, "remove_recipe"), "-y")
+
+
+def _plain_recipe_name(name: str, tool: str) -> str:
+    checked = guards.check_index_name(name)
+    if "@" in checked:
+        raise GuardRejection(f"{tool} takes a plain recipe name")
+    return checked
 
 
 @mcp.tool(

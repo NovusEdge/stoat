@@ -116,18 +116,3 @@ func New(name, osName, _ string) (string, error) {
 
 	return recipeDir, nil
 }
-
-// Installed lists every recipe in the data root, whether bundled or written
-// by the user. Unlike List it does not filter by os: this is "what is on
-// disk", for a human looking for something to edit.
-func Installed() ([]string, error) {
-	manifests, err := ListManifests()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, len(manifests))
-	for i, m := range manifests {
-		out[i] = m.Name
-	}
-	return out, nil
-}

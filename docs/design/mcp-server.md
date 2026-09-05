@@ -114,6 +114,7 @@ is enforced regardless of what the client does.
 | `check_image_id` | Catalog IDs only. An absolute or relative path is rejected: §7.1 #4. |
 | `rate_limit` | A token bucket per tool, and a second one shared by every tool. Per-tool alone let a caller burst `capacity` times across each of ~20 tools. The MCP spec makes rate limiting a server `MUST`. |
 | `check_flag_free` | Values splatted into argv as positionals (`forward` pairs, `check_recipes` names) must not start with `-`. `forward(pairs=["--clear"])` otherwise reached kong as the clear flag. |
+| `check_index_name` | `add_recipe` takes an index name with an optional `@ref`; a URL, path separator in the plain name, dot segment, leading dash, or malformed ref is refused before it reaches the CLI. A valid slash-containing branch ref after `@` is allowed. `update_recipe` and `remove_recipe` take plain names. |
 
 **Never exposed as tools at all** (§7.1): `share` as any parameter, BYO image
 paths, `recipe new`, `ssh-command`, and the global (no VM) `logs`. These are
@@ -129,9 +130,9 @@ may ignore them.
 
 | Class | Tools | `readOnlyHint` | `destructiveHint` |
 |---|---|---|---|
-| Read-only | `list_vms`, `vm_status`, `list_images`, `list_recipes`, `check_recipes`, `logs`, `doctor`, `plan_recipes` | true | false |
-| Mutating | `create`, `start`, `stop`, `apply_recipes`, `update`, `clone`, `snapshot`, `forward`, `wait` | false | false |
-| Destructive | `destroy`, `prune`, `restore` | false | true |
+| Read-only | `list_vms`, `vm_status`, `list_images`, `list_recipes`, `check_recipes`, `logs`, `search_recipes`, `doctor`, `plan_recipes` | true | false |
+| Mutating | `create`, `start`, `stop`, `apply_recipes`, `update`, `add_recipe`, `update_recipe`, `clone`, `snapshot`, `forward`, `wait` | false | false |
+| Destructive | `destroy`, `prune`, `remove_recipe`, `restore` | false | true |
 | Execution | `exec`, `copy_to`, `copy_from` | false | true, `openWorldHint` true |
 
 `plan_recipes` is `apply --dry-run`. It exists so an agent can read what an
@@ -145,6 +146,13 @@ and only another snapshot taken later undoes that.
 `apply_recipes` runs arbitrary scripts inside the guest, so it checks
 `allow_exec` exactly as `exec` does. A VM created with `--allow-exec=false`
 refuses both.
+
+`search_recipes` and `add_recipe` use the curated index. `add_recipe` accepts an
+index name and an optional tag or branch ref, including slash-containing branch
+refs. It never accepts a repository URL. `update_recipe` and `remove_recipe`
+address an existing remote pin by plain name, including one originally added
+from a URL. `remove_recipe` has no `force` argument and therefore refuses while
+a VM still lists the recipe.
 
 Every schema sets `additionalProperties: false`, so an unexpected parameter is
 rejected rather than silently ignored (OWASP MCP guidance).

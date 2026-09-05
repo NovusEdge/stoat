@@ -8,6 +8,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // DTOs, not json tags on core types (§3.1). Reasons, in order of weight:
@@ -33,6 +34,10 @@ import (
 // nonNil turns a nil slice into an empty, non-nil one so it marshals as []
 // rather than null (§3.1, §6: "MAY rely on [] for an empty list, never
 // null").
+// NonNil is nonNil, exported so cli callers building a wire slice by hand
+// (not through a From* constructor) route through the same guarantee.
+func NonNil[T any](s []T) []T { return nonNil(s) }
+
 func nonNil[T any](s []T) []T {
 	if s == nil {
 		return []T{}
@@ -287,14 +292,15 @@ func FromSnapshots(ss []core.Snapshot) []Snapshot {
 
 // HostCheck is core.HostCheck for the wire.
 type HostCheck struct {
-	Name   string   `json:"name"`
-	OK     bool     `json:"ok"`
-	Detail string   `json:"detail"`
-	Fix    []string `json:"fix"`
+	Name     string   `json:"name"`
+	OK       bool     `json:"ok"`
+	Detail   string   `json:"detail"`
+	Fix      []string `json:"fix"`
+	Optional bool     `json:"optional"`
 }
 
 func FromHostCheck(c core.HostCheck) HostCheck {
-	return HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: nonNil(c.Fix)}
+	return HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: nonNil(c.Fix), Optional: c.Optional}
 }
 
 func FromHostChecks(cs []core.HostCheck) []HostCheck {
@@ -303,6 +309,75 @@ func FromHostChecks(cs []core.HostCheck) []HostCheck {
 		out[i] = FromHostCheck(c)
 	}
 	return nonNil(out)
+}
+
+// RecipeEntry is one row of `recipe list`: the recipe, its source scope, and
+// the commit pinned by that scope.
+type RecipeEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Scope       string `json:"scope"`
+	Source      string `json:"source"`
+	Ref         string `json:"ref"`
+	Commit      string `json:"commit"`
+}
+
+// IndexEntry is one result of `recipe search`.
+type IndexEntry struct {
+	Name        string   `json:"name"`
+	Source      string   `json:"source"`
+	Description string   `json:"description"`
+	OS          []string `json:"os"`
+}
+
+func FromIndexEntry(e recipes.IndexEntry) IndexEntry {
+	return IndexEntry{Name: e.Name, Source: e.Source, Description: e.Description, OS: nonNil(e.OS)}
+}
+
+func FromIndexEntries(es []recipes.IndexEntry) []IndexEntry {
+	out := make([]IndexEntry, len(es))
+	for i, e := range es {
+		out[i] = FromIndexEntry(e)
+	}
+	return nonNil(out)
+}
+
+// RecipeList is the data of `recipe list`.
+type RecipeList struct {
+	Roots   []RecipeRoot  `json:"roots"`
+	Recipes []RecipeEntry `json:"recipes"`
+}
+
+// RecipeRoot is one recipe search root and its scope label.
+type RecipeRoot struct {
+	Path  string `json:"path"`
+	Scope string `json:"scope"`
+}
+
+// RecipeAdded is one resolved remote recipe pin.
+type RecipeAdded struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Ref    string `json:"ref"`
+	Commit string `json:"commit"`
+	Scope  string `json:"scope"`
+}
+
+// RecipeRemoved is the minimal result of `recipe rm`: removal has no pin
+// metadata to report after the lock and cache are gone.
+type RecipeRemoved struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+
+// RecipeBatch is the data returned by lock, sync, and update.
+type RecipeBatch struct {
+	Recipes []RecipeAdded `json:"recipes"`
+}
+
+// RecipeSearch is the data returned by recipe search.
+type RecipeSearch struct {
+	Recipes []IndexEntry `json:"recipes"`
 }
 
 // PruneItem is core.PruneItem for the wire. Class is already the wire value

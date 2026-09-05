@@ -1,0 +1,139 @@
+package recipes
+
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/novusedge/stoat/internal/config"
+)
+
+// Root is one directory searched for recipes, with the scope a name found
+// there reports.
+type Root struct {
+	Path  string
+	Scope string // "project", "global", "local" or "bundled"
+}
+
+// Roots lists every recipe directory in shadow order: the project cache first,
+// then the home directory three times, once per label it can carry.
+//
+// The global cache and the bundled set share ~/.stoat/recipes, so the label
+// comes from the bookkeeping beside them rather than from the path: the home
+// lock names the remote recipes and .manifest names stoat's own copies.
+//
+// ScopeFor fails when the working directory cannot be read (os.Getwd) or
+// stat'd for stoat.toml. Surfacing that error keeps a broken cwd from
+// silently downgrading a project recipe to the global one.
+func Roots() ([]Root, error) {
+	var roots []Root
+	s, err := ScopeFor(false)
+	if err != nil {
+		return nil, err
+	}
+	if s.Name == "project" {
+		roots = append(roots, Root{Path: s.CachePath, Scope: "project"})
+	}
+	home := dir()
+	return append(roots,
+		Root{Path: home, Scope: "global"},
+		Root{Path: home, Scope: "local"},
+		Root{Path: home, Scope: "bundled"},
+	), nil
+}
+
+// ResolvePath finds name's recipe directory and the scope it belongs to. The
+// first root that both holds the directory and owns the name wins.
+func ResolvePath(name string) (path, scope string, ok bool, err error) {
+	locks, err := lockRecipeScopes(false)
+	if err != nil {
+		return "", "", false, err
+	}
+	path, scope, ok, readErr := resolvePath(name)
+	unlockErr := unlockRecipeScopes(locks)
+	if readErr != nil {
+		return "", "", false, readErr
+	}
+	if unlockErr != nil {
+		return "", "", false, unlockErr
+	}
+	return path, scope, ok, nil
+}
+
+func resolvePath(name string) (path, scope string, ok bool, err error) {
+	if err := validateRecipeName(name); err != nil {
+		return "", "", false, err
+	}
+	roots, err := Roots()
+	if err != nil {
+		return "", "", false, err
+	}
+	for _, root := range roots {
+		d, targetErr := recipeTarget(root.Path, name)
+		if targetErr != nil {
+			return "", "", false, targetErr
+		}
+		if _, statErr := os.Stat(filepath.Join(d, "recipe.toml")); statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return "", "", false, statErr
+		}
+		owned, ownsErr := owns(root, name)
+		if ownsErr != nil {
+			return "", "", false, ownsErr
+		}
+		if owned {
+			return d, root.Scope, true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
+// ScopeOf returns name's scope, or "" when no root holds it.
+func ScopeOf(name string) (string, error) {
+	locks, err := lockRecipeScopes(false)
+	if err != nil {
+		return "", err
+	}
+	_, scope, _, readErr := resolvePath(name)
+	unlockErr := unlockRecipeScopes(locks)
+	if readErr != nil {
+		return "", readErr
+	}
+	return scope, unlockErr
+}
+
+// owns reports whether a name found under root carries root's label.
+func owns(root Root, name string) (bool, error) {
+	switch root.Scope {
+	case "project":
+		return true, nil
+	case "global":
+		return homeLockHas(name)
+	case "bundled":
+		return bundledHas(name), nil
+	default: // local
+		remote, err := homeLockHas(name)
+		if err != nil {
+			return false, err
+		}
+		return !remote && !bundledHas(name), nil
+	}
+}
+
+// homeLockHas reports whether the home lock pins name.
+func homeLockHas(name string) (bool, error) {
+	lock, err := LoadLock(filepath.Join(config.Root(), "stoat.lock"))
+	if err != nil {
+		return false, err
+	}
+	_, ok := lock.Recipes[name]
+	return ok, nil
+}
+
+// bundledHas reports whether stoat wrote name from the embedded set. The
+// manifest is keyed by the path relative to the recipes root.
+func bundledHas(name string) bool {
+	_, ok := readManifest()[name+"/recipe.toml"]
+	return ok
+}

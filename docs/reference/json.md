@@ -10,7 +10,7 @@ This document is the contract. The human-facing CLI is documented in
 
 ```
 stoat --json ls
-{"v":2,"type":"result","cmd":"ls","ok":true,"data":{"vms":[...]}}
+{"v":3,"type":"result","cmd":"ls","ok":true,"data":{"vms":[...]}}
 ```
 
 ## The consumer contract, in one page
@@ -106,6 +106,8 @@ bump the contract version. Do not write code that requires them.
 | `invalid_spec` | the request itself is malformed |
 | `image_not_downloaded` | the image exists in the catalog but not on disk |
 | `recipe_not_applicable` | a named recipe cannot run on this VM |
+| `in_use` | a recipe is still listed by one or more VMs |
+| `git_required` | a recipe operation needs Git on `PATH` |
 | `not_running` | the operation needs a running VM |
 | `already_running` | the operation needs a stopped VM |
 | `no_disk` | the VM has no qcow2 (a live VM has none) |
@@ -131,6 +133,7 @@ bump the contract version. Do not write code that requires them.
 | `canceled` | the context was cancelled |
 | `usage` | a bad flag, a missing argument, an unknown subcommand |
 | `confirmation_required` | a destructive command was run without `-y` |
+| `lock_out_of_date` | a project declaration is not pinned in `stoat.lock` |
 | `internal` | anything unanticipated; the escape hatch |
 
 **Codes are only ever added.** Never renamed, never repurposed, never removed.
@@ -202,7 +205,7 @@ Snapshot    {"tag":"clean","vm_state":true,"size_display":"203 MiB",
              "created_display":"2026-08-04 12:00:00"}
 
 Check       {"name":"qemu-img","ok":false,"detail":"not found",
-             "fix":["sudo","pacman","-S","qemu-img"]}
+             "fix":["sudo","pacman","-S","qemu-img"],"optional":false}
 
 PruneItem   {"class":"orphaned_image","path":"/home/u/.stoat/isos/old.iso"}
 
@@ -218,6 +221,21 @@ RecipeParam {"name":"channel","type":"enum","required":false,
              "default":"stable","values":["stable","test"],"help":"..."}
 RecipeOutput {"name":"socket","help":"path of the socket"}
 RecipeHealth {"check":"docker info","timeout":"30s"}
+
+RecipeEntry {"name":"tailscale","description":"join a tailnet on boot",
+             "scope":"global","source":"https://github.com/x/stoat-tailscale",
+             "ref":"v1.2","commit":"9f3c1e2"}
+
+RecipeRoot  {"path":"/home/u/.stoat/recipes","scope":"global"}
+
+RecipeAdded {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
+             "ref":"v1.2","commit":"9f3c1e2d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d",
+             "scope":"global"}
+
+RecipeRemoved {"name":"tailscale","scope":"global"}
+
+IndexEntry  {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
+             "description":"join a tailnet on boot","os":["alpine"]}
 
 RecipeIssue {"name":"docker","reason":"docker is not offered to debian/cloudinit"}
 
@@ -235,6 +253,14 @@ Guest       {"name":"fedora","init":"systemd","shell":"/bin/bash",
              "cmd":{},"backend":{"cloudinit":{"skip_9p":false}},
              "source":"bundled"}
 ```
+
+`RecipeEntry` has `name`, `description`, `scope`, `source`, `ref`, and
+`commit`. `scope` is one of `bundled`, `local`, `global`, or `project`; only
+`global` and `project` entries carry `source`, `ref`, and the seven-character
+commit prefix. `RecipeRoot` identifies each search root with `path` and
+`scope`. `RecipeAdded` uses the same remote pin fields for add, lock, sync, and
+update results, with the full resolved commit. `RecipeRemoved` contains only
+the name and scope.
 
 `state` is one of `stopped`, `running`, `broken`. `error` appears only on a
 broken VM.
@@ -350,26 +376,22 @@ so a leak fails the build rather than shipping.
 | `check-recipes` | `{"applicable":false,"issues":[RecipeIssue,...]}` |
 | `guest ls` | `{"guests":[Guest,...]}` |
 | `guest show` | `{"guest":Guest}` |
-| `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
+| `recipe list` | `{"roots":[RecipeRoot,...],"recipes":[RecipeEntry,...]}` |
 | `recipe show` | `{"recipe":RecipeSchema}` |
-| `recipe new` | `{"path":"/home/u/.stoat/recipes/foo"}` |
+| `recipe new` | `{"path":"/home/u/.stoat/recipes/foo/"}` |
+| `recipe add` | `{"name":"tailscale","source":"...","ref":"v1.2","commit":"9f3c1e2d4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d","scope":"global"}` |
+| `recipe lock` | `{"recipes":[RecipeAdded,...]}` |
+| `recipe sync` | `{"recipes":[RecipeAdded,...]}` |
+| `recipe update` | `{"recipes":[RecipeAdded,...]}` |
+| `recipe rm` | `{"name":"tailscale","scope":"global"}` |
+| `recipe search` | `{"recipes":[IndexEntry,...]}` |
 | `screenshot` | `{"vm":"work","path":"/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png","bytes":48213,"width":1280,"height":800}` |
 | `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |
 | `logs <vm>` | `{"vm":"work","which":"console","lines":[...]}` |
 | `doctor` | `{"healthy":false,"checks":[Check,...]}` |
-| `version` | `{"version":"1.2.3","contract":2}` |
+| `version` | `{"version":"1.2.3","contract":3}` |
 | `help` | `{"usage":"..."}` |
 | `ssh` | **refused**, see below |
-
-Both `recipe` subcommands report `"cmd":"recipe"`, not `"cmd":"recipe list"`,
-and both `guest` subcommands report `"cmd":"guest"`. Distinguish them by which
-fields `data` carries.
-
-`recipe list` is "every file in the recipes directory", which is not the same
-as "every recipe you can use": it currently includes the `.bak` files the
-one-time manifest upgrade left behind, and those are not applicable to any VM.
-Use `recipes` (which filters by OS and backend) to find something a VM can
-actually run; use `recipe list` only to find a recipe directory to inspect.
 
 `get` returns `{"vm":VMStatus}`: `VMStatus` embeds the VM fields directly;
 only the outer get result has the `vm` member. `recipes` remains the compatible
@@ -381,6 +403,15 @@ string list, while `recipes_detail` adds stored per-recipe state. `health` is th
 `recipe show` and `recipes` use the same `RecipeSchema` projection. Parameters
 and outputs are named arrays sorted by name. A recipe without a health check
 has `health:null`; all list fields are `[]`, never `null`.
+
+All `recipe` subcommands report `"cmd":"recipe"`, not the full subcommand
+path, and all `guest` subcommands report `"cmd":"guest"`. Distinguish them by
+which fields `data` carries.
+
+`recipe list` reports every valid manifest in shadow order. Each row names its
+scope (`bundled`, `local`, `global`, or `project`); only remote `global` and
+`project` rows carry source, ref, and the seven-character commit prefix. The
+`roots` list gives the search order and the scope label for each root.
 
 Fields worth knowing about:
 
@@ -432,9 +463,9 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 --dry-run` emits none: it computes the plan host-side and runs nothing.
 
 ```
-{"v":2,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":41943040,"total":62914560,"percent":66}}
-{"v":2,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":62914560,"total":62914560,"percent":100}}
-{"v":2,"type":"result","cmd":"pull","ok":true,"data":{"id":"alpine-virt","downloaded":true,"verified":true,"checksum_available":true}}
+{"v":3,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":41943040,"total":62914560,"percent":66}}
+{"v":3,"type":"progress","cmd":"pull","data":{"id":"alpine-virt","done":62914560,"total":62914560,"percent":100}}
+{"v":3,"type":"result","cmd":"pull","ok":true,"data":{"id":"alpine-virt","downloaded":true,"verified":true,"checksum_available":true}}
 ```
 
 `progress` fires only when the percentage changes, not per read.
@@ -443,8 +474,8 @@ faking one would break the exactly-one-result guarantee everywhere. Use
 a `stage` event at each recipe boundary:
 
 ```
-{"v":2,"type":"stage","cmd":"apply","data":{"recipe":"xfce"}}
-{"v":2,"type":"log","cmd":"apply","data":{"line":"+ apk add xfce4"}}
+{"v":3,"type":"stage","cmd":"apply","data":{"recipe":"xfce"}}
+{"v":3,"type":"log","cmd":"apply","data":{"line":"+ apk add xfce4"}}
 ```
 
 The stage boundaries are real, read out of the markers the provisioner already
@@ -455,7 +486,7 @@ streaming into "silent until exit".
 
 ## Versioning
 
-`"v"` is an integer **contract** version, not the build version. It is `2`.
+`"v"` is an integer **contract** version, not the build version. It is `3`.
 
 It bumps only for a removal or a meaning change: a field deleted, a unit
 changed, an error code split or repurposed, or `result` ceasing to be last.
@@ -490,3 +521,8 @@ A consumer may rely on:
 
 A consumer may **not** rely on: field order, the exact text of `message`, the
 contents of any `*_display` field, or the absence of fields it does not know.
+
+**v3.** `recipe list` changed shape for remote recipes. `dir` became `roots`,
+a list of `{path, scope}` in search order, and `recipes` became a list of
+`RecipeEntry` objects rather than names. A consumer that read
+`data.recipes[]` as strings reads `data.recipes[].name` instead.

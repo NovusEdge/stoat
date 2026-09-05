@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -246,22 +245,8 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if v.State == core.StateRunning {
 		return a.failMsg(stdout, stderr, core.ErrAlreadyRunning, a.VM+" is running; stop it first")
 	}
-	if !a.Yes {
-		if a.JSON {
-			// --json never prompts (§1): an enforcement boundary a process can
-			// cross by answering a prompt is not a boundary.
-			return a.fail(stdout, stderr, fmt.Errorf("%w: %s", wire.ErrConfirmationRequired, a.VM))
-		}
-		if a.Quiet {
-			fmt.Fprintln(stderr, "stoat: rm: refusing to delete without -y in non-interactive mode")
-			return ExitFail
-		}
-		fmt.Fprintf(stdout, "delete VM %s? [y/N] ", a.VM)
-		line, _ := bufio.NewReader(stdin).ReadString('\n')
-		if strings.ToLower(strings.TrimSpace(line)) != "y" {
-			fmt.Fprintln(stdout, "aborted")
-			return ExitFail
-		}
+	if ok, code := confirm(a, stdin, stdout, stderr, "delete VM "+a.VM+"?"); !ok {
+		return code
 	}
 	if err := core.Destroy(a.VM); err != nil {
 		// Same race as runDown: the State check above refuses a running VM

@@ -31,7 +31,7 @@ func TestRunChecksAllMissing(t *testing.T) {
 	for _, c := range checks {
 		names = append(names, c.Name)
 	}
-	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "/dev/kvm"}
+	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "git", "/dev/kvm"}
 	if len(names) != len(want) {
 		t.Fatalf("got %d checks %v, want %d %v", len(names), names, len(want), want)
 	}
@@ -41,7 +41,7 @@ func TestRunChecksAllMissing(t *testing.T) {
 		}
 	}
 
-	for _, c := range checks[:4] {
+	for _, c := range checks[:5] {
 		if c.OK {
 			t.Errorf("%s: OK with an empty PATH", c.Name)
 		}
@@ -53,6 +53,12 @@ func TestRunChecksAllMissing(t *testing.T) {
 		}
 		if !strings.HasPrefix(c.Fix[0], "sudo pacman") {
 			t.Errorf("%s: Fix = %v, want an arch command", c.Name, c.Fix)
+		}
+		if c.Name == "git" && !c.Optional {
+			t.Errorf("%s: Optional = false, want true", c.Name)
+		}
+		if c.Name != "git" && c.Optional {
+			t.Errorf("%s: Optional = true, want false", c.Name)
 		}
 	}
 }
@@ -111,6 +117,27 @@ func TestRunChecksUnknownDistroHasNoCommand(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestRunChecksReportsGitAsOptionalWithDistroFix(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	checks := RunChecks(DistroArch)
+	for _, c := range checks {
+		if c.Name != "git" {
+			continue
+		}
+		if !c.Optional {
+			t.Fatal("git is required by recipe commands but must be optional for host readiness")
+		}
+		if c.OK {
+			t.Fatal("git unexpectedly found with an empty PATH")
+		}
+		if got := strings.Join(c.Fix, " "); !strings.Contains(got, "git") || !strings.Contains(got, "pacman") {
+			t.Fatalf("git fix = %v, want an actionable Arch install command", c.Fix)
+		}
+		return
+	}
+	t.Fatal("RunChecks omitted the optional git check")
 }
 
 func TestKVMCheckAt(t *testing.T) {
@@ -187,5 +214,17 @@ func TestProblems(t *testing.T) {
 	got := Problems(cs)
 	if len(got) != 2 || got[0].Name != "b" || got[1].Name != "d" {
 		t.Errorf("Problems() = %+v, want the two failures b and d", got)
+	}
+}
+
+func TestProblemsExcludesOptionalFailuresFromReadiness(t *testing.T) {
+	cs := []Check{
+		{Name: "git", OK: false, Optional: true, Fix: []string{"install git"}},
+		{Name: "qemu-img", OK: false, Fix: []string{"install qemu-img"}},
+		{Name: "ssh", OK: true, Optional: false},
+	}
+	got := Problems(cs)
+	if len(got) != 1 || got[0].Name != "qemu-img" {
+		t.Fatalf("Problems() = %+v, want only required qemu-img failure", got)
 	}
 }

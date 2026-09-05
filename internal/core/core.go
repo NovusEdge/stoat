@@ -30,6 +30,7 @@ var (
 	ErrNameTaken          = errors.New("name already taken")
 	ErrImageNotDownloaded = errors.New("image not downloaded")
 	ErrInvalidSpec        = errors.New("invalid spec")
+	ErrInUse              = errors.New("in use")
 	// ErrRecipeNotApplicable: a recipe was named that this VM's OS and
 	// backend cannot run. Typed because a caller retrying with a corrected
 	// name needs to tell this apart from a malformed spec.

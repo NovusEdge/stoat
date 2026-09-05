@@ -111,26 +111,6 @@ func TestNewRejectsBadNames(t *testing.T) {
 	}
 }
 
-func TestInstalledListsRecipes(t *testing.T) {
-	t.Setenv("STOAT_HOME", t.TempDir())
-	if names, err := Installed(); err != nil || len(names) != 0 {
-		t.Errorf("Installed() on a fresh root = %v, %v; want empty", names, err)
-	}
-	if err := Install(); err != nil {
-		t.Fatal(err)
-	}
-	names, err := Installed()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Should list recipe names, not filenames
-	for _, want := range []string{"xfce", "docker", "devtools", "tailscale"} {
-		if !contains(names, want) {
-			t.Errorf("Installed() missing %q: %v", want, names)
-		}
-	}
-}
-
 func contains(s []string, want string) bool {
 	for _, v := range s {
 		if v == want {

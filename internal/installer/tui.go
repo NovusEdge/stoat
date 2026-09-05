@@ -371,9 +371,29 @@ func (m Model) checkTable() string {
 		StyleFunc(func(_, _ int) lipgloss.Style { return cellStyle })
 
 	for _, c := range m.checks {
-		t.Row("   "+status(c), c.Name, c.Detail)
+		t.Row("   "+status(c), checkLabel(c), c.Detail)
 	}
 	return t.Render()
+}
+
+// repairProblems is the display subset of failed checks. hostcheck.Problems
+// intentionally excludes optional failures for readiness aggregation, while
+// the installer must still tell the user how to repair every missing tool.
+func repairProblems(cs []Check) []Check {
+	var out []Check
+	for _, c := range cs {
+		if !c.OK {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func checkLabel(c Check) string {
+	if c.Optional {
+		return c.Name + " (optional)"
+	}
+	return c.Name
 }
 
 func (m Model) ruleWidth() int {
@@ -473,11 +493,11 @@ func (m Model) done() string {
 		}
 	}
 
-	if problems := Problems(m.checks); len(problems) > 0 {
+	if problems := repairProblems(m.checks); len(problems) > 0 {
 		lines = append(lines, "", "before your first VM:")
 		seen := map[string]bool{}
 		for _, c := range problems {
-			lines = append(lines, "", "  "+warnStyle.Render(c.Name)+": "+c.Detail)
+			lines = append(lines, "", "  "+warnStyle.Render(checkLabel(c))+": "+c.Detail)
 			for _, f := range c.Fix {
 				// Fixes are deduplicated here, not in Check. Two checks
 				// (qemu-img, qemu-system-x86_64) can share one package. The

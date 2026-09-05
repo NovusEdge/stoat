@@ -222,9 +222,15 @@ type checkRecipesCmd struct {
 }
 
 type recipeCmd struct {
-	List recipeListCmd `cmd:"" help:"list installed recipes and where they live"`
-	New  recipeNewCmd  `cmd:"" help:"scaffold a recipe in the recipes directory"`
-	Show recipeShowCmd `cmd:"" help:"print one recipe's params, outputs and health check"`
+	List   recipeListCmd   `cmd:"" aliases:"ls" help:"list recipes with their scope and pinned commit"`
+	New    recipeNewCmd    `cmd:"" help:"scaffold a recipe in the recipes directory"`
+	Show   recipeShowCmd   `cmd:"" help:"print one recipe's params, outputs and health check"`
+	Add    recipeAddCmd    `cmd:"" help:"install a recipe from the index or a git URL"`
+	Lock   recipeLockCmd   `cmd:"" help:"resolve every declaration to a commit"`
+	Sync   recipeSyncCmd   `cmd:"" help:"make the recipe cache match the lock"`
+	Update recipeUpdateCmd `cmd:"" help:"fetch a recipe's ref again and repin it"`
+	RM     recipeRmCmd     `cmd:"" name:"rm" help:"remove a remote recipe"`
+	Search recipeSearchCmd `cmd:"" help:"search the recipe index"`
 }
 
 type recipeListCmd struct{}
@@ -237,6 +243,38 @@ type recipeNewCmd struct {
 
 type recipeShowCmd struct {
 	Name string `arg:"" help:"recipe name"`
+}
+
+type recipeAddCmd struct {
+	Ref    string `arg:"" help:"index name, or a git URL, either with an optional @tag"`
+	Yes    bool   `short:"y" help:"skip the confirmation for a URL source"`
+	Global bool   `help:"use the home scope even inside a project"`
+	Force  bool   `help:"install over a name that already exists"`
+}
+
+type recipeLockCmd struct {
+	Global bool `help:"use the home scope even inside a project"`
+}
+
+type recipeSyncCmd struct {
+	Global bool `help:"use the home scope even inside a project"`
+}
+
+type recipeUpdateCmd struct {
+	Names  []string `arg:"" optional:"" help:"recipe names; omit for every remote recipe"`
+	Global bool     `help:"use the home scope even inside a project"`
+}
+
+type recipeRmCmd struct {
+	Name   string `arg:"" help:"recipe name"`
+	Yes    bool   `short:"y" help:"skip the delete confirmation"`
+	Global bool   `help:"use the home scope even inside a project"`
+	Force  bool   `help:"remove it even while a VM lists it"`
+}
+
+type recipeSearchCmd struct {
+	Term    []string `arg:"" optional:"" passthrough:"all" help:"match against name and description"`
+	Refresh bool     `help:"fetch the index even when it is fresh"`
 }
 
 type recipeGuestCmd struct {
@@ -455,6 +493,36 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "recipe show":
 		a.Cmd, a.Sub = "recipe", "show"
 		a.VM = g.Recipe.Show.Name
+
+	case "recipe add":
+		c := g.Recipe.Add
+		a.Cmd, a.Sub = "recipe", "add"
+		a.Ref, a.Yes, a.Global, a.Force = c.Ref, c.Yes, c.Global, c.Force
+
+	case "recipe lock":
+		a.Cmd, a.Sub = "recipe", "lock"
+		a.Global = g.Recipe.Lock.Global
+
+	case "recipe sync":
+		a.Cmd, a.Sub = "recipe", "sync"
+		a.Global = g.Recipe.Sync.Global
+
+	case "recipe update":
+		a.Cmd, a.Sub = "recipe", "update"
+		a.Names, a.Global = trimList(g.Recipe.Update.Names), g.Recipe.Update.Global
+
+	case "recipe rm":
+		c := g.Recipe.RM
+		a.Cmd, a.Sub = "recipe", "rm"
+		a.Names, a.Yes, a.Global, a.Force = []string{c.Name}, c.Yes, c.Global, c.Force
+
+	case "recipe search":
+		a.Cmd, a.Sub = "recipe", "search"
+		term := g.Recipe.Search.Term
+		if len(term) > 0 && term[0] == "--" {
+			term = term[1:]
+		}
+		a.Ref, a.Refresh = strings.Join(term, " "), g.Recipe.Search.Refresh
 
 	case "guest ls":
 		a.Cmd, a.Sub = "guest", "ls"

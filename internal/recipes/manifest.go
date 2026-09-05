@@ -190,6 +190,9 @@ func ParseManifest(path string) (Manifest, error) {
 	if m.Name == "" {
 		return Manifest{}, fmt.Errorf("%s: missing required field %q", path, "name")
 	}
+	if err := validateRecipeName(m.Name); err != nil {
+		return Manifest{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if m.Script == "" {
 		return Manifest{}, fmt.Errorf("%s: missing required field %q", path, "script")
 	}
@@ -357,20 +360,36 @@ func validateHealth(path string, h Health) error {
 	return nil
 }
 
-// ManifestFor resolves name (an entry in the recipes root, the same
-// identifier VM.Recipes/ApplyOpts.Only use) to its recipe.toml manifest
-// (docs/recipe-spec-v2.md).
+// ManifestFor resolves name to its recipe.toml through ResolvePath, so a
+// project recipe shadows a home one of the same name.
 //
-// ok is false with a nil error when name has no recipe.toml at all: an
-// unrelated or nonexistent name that CheckRecipes/List reject elsewhere. A
-// caller decides what absence means for it. A recipe.toml that exists but
-// fails to parse is a real problem, and comes back as err instead.
+// ok is false with a nil error when no root holds name. A recipe.toml that
+// exists but fails to parse comes back as err instead.
 func ManifestFor(name string) (m Manifest, ok bool, err error) {
-	path := filepath.Join(dir(), name, "recipe.toml")
-	if _, statErr := os.Stat(path); statErr != nil {
+	locks, err := lockRecipeScopes(false)
+	if err != nil {
+		return Manifest{}, false, err
+	}
+	m, ok, readErr := manifestForLocked(name)
+	unlockErr := unlockRecipeScopes(locks)
+	if readErr != nil {
+		return Manifest{}, false, readErr
+	}
+	if unlockErr != nil {
+		return Manifest{}, false, unlockErr
+	}
+	return m, ok, nil
+}
+
+func manifestForLocked(name string) (m Manifest, ok bool, err error) {
+	d, _, found, resolveErr := resolvePath(name)
+	if resolveErr != nil {
+		return Manifest{}, false, resolveErr
+	}
+	if !found {
 		return Manifest{}, false, nil
 	}
-	m, err = ParseManifest(path)
+	m, err = ParseManifest(filepath.Join(d, "recipe.toml"))
 	if err != nil {
 		return Manifest{}, false, err
 	}
@@ -400,6 +419,15 @@ func (m Manifest) ScriptContent(osName string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// ScriptHash returns the hash of the script selected for osName.
+func (m Manifest) ScriptHash(osName string) (string, error) {
+	body, err := m.ScriptContent(osName)
+	if err != nil {
+		return "", err
+	}
+	return sum([]byte(body)), nil
 }
 
 // hasCapability reports whether cap resolves against vmOS. The table comes

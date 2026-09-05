@@ -44,10 +44,10 @@ func TestDoctorStructure(t *testing.T) {
 		}
 	}
 
-	// The union of both prior doctors' checks must be present: the four
+	// The union of both prior doctors' checks must be present: the five
 	// installer binChecks plus /dev/kvm. Losing one silently is the failure to
 	// catch.
-	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "/dev/kvm"}
+	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "git", "/dev/kvm"}
 	for _, name := range want {
 		if !seen[name] {
 			t.Errorf("Doctor() is missing the %q check", name)
@@ -78,4 +78,21 @@ func TestDoctorNoSSHKeygenCheck(t *testing.T) {
 			t.Errorf("Doctor() has a separate ssh-keygen check: %+v", c)
 		}
 	}
+}
+
+func TestDoctorCarriesOptionalGitFailure(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, c := range Doctor() {
+		if c.Name != "git" {
+			continue
+		}
+		if !c.Optional {
+			t.Fatal("Doctor() lost git's optional marker")
+		}
+		if len(c.Fix) == 0 {
+			t.Fatal("optional git failure has no install guidance")
+		}
+		return
+	}
+	t.Fatal("Doctor() has no git check")
 }

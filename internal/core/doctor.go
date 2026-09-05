@@ -12,6 +12,8 @@ type HostCheck struct {
 	OK     bool
 	Detail string   // "/usr/bin", "not found", "permission denied"
 	Fix    []string // shell commands, already distro-resolved; empty when OK
+	// Optional marks a binary some commands need; a missing one is not a broken host.
+	Optional bool
 }
 
 // Doctor probes every host dependency and reports it as data, printing
@@ -25,7 +27,7 @@ func Doctor() []HostCheck {
 	checks := hostcheck.RunChecks(hostcheck.DetectDistro())
 	out := make([]HostCheck, len(checks))
 	for i, c := range checks {
-		out[i] = HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: c.Fix}
+		out[i] = HostCheck{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: c.Fix, Optional: c.Optional}
 	}
 	return out
 }

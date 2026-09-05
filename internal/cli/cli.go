@@ -77,6 +77,11 @@ type Args struct {
 	// OS and Backend belong to "recipe new"; VM carries the recipe name
 	// there, since it is the same "one positional argument" slot.
 	Sub     string
+	Global  bool
+	Force   bool
+	Refresh bool
+	Ref     string
+	Names   []string
 	OS      string
 	Backend string
 
@@ -195,6 +200,7 @@ func Parse(args []string) (*Args, error) {
 	if len(args) > 0 && args[0] == "exec" {
 		return parseExec(args[1:])
 	}
+	args = preserveRecipeSearchTerm(args)
 
 	var g grammar
 	var help bytes.Buffer
@@ -235,6 +241,31 @@ func Parse(args []string) (*Args, error) {
 		}
 	}
 	return a, nil
+}
+
+// preserveRecipeSearchTerm inserts Kong's argument terminator before a search
+// term that starts with a dash. Search terms are data, so Kong must not parse
+// their leading characters as short or long flags.
+func preserveRecipeSearchTerm(args []string) []string {
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] != "recipe" || args[i+1] != "search" || args[i+2] == "--" {
+			continue
+		}
+		for j := i + 2; j < len(args); j++ {
+			if args[j] == "--refresh" {
+				continue
+			}
+			if !strings.HasPrefix(args[j], "-") || args[j] == "--" {
+				break
+			}
+			out := make([]string, 0, len(args)+1)
+			out = append(out, args[:j]...)
+			out = append(out, "--")
+			out = append(out, args[j:]...)
+			return out
+		}
+	}
+	return args
 }
 
 // parseExec handles `exec <vm> <cmd>...` without kong. Kong's passthrough is
@@ -437,7 +468,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	case "rm":
 		return runRM(a, stdin, stdout, stderr)
 	case "recipe":
-		return runRecipe(a, stdout, stderr)
+		return runRecipe(a, stdin, stdout, stderr)
 	case "guest":
 		return runGuest(a, stdout, stderr)
 	case "logs":

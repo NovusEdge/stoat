@@ -29,6 +29,7 @@ func writeV2Recipe(t *testing.T, name, description string) {
 
 func TestListManifestsFindsV2Recipes(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	writeV2Recipe(t, "xfce", "XFCE desktop")
 	writeV2Recipe(t, "docker", "Docker engine")
 
@@ -56,6 +57,7 @@ func TestListManifestsSkipsDirWithoutManifest(t *testing.T) {
 	// scratch dir) is not a v2 recipe and must not be reported, let alone
 	// error the whole listing.
 	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(dir(), "not-a-recipe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +74,7 @@ func TestListManifestsSkipsDirWithoutManifest(t *testing.T) {
 
 func TestListManifestsSkipsInvalidManifestButKeepsOthers(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	writeV2Recipe(t, "xfce", "XFCE desktop")
 
 	broken := filepath.Join(dir(), "broken")
@@ -94,6 +97,7 @@ func TestListManifestsSkipsInvalidManifestButKeepsOthers(t *testing.T) {
 
 func TestListManifestsNoDirYet(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	got, err := ListManifests()
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +115,7 @@ func TestListManifestsNoDirYet(t *testing.T) {
 // ("xfce/recipe.toml"), with scripts landing executable.
 func TestInstallCopiesBundledV2RecipeDirectories(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 
 	fake := fstest.MapFS{
 		"xfce/recipe.toml": {Data: []byte("name = \"xfce\"\nscript = \"install.sh\"\n"), Mode: 0o644},
@@ -152,6 +157,7 @@ func TestInstallCopiesBundledV2RecipeDirectories(t *testing.T) {
 // already gives flat files.
 func TestInstallPreservesEditsInsideAV2RecipeDirectory(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 
 	fake := fstest.MapFS{
 		"xfce/recipe.toml": {Data: []byte("name = \"xfce\"\nscript = \"install.sh\"\n"), Mode: 0o644},

@@ -6,8 +6,10 @@ import (
 	"slices"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/gitx"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // Code is a stable, machine-readable error code. Codes are only ever ADDED:
@@ -25,6 +27,8 @@ const (
 	CodeBroken               Code = "broken"
 	CodeNameTaken            Code = "name_taken"
 	CodeInvalidSpec          Code = "invalid_spec"
+	CodeInUse                Code = "in_use"
+	CodeGitRequired          Code = "git_required"
 	CodeImageNotDownloaded   Code = "image_not_downloaded"
 	CodeRecipeNotApplicable  Code = "recipe_not_applicable"
 	CodeNotRunning           Code = "not_running"
@@ -55,6 +59,8 @@ const (
 	CodeNoSuchImage      Code = "no_such_image"
 
 	CodeScreenshotFailed Code = "screenshot_failed"
+	// CodeLockOutOfDate identifies a repairable project-lock condition.
+	CodeLockOutOfDate Code = "lock_out_of_date"
 )
 
 // Codes returns every declared code, sorted. Built from the same string
@@ -63,7 +69,7 @@ const (
 func Codes() []Code {
 	out := []Code{
 		CodeNotFound, CodeBroken, CodeNameTaken, CodeInvalidSpec,
-		CodeImageNotDownloaded, CodeRecipeNotApplicable, CodeNotRunning,
+		CodeImageNotDownloaded, CodeRecipeNotApplicable, CodeInUse, CodeGitRequired, CodeNotRunning,
 		CodeAlreadyRunning, CodeNoDisk, CodeImmutableField, CodeDiskShrink,
 		CodeCannotReach, CodeUnknownLog, CodeTimeout, CodeCanceled,
 		CodeUsage, CodeConfirmationRequired, CodeInternal,
@@ -73,6 +79,7 @@ func Codes() []Code {
 		CodeDownloadFailed, CodeDownloadStalled, CodeChecksumMismatch,
 		CodeNoSuchImage,
 		CodeScreenshotFailed,
+		CodeLockOutOfDate,
 	}
 	slices.Sort(out)
 	return out
@@ -101,6 +108,9 @@ var codeTable = []struct {
 	{CodeBroken, core.ErrBroken},
 	{CodeNameTaken, core.ErrNameTaken},
 	{CodeInvalidSpec, core.ErrInvalidSpec},
+	{CodeInvalidSpec, recipes.ErrInvalidTree},
+	{CodeInUse, core.ErrInUse},
+	{CodeGitRequired, gitx.ErrNoGit},
 	{CodeImageNotDownloaded, core.ErrImageNotDownloaded},
 	{CodeRecipeNotApplicable, core.ErrRecipeNotApplicable},
 	{CodeNotRunning, core.ErrNotRunning},
@@ -128,6 +138,7 @@ var codeTable = []struct {
 	{CodeNoSuchImage, iso.ErrNoSuchImage},
 	{CodeScreenshotFailed, qemu.ErrScreenshotFailed},
 	{CodeNotRunning, qemu.ErrNotRunning},
+	{CodeLockOutOfDate, core.ErrLockOutOfDate},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking

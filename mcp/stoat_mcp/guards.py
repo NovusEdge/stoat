@@ -31,6 +31,9 @@ _VM_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # BYO path is an arbitrary host file read, booted as a disk.
 _IMAGE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
+_RECIPE_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+_RECIPE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
 
 def check_vm_name(name: str) -> str:
     """Reject anything that is not a plain VM name.
@@ -77,6 +80,40 @@ def check_image_id(image: str) -> str:
     if not _IMAGE_ID.match(image):
         raise GuardRejection(f"image id {image!r} is not a valid catalog id")
     return image
+
+
+def check_index_name(ref: str) -> str:
+    """Accept an index recipe name with an optional safe git ref.
+
+    The recipe name is always resolved through the curated index. A ref may
+    contain slashes for branches such as ``feature/topic`` but cannot contain
+    URL, option, or path-traversal syntax.
+    """
+    if not isinstance(ref, str) or not ref or ref != ref.strip():
+        raise GuardRejection("recipe index name is required")
+    if ref.startswith("-") or "\\" in ref or "\x00" in ref:
+        raise GuardRejection(f"recipe index name {ref!r} is not safe")
+    if ref.count("@") > 1:
+        raise GuardRejection(f"recipe index name {ref!r} has more than one ref")
+    name, separator, branch = ref.partition("@")
+    if not _RECIPE_NAME.fullmatch(name):
+        raise GuardRejection(
+            f"recipe index name {ref!r} must start with a letter and contain only letters, digits and dashes"
+        )
+    if not separator:
+        return ref
+    if not _RECIPE_REF.fullmatch(branch) or branch.startswith("/") or branch.endswith("/"):
+        raise GuardRejection(f"recipe ref {branch!r} is not safe")
+    parts = branch.split("/")
+    if ".." in branch or any(
+        part in ("", ".", "..")
+        or part.startswith(".")
+        or part.endswith(".")
+        or part.endswith(".lock")
+        for part in parts
+    ):
+        raise GuardRejection(f"recipe ref {branch!r} is not safe")
+    return ref
 
 
 def shared_dir(vm: str, data_root: str | os.PathLike[str] | None = None) -> Path:

@@ -206,17 +206,18 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 // pre-install checklist runs (qemu-system-x86_64, qemu-img, ssh, xorriso,
 // /dev/kvm), so `stoat doctor` and `just setup` agree on host readiness.
 //
-// It prints the fix command when there is one, so a failed check tells the
-// user how to repair it instead of leaving them to guess.
+// It prints every failed check's fix command, including optional dependencies.
+// Optional checks are warnings only; required failures remain FAIL and make
+// the aggregate doctor result unhealthy.
 func runDoctor(a *Args, stdout, stderr io.Writer) int {
 	checks := core.Doctor()
-	var failed []core.HostCheck
-	for _, c := range checks {
-		if !c.OK {
-			failed = append(failed, c)
-		}
-	}
 	if a.JSON {
+		var failed []core.HostCheck
+		for _, c := range checks {
+			if !c.OK && !c.Optional {
+				failed = append(failed, c)
+			}
+		}
 		// healthy, not ok: the envelope already owns "ok", and two
 		// differently-scoped ok fields one level apart is a trap. Exit is 0
 		// even when the host is unhealthy (§5): doctor SUCCEEDED at checking,
@@ -226,15 +227,27 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 			"checks":  wire.FromHostChecks(checks),
 		})
 	}
-	if len(failed) == 0 {
-		fmt.Fprintln(stdout, "ok")
-		return ExitOK
-	}
-	for _, c := range failed {
-		fmt.Fprintf(stdout, "FAIL: %s: %s\n", c.Name, c.Detail)
+	failedRequired := false
+	for _, c := range checks {
+		if c.OK {
+			continue
+		}
+		label := c.Name
+		prefix := "FAIL"
+		if c.Optional {
+			label += " (optional)"
+			prefix = "WARN"
+		} else {
+			failedRequired = true
+		}
+		fmt.Fprintf(stdout, "%s: %s: %s\n", prefix, label, c.Detail)
 		if len(c.Fix) > 0 {
 			fmt.Fprintf(stdout, "      try: %s\n", strings.Join(c.Fix, " "))
 		}
+	}
+	if !failedRequired {
+		fmt.Fprintln(stdout, "ok")
+		return ExitOK
 	}
 	return ExitFail
 }

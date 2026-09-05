@@ -177,13 +177,16 @@ func EnsureRoot() error {
 
 // reserved reports whether a directory in the data root is stoat's own rather
 // than a VM. Everything not listed here is treated as a VM directory, so a new
-// one must be added or it gets scanned as a candidate VM.
+// one must be added or it gets scanned as a candidate VM. Index refreshes use
+// the two hidden workspace prefixes below; their contents can include vm.toml
+// files copied from a previously published index.
 func reserved(name string) bool {
 	switch name {
-	case "isos", "recipes", "shared", "logs":
+	case "isos", "recipes", "shared", "logs", "index":
 		return true
 	}
-	return false
+	return strings.HasPrefix(name, ".stoat-index-stage-") ||
+		strings.HasPrefix(name, ".stoat-index-old-")
 }
 
 // Expand resolves a leading ~ against the user's home directory. Exported so

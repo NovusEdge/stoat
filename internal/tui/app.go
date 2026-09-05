@@ -168,7 +168,11 @@ func preflightReport(checks []core.HostCheck) string {
 		if c.OK {
 			continue
 		}
-		line := c.Name + ": " + c.Detail
+		label := c.Name
+		if c.Optional {
+			label += " (optional)"
+		}
+		line := label + ": " + c.Detail
 		if len(c.Fix) > 0 {
 			line += "\n  fix: " + strings.Join(c.Fix, " && ")
 		}
