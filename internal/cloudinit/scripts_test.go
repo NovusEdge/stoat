@@ -342,8 +342,9 @@ func TestWrapScriptsExecutesRecipeOutputAndGatesMarker(t *testing.T) {
 // Recipe names are user-controlled directory names and may contain a dash.
 // The wrapper must translate each namespaced secret into a shell-safe,
 // collision-free environment variable before invoking the child script. This
-// executes both a dashed and underscored name so a normalization scheme that
-// aliases them cannot silently deliver one recipe's secret to the other.
+// executes dashed, underscored, and literal escape-shaped names so a
+// normalization scheme that aliases them cannot silently deliver one recipe's
+// secret to the other.
 func TestWrapScriptsExecutesHyphenatedSecretsAndCleansUp(t *testing.T) {
 	scripts := []Script{
 		{
@@ -355,6 +356,11 @@ func TestWrapScriptsExecutesHyphenatedSecretsAndCleansUp(t *testing.T) {
 			Name:    "my_recipe",
 			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = underscore-secret\n",
 			Secrets: map[string]string{"token": "underscore-secret"},
+		},
+		{
+			Name:    "my_2drecipe",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = escape-shaped-secret\n",
+			Secrets: map[string]string{"token": "escape-shaped-secret"},
 		},
 	}
 	f := parseWrapped(t, WrapScripts(scripts, ""))
