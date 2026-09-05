@@ -235,6 +235,59 @@ func TestDiffRefusesAnImageChange(t *testing.T) {
 	}
 }
 
+func TestDiffRefusesADiskChange(t *testing.T) {
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"debian-13\"\ndisk  = \"10G\"\n")
+	haveImage(t, os.Getenv("STOAT_HOME"), "debian-13-genericcloud-amd64.qcow2")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName),
+		[]byte("schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"debian-13\"\ndisk  = \"20G\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Diff(p2, "dev")
+	if !errors.Is(err, ErrImmutableDeclaration) {
+		t.Fatalf("err = %v, want ErrImmutableDeclaration", err)
+	}
+	if !strings.Contains(err.Error(), "dev: disk changed (10G -> 20G)") ||
+		!strings.Contains(err.Error(), "stoat rm dev") {
+		t.Errorf("err = %q, want the disk-changed message with the stoat rm hint", err.Error())
+	}
+}
+
+// A declaration that omits disk takes stoat new's default, the same as a
+// minimal declaration does for every other field. vm.toml then records that
+// default rather than an empty string, and re-declaring the same omission
+// must not read as the user having changed disk.
+func TestDiffOmittedDiskMatchesTheDefault(t *testing.T) {
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"debian-13\"\n")
+	haveImage(t, os.Getenv("STOAT_HOME"), "debian-13-genericcloud-amd64.qcow2")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	drift, err := Diff(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range drift {
+		if d.Field == "disk" {
+			t.Errorf("disk reported as drift for an omitted field: %+v", d)
+		}
+	}
+}
+
 func TestReconcileCreatesAMissingVM(t *testing.T) {
 	p := projectDir(t, fullDecl)
 	r, err := Reconcile(p, "dev")
