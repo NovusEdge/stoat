@@ -688,7 +688,11 @@ func fromManifest(m recipes.Manifest) Recipe {
 		r.Outputs = append(r.Outputs, RecipeOutput{Name: o.Name, Help: o.Help})
 	}
 	if m.Health.Check != "" {
-		r.Health = &RecipeHealthSpec{Check: m.Health.Check, Timeout: m.Health.Duration().String()}
+		timeout := m.Health.Timeout
+		if timeout == "" {
+			timeout = recipes.DefaultHealthTimeout.String()
+		}
+		r.Health = &RecipeHealthSpec{Check: m.Health.Check, Timeout: timeout}
 	}
 	return r
 }

@@ -225,6 +225,11 @@ func bannerReady(c net.Conn, budget time.Duration) bool {
 // react. This bounds that grace period rather than waiting on it forever.
 const recipeShutdownGrace = 5 * time.Second
 
+// healthShutdownGrace is deliberately short: a health probe has no recipe
+// state to preserve after its context expires, and a TERM-ignoring probe must
+// not extend Wait's single health budget by the normal recipe grace period.
+const healthShutdownGrace = 100 * time.Millisecond
+
 // RunCheck runs one command inside v's guest through the guest prelude, as
 // the recipe's ssh user and under the guest's escalation. The command is
 // sent over stdin so it does not become a local ssh argv element.
@@ -239,7 +244,7 @@ func RunCheck(ctx context.Context, v *config.VM, command string, timeout time.Du
 	body := prelude + "\n" + command + "\n"
 	cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = recipeShutdownGrace
+	cmd.WaitDelay = healthShutdownGrace
 	cmd.Stdin = strings.NewReader(body)
 	out, err := cmd.CombinedOutput()
 	return string(out), err

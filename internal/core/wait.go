@@ -108,11 +108,15 @@ func waitHealthy(ctx context.Context, v *config.VM) error {
 	if budget <= 0 {
 		return nil
 	}
-	deadline := time.Now().Add(budget)
+	healthCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	var first RecipeHealth
 	for {
-		verdicts, err := HealthChecks(ctx, v.Name)
+		verdicts, err := HealthChecks(healthCtx, v.Name)
 		if err != nil {
+			if ctx.Err() != nil && first.Name != "" && errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("%w: %s", ctx.Err(), healthFailure(first))
+			}
 			return err
 		}
 		first = RecipeHealth{}
@@ -125,16 +129,20 @@ func waitHealthy(ctx context.Context, v *config.VM) error {
 		if first.Name == "" {
 			return nil
 		}
-		if time.Now().After(deadline) {
-			return healthFailure(first)
-		}
+		timer := time.NewTimer(pollInterval)
 		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		case <-healthCtx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			if ctx.Err() != nil && first.Name != "" {
+				return fmt.Errorf("%w: %s", ctx.Err(), healthFailure(first))
+			}
+			if first.Name != "" {
 				return healthFailure(first)
 			}
-			return ctx.Err()
-		case <-time.After(pollInterval):
+			return healthCtx.Err()
+		case <-timer.C:
 		}
 	}
 }
@@ -172,7 +180,20 @@ func sshBannerUp(ctx context.Context, v *config.VM) bool {
 		return false
 	}
 	defer func() { _ = c.Close() }()
-	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	deadline := time.Now().Add(2 * time.Second)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	_ = c.SetReadDeadline(deadline)
+	readDone := make(chan struct{})
+	defer close(readDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = c.Close()
+		case <-readDone:
+		}
+	}()
 	buf := make([]byte, 4)
 	_, err = io.ReadFull(c, buf)
 	return err == nil && string(buf) == "SSH-"

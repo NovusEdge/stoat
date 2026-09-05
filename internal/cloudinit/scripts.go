@@ -119,15 +119,15 @@ func namespacedSecret(recipe, param string) string {
 }
 
 // plainNamespacePart retains the historical readable spelling for the
-// ordinary recipe names and parameter names already in use. Any punctuation
-// or underscore uses the pair encoding above, which makes the recipe/param
-// boundary unambiguous and prevents case-folding collisions.
+// ordinary lower-case recipe names and parameter names already in use. Any
+// punctuation, underscore, or uppercase uses the pair encoding above, which
+// makes the recipe/param boundary unambiguous and preserves case identity.
 func plainNamespacePart(value string) bool {
 	if value == "" {
 		return false
 	}
 	for _, r := range value {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
 			return false
 		}
 	}
@@ -157,9 +157,18 @@ func recipeCommand(s Script, path, marker string) string {
 	}
 	output := "/tmp/.stoat-out/" + s.Name
 	if len(s.Env) > 0 {
-		fmt.Fprintf(&b, "STOAT_OUTPUT=%s && export STOAT_OUTPUT && mkdir -p /tmp/.stoat-out && chmod 700 /tmp/.stoat-out && : > \"$STOAT_OUTPUT\" && ", guest.ShQuote(output))
+		outputDir := output[:strings.LastIndex(output, "/")]
+		fmt.Fprintf(&b, "STOAT_OUTPUT=%s && export STOAT_OUTPUT && mkdir -p %s && chmod 700 %s && : > \"$STOAT_OUTPUT\" && ", guest.ShQuote(output), guest.ShQuote(outputDir), guest.ShQuote(outputDir))
 	}
-	fmt.Fprintf(&b, "%s && mkdir -p %s && ", path, MarkerDir)
+	markerDir := MarkerDir
+	if slash := strings.LastIndex(marker, "/"); slash > 0 {
+		markerDir = marker[:slash]
+	}
+	markerDirArg := markerDir
+	if markerDir != MarkerDir {
+		markerDirArg = guest.ShQuote(markerDir)
+	}
+	fmt.Fprintf(&b, "%s && mkdir -p %s && ", path, markerDirArg)
 	if len(s.Env) > 0 {
 		fmt.Fprintf(&b, "if [ -f %s ]; then cp %s %s.out; fi && ", output, output, marker)
 	}

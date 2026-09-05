@@ -1,39 +1,40 @@
 # Every field a vm.toml can carry. stoat writes this file; a human edits the
 # resource fields and recipe params. `stoat update` is safer for automation.
 
-name             = "work"         # directory identity.
-mode             = "disk"         # live, disk, or cloud.
-os               = "alpine"       # guest definition name.
-iso              = "isos/x.iso"   # relative to the data root.
-ram              = 2048            # MB.
-cpus             = 2
-disk             = "16G"           # disk/cloud modes; grow-only.
-installed        = true            # disk mode only; flips boot order.
-share            = "~/src"         # exposed at /mnt/host.
-sshport          = 2200            # host port forwarded to guest sshd.
-recipes          = ["docker"]
-display          = "auto"         # auto, window, or vnc.
-backend          = "cloudinit"    # apkovl, cloudinit, or ssh.
-base             = ""             # absolute shared base-image path.
-sshuser          = "stoat"        # empty means root.
-console_password = ""             # VNC console login, never over ssh.
-allow_exec       = true
+name             = "work"         # string; default none; user creates, stoat writes the directory identity.
+mode             = "disk"         # string; default inferred from image/backend; stoat writes: live, disk, or cloud.
+os               = "alpine"       # string; default inferred from image; stoat writes the guest definition name.
+iso              = "isos/x.iso"   # string path; default none; stoat writes it relative to the data root.
+ram              = 2048            # int MB; default 4096; stoat writes at create/update.
+cpus             = 2               # int; default 4; stoat writes at create/update.
+disk             = "16G"           # string; default 8G in disk mode; stoat writes, grow-only after creation.
+installed        = true            # bool; default false; stoat writes for disk mode and flips boot order.
+share            = "~/src"         # string path; default empty; user/TUI and stoat update write the host share.
+sshport          = 2200            # int; default an allocated free port; stoat writes the host forward to guest sshd.
+recipes          = ["docker"]      # string[]; default []; user/TUI and stoat create/update write the selection.
+display          = "auto"          # string; default "auto"; user/TUI writes: auto, window, or vnc.
+backend          = "cloudinit"     # string; default inferred from image; stoat writes: apkovl, cloudinit, or ssh.
+base             = ""              # string path; default empty; stoat writes the absolute shared base-image path.
+sshuser          = "stoat"         # string; default guest-defined user (empty means root); stoat writes it.
+console_password = ""              # string; default "stoat" for cloud VMs, empty otherwise; stoat writes, never ssh.
+allow_exec       = true             # bool; default true; user/TUI and stoat create write the MCP exec/copy opt-in.
 
-[[forwards]]                     # extra host-to-guest TCP forwards.
-hostport  = 8080
-guestport = 80
+[[forwards]]                      # table[]; default []; user/TUI and `stoat forward` write extra forwards.
+hostport  = 8080                  # int; default none; user writes the host port.
+guestport = 80                    # int; default none; user writes the guest port.
 
-[params.docker]                  # non-secret values, keyed by recipe.
-user    = "dev"
-channel = "stable"
+[params.docker]                   # table; default {}; stoat writes parameter values; do not edit by hand.
+user    = "dev"                   # string; default recipe value "dev"; stoat writes the non-secret override.
+channel = "stable"                # string; default recipe value; stoat writes the non-secret override.
 
 # Written by stoat; do not edit.
 [applied.docker]
-version     = "1.2.0"
-hash        = "recipe-and-params-hash"
-script_hash = "script-hash"
-at          = 2026-09-04T10:00:00Z
-health      = "ok"
+version     = "1.2.0"             # string; default empty; stoat writes the applied recipe version.
+hash        = "recipe-and-params-hash" # string; default empty; stoat writes the recipe/params hash.
+script_hash = "script-hash"       # string; default empty; stoat writes the applied script hash.
+at          = 2026-09-04T10:00:00Z # datetime; default zero; stoat writes the apply time.
+health      = "ok"                # string; default unknown; stoat writes the stored health result.
 
+# Written by stoat; do not edit.
 [applied.docker.outputs]
-socket = "/var/run/docker.sock"
+socket = "/var/run/docker.sock"   # string; default empty; stoat writes recipe output values.

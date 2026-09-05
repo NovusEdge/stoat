@@ -1,50 +1,50 @@
 # Every field a recipe.toml can carry. `stoat recipe new` copies this file and
 # fills name and os; delete what a recipe does not need.
 
-schema      = 3                  # 3 enables params, outputs and health.
-name        = "example"          # required; must match the directory name.
-description = "one line"         # shown by `stoat recipe list`.
-version     = "1.0.0"            # changes re-run `run = "once"` recipes.
-os          = ["alpine"]         # empty means every guest.
-requires    = ["apk"]            # capabilities from the guest file.
-stage       = "provision"        # "install" or "provision".
-script      = "install.sh"       # required; relative to this directory.
-auto        = false              # offered pre-checked in the TUI picker.
-run         = "once"             # "once", "always", or "manual".
-reboot      = false              # reboot a disk VM after this recipe.
-runtime     = "sh"               # "sh" or "python3".
-depends     = []                 # recipe names that run first.
+schema      = 3                  # int; default 2; author writes, scaffold preserves. Enables v3 fields.
+name        = "example"          # string; required; author writes, scaffold replaces with the directory name.
+description = "one line"         # string; default empty; author writes. Shown by `stoat recipes` and `recipe show`.
+version     = "1.0.0"            # string; default empty; author writes. Changes re-run `run = "once"` recipes.
+os          = ["alpine"]         # string[]; default []; author writes. Empty means every guest.
+requires    = ["apk"]            # string[]; default []; author writes. Capabilities from the guest file.
+stage       = "provision"        # string; default "provision"; author writes: "install" or "provision".
+script      = "install.sh"       # string; required; author writes. Relative to this directory.
+auto        = false               # bool; default false; author writes. Offered pre-checked in the TUI picker.
+run         = "once"              # string; default "once"; author writes: "once", "always", or "manual".
+reboot      = false               # bool; default false; author writes. Reboot a disk VM after this recipe.
+runtime     = "sh"                # string; default "sh"; author writes: "sh" or "python3".
+depends     = []                  # string[]; default []; author writes. Recipe names that run first.
 
-[scripts]                        # per-guest overrides of `script`.
-alpine = "install-alpine.sh"
+[scripts]                        # table; default {}; author writes. Per-guest overrides of `script`.
+alpine = "install-alpine.sh"    # string path; author writes; scaffold creates the declared file.
 
-[params.user]                    # the guest reads STOAT_PARAM_USER.
-type     = "string"              # string, int, bool, enum, or secret.
-default  = "dev"                 # required unless `required = true`.
-required = false
-help     = "account to create"
+[params.user]                    # table; author writes; scaffold preserves.
+type     = "string"              # string; required; author writes: string, int, bool, enum, or secret.
+default  = "dev"                 # string; default "dev"; author writes; guest receives STOAT_PARAM_USER.
+required = false                 # bool; default false; author writes.
+help     = "account to create"  # string; default empty; author writes; shown by the TUI and `recipe show`.
 
 [params.port]
-type    = "int"
-default = 2375
+type    = "int"                 # string; required; author writes.
+default = 2375                   # int; default 2375; author writes; guest receives "2375".
 
 [params.tls]
-type    = "bool"
-default = true
+type    = "bool"                # string; required; author writes.
+default = true                   # bool; default true; author writes; guest receives "true".
 
 [params.channel]
-type    = "enum"
-values  = ["stable", "test"]
-default = "stable"
+type    = "enum"                # string; required; author writes.
+values  = ["stable", "test"]    # string[]; default []; author writes allowed values.
+default = "stable"              # string; default first choice is not implicit; author writes.
 
 [params.authkey]
-type     = "secret"              # stored only in secrets.toml.
-required = true
-help     = "auth key"
+type     = "secret"              # string; required; author writes; value is stored only in secrets.toml.
+required = true                  # bool; default false; author writes.
+help     = "auth key"            # string; default empty; author writes; shown by the TUI.
 
-[outputs]                        # the script writes name=value to $STOAT_OUTPUT.
-socket = "path of the socket"
+[outputs]                        # table; default {}; author writes. Script writes name=value to $STOAT_OUTPUT.
+socket = "path of the socket"    # string help text; author writes; value is recorded after apply.
 
 [health]
-check   = "docker info"          # exit 0 means healthy.
-timeout = "30s"
+check   = "docker info"          # string; default empty (no health check); author writes; exit 0 means healthy.
+timeout = "30s"                  # duration string; default "30s" when check is set; author writes.

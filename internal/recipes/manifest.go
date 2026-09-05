@@ -38,7 +38,8 @@ type Manifest struct {
 	Outputs     map[string]string   `toml:"outputs"`
 	Health      Health              `toml:"health"`
 
-	dir string // recipe directory, set by ParseManifest; scripts resolve against it
+	dir        string   // recipe directory, set by ParseManifest; scripts resolve against it
+	paramOrder []string // parameter declaration order, for interactive forms
 }
 
 // Param is one declared input of a schema-3 recipe. Default is the spelling
@@ -111,6 +112,28 @@ func (m Manifest) SortedParams() []Param {
 		params = append(params, p)
 	}
 	sort.Slice(params, func(i, j int) bool { return params[i].Name < params[j].Name })
+	return params
+}
+
+// OrderedParams returns parameters in the order in which their tables appear
+// in recipe.toml. Parameters added by a caller without a corresponding table
+// are appended by name, so the result remains complete and deterministic.
+// Wire projections use SortedParams; this order is only for the interactive
+// form, where declaration order is part of the user's input flow.
+func (m Manifest) OrderedParams() []Param {
+	params := make([]Param, 0, len(m.Params))
+	seen := make(map[string]bool, len(m.Params))
+	for _, name := range m.paramOrder {
+		if p, ok := m.Params[name]; ok {
+			params = append(params, p)
+			seen[name] = true
+		}
+	}
+	for _, p := range m.SortedParams() {
+		if !seen[p.Name] {
+			params = append(params, p)
+		}
+	}
 	return params
 }
 
@@ -191,11 +214,39 @@ func ParseManifest(path string) (Manifest, error) {
 	if err := m.buildParams(); err != nil {
 		return Manifest{}, err
 	}
+	order, err := manifestParamOrder(path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	m.paramOrder = order
 	if err := validateHealth(path, m.Health); err != nil {
 		return Manifest{}, err
 	}
 
 	return m, nil
+}
+
+// manifestParamOrder reads only table headers. The TOML decoder intentionally
+// normalizes params into a map, but the form should follow the author's
+// declaration order without changing the sorted public recipe projection.
+func manifestParamOrder(path string) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var order []string
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "[params.") || !strings.HasSuffix(line, "]") {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(line, "[params."), "]")
+		name = strings.Trim(name, "\"")
+		if paramName.MatchString(name) {
+			order = append(order, name)
+		}
+	}
+	return order, nil
 }
 
 // manifestSchema distinguishes an absent schema from an explicit zero. The

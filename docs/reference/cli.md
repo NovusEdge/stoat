@@ -498,15 +498,17 @@ the schema only says that a parameter has type `secret`.
 
 ## `stoat recipe new <name>`
 
-Scaffolds a new recipe file in the recipes directory and prints its path.
+Scaffolds a new recipe directory (manifest plus scripts) and prints its path.
 
 ```
 $ stoat recipe new mytool --os alpine
-/home/user/.stoat/recipes/mytool.alpine.sh
-edit it, then pick it in the new-vm form for a matching vm
+/home/user/.stoat/recipes/mytool
+edit its recipe.toml and scripts, then pick it in the new-vm form for a matching vm
 ```
 
-`--backend cloudinit` scaffolds a cloud-init fragment instead of a shell script. `-q` suppresses the trailing hint line.
+`--backend` is accepted for CLI compatibility but does not change the scaffold:
+all recipes are directories with a manifest and shell scripts. `-q` suppresses
+the trailing hint line.
 
 `recipe new` copies the annotated [recipe sample](samples/recipe.toml), with
 `name` and `os` filled for the new recipe. It creates the default script and

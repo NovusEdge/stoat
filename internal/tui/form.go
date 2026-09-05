@@ -246,6 +246,8 @@ type formModel struct {
 	recipeExplicit map[string]bool
 	paramValues    map[string]map[string]string
 	paramForm      *paramForm
+	paramQueue     []*paramForm
+	paramRoot      string
 	// randomPassword swaps the fixed, documented console password for a
 	// generated one. Cloud images only, see build().
 	randomPassword bool
@@ -520,10 +522,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.form.paramForm != nil {
 		param := m.form.paramForm
 		if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" {
-			m.form.paramForm = nil
-			m.form.recipeExplicit[param.recipe] = false
-			delete(m.form.paramValues, param.recipe)
-			m.form.recomputeRecipeSelection()
+			m.form.cancelParamForms()
 			return m, nil
 		}
 		_, cmd := param.form.Update(msg)
@@ -554,11 +553,15 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form.paramValues = map[string]map[string]string{}
 			}
 			m.form.paramValues[param.recipe] = param.valuesSnapshot()
+			if len(m.form.paramQueue) > 0 {
+				m.form.paramForm = m.form.paramQueue[0]
+				m.form.paramQueue = m.form.paramQueue[1:]
+				return m, m.form.paramForm.init()
+			}
 			m.form.paramForm = nil
+			m.form.paramRoot = ""
 		case huh.StateAborted:
-			m.form.paramForm = nil
-			m.form.recipeExplicit[param.recipe] = false
-			m.form.recomputeRecipeSelection()
+			m.form.cancelParamForms()
 		}
 		return m, cmd
 	}
@@ -733,6 +736,7 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.form.recipeExplicit[name] = false
 					delete(m.form.paramValues, name)
 					m.form.recomputeRecipeSelection()
+					m.form.cleanupParamValues()
 					return m, nil
 				}
 				// Checking a box can pull in a recipe it depends on. A
@@ -749,8 +753,14 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for _, a := range added {
 					m.form.recipeSel[a.Recipe] = true
 				}
-				if recipe, err := core.RecipeShow(name); err == nil && len(recipe.Params) > 0 {
-					m.form.paramForm = newParamForm(recipe)
+				forms, err := m.form.parameterForms(name, added)
+				if err != nil {
+					return m, m.showToast(err.Error(), true)
+				}
+				if len(forms) > 0 {
+					m.form.paramRoot = name
+					m.form.paramForm = forms[0]
+					m.form.paramQueue = forms[1:]
 					return m, tea.Batch(m.form.paramForm.init(), m.showToast(depMessage(added), false))
 				}
 				return m, m.showToast(depMessage(added), false)

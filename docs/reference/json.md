@@ -190,7 +190,7 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "allow_exec":true,"display":"vnc",
              "error":"only on a broken VM"}
 
-VMStatus    {"vm":VM,"health":"ok","recipes_detail":[
+VMStatus    {"name":"work",...VM fields...,"health":"ok","recipes_detail":[
              {"name":"xfce","applied":true,"version":"1.2","at":"...",
               "health":"unknown","params":{},"outputs":{}}]}
 
@@ -326,7 +326,7 @@ so a leak fails the build rather than shipping.
 | `cmd` | `data` |
 |---|---|
 | `ls` | `{"vms":[VM,...]}` |
-| `get` | `{"vm":VM}` |
+| `get` | `{"vm":VMStatus}` |
 | `create` | `{"vm":VM}` |
 | `update` | `{"vm":VM,"changed":["ram"],"applies_at":"now"}` |
 | `up` | `{"vm":VM}` (re-read after start, so `state` is authoritative) |
@@ -352,7 +352,7 @@ so a leak fails the build rather than shipping.
 | `guest show` | `{"guest":Guest}` |
 | `recipe list` | `{"dir":"...","recipes":["xfce"]}`, see note below |
 | `recipe show` | `{"recipe":RecipeSchema}` |
-| `recipe new` | `{"path":"/home/u/.stoat/recipes/foo.alpine.sh"}` |
+| `recipe new` | `{"path":"/home/u/.stoat/recipes/foo"}` |
 | `screenshot` | `{"vm":"work","path":"/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png","bytes":48213,"width":1280,"height":800}` |
 | `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |
 | `logs <vm>` | `{"vm":"work","which":"console","lines":[...]}` |
@@ -369,10 +369,11 @@ fields `data` carries.
 as "every recipe you can use": it currently includes the `.bak` files the
 one-time manifest upgrade left behind, and those are not applicable to any VM.
 Use `recipes` (which filters by OS and backend) to find something a VM can
-actually run; use `recipe list` only to find a file to edit.
+actually run; use `recipe list` only to find a recipe directory to inspect.
 
-`get` returns `VMStatus`: `recipes` remains the compatible string list, while
-`recipes_detail` adds stored per-recipe state. `health` is the stored aggregate
+`get` returns `{"vm":VMStatus}`: `VMStatus` embeds the VM fields directly;
+only the outer get result has the `vm` member. `recipes` remains the compatible
+string list, while `recipes_detail` adds stored per-recipe state. `health` is the stored aggregate
 (`ok`, `failed`, or `unknown`); it is not a live SSH check. Every detail's
 `params` and `outputs` is an object, even when empty. Secret parameters are
 `<set>` or `<unset>` and are never emitted as their value.

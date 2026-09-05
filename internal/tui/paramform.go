@@ -9,6 +9,7 @@ import (
 	"charm.land/huh/v2"
 
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // paramForm is the schema-driven form shown after a recipe with parameters is
@@ -105,6 +106,78 @@ func (p *paramForm) valuesSnapshot() map[string]string {
 	return out
 }
 
+// parameterForms queues dependency forms before the explicitly selected
+// recipe. Dependencies are real selections, so their required inputs must be
+// completed through the same wizard rather than being left for core.Plan to
+// reject after the user submits the VM form.
+func (f *formModel) parameterForms(root string, added []core.DepAddition) ([]*paramForm, error) {
+	names := make([]string, 0, len(added)+1)
+	seen := make(map[string]bool, len(added)+1)
+	for _, addition := range added {
+		if !seen[addition.Recipe] {
+			names = append(names, addition.Recipe)
+			seen[addition.Recipe] = true
+		}
+	}
+	if !seen[root] {
+		names = append(names, root)
+	}
+	forms := make([]*paramForm, 0, len(names))
+	for _, name := range names {
+		recipe, err := core.RecipeShow(name)
+		if err != nil {
+			return nil, err
+		}
+		if manifest, ok, err := recipes.ManifestFor(name); err != nil {
+			return nil, err
+		} else if ok {
+			byName := make(map[string]core.RecipeParam, len(recipe.Params))
+			for _, param := range recipe.Params {
+				byName[param.Name] = param
+			}
+			ordered := make([]core.RecipeParam, 0, len(recipe.Params))
+			for _, param := range manifest.OrderedParams() {
+				if projected, exists := byName[param.Name]; exists {
+					ordered = append(ordered, projected)
+					delete(byName, param.Name)
+				}
+			}
+			for _, param := range recipe.Params {
+				if _, exists := byName[param.Name]; exists {
+					ordered = append(ordered, param)
+					delete(byName, param.Name)
+				}
+			}
+			recipe.Params = ordered
+		}
+		if len(recipe.Params) > 0 {
+			forms = append(forms, newParamForm(recipe))
+		}
+	}
+	return forms, nil
+}
+
+func (f *formModel) cancelParamForms() {
+	root := f.paramRoot
+	f.paramForm = nil
+	f.paramQueue = nil
+	f.paramRoot = ""
+	if root != "" {
+		f.recipeExplicit[root] = false
+		delete(f.paramValues, root)
+	}
+	f.recomputeRecipeSelection()
+	f.cleanupParamValues()
+}
+
+func (f *formModel) cleanupParamValues() {
+	for name := range f.paramValues {
+		if !f.recipeSel[name] {
+			delete(f.paramValues, name)
+		}
+	}
+}
+
 func (f *formModel) recomputeRecipeSelection() {
 	if f.recipeSel == nil {
 		f.recipeSel = map[string]bool{}
@@ -126,6 +199,7 @@ func (f *formModel) recomputeRecipeSelection() {
 	for _, dep := range added {
 		f.recipeSel[dep.Recipe] = true
 	}
+	f.cleanupParamValues()
 }
 
 func (m model) viewParamForm() string {
