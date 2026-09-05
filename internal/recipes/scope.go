@@ -183,22 +183,39 @@ func (s Scope) editDecls(edit func(map[string]any)) error {
 
 func encodeProject(path string, value any) (err error) {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".stoat-project-*")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	mode, err := existingFileMode(path)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
+	stageDir, err := os.MkdirTemp(dir, ".stoat-project-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := filepath.Join(stageDir, "stoat.toml")
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		_ = os.RemoveAll(stageDir)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.RemoveAll(stageDir)
 		return err
 	}
 	defer func() {
-		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
+		if removeErr := os.RemoveAll(stageDir); removeErr != nil && err == nil {
 			err = removeErr
 		}
 	}()
 	if err := tomlx.Encode(tmpPath, value); err != nil {
 		return err
+	}
+	if mode != 0 {
+		if err := os.Chmod(tmpPath, mode); err != nil {
+			return err
+		}
 	}
 	return os.Rename(tmpPath, path)
 }

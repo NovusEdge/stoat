@@ -63,17 +63,26 @@ func SaveLock(path string, l Lock) (err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".stoat-lock-*")
+	mode, err := existingFileMode(path)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
+	stageDir, err := os.MkdirTemp(dir, ".stoat-lock-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := filepath.Join(stageDir, "lock")
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		_ = os.RemoveAll(stageDir)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = os.RemoveAll(stageDir)
 		return err
 	}
 	defer func() {
-		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
+		if removeErr := os.RemoveAll(stageDir); removeErr != nil && err == nil {
 			err = removeErr
 		}
 	}()
@@ -88,8 +97,24 @@ func SaveLock(path string, l Lock) (err error) {
 	if err := os.WriteFile(tmpPath, append([]byte(lockHeader), body...), 0o644); err != nil {
 		return err
 	}
+	if mode != 0 {
+		if err := os.Chmod(tmpPath, mode); err != nil {
+			return err
+		}
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
 	return nil
+}
+
+func existingFileMode(path string) (os.FileMode, error) {
+	info, err := os.Stat(path)
+	if err == nil {
+		return info.Mode().Perm(), nil
+	}
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return 0, err
 }

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -19,10 +19,10 @@ import (
 const DefaultIndexURL = "https://github.com/novusedge/stoat-recipes"
 
 const indexStampName = ".fetched"
+const indexSourceName = ".source"
+const indexLockName = ".index.lock"
 const indexSchema = 1
 const indexMaxAge = 24 * time.Hour
-
-var indexMu sync.Mutex
 
 type Index struct {
 	Schema  int                   `toml:"schema"`
@@ -49,10 +49,20 @@ func IndexDir() string { return filepath.Join(config.Root(), "index") }
 
 // RefreshIndex clones the index into a staging directory, validates it, then
 // swaps it into place. A failed refresh leaves the last usable clone intact.
-func RefreshIndex(force bool) (err error) {
-	indexMu.Lock()
-	defer indexMu.Unlock()
+func RefreshIndex(force bool) error {
+	unlock, err := lockIndex()
+	if err != nil {
+		return err
+	}
+	operationErr := refreshIndexLocked(force)
+	unlockErr := unlock()
+	if operationErr != nil {
+		return operationErr
+	}
+	return unlockErr
+}
 
+func refreshIndexLocked(force bool) (err error) {
 	root := config.Root()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
@@ -62,7 +72,7 @@ func RefreshIndex(force bool) (err error) {
 	if !force {
 		st, statErr := os.Stat(stamp)
 		if statErr == nil {
-			if time.Since(st.ModTime()) < indexMaxAge {
+			if time.Since(st.ModTime()) < indexMaxAge && indexSource(dir) == IndexURL() {
 				return nil
 			}
 		} else if !os.IsNotExist(statErr) {
@@ -92,11 +102,45 @@ func RefreshIndex(force bool) (err error) {
 	if err := os.WriteFile(filepath.Join(stage, indexStampName), nil, 0o644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(stage, indexSourceName), []byte(IndexURL()), 0o644); err != nil {
+		return err
+	}
 	if err := replaceIndex(stage, dir); err != nil {
 		return err
 	}
 	stageActive = false
 	return nil
+}
+
+func indexSource(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, indexSourceName))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func lockIndex() (func() error, error) {
+	root := config.Root()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(root, indexLockName), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() error {
+		unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		closeErr := f.Close()
+		if unlockErr != nil {
+			return unlockErr
+		}
+		return closeErr
+	}, nil
 }
 
 func replaceIndex(stage, dir string) error {
@@ -129,8 +173,19 @@ func replaceIndex(stage, dir string) error {
 	return os.RemoveAll(backup)
 }
 
-// LoadIndex reads the cloned index.toml.
-func LoadIndex() (Index, error) { return loadIndex(IndexDir()) }
+// LoadIndex reads the cloned index.toml under the index file lock.
+func LoadIndex() (Index, error) {
+	unlock, err := lockIndex()
+	if err != nil {
+		return Index{}, err
+	}
+	idx, loadErr := loadIndex(IndexDir())
+	unlockErr := unlock()
+	if loadErr != nil {
+		return Index{}, loadErr
+	}
+	return idx, unlockErr
+}
 
 func loadIndex(dir string) (Index, error) {
 	var idx Index
@@ -153,12 +208,21 @@ func loadIndex(dir string) (Index, error) {
 // SearchIndex returns entries whose name or description contains term, sorted
 // by name. An empty term returns the whole index.
 func SearchIndex(term string) ([]IndexEntry, error) {
-	if err := RefreshIndex(false); err != nil {
-		return nil, err
-	}
-	idx, err := LoadIndex()
+	unlock, err := lockIndex()
 	if err != nil {
 		return nil, err
+	}
+	if err := refreshIndexLocked(false); err != nil {
+		_ = unlock()
+		return nil, err
+	}
+	idx, err := loadIndex(IndexDir())
+	unlockErr := unlock()
+	if err != nil {
+		return nil, err
+	}
+	if unlockErr != nil {
+		return nil, unlockErr
 	}
 	q := strings.ToLower(term)
 	var out []IndexEntry
@@ -173,12 +237,21 @@ func SearchIndex(term string) ([]IndexEntry, error) {
 
 // IndexLookup refreshes the index and returns one entry by name.
 func IndexLookup(name string) (IndexEntry, bool, error) {
-	if err := RefreshIndex(false); err != nil {
-		return IndexEntry{}, false, err
-	}
-	idx, err := LoadIndex()
+	unlock, err := lockIndex()
 	if err != nil {
 		return IndexEntry{}, false, err
+	}
+	if err := refreshIndexLocked(false); err != nil {
+		_ = unlock()
+		return IndexEntry{}, false, err
+	}
+	idx, err := loadIndex(IndexDir())
+	unlockErr := unlock()
+	if err != nil {
+		return IndexEntry{}, false, err
+	}
+	if unlockErr != nil {
+		return IndexEntry{}, false, unlockErr
 	}
 	entry, ok := idx.Recipes[name]
 	return entry, ok, nil

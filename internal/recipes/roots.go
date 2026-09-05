@@ -36,8 +36,7 @@ func Roots() []Root {
 // ResolvePath finds name's recipe directory and the scope it belongs to. The
 // first root that both holds the directory and owns the name wins.
 func ResolvePath(name string) (path, scope string, ok bool, err error) {
-	path, scope, ok, _ = resolvePath(name)
-	return path, scope, ok, nil
+	return resolvePath(name)
 }
 
 func resolvePath(name string) (path, scope string, ok bool, err error) {
@@ -65,8 +64,8 @@ func resolvePath(name string) (path, scope string, ok bool, err error) {
 
 // ScopeOf returns name's scope, or "" when no root holds it.
 func ScopeOf(name string) (string, error) {
-	_, scope, _, _ := resolvePath(name)
-	return scope, nil
+	_, scope, _, err := resolvePath(name)
+	return scope, err
 }
 
 // owns reports whether a name found under root carries root's label.
