@@ -200,6 +200,7 @@ func Parse(args []string) (*Args, error) {
 	if len(args) > 0 && args[0] == "exec" {
 		return parseExec(args[1:])
 	}
+	args = preserveRecipeSearchTerm(args)
 
 	var g grammar
 	var help bytes.Buffer
@@ -240,6 +241,25 @@ func Parse(args []string) (*Args, error) {
 		}
 	}
 	return a, nil
+}
+
+// preserveRecipeSearchTerm inserts Kong's argument terminator before a search
+// term that starts with a dash. Search terms are data, so Kong must not parse
+// their leading characters as short or long flags.
+func preserveRecipeSearchTerm(args []string) []string {
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] != "recipe" || args[i+1] != "search" || args[i+2] == "--" {
+			continue
+		}
+		if strings.HasPrefix(args[i+2], "-") && args[i+2] != "--refresh" {
+			out := make([]string, 0, len(args)+1)
+			out = append(out, args[:i+2]...)
+			out = append(out, "--")
+			out = append(out, args[i+2:]...)
+			return out
+		}
+	}
+	return args
 }
 
 // parseExec handles `exec <vm> <cmd>...` without kong. Kong's passthrough is
