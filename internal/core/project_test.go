@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/project"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -346,5 +347,175 @@ user = "dev"
 	}
 	if v.CPUs != 8 {
 		t.Errorf("cpus = %d, want 8; the drift was reported but not applied", v.CPUs)
+	}
+}
+
+// writeProjectSecrets writes a project's .stoat/secrets.toml, 0600 as
+// project.Secrets requires.
+func writeProjectSecrets(t *testing.T, dir, body string) {
+	t.Helper()
+	cache := filepath.Join(dir, project.CacheDir)
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "secrets.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileDropsOneParamButKeepsTheRecipe(t *testing.T) {
+	p := projectDir(t, fullDecl)
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same recipe, no [vms.dev.params.docker] table: the declaration no
+	// longer states a user, so vm.toml must stop holding one.
+	dropped := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 2
+ram     = 2048
+recipes = ["docker"]
+shares  = ["."]
+agent_access = "observe"
+`
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName), []byte(dropped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(p2, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := load("myrepo-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := v.Params["docker"]["user"]; ok {
+		t.Errorf("params = %+v, want docker.user unset", v.Params)
+	}
+
+	drift, err := Diff(p2, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drift) != 0 {
+		t.Errorf("second diff = %+v, want none", drift)
+	}
+}
+
+func TestReconcileDropsAWholeRecipeWithParams(t *testing.T) {
+	p := projectDir(t, fullDecl)
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	// docker is gone from recipes and its params table is gone with it.
+	dropped := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 2
+ram     = 2048
+recipes = []
+shares  = ["."]
+agent_access = "observe"
+`
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName), []byte(dropped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(p2, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err := load("myrepo-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range v.Recipes {
+		if r == "docker" {
+			t.Errorf("recipes = %v, want docker dropped", v.Recipes)
+		}
+	}
+	if _, ok := v.Params["docker"]; ok {
+		t.Errorf("params = %+v, want the docker table dropped", v.Params)
+	}
+
+	drift, err := Diff(p2, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drift) != 0 {
+		t.Errorf("second diff = %+v, want none", drift)
+	}
+}
+
+func TestReconcileAppliesASecretsOnlyChange(t *testing.T) {
+	withTailscale := `
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 2
+ram     = 2048
+recipes = ["docker", "tailscale"]
+shares  = ["."]
+agent_access = "observe"
+
+[vms.dev.params.docker]
+user = "dev"
+`
+	p := projectDir(t, withTailscale)
+	writeProjectSecrets(t, p.Dir, "[dev.tailscale]\nauthkey = \"first-key\"\n")
+	p, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	writeProjectSecrets(t, p.Dir, "[dev.tailscale]\nauthkey = \"second-key\"\n")
+	drift, err := Diff(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drift) != 0 {
+		t.Errorf("drift = %+v, want none; this is a secrets-only change", drift)
+	}
+
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	v, err := load("myrepo-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := config.LoadSecrets(v.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secrets["tailscale"]["authkey"] != "second-key" {
+		t.Errorf("stored authkey = %q, want second-key", secrets["tailscale"]["authkey"])
 	}
 }
