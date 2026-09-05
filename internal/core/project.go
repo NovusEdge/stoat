@@ -31,3 +31,26 @@ type Drift struct {
 func Diff(p *project.Project, key string) ([]Drift, error) {
 	return nil, errors.New("core: not implemented")
 }
+
+// Reconciled is what one Reconcile call did.
+type Reconciled struct {
+	Key  string
+	Name string
+
+	// Created is true when the VM did not exist and Reconcile made it.
+	Created bool
+
+	// Drift is what the declaration changed on an existing VM. It is empty on
+	// a create: a VM built from the declaration cannot differ from it.
+	Drift []Drift
+
+	// RestartPending is true when at least one applied drift needs a restart.
+	// The change is already in vm.toml; the guest sees it at the next down
+	// and up.
+	RestartPending bool
+}
+
+// Reconcile makes the VM named by one declaration match it.
+func Reconcile(p *project.Project, key string) (Reconciled, error) {
+	return Reconciled{}, errors.New("core: not implemented")
+}

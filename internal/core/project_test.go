@@ -225,3 +225,66 @@ func TestDiffRefusesAnImageChange(t *testing.T) {
 		t.Errorf("err = %q, want %q", err.Error(), want)
 	}
 }
+
+func TestReconcileCreatesAMissingVM(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	p := projectDir(t, fullDecl)
+	r, err := Reconcile(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Created || r.Name != "myrepo-dev" || r.Key != "dev" {
+		t.Fatalf("reconciled = %+v", r)
+	}
+	if _, err := Get("myrepo-dev"); err != nil {
+		t.Fatalf("vm was not created: %v", err)
+	}
+}
+
+func TestReconcileAppliesDriftAndReportsRestart(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	p := projectDir(t, fullDecl)
+	if _, err := Reconcile(p, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName), []byte(`
+schema = 1
+
+[project]
+name = "myrepo"
+
+[vms.dev]
+image   = "alpine-virt"
+cpus    = 8
+ram     = 2048
+recipes = ["docker"]
+shares  = ["."]
+agent_access = "observe"
+
+[vms.dev.params.docker]
+user = "dev"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Reconcile(p2, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Created {
+		t.Error("Created = true on an existing VM")
+	}
+	if !r.RestartPending {
+		t.Errorf("RestartPending = false after a cpus change: %+v", r.Drift)
+	}
+	v, err := Get("myrepo-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.CPUs != 8 {
+		t.Errorf("cpus = %d, want 8; the drift was reported but not applied", v.CPUs)
+	}
+}
