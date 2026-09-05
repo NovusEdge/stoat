@@ -69,6 +69,19 @@ const workMountFix = `	fstab="$target/etc/fstab"
 	fi
 `
 
-// issueFix is a stub. Task 10 replaces its body with the sh fragment that
-// closes issue #61.
-const issueFix = ``
+// issueFix restores the stock /etc/issue on the target (issue #61).
+//
+// setup-disk -m sys copies the live system's /etc, so the installed login
+// screen still reads "Installing Alpine. Unattended. Do not log in." The
+// guard on the banner text means a rerun never overwrites an issue the user
+// has since edited.
+//
+// printf's format is single-quoted, so \r, \m and \l reach the file as the
+// getty escapes \r, \m and \l rather than as control characters.
+const issueFix = `	issue="$target/etc/issue"
+	if [ -f "$issue" ] && grep -q 'Installing Alpine' "$issue"; then
+		printf 'Welcome to Alpine Linux %s\nKernel \\r on an \\m (\\l)\n\n' \
+			"$(cut -d. -f1,2 "$target/etc/alpine-release")" > "$issue"
+		echo "stoat: restored the stock /etc/issue"
+	fi
+`
