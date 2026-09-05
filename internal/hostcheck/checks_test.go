@@ -31,7 +31,7 @@ func TestRunChecksAllMissing(t *testing.T) {
 	for _, c := range checks {
 		names = append(names, c.Name)
 	}
-	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "/dev/kvm"}
+	want := []string{"qemu-system-x86_64", "qemu-img", "ssh", "xorriso", "git", "/dev/kvm"}
 	if len(names) != len(want) {
 		t.Fatalf("got %d checks %v, want %d %v", len(names), names, len(want), want)
 	}
@@ -41,7 +41,7 @@ func TestRunChecksAllMissing(t *testing.T) {
 		}
 	}
 
-	for _, c := range checks[:4] {
+	for _, c := range checks[:5] {
 		if c.OK {
 			t.Errorf("%s: OK with an empty PATH", c.Name)
 		}
@@ -53,6 +53,12 @@ func TestRunChecksAllMissing(t *testing.T) {
 		}
 		if !strings.HasPrefix(c.Fix[0], "sudo pacman") {
 			t.Errorf("%s: Fix = %v, want an arch command", c.Name, c.Fix)
+		}
+		if c.Name == "git" && !c.Optional {
+			t.Errorf("%s: Optional = false, want true", c.Name)
+		}
+		if c.Name != "git" && c.Optional {
+			t.Errorf("%s: Optional = true, want false", c.Name)
 		}
 	}
 }
