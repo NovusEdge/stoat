@@ -58,6 +58,15 @@ var portedTests = map[string]string{
 	"test_wait_clamps_the_timeout":                                            "TestWaitClampsTimeout",
 	"test_logs_clamps_the_line_count":                                         "TestLogsClampsLines",
 	"test_forward_refuses_a_pair_that_kong_reads_as_a_flag":                   "TestForwardRefusesFlagPair",
+	"test_check_index_name_accepts_name_and_optional_ref":                     "TestCheckIndexName",
+	"test_check_index_name_rejects_urls_paths_options_and_bad_refs":           "TestCheckIndexName",
+	"test_add_recipe_accepts_a_slash_containing_ref_and_uses_variadic_argv":   "TestCheckIndexName",
+	"test_recipe_tools_refuse_unsafe_names_before_cli":                        "TestRecipeToolsRefuseUnsafeNames",
+	"test_update_and_remove_recipe_use_plain_names_and_remove_has_no_force":   "TestRecipeToolsRefuseUnsafeNames",
+	// The Go server refuses a search term that starts with a dash instead of
+	// passing it after "--": search_recipes takes one term through
+	// checkFlagFree, the same guard forward and check_recipes use.
+	"test_search_recipes_preserves_a_leading_dash_as_data": "TestSearchRecipesRefusesAFlagTerm",
 }
 
 // TestEveryPortedTestExists asserts each named Go test is in this package's

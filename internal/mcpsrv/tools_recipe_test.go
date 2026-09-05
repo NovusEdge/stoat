@@ -29,6 +29,23 @@ func TestAddRecipeRefusesAURL(t *testing.T) {
 	}
 }
 
+// TestRecipeToolsRefuseUnsafeNames pins that update_recipe and
+// remove_recipe take a plain index name. Both reach core with a name only,
+// so an @ref is refused rather than dropped without a word.
+func TestRecipeToolsRefuseUnsafeNames(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	for _, c := range []struct{ tool, name string }{
+		{"update_recipe", "tailscale@v1.2"},
+		{"remove_recipe", "../tailscale"},
+		{"remove_recipe", "-y"},
+		{"remove_recipe", "tailscale@v1.2"},
+	} {
+		if res := callTool(t, c.tool, map[string]any{"name": c.name}); !res.IsError {
+			t.Errorf("%s accepted %q", c.tool, c.name)
+		}
+	}
+}
+
 // TestRemoveRecipeHasNoForce pins the spec's rule that remove_recipe has no
 // force parameter: a person, not an agent, removes a recipe a VM still
 // uses.

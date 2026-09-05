@@ -2,6 +2,7 @@ package mcpsrv
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
@@ -47,9 +48,12 @@ func (s *srv) registerRecipe(server *mcp.Server) {
 		func(ctx context.Context, in recipeNameIn) (wire.RecipeCatalog, error) {
 			name := in.Name
 			if name != "" {
-				n, _, err := checkIndexName(name)
+				n, ref, err := checkIndexName(name)
 				if err != nil {
 					return wire.RecipeCatalog{}, err
+				}
+				if ref != "" {
+					return wire.RecipeCatalog{}, fmt.Errorf("update_recipe takes a plain recipe name; pin a ref with add_recipe")
 				}
 				name = n
 			}
@@ -62,9 +66,12 @@ func (s *srv) registerRecipe(server *mcp.Server) {
 	register(server, "remove_recipe", classMutate,
 		"Remove a remote recipe: its declaration, its lock entry and its directory. It refuses while any VM lists that recipe. There is no force option on this tool; a person removes a recipe a VM still uses, from the CLI. Mutating and not reversible from here, though add_recipe reinstalls it.",
 		func(ctx context.Context, in removeRecipeIn) (wire.RecipeCatalog, error) {
-			name, _, err := checkIndexName(in.Name)
+			name, ref, err := checkIndexName(in.Name)
 			if err != nil {
 				return wire.RecipeCatalog{}, err
+			}
+			if ref != "" {
+				return wire.RecipeCatalog{}, fmt.Errorf("remove_recipe takes a plain recipe name, without @ref")
 			}
 			// force is deliberately absent rather than false-by-default: a
 			// parameter that exists is eventually reachable.
