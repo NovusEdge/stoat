@@ -43,7 +43,7 @@ func (p *Project) Shares(key string) ([]Share, error) {
 		// only for the EvalSymlinks call below, which resolves the escape a
 		// symlink hides.
 		joined := filepath.Join(p.Dir, entry)
-		if joined != root && !strings.HasPrefix(joined, root+string(filepath.Separator)) {
+		if joined != p.Dir && !strings.HasPrefix(joined, p.Dir+string(filepath.Separator)) {
 			return nil, fmt.Errorf("%s: vms.%s.shares: %q is outside the project", FileName, key, entry)
 		}
 		abs, err := filepath.EvalSymlinks(joined)
