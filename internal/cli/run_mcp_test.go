@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,5 +65,23 @@ func TestMCPDoctorJSON(t *testing.T) {
 		if !strings.Contains(out, key) {
 			t.Errorf("mcp doctor output has no %s: %s", key, out)
 		}
+	}
+}
+
+// TestMCPInstallPrintWritesNoFile pins --print's own contract: the client
+// entry goes to stdout and configPath's file is never touched, regardless of
+// the --json flag.
+func TestMCPInstallPrintWritesNoFile(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	out := runCLI(t, "--json", "mcp", "install", "claude-code", "--print")
+	for _, key := range []string{`"command"`, `"args"`, `"cwd"`, `"mcpServers"`} {
+		if !strings.Contains(out, key) {
+			t.Errorf("mcp install --print output has no %s: %s", key, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
+		t.Errorf("mcp install --print wrote %s: %v", filepath.Join(home, ".claude.json"), err)
 	}
 }

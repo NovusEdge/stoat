@@ -95,6 +95,9 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		// The fixture VM is stopped, so the honest answer is not_running; the
 		// point here is that the command answers in the envelope at all.
 		{name: "screenshot stopped", argv: []string{"screenshot", "work"}, code: wire.CodeNotRunning, exit: ExitFail},
+		// mcp serve blocks on a transport and speaks MCP, not the --json
+		// envelope, so it has no row here.
+		{name: "mcp doctor", argv: []string{"mcp", "doctor"}, ok: true, exit: ExitOK},
 
 		{name: "up unknown", argv: []string{"up", "nope"}, code: wire.CodeNotFound, exit: ExitFail},
 		{name: "down stopped", argv: []string{"down", "work"}, code: wire.CodeNotRunning, exit: ExitFail},
@@ -110,6 +113,9 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cliRoot(t)
+			if tt.name == "mcp doctor" {
+				t.Setenv("HOME", t.TempDir())
+			}
 			if tt.name == "recipe show" {
 				if err := recipes.Install(); err != nil {
 					t.Fatal(err)
