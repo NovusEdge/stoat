@@ -133,8 +133,12 @@ func snapshotLocked() (RecipeSnapshot, error) {
 		}
 		locks[project.Name] = projectLock
 	}
+	roots, err := Roots()
+	if err != nil {
+		return RecipeSnapshot{}, err
+	}
 	snapshot := RecipeSnapshot{
-		Roots:     Roots(),
+		Roots:     roots,
 		Manifests: manifests,
 		Scopes:    make(map[string]string, len(manifests)),
 		Pins:      make(map[string]LockEntry, len(manifests)),

@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,6 +95,32 @@ func TestGlobalLockErrorsSurfaceAtResolutionBoundaries(t *testing.T) {
 				t.Fatalf("ScopeOf error = %v", err)
 			}
 		})
+	}
+}
+
+// TestResolvePathFailsRatherThanDowngradeOnAnUnreadableCwd checks that a
+// deleted working directory surfaces the Getwd error instead of silently
+// falling back to the global recipe root.
+func TestResolvePathFailsRatherThanDowngradeOnAnUnreadableCwd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("STOAT_HOME", home)
+	seedRecipe(t, filepath.Join(home, "recipes"), "tailscale")
+	writeFile(t, filepath.Join(home, "stoat.lock"),
+		"schema = 1\n[recipes.tailscale]\nsource = \"s\"\nref = \"v1\"\ncommit = \"abc\"\nadded = \"now\"\n")
+
+	gone := t.TempDir()
+	wd := filepath.Join(gone, "wd")
+	if err := os.Mkdir(wd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(wd)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	_, scope, ok, err := ResolvePath("tailscale")
+	if err == nil {
+		t.Fatalf("ResolvePath error = nil, scope = %q, ok = %v, want the deleted-cwd error", scope, ok)
 	}
 }
 

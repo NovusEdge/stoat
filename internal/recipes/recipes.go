@@ -323,7 +323,11 @@ func ListManifests() ([]Manifest, error) {
 func listManifestsLocked() ([]Manifest, error) {
 	seen := map[string]bool{}
 	var out []Manifest
-	for _, root := range Roots() {
+	roots, err := Roots()
+	if err != nil {
+		return nil, err
+	}
+	for _, root := range roots {
 		entries, err := os.ReadDir(root.Path)
 		if err != nil {
 			if os.IsNotExist(err) {

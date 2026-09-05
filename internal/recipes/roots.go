@@ -20,9 +20,17 @@ type Root struct {
 // The global cache and the bundled set share ~/.stoat/recipes, so the label
 // comes from the bookkeeping beside them rather than from the path: the home
 // lock names the remote recipes and .manifest names stoat's own copies.
-func Roots() []Root {
+//
+// ScopeFor fails when the working directory cannot be read (os.Getwd) or
+// stat'd for stoat.toml. Surfacing that error keeps a broken cwd from
+// silently downgrading a project recipe to the global one.
+func Roots() ([]Root, error) {
 	var roots []Root
-	if s, err := ScopeFor(false); err == nil && s.Name == "project" {
+	s, err := ScopeFor(false)
+	if err != nil {
+		return nil, err
+	}
+	if s.Name == "project" {
 		roots = append(roots, Root{Path: s.CachePath, Scope: "project"})
 	}
 	home := dir()
@@ -30,7 +38,7 @@ func Roots() []Root {
 		Root{Path: home, Scope: "global"},
 		Root{Path: home, Scope: "local"},
 		Root{Path: home, Scope: "bundled"},
-	)
+	), nil
 }
 
 // ResolvePath finds name's recipe directory and the scope it belongs to. The
@@ -55,7 +63,11 @@ func resolvePath(name string) (path, scope string, ok bool, err error) {
 	if err := validateRecipeName(name); err != nil {
 		return "", "", false, err
 	}
-	for _, root := range Roots() {
+	roots, err := Roots()
+	if err != nil {
+		return "", "", false, err
+	}
+	for _, root := range roots {
 		d, targetErr := recipeTarget(root.Path, name)
 		if targetErr != nil {
 			return "", "", false, targetErr
