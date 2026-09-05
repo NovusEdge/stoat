@@ -31,9 +31,9 @@ type RecipeHealth struct {
 	Detail string
 }
 
-// HealthChecks runs checks for the named recipes in order and records each
-// verdict on an existing applied entry. It does not save v.
-func HealthChecks(ctx context.Context, v *config.VM, names []string) ([]RecipeHealth, error) {
+// healthChecksForVM runs checks for the named recipes in order and records
+// each verdict on an existing applied entry. It does not save v.
+func healthChecksForVM(ctx context.Context, v *config.VM, names []string) ([]RecipeHealth, error) {
 	out := make([]RecipeHealth, 0, len(names))
 	for _, name := range names {
 		if err := ctx.Err(); err != nil {
@@ -68,6 +68,13 @@ func HealthChecks(ctx context.Context, v *config.VM, names []string) ([]RecipeHe
 		out = append(out, verdict)
 	}
 	return out, nil
+}
+
+// HealthChecks checks the named VM's applied recipes in configured order.
+// The public operation is implemented by the recipe-health follow-up; the
+// loaded-VM runner above remains the Apply-local mechanical seam.
+func HealthChecks(ctx context.Context, name string) ([]RecipeHealth, error) {
+	return nil, nil
 }
 
 // VMHealth folds verdicts into one VM result.

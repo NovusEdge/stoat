@@ -252,7 +252,7 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		}
 	}
 
-	verdicts, healthErr := HealthChecks(ctx, v, runTargets)
+	verdicts, healthErr := healthChecksForVM(ctx, v, runTargets)
 	if healthErr != nil {
 		if saveErr := v.Save(); saveErr != nil {
 			return saveErr

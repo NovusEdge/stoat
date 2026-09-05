@@ -2,6 +2,7 @@ package sshx
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,12 +72,12 @@ func TestProvisionKeepsSecretOutOfSSHArgvAndLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Provision(context.Background(), v)
-	if err == nil {
+	provisionErr := Provision(context.Background(), v)
+	if provisionErr == nil {
 		t.Fatal("Provision succeeded, want the fake recipe failure")
 	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("secret leaked in Provision error: %v", err)
+	if strings.Contains(provisionErr.Error(), secret) {
+		t.Fatalf("secret leaked in Provision error: %v", provisionErr)
 	}
 	log, err := os.ReadFile(v.ProvisionLogPath())
 	if err != nil {
@@ -101,9 +102,42 @@ func TestProvisionKeepsSecretOutOfSSHArgvAndLogs(t *testing.T) {
 		t.Fatalf("secret changed while crossing the shell boundary: got %q, want %q", value, secret)
 	}
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "ARGV:") && strings.Contains(line, "cli-secret-value") {
+		if strings.HasPrefix(line, "ARGV:") && strings.Contains(line, secret) {
 			t.Fatalf("secret appeared in ssh argv: %q", line)
 		}
+	}
+	split := len(secret) / 2
+	for _, public := range []string{provisionErr.Error(), string(log)} {
+		for _, fragment := range []string{secret, secret[:split], secret[split:]} {
+			if strings.Contains(public, fragment) {
+				t.Fatalf("secret fragment %q leaked into public Provision sink %q", fragment, public)
+			}
+		}
+	}
+}
+
+func TestProvisionExportsOutputToChildProcess(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	childOutput := filepath.Join(root, "child-output")
+	installSSHRecipe(t, root, "child", "schema = 3\nname = \"child\"\nscript = \"install.sh\"\n", "#!/bin/sh\nsh -c 'printf \"%s\" \"$STOAT_OUTPUT\" > "+shellQuoteForTest(childOutput)+"'\n")
+	guestOutputRoot := t.TempDir()
+	installExecutingSSH(t, guestOutputRoot)
+	port := acceptOnly(t, "SSH-2.0-fake\r\n")
+	v := &config.VM{Name: "work", Dir: filepath.Join(root, "work"), OS: "alpine", SSHPort: port, Recipes: []string{"child"}}
+	if err := os.MkdirAll(v.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Provision(context.Background(), v); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(childOutput)
+	if err != nil {
+		t.Fatalf("child did not write STOAT_OUTPUT: %v", err)
+	}
+	want := filepath.Join(guestOutputRoot, "child")
+	if string(got) != want {
+		t.Fatalf("child STOAT_OUTPUT = %q, want %q", got, want)
 	}
 }
 
@@ -175,13 +209,25 @@ func installSecretCheckingSSH(t *testing.T, capture, valueFile, secret string, f
 	bin := t.TempDir()
 	fail := ""
 	if failRecipe {
-		fail = "printf '%s' \"$(cat " + shellQuoteForTest(valueFile) + ")\"; printf '%s\\n' '-tail'; exit 1\n"
+		split := len(secret) / 2
+		fail = fmt.Sprintf("secret=$(cat %s)\nprintf '%%s' \"$(printf '%%s' \"$secret\" | cut -c1-%d)\"\nsleep 0.05\nprintf '%%s\\n' \"$(printf '%%s' \"$secret\" | cut -c%d-)\"\nexit 1\n", shellQuoteForTest(valueFile), split, split+1)
 	}
 	script := "#!/bin/sh\n" +
 		"input=$(cat)\n" + "printf 'ARGV:%s\\n' \"$*\" >> " + shellQuoteForTest(capture) + "\n" +
 		"printf 'STDIN:%s\\n' \"$input\" >> " + shellQuoteForTest(capture) + "\n" +
 		"case \"$input\" in *STOAT_RECIPE=docker*)\n" +
 		"printf '%s' \"$input\" | sh -s\n" + fail + ";; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installExecutingSSH(t *testing.T, outputRoot string) {
+	t.Helper()
+	bin := t.TempDir()
+	root := strings.ReplaceAll(outputRoot, "#", "\\#")
+	script := "#!/bin/sh\ninput=$(cat)\ncase \"$input\" in *'STOAT_RECIPE=child'*) safe=$(printf '%s' \"$input\" | sed 's#/tmp/.stoat-out#" + root + "#g'); printf '%s' \"$safe\" | sh -s;; esac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

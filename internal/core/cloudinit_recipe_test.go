@@ -16,7 +16,7 @@ func TestApplyDiscoversCloudInitOutputsAndSkipsTheRecipe(t *testing.T) {
 	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := "schema = 3\nname = \"docker\"\nscript = \"install.sh\"\n\n[outputs]\nsocket = \"path\"\n"
+	manifest := "schema = 3\nname = \"docker\"\nscript = \"install.sh\"\n"
 	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +34,13 @@ func TestApplyDiscoversCloudInitOutputsAndSkipsTheRecipe(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
+	const secret = "cloud-discovery-secret"
+	if err := config.SaveSecrets(vmDir, config.Secrets{"docker": {"authkey": secret}}); err != nil {
+		t.Fatal(err)
+	}
 	defer fakeRunning(t, v)()
 	count := filepath.Join(vmDir, "recipe-count")
-	installCloudMarkerSSH(t, count)
+	installCloudMarkerSSH(t, count, secret)
 
 	if err := Apply(context.Background(), v.Name, ApplyOpts{}); err != nil {
 		t.Fatal(err)
@@ -45,8 +49,25 @@ func TestApplyDiscoversCloudInitOutputsAndSkipsTheRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Applied["docker"].Outputs["socket"] != "/var/run/docker.sock" {
-		t.Fatalf("cloud-init outputs = %v, want socket output", got.Applied["docker"].Outputs)
+	outputs := got.Applied["docker"].Outputs
+	if outputs["rogue"] != "<redacted>" || outputs["empty"] != "" {
+		t.Fatalf("cloud-init outputs = %v, want redacted rogue and empty output", outputs)
+	}
+	vmToml, err := os.ReadFile(filepath.Join(vmDir, "vm.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(vmToml), secret) {
+		t.Fatalf("cloud-init output secret leaked into vm.toml: %s", vmToml)
+	}
+	applyLog, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatalf("apply log missing discovery warnings: %v", err)
+	}
+	for _, name := range []string{"rogue", "empty"} {
+		if !strings.Contains(string(applyLog), `docker: output "`+name+`" is not declared`) {
+			t.Errorf("apply log missing undeclared %s warning: %s", name, applyLog)
+		}
 	}
 	b, err := os.ReadFile(count)
 	if err == nil && strings.Contains(string(b), "STOAT_RECIPE=docker") {
@@ -54,10 +75,10 @@ func TestApplyDiscoversCloudInitOutputsAndSkipsTheRecipe(t *testing.T) {
 	}
 }
 
-func installCloudMarkerSSH(t *testing.T, count string) {
+func installCloudMarkerSSH(t *testing.T, count, secret string) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\ninput=$(cat)\ncase \"$*\" in *'.applied'*) printf '===docker\\nsocket=/var/run/docker.sock\\n';; esac\ncase \"$input\" in *'STOAT_RECIPE=docker'*) printf '%s\\n' \"$input\" >> " + shellQuoteCoreTest(count) + ";; esac\nexit 0\n"
+	script := "#!/bin/sh\ninput=$(cat)\ncase \"$*\" in *'.applied'*) printf '===docker\\nrogue=%s\\nempty=\\n' " + shellQuoteCoreTest(secret) + ";; esac\ncase \"$input\" in *'STOAT_RECIPE=docker'*) printf '%s\\n' \"$input\" >> " + shellQuoteCoreTest(count) + ";; esac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

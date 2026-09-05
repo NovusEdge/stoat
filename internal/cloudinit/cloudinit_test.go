@@ -269,9 +269,11 @@ func TestSeedSecretArtifactsArePrivate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 	bin := t.TempDir()
-	// The stand-in deliberately creates the ISO with umask 022. Seed must
-	// tighten the resulting artifact after xorriso writes it.
-	xorriso := "#!/bin/sh\numask 022\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=$2; shift 2; else shift; fi\ndone\nprintf 'private seed' > \"$out\"\n"
+	// The stand-in deliberately unlinks and recreates the ISO with umask 022.
+	// Seed must protect the replacement inode before xorriso writes bytes.
+	modeFile := filepath.Join(root, "xorriso-create-mode")
+	modeFileQ := shellQuoteCloudinitTest(modeFile)
+	xorriso := "#!/bin/sh\numask 022\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=$2; shift 2; else shift; fi\ndone\nrm -f \"$out\"\n: > \"$out\"\nstat -c '%a' \"$out\" > " + modeFileQ + "\nprintf 'private seed' > \"$out\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "xorriso"), []byte(xorriso), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -283,6 +285,13 @@ func TestSeedSecretArtifactsArePrivate(t *testing.T) {
 	}
 	if _, err := Seed(v, testPubkey, []string{"#cloud-config\nruncmd:\n  - echo " + sentinel + "\n"}); err != nil {
 		t.Fatal(err)
+	}
+	createdMode, err := os.ReadFile(modeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(createdMode)) != "600" {
+		t.Fatalf("xorriso replacement mode before payload = %q, want 600", createdMode)
 	}
 	seedDir := filepath.Join(v.OvlDir(), "seed")
 	for _, item := range []struct {
@@ -308,6 +317,10 @@ func TestSeedSecretArtifactsArePrivate(t *testing.T) {
 	if !strings.Contains(string(b), sentinel) {
 		t.Fatal("private user-data seed lost the required secret-bearing recipe")
 	}
+}
+
+func shellQuoteCloudinitTest(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 // TestSeedArchiveHeaderIsFirstLine pins what NoCloud checks to recognise a

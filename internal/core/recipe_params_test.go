@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,7 @@ func TestPlanApplyReportsParamsChangedAndIgnoresSecretValueChanges(t *testing.T)
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": "first-secret"}}); err != nil {
+	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": "first-secret", "stale": "stale-secret"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +78,7 @@ func TestPlanApplyReportsParamsChangedAndIgnoresSecretValueChanges(t *testing.T)
 		t.Fatalf("initial plan = %+v, want skip", plan)
 	}
 
-	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": "changed-secret"}}); err != nil {
+	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": "changed-secret", "stale": "changed-stale-secret"}}); err != nil {
 		t.Fatal(err)
 	}
 	plan, err = PlanApply(v.Name, ApplyOpts{})
@@ -86,6 +87,13 @@ func TestPlanApplyReportsParamsChangedAndIgnoresSecretValueChanges(t *testing.T)
 	}
 	if len(plan) != 1 || plan[0].Action != "skip" {
 		t.Fatalf("secret-only plan = %+v, want skip", plan)
+	}
+	reloaded, err := config.Load(v.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Applied["docker"].Hash != combined {
+		t.Fatalf("stale undeclared secret changed applied hash to %q, want %q", reloaded.Applied["docker"].Hash, combined)
 	}
 
 	v.SetParam("docker", "user", "bob")
@@ -190,5 +198,67 @@ func TestUpdateValidatesAndUnsetsSecretAndNonSecretParams(t *testing.T) {
 	}
 	if got, ok := v.Param("docker", "user"); !ok || got != "bob" {
 		t.Errorf("failed update changed user = %q/%v", got, ok)
+	}
+}
+
+func TestUpdateSecretEditRollsBackWhenLaterFieldIsInvalid(t *testing.T) {
+	dir := root(t)
+	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
+	writeParamRecipe(t, dir)
+	cases := []struct {
+		name  string
+		patch func(*string) Patch
+	}{
+		{name: "display", patch: func(secret *string) Patch {
+			return Patch{Secrets: config.Secrets{"docker": {"authkey": *secret}}, Display: ptr("invalid")}
+		}},
+		{name: "ssh port", patch: func(secret *string) Patch {
+			return Patch{Secrets: config.Secrets{"docker": {"authkey": *secret}}, SSHPort: ptr(80)}
+		}},
+		{name: "disk", patch: func(secret *string) Patch {
+			return Patch{Secrets: config.Secrets{"docker": {"authkey": *secret}}, Disk: ptr("not-a-size")}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "rollback-" + strings.ReplaceAll(tc.name, " ", "-")
+			if _, err := Create(Spec{
+				Name: name, Image: "alpine-virt-3.24.1-x86_64.iso", Recipes: []string{"docker"},
+				Params:  map[string]map[string]string{"docker": {"user": "alice"}},
+				Secrets: config.Secrets{"docker": {"authkey": "old-secret"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			v, err := config.Load(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vmBefore, err := os.ReadFile(filepath.Join(v.Dir, "vm.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			secretsBefore, err := os.ReadFile(v.SecretsPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			newSecret := "new-secret-" + tc.name
+			if _, err := Update(name, tc.patch(&newSecret)); err == nil {
+				t.Fatal("invalid update succeeded")
+			}
+			vmAfter, err := os.ReadFile(filepath.Join(v.Dir, "vm.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			secretsAfter, err := os.ReadFile(v.SecretsPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(vmAfter, vmBefore) {
+				t.Errorf("vm.toml changed after rejected update:\nbefore:\n%s\nafter:\n%s", vmBefore, vmAfter)
+			}
+			if !bytes.Equal(secretsAfter, secretsBefore) {
+				t.Errorf("secrets.toml changed after rejected update:\nbefore:\n%s\nafter:\n%s", secretsBefore, secretsAfter)
+			}
+		})
 	}
 }

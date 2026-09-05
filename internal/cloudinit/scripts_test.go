@@ -1,6 +1,9 @@
 package cloudinit
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -254,4 +257,98 @@ func TestWrapScriptsFailureCannotWriteSuccessMarker(t *testing.T) {
 	if strings.Contains(cmd, "; touch "+marker) {
 		t.Errorf("success marker is unconditional after a semicolon: %q", cmd)
 	}
+}
+
+func TestWrapScriptsExecutesRecipeOutputAndGatesMarker(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		script  string
+		success bool
+	}{
+		{
+			name:    "success",
+			script:  "#!/bin/sh\nset -eu\nprintf '%s\\n' 'socket=/run/demo.sock' > \"$STOAT_OUTPUT\"\n",
+			success: true,
+		},
+		{
+			name:   "failure",
+			script: "#!/bin/sh\nset -eu\nprintf '%s\\n' 'socket=/run/demo.sock' > \"$STOAT_OUTPUT\"\nexit 1\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := WrapScripts([]Script{{
+				Name:    "demo",
+				Content: tt.script,
+				Env:     []string{"STOAT_RECIPE=demo"},
+			}}, "")
+			f := parseWrapped(t, body)
+			if len(f.WriteFiles) != 1 || len(f.Runcmd) != 1 {
+				t.Fatalf("generated files/commands = %d/%d, want one each:\n%s", len(f.WriteFiles), len(f.Runcmd), body)
+			}
+
+			harness := t.TempDir()
+			writeFiles := map[string]string{
+				"/var/lib/stoat/recipes":  filepath.Join(harness, "recipes"),
+				"/var/lib/stoat/.applied": filepath.Join(harness, "applied"),
+				"/tmp/.stoat-out":         filepath.Join(harness, "out"),
+			}
+			for _, wf := range f.WriteFiles {
+				path := relocateGuestPath(wf.Path, writeFiles)
+				if !pathWithin(path, harness) {
+					t.Fatalf("write_files path escaped harness: %q", path)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(wf.Content), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			command := relocateGuestPath(f.Runcmd[0], writeFiles)
+			if !strings.Contains(command, harness) {
+				t.Fatalf("generated command was not relocated into harness: %q", command)
+			}
+			cmd := exec.Command("sh", "-eu", "-c", command)
+			if err := cmd.Run(); (err == nil) != tt.success {
+				t.Fatalf("generated recipe command error = %v, success = %v", err, tt.success)
+			}
+
+			marker := filepath.Join(harness, "applied", "demo")
+			copied := marker + ".out"
+			if tt.success {
+				if _, err := os.Stat(marker); err != nil {
+					t.Fatalf("success marker missing: %v", err)
+				}
+				got, err := os.ReadFile(copied)
+				if err != nil {
+					t.Fatalf("copied output missing: %v", err)
+				}
+				if string(got) != "socket=/run/demo.sock\n" {
+					t.Fatalf("copied output = %q", got)
+				}
+			} else {
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Errorf("failure marker stat = %v, want absent", err)
+				}
+				if _, err := os.Stat(copied); !os.IsNotExist(err) {
+					t.Errorf("failure copied output stat = %v, want absent", err)
+				}
+			}
+		})
+	}
+}
+
+func relocateGuestPath(value string, replacements map[string]string) string {
+	for _, path := range []string{"/var/lib/stoat/recipes", "/var/lib/stoat/.applied", "/tmp/.stoat-out", "/run/stoat"} {
+		if replacement, ok := replacements[path]; ok {
+			value = strings.ReplaceAll(value, path, replacement)
+		}
+	}
+	return value
+}
+
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

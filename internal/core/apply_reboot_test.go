@@ -88,6 +88,79 @@ func TestApplyRebootsAfterARecipeThatDeclaresIt(t *testing.T) {
 	}
 }
 
+func TestApplyRunsHealthOnlyAfterRebootAndReachability(t *testing.T) {
+	dir := root(t)
+	writeSchema3RebootHealthRecipe(t, dir, "xfce")
+	sequence := filepath.Join(dir, "ssh-sequence")
+	installSequenceSSH(t, sequence)
+
+	port, stop := fakeSSHD(t, 0)
+	defer stop()
+	v := &config.VM{
+		Name: "work", Mode: "disk", OS: "alpine", Backend: "apkovl", Installed: true,
+		RAM: 512, CPUs: 1, SSHPort: port, Recipes: []string{"xfce"},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer fakeRunning(t, v)()
+
+	if err := Apply(context.Background(), v.Name, ApplyOpts{}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	events, err := os.ReadFile(sequence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Fields(string(events))
+	index := func(want string) int {
+		for i, line := range lines {
+			if line == want {
+				return i
+			}
+		}
+		return -1
+	}
+	recipeAt, rebootAt, healthAt := index("recipe"), index("reboot"), index("health")
+	if recipeAt < 0 || rebootAt < 0 || healthAt < 0 {
+		t.Fatalf("ssh sequence = %v, want recipe, reboot, and health", lines)
+	}
+	if !(recipeAt < rebootAt && rebootAt < healthAt) {
+		t.Fatalf("ssh sequence = %v, want recipe < reboot < health", lines)
+	}
+}
+
+func writeSchema3RebootHealthRecipe(t *testing.T, rootDir, name string) {
+	t.Helper()
+	d := filepath.Join(rootDir, "recipes", name)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "schema = 3\nname = \"" + name + "\"\nversion = \"1.0\"\nscript = \"install.sh\"\nrun = \"always\"\nreboot = true\n\n[health]\ncheck = \"health-check\"\n"
+	if err := os.WriteFile(filepath.Join(d, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "install.sh"), []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func installSequenceSSH(t *testing.T, sequence string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"last=\"\"\nfor a in \"$@\"; do last=\"$a\"; done\n" +
+		"if [ \"$last\" = reboot ]; then printf 'reboot\\n' >> " + shellQuoteCoreTest(sequence) + "; exit 0; fi\n" +
+		"input=$(cat)\n" +
+		"case \"$*\" in *'cat /tmp/.stoat-out/xfce'*) printf 'outputs\\n' >> " + shellQuoteCoreTest(sequence) + "; exit 0;; esac\n" +
+		"case \"$input\" in *'health-check'*) printf 'health\\n' >> " + shellQuoteCoreTest(sequence) + "; exit 0;; *'STOAT_RECIPE=xfce'*) printf 'recipe\\n' >> " + shellQuoteCoreTest(sequence) + "; exit 0;; *'stoat_pkg_setup'*) printf 'setup\\n' >> " + shellQuoteCoreTest(sequence) + "; exit 0;; esac\n" +
+		"printf 'other\\n' >> " + shellQuoteCoreTest(sequence) + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestApplyDoesNotRebootALiveVM pins the mode gate: a live VM's root is a
 // tmpfs the reboot wipes, and a live VM re-applies every boot, so a reboot
 // here would loop. A reboot=true recipe on a live VM reboots nothing.

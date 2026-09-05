@@ -33,7 +33,8 @@ func TestVMHealthFolds(t *testing.T) {
 
 func TestApplyFailsOnHealthCheckAndPersistsResult(t *testing.T) {
 	dir := root(t)
-	writeHealthRecipe(t, dir, true)
+	writeHealthRecipeWithOutput(t, dir)
+	const secret = "health-output-secret"
 	port, stopSSH := fakeSSHD(t, 0)
 	defer stopSSH()
 	v := &config.VM{
@@ -43,8 +44,11 @@ func TestApplyFailsOnHealthCheckAndPersistsResult(t *testing.T) {
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
+	if err := config.SaveSecrets(v.Dir, config.Secrets{"docker": {"authkey": secret}}); err != nil {
+		t.Fatal(err)
+	}
 	defer fakeRunning(t, v)()
-	installHealthSSH(t, false)
+	installHealthSSH(t, false, t.TempDir())
 
 	err := Apply(context.Background(), v.Name, ApplyOpts{})
 	if err == nil {
@@ -59,6 +63,16 @@ func TestApplyFailsOnHealthCheckAndPersistsResult(t *testing.T) {
 	}
 	if got.Applied["docker"].Health != string(HealthFailed) {
 		t.Errorf("health = %q, want failed", got.Applied["docker"].Health)
+	}
+	if got.Applied["docker"].Outputs["captured"] != "<redacted>" {
+		t.Errorf("captured output = %q, want redacted", got.Applied["docker"].Outputs["captured"])
+	}
+	vmToml, err := os.ReadFile(filepath.Join(got.Dir, "vm.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(vmToml), secret) {
+		t.Fatalf("health output secret leaked into vm.toml: %s", vmToml)
 	}
 	plan, err := PlanApply(v.Name, ApplyOpts{})
 	if err != nil {
@@ -99,10 +113,13 @@ func TestApplyWithoutHealthCheckRecordsUnknown(t *testing.T) {
 func TestHealthChecksPropagatesCancellation(t *testing.T) {
 	dir := root(t)
 	writeHealthRecipe(t, dir, true)
-	v := &config.VM{Name: "work", Dir: filepath.Join(dir, "work"), OS: "alpine"}
+	v := &config.VM{Name: "work", Dir: filepath.Join(dir, "work"), OS: "alpine", Recipes: []string{"docker"}, Applied: map[string]config.AppliedRecipe{"docker": {}}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := HealthChecks(ctx, v, []string{"docker"})
+	_, err := HealthChecks(ctx, v.Name)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("HealthChecks error = %v, want context.Canceled", err)
 	}
@@ -126,14 +143,36 @@ func writeHealthRecipe(t *testing.T, rootDir string, withHealth bool) {
 	}
 }
 
-func installHealthSSH(t *testing.T, succeedHealth bool) {
+func writeHealthRecipeWithOutput(t *testing.T, rootDir string) {
+	t.Helper()
+	d := filepath.Join(rootDir, "recipes", "docker")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "schema = 3\nname = \"docker\"\nscript = \"install.sh\"\n\n[params.authkey]\ntype = \"secret\"\nrequired = true\n\n[health]\ncheck = \"docker info\"\n"
+	if err := os.WriteFile(filepath.Join(d, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf 'captured=%s\\n' \"$STOAT_PARAM_AUTHKEY\" > \"$STOAT_OUTPUT\"\n"
+	if err := os.WriteFile(filepath.Join(d, "install.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func installHealthSSH(t *testing.T, succeedHealth bool, outputRoots ...string) {
 	t.Helper()
 	bin := t.TempDir()
 	check := "echo 'cannot connect to the docker daemon' >&2\nexit 1"
 	if succeedHealth {
 		check = "exit 0"
 	}
-	script := "#!/bin/sh\ninput=$(cat)\ncase \"$input\" in *'docker info'*)\n" + check + "\n;; esac\nexit 0\n"
+	script := "#!/bin/sh\ninput=$(cat)\ncase \"$input\" in *'docker info'*)\n" + check + "\n;; esac\n"
+	if len(outputRoots) > 0 {
+		root := strings.ReplaceAll(outputRoots[0], "#", "\\#")
+		script += "case \"$input\" in *'STOAT_RECIPE=docker'*) safe=$(printf '%s' \"$input\" | sed 's#/tmp/.stoat-out#" + root + "#g'); printf '%s' \"$safe\" | sh -s; exit $?;; esac\n"
+		script += "case \"$*\" in *'cat /tmp/.stoat-out/docker'*) cat " + filepath.Join(outputRoots[0], "docker") + ";; esac\n"
+	}
+	script += "exit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
