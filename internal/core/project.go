@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/project"
 )
 
@@ -126,16 +127,21 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		return nil, err
 	}
 
-	// image is compared against the resolved image, not the raw string: a
-	// catalog id and the path it resolves to name the same image, and
-	// reporting them as a difference would refuse a VM that is correct.
+	// vm.toml records the file a VM was built from (isos/<file>, or the
+	// absolute Base path for a cloud image), never a catalog id. Comparing
+	// that against img.id() (a catalog id) reported every unchanged
+	// declaration as a change, since the two never share a spelling.
 	img, err := resolveImage(spec.Image)
 	if err != nil {
 		return nil, err
 	}
-	if was := declaredImage(v); was != img.id() {
+	now := img.isoField()
+	if img.backend == "cloudinit" {
+		now = img.abs
+	}
+	if was := declaredImage(v); was != now {
 		return nil, fmt.Errorf("%w: %s: image changed (%s -> %s); run stoat rm %s and stoat up",
-			ErrImmutableDeclaration, key, was, img.id(), key)
+			ErrImmutableDeclaration, key, imageName(was), img.id(), key)
 	}
 	if spec.Disk != "" && v.Disk != "" && spec.Disk != v.Disk {
 		return nil, fmt.Errorf("%w: %s: disk changed (%s -> %s); run stoat rm %s and stoat up",
@@ -170,6 +176,23 @@ func declaredImage(v *config.VM) string {
 		return v.Base
 	}
 	return v.ISO
+}
+
+// imageName renders a stored image field back to a catalog id, so an
+// image-changed message names the image the way a user typed it in
+// stoat.toml rather than the file it resolved to. A field with no catalog
+// match (a BYO image, or an absolute Base path) is returned as recorded.
+func imageName(field string) string {
+	rel := strings.TrimPrefix(field, "isos/")
+	if rel == field {
+		return field
+	}
+	for _, e := range iso.Catalog() {
+		if MatchLocal(e, []string{rel}) == rel {
+			return e.ID
+		}
+	}
+	return rel
 }
 
 // renderShares is the comparable form of a share list: guest mountpoint and
