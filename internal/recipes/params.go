@@ -57,10 +57,17 @@ func Resolve(m Manifest, set map[string]string, secrets map[string]string) (map[
 
 func requiredUnset(recipe string, p Param) error {
 	if p.Type == "secret" {
-		return fmt.Errorf("%w: %s.%s: required secret is unset; run stoat update --secret %s.%s", ErrParamUnset, recipe, p.Name, recipe, p.Name)
+		return paramUnset{fmt.Errorf("%s.%s: required secret is unset; run stoat update --secret %s.%s", recipe, p.Name, recipe, p.Name)}
 	}
-	return fmt.Errorf("%w: %s.%s: required param is unset; run stoat update --set %s.%s=VALUE", ErrParamUnset, recipe, p.Name, recipe, p.Name)
+	return paramUnset{fmt.Errorf("%s.%s: required param is unset; run stoat update --set %s.%s=VALUE", recipe, p.Name, recipe, p.Name)}
 }
+
+// paramUnset carries ErrParamUnset without a "%w: " prefix on its message: a
+// secret's failure text must read "required secret is unset", not "required
+// parameter is unset: required secret is unset".
+type paramUnset struct{ error }
+
+func (paramUnset) Unwrap() error { return ErrParamUnset }
 
 // Validate checks one declared parameter value against its manifest type.
 func Validate(m Manifest, name, value string) error {

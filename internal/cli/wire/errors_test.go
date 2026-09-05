@@ -162,8 +162,9 @@ func TestRequiredSecretUnsetSurvivesTheJSONResultBoundary(t *testing.T) {
 	if result.Error.Code != CodeInvalidSpec {
 		t.Fatalf("error.code = %q, want %q", result.Error.Code, CodeInvalidSpec)
 	}
-	if result.Error.Message != resolveErr.Error() {
-		t.Fatalf("error.message = %q, want %q", result.Error.Message, resolveErr.Error())
+	const wantMessage = "docker.authkey: required secret is unset; run stoat update --secret docker.authkey"
+	if result.Error.Message != wantMessage {
+		t.Fatalf("error.message = %q, want %q", result.Error.Message, wantMessage)
 	}
 }
 
