@@ -43,6 +43,17 @@ type AppliedRecipe struct {
 	Health     string            `toml:"health"`
 }
 
+// Share is one 9p export a project VM gets, beyond the legacy single Share
+// and the per-VM work scratch. Tag is qemu's mount_tag and must be unique
+// within a VM; "host" and "work" are reserved by the two exports qemu.Args
+// already attaches. stoat writes these from stoat.toml at create and at
+// reconcile; a hand edit is overwritten by the next stoat up.
+type Share struct {
+	Tag   string `toml:"tag"`
+	Host  string `toml:"host"`
+	Guest string `toml:"guest"`
+}
+
 // VM is one virtual machine. vm.toml is authoritative; there is no cache.
 type VM struct {
 	Name      string                       `toml:"name"`
@@ -114,6 +125,16 @@ type VM struct {
 
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.
 	Applied map[string]AppliedRecipe `toml:"applied,omitempty" comment:"written by stoat; do not edit"`
+
+	// Project is the absolute directory of the stoat.toml that declared this
+	// VM, empty for a VM created by stoat new. A VM whose project directory
+	// is gone still lists and still runs; ls marks the path "(missing)".
+	Project string `toml:"project"`
+
+	// Shares are the project's 9p exports, mounted under /work in the guest.
+	// The legacy single Share field stays as it is: it is a different export
+	// (read-only, at /mnt/host) with its own users.
+	Shares []Share `toml:"shares,omitempty"`
 
 	Dir string `toml:"-"` // absolute path to the VM directory
 }

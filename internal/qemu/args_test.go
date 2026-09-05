@@ -305,3 +305,27 @@ func TestArgsShareExportsAreAsymmetric(t *testing.T) {
 		t.Error("the work export must be writable")
 	}
 }
+
+// Every project share gets its own -virtfs with its own mount tag. qemu
+// derives the fsdev id from the tag, so a duplicate tag makes qemu refuse to
+// start with an error that names neither share.
+func TestArgsRenderEveryProjectShare(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "dev", Mode: "live", ISO: "alpine.iso", RAM: 1024, CPUs: 1, SSHPort: 2200,
+		Dir: filepath.Join("/data", "dev"),
+		Shares: []config.Share{
+			{Tag: "p0", Host: "/proj", Guest: "/work"},
+			{Tag: "p1", Host: "/proj/src", Guest: "/work/src"},
+		},
+	}
+	got := joined(Args(v, true))
+	for _, want := range []string{
+		"local,path=/proj,mount_tag=p0,security_model=mapped-xattr",
+		"local,path=/proj/src,mount_tag=p1,security_model=mapped-xattr",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args do not carry %q:\n%s", want, got)
+		}
+	}
+}
