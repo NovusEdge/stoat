@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -151,6 +152,7 @@ type artifact struct {
 	target string
 	stage  string
 	isDir  bool
+	remove bool
 }
 
 type publishedArtifact struct {
@@ -322,6 +324,11 @@ func publishArtifacts(artifacts []artifact) error {
 		}
 		p.targetMoved = p.oldExists
 		published = append(published, p)
+		if a.remove {
+			p.published = true
+			published[len(published)-1] = p
+			continue
+		}
 		if err := os.Rename(a.stage, a.target); err != nil {
 			return rollbackPublished(published, err)
 		}
@@ -396,14 +403,158 @@ func lockScope(s Scope) (func() error, error) {
 	}, nil
 }
 
-// The lock, sync, update, and remove operations are implemented in the next
-// remote-recipe tasks. These declarations keep the test-first branch buildable.
-func LockAll(Scope) (Lock, error) { return Lock{}, errors.New("remote recipe lock is not implemented") }
+// LockAll resolves every project declaration to a fresh commit. It does not
+// write a lock or touch the recipe cache.
+func LockAll(s Scope) (Lock, error) {
+	old, err := s.Lock()
+	if err != nil {
+		return Lock{}, err
+	}
+	decls, err := s.Decls()
+	if err != nil {
+		return Lock{}, err
+	}
+	if s.Name == "global" {
+		decls = make(map[string]Decl, len(old.Recipes))
+		for name, entry := range old.Recipes {
+			decls[name] = Decl{Source: entry.Source, Ref: entry.Ref}
+		}
+	}
+	names := make([]string, 0, len(decls))
+	for name := range decls {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	next := Lock{Schema: LockSchema, Recipes: make(map[string]LockEntry, len(names))}
+	for _, name := range names {
+		decl := decls[name]
+		source := decl.Source
+		if source == "" {
+			entry, ok, lookupErr := IndexLookup(name)
+			if lookupErr != nil {
+				return Lock{}, lookupErr
+			}
+			if !ok {
+				return Lock{}, fmt.Errorf("no recipe %q in the index; run stoat recipe search %s", name, name)
+			}
+			source = entry.Source
+		}
+		commit, resolveErr := resolveCommit(source, decl.Ref)
+		if resolveErr != nil {
+			return Lock{}, refError(source, decl.Ref, resolveErr)
+		}
+		added := time.Now().UTC().Format(time.RFC3339)
+		if previous, ok := old.Recipes[name]; ok && previous.Added != "" {
+			added = previous.Added
+		}
+		next.Recipes[name] = LockEntry{Source: source, Ref: decl.Ref, Commit: commit, Added: added}
+	}
+	return next, nil
+}
 
-func Sync(Scope) error { return errors.New("remote recipe sync is not implemented") }
+func resolveCommit(source, gitRef string) (string, error) {
+	tmp, err := os.MkdirTemp("", "stoat-lock-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	dst := filepath.Join(tmp, "recipe")
+	if err := gitx.Clone(source, gitRef, dst); err != nil {
+		return "", refError(source, gitRef, err)
+	}
+	return gitx.RevParse(dst, "HEAD")
+}
 
-func StaleLock(Scope) (string, bool, error) {
-	return "", false, errors.New("remote recipe lock is not implemented")
+// Sync stages every missing or mismatched checkout, validates them, then
+// publishes the complete cache transaction. Project caches remove stray
+// entries; the global cache leaves non-remote recipes untouched.
+func Sync(s Scope) error {
+	lock, err := s.Lock()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.CachePath), 0o755); err != nil {
+		return err
+	}
+	stageRoot, err := os.MkdirTemp(filepath.Dir(s.CachePath), ".stoat-recipe-sync-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stageRoot) }()
+
+	names := make([]string, 0, len(lock.Recipes))
+	for name := range lock.Recipes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	artifacts := make([]artifact, 0, len(names))
+	for _, name := range names {
+		entry := lock.Recipes[name]
+		dst := filepath.Join(s.CachePath, name)
+		if cacheMatches(dst, name, entry) {
+			continue
+		}
+		stage := filepath.Join(stageRoot, name)
+		if err := gitx.CloneFull(entry.Source, stage); err != nil {
+			return err
+		}
+		if err := gitx.Checkout(stage, entry.Commit); err != nil {
+			return err
+		}
+		if err := ValidateTree(stage, name); err != nil {
+			return err
+		}
+		artifacts = append(artifacts, artifact{target: dst, stage: stage, isDir: true})
+	}
+	if s.Name == "project" {
+		entries, readErr := os.ReadDir(s.CachePath)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			if _, ok := lock.Recipes[entry.Name()]; !ok {
+				artifacts = append(artifacts, artifact{target: filepath.Join(s.CachePath, entry.Name()), remove: true, isDir: true})
+			}
+		}
+	}
+	return publishArtifacts(artifacts)
+}
+
+func cacheMatches(path, name string, entry LockEntry) bool {
+	have, err := gitx.RevParse(path, "HEAD")
+	if err != nil || have != entry.Commit {
+		return false
+	}
+	return ValidateTree(path, name) == nil
+}
+
+// StaleLock reports the first project declaration that is absent or differs
+// from its lock pin. Global scope has no declaration and is never stale here.
+func StaleLock(s Scope) (string, bool, error) {
+	decls, err := s.Decls()
+	if err != nil {
+		return "", false, err
+	}
+	lock, err := s.Lock()
+	if err != nil {
+		return "", false, err
+	}
+	names := make([]string, 0, len(decls))
+	for name := range decls {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		decl := decls[name]
+		entry, ok := lock.Recipes[name]
+		if !ok || entry.Ref != decl.Ref || (decl.Source != "" && entry.Source != decl.Source) {
+			return name, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func Update(Scope, []string) ([]LockEntry, error) {
