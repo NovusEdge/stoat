@@ -263,6 +263,16 @@ func printDisplay(w io.Writer, d core.Display) {
 }
 
 func runDown(a *Args, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		return fanOut(a, stdout, stderr, func(name string) error {
+			sub := *a
+			sub.VM, sub.JSON = name, false
+			if code := runDown(&sub, stdout, stderr); code != ExitOK {
+				return fmt.Errorf("%s is not running", name)
+			}
+			return nil
+		})
+	}
 	v, err := core.Get(a.VM)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
@@ -298,6 +308,16 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 }
 
 func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		return fanOut(a, stdout, stderr, func(name string) error {
+			sub := *a
+			sub.VM, sub.JSON = name, false
+			if code := runRM(&sub, stdin, stdout, stderr); code != ExitOK {
+				return fmt.Errorf("%s was not deleted", name)
+			}
+			return nil
+		})
+	}
 	v, err := core.Get(a.VM)
 	if err != nil {
 		return a.fail(stdout, stderr, err)

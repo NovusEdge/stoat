@@ -19,6 +19,16 @@ import (
 // missing VM came back as code "internal" instead of "not_found". core.Apply
 // loads and validates independently, so this read cannot desync from it.
 func runApply(a *Args, stdout, stderr io.Writer) int {
+	if a.VM == "" {
+		return fanOut(a, stdout, stderr, func(name string) error {
+			sub := *a
+			sub.VM, sub.JSON = name, false
+			if code := runApply(&sub, stdout, stderr); code != ExitOK {
+				return fmt.Errorf("%s: apply failed", name)
+			}
+			return nil
+		})
+	}
 	v, err := core.Get(a.VM)
 	if err != nil {
 		return a.fail(stdout, stderr, err)
