@@ -92,6 +92,22 @@ func Encode(path string, v any) error {
 func normalizeQuotes(data []byte) []byte {
 	var out bytes.Buffer
 	for i := 0; i < len(data); {
+		if data[i] == '"' {
+			out.WriteByte(data[i])
+			i++
+			for i < len(data) {
+				out.WriteByte(data[i])
+				if data[i] == '\\' && i+1 < len(data) {
+					i++
+					out.WriteByte(data[i])
+				} else if data[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
 		if data[i] != '\'' || i+1 >= len(data) || data[i+1] == '\'' {
 			out.WriteByte(data[i])
 			i++
