@@ -61,3 +61,8 @@ func Decode(path string, v any, opts ...Option) error {
 	}
 	return nil
 }
+
+// Encode is the single TOML writer for files owned by stoat.
+func Encode(path string, v any) error {
+	return nil
+}

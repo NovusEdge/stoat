@@ -82,3 +82,17 @@ func TestDecodeSchemaAbsentIsFine(t *testing.T) {
 		t.Errorf("schema = %d, want 0 (absent)", d.Schema)
 	}
 }
+
+func TestEncodeThenDecodeRoundTrips(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.toml")
+	if err := Encode(p, doc{Schema: 1, Name: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	var got doc
+	if err := Decode(p, &got, Reject); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "x" || got.Schema != 1 {
+		t.Errorf("got %+v", got)
+	}
+}
