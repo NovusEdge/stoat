@@ -182,6 +182,11 @@ type VM struct {
 	// Spec.AllowExec's doc comment for who enforces it.
 	AllowExec bool
 
+	// AgentAccess is vm.toml's agent_access, already resolved by config.Load
+	// so a pre-existing vm.toml with no agent_access key reads as "manage"
+	// (or "exec", mapped from a legacy allow_exec = true) here too.
+	AgentAccess string
+
 	Paths Paths
 
 	// Error is populated only when State is StateBroken, and holds
@@ -271,6 +276,7 @@ func fromConfigUnchecked(v *config.VM) VM {
 		Forwards:        v.Forwards,
 		Installed:       v.Installed,
 		AllowExec:       v.AllowExec,
+		AgentAccess:     v.AgentAccess,
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),

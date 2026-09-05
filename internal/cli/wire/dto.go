@@ -97,6 +97,10 @@ type VM struct {
 	Installed bool          `json:"installed"`
 	Forwards  []PortForward `json:"forwards"`
 	AllowExec bool          `json:"allow_exec"`
+	// AgentAccess mirrors config.VM.AgentAccess: none, observe, manage or
+	// exec. Additive alongside AllowExec, which stays for existing readers;
+	// see internal/mcpsrv's access levels for who enforces it.
+	AgentAccess string `json:"agent_access,omitempty"`
 	// Display is "window" or "vnc" ("" on a broken VM, like every other field
 	// a broken vm.toml cannot supply). Emitted rather than left for a
 	// consumer to derive from mode and installed: a host with no graphical
@@ -178,21 +182,22 @@ func nonNilMap(m map[string]string) map[string]string {
 // answer it differently depending on the machine it ran on.
 func FromVM(v core.VM, graphical bool) VM {
 	return VM{
-		Name:      v.Name,
-		OS:        v.OS,
-		Mode:      v.Mode,
-		Backend:   v.Backend,
-		State:     string(v.State),
-		CPUs:      v.CPUs,
-		RAMMB:     v.RAM,
-		Disk:      v.Disk,
-		Share:     v.Share,
-		Recipes:   nonNil(v.Recipes),
-		SSHPort:   v.SSHPort,
-		SSHUser:   v.SSHUser,
-		Installed: v.Installed,
-		Forwards:  FromPortForwards(v.Forwards),
-		AllowExec: v.AllowExec,
+		Name:        v.Name,
+		OS:          v.OS,
+		Mode:        v.Mode,
+		Backend:     v.Backend,
+		State:       string(v.State),
+		CPUs:        v.CPUs,
+		RAMMB:       v.RAM,
+		Disk:        v.Disk,
+		Share:       v.Share,
+		Recipes:     nonNil(v.Recipes),
+		SSHPort:     v.SSHPort,
+		SSHUser:     v.SSHUser,
+		Installed:   v.Installed,
+		Forwards:    FromPortForwards(v.Forwards),
+		AllowExec:   v.AllowExec,
+		AgentAccess: v.AgentAccess,
 		// DisplayKind, not DisplayFor: this constructor must not go looking at
 		// PATH, which DisplayFor does once per VM it is handed.
 		Display: core.DisplayKind(v, graphical),
