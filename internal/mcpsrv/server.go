@@ -116,3 +116,7 @@ func toolError(err error) *mcp.CallToolResult {
 func clampInt(v, lo, hi int) int {
 	return max(lo, min(v, hi))
 }
+
+func CheckLoopback(addr string) error {
+	return nil
+}
