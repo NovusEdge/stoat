@@ -2,7 +2,10 @@ package mcpsrv
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"reflect"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -154,4 +157,50 @@ func toolError(err error) *mcp.CallToolResult {
 
 func clampInt(v, lo, hi int) int {
 	return max(lo, min(v, hi))
+}
+
+// ServeStdio runs the server over stdio, which is how every MCP client
+// launches a server as a subprocess.
+func ServeStdio(ctx context.Context, opts Options) error {
+	return New(opts).Run(ctx, &mcp.StdioTransport{})
+}
+
+// CheckLoopback refuses a bind that is not loopback. This server has no
+// authentication, so the bind is the boundary.
+func CheckLoopback(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid address %q: %w", addr, err)
+	}
+	if host == "" {
+		return fmt.Errorf("address %q binds every interface; use 127.0.0.1", addr)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("address %q is not loopback; this server has no authentication", addr)
+	}
+	return nil
+}
+
+// ServeHTTP runs the server over streamable HTTP for a client that cannot
+// launch a subprocess. One server instance serves every request, so the
+// rate limiter's buckets are shared across connections.
+func ServeHTTP(ctx context.Context, addr string, opts Options) error {
+	if err := CheckLoopback(addr); err != nil {
+		return err
+	}
+	server := New(opts)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	hs := &http.Server{Addr: addr, Handler: handler}
+	go func() {
+		<-ctx.Done()
+		_ = hs.Close()
+	}()
+	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
