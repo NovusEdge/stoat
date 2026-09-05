@@ -64,6 +64,12 @@ func (h Health) Duration() time.Duration { return 0 }
 // SecretNames returns the names of secret parameters.
 func (m Manifest) SecretNames() []string { return nil }
 
+// SortedParams returns declared parameters in name order.
+func (m Manifest) SortedParams() []Param { return nil }
+
+// SortedOutputs returns declared outputs in name order.
+func (m Manifest) SortedOutputs() []Output { return nil }
+
 var validStages = map[string]bool{"install": true, "provision": true}
 
 var validRuns = map[string]bool{"once": true, "always": true, "manual": true}

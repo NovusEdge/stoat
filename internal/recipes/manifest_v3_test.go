@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ required = true
 
 [outputs]
 socket = "path of the docker socket"
+zsocket = "a second output"
 
 [health]
 check   = "docker info"
@@ -72,6 +74,22 @@ func TestParseManifestV3(t *testing.T) {
 	}
 	if got := m.SecretNames(); len(got) != 1 || got[0] != "authkey" {
 		t.Errorf("SecretNames = %v, want [authkey]", got)
+	}
+	params := m.SortedParams()
+	paramNames := make([]string, len(params))
+	for i, p := range params {
+		paramNames[i] = p.Name
+	}
+	if want := []string{"authkey", "channel", "port", "tls", "user"}; !slices.Equal(paramNames, want) {
+		t.Errorf("SortedParams names = %v, want %v", paramNames, want)
+	}
+	outputs := m.SortedOutputs()
+	outputNames := make([]string, len(outputs))
+	for i, output := range outputs {
+		outputNames[i] = output.Name
+	}
+	if want := []string{"socket", "zsocket"}; !slices.Equal(outputNames, want) {
+		t.Errorf("SortedOutputs names = %v, want %v", outputNames, want)
 	}
 }
 
