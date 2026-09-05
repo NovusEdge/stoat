@@ -10,7 +10,7 @@ require (
 	charm.land/log/v2 v2.0.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/alecthomas/kong v1.16.1
-	github.com/charmbracelet/x/ansi v0.11.7
+	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.47.0
