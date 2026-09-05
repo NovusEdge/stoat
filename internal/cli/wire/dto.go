@@ -34,6 +34,10 @@ import (
 // nonNil turns a nil slice into an empty, non-nil one so it marshals as []
 // rather than null (§3.1, §6: "MAY rely on [] for an empty list, never
 // null").
+// NonNil is nonNil, exported so cli callers building a wire slice by hand
+// (not through a From* constructor) route through the same guarantee.
+func NonNil[T any](s []T) []T { return nonNil(s) }
+
 func nonNil[T any](s []T) []T {
 	if s == nil {
 		return []T{}

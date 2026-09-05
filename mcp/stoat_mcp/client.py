@@ -186,7 +186,6 @@ class Client:
         # payload; an empty dict is the honest reading, not an error.
         return result.get("data") or {}
 
-
     def stream(self, *args: str, timeout: float | None = None) -> Iterator[tuple[str, dict[str, Any]]]:
         """Run a command, yielding every event including the terminal result.
 

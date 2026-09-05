@@ -102,7 +102,7 @@ func reportLock(a *Args, stdout io.Writer, s recipes.Scope, l recipes.Lock) int 
 		rows = append(rows, wire.RecipeAdded{Name: name, Source: e.Source, Ref: e.Ref, Commit: e.Commit, Scope: s.Name})
 	}
 	if a.JSON {
-		return a.ok(stdout, wire.RecipeBatch{Recipes: rows})
+		return a.ok(stdout, wire.RecipeBatch{Recipes: wire.NonNil(rows)})
 	}
 	for _, row := range rows {
 		fmt.Fprintf(stdout, "%-20s %-12s %s\n", row.Name, row.Ref, short(row.Commit))

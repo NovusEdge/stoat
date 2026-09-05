@@ -147,6 +147,7 @@ func runRecipe(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 			out.Recipes = append(out.Recipes, e)
 		}
+		out.Roots, out.Recipes = wire.NonNil(out.Roots), wire.NonNil(out.Recipes)
 		if a.JSON {
 			return a.ok(stdout, out)
 		}
