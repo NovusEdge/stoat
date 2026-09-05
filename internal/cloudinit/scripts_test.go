@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/novusedge/stoat/internal/guest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -164,6 +165,31 @@ func TestWrapScriptsRunsSetupFirst(t *testing.T) {
 	}
 	if !strings.Contains(got, "      #!/bin/sh\n      P\n      echo hi\n") {
 		t.Errorf("prelude not after the shebang:\n%s", got)
+	}
+}
+
+// Debian's registered prelude contains real multiline shell commands. The
+// public wrapper must serialize that setup command as one valid YAML scalar so
+// cloud-init can retain and execute the package setup before the recipe.
+func TestWrapScriptsSerializesActualDebianPrelude(t *testing.T) {
+	o, ok := guest.Lookup("debian")
+	if !ok {
+		t.Fatal("debian guest definition missing")
+	}
+	prelude := guest.Prelude(o, "sh")
+	body := WrapScripts([]Script{{
+		Name:    "docker",
+		Content: "#!/bin/sh\nset -eu\nstoat_pkg_install ca-certificates\n",
+	}}, prelude)
+	f := parseWrapped(t, body)
+	if len(f.Runcmd) < 2 {
+		t.Fatalf("runcmd = %v, want setup and recipe commands", f.Runcmd)
+	}
+	if !strings.Contains(f.Runcmd[0], "stoat_pkg_setup") || !strings.Contains(f.Runcmd[0], "apt-get update") {
+		t.Fatalf("setup command lost Debian prelude semantics: %q", f.Runcmd[0])
+	}
+	if !strings.Contains(f.Runcmd[1], "/var/lib/stoat/recipes/docker.sh") {
+		t.Fatalf("recipe command missing after setup: %q", f.Runcmd[1])
 	}
 }
 
