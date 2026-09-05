@@ -115,7 +115,7 @@ its meaning under the new field.
 `requireAccess(vm, level)` gates every guest-touching tool. `core.Exec` does
 not enforce it, because `core` is a library the CLI and TUI also call and a
 blanket refusal there would be the wrong layer. A refusal names both levels:
-`vm "dev" has agent_access = observe; write_file needs manage`.
+`vm "dev" has agent_access = observe; needs manage`.
 
 MCP's `update` tool may lower a VM's `agent_access` and never raise it.
 Raising is CLI or TUI only, so an agent cannot grant itself more access than
@@ -209,6 +209,8 @@ user and carry no hidden instructions; `TestNoEmDashInDescription` and
 both ways. `search_recipes` and `add_recipe` use the curated remote index;
 `add_recipe` accepts an index name and an optional tag or branch ref,
 including slash-containing branch refs, and never a repository URL.
+`search_recipes` refuses a term that starts with a dash, through the same
+`checkFlagFree` guard, so the term never reads as a flag.
 `remove_recipe` has no `force` argument and refuses while a VM still lists
 the recipe.
 
@@ -247,21 +249,25 @@ session tool and a guest agent binary over vsock are candidates for their
 own design after this one; the agent would also cover guests without sshd
 (Windows) and streaming output.
 
-## 9. Live gate: CLEARED (2026-08-04)
+## 9. Live gate
 
-Every claim below came from real VMs booted through the MCP tools, not from
-mocks, against the design's original build. A throwaway `mcpgate`
-(alpine-cloud) and `mcplocked` were created, exercised and destroyed; the
-data root was left exactly as found. These are facts about real VMs and
-still hold.
+The Go server has not been booted against a real VM yet. It changes
+`internal/sshx` and `internal/core/exec.go`, so a live boot exercising
+`exec`, `write_file` and `exec_bg` gates the merge.
+
+The findings below came from real VMs booted through the MCP tools, not from
+mocks, against the Python build this package replaced (2026-08-04). A
+throwaway `mcpgate` (alpine-cloud) and `mcplocked` were created, exercised
+and destroyed; the data root was left exactly as found. They are facts about
+the design, and the live boot above is what confirms the Go port keeps them.
 
 - **create, start, wait**: reachable in 13.4s.
 - **exec** returns real guest output, running as `uid=1001(stoat)`, the
   cloud-init account rather than root.
 - **Quoting survives the whole chain**, which is the thing only a live test
   proves: `exec(argv=["touch", "/tmp/qt/my file"])` created ONE file. The
-  argv goes through `sshx.Run`'s own quoting to the guest's ash, and any
-  layer dropping a word boundary shows up here.
+  argv goes through one quoter to the guest's ash, `sshx.Run` in the Go
+  port, and any layer dropping a word boundary shows up here.
 - **A nonzero guest status is DATA**: `sh -c 'exit 42'` returned
   `exit_code: 42` with no exception raised, matching the contract's rule
   that exec exits 0 whenever the command ran.
