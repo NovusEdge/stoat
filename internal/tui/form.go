@@ -11,6 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/novusedge/stoat/internal/cloudinit"
@@ -228,20 +229,23 @@ func byoOSNames() []string {
 const formContentWidth = appContentWidth
 
 type formModel struct {
-	inputs      []textinput.Model // name, ram, cpus, disk, share
-	focus       int
-	images      []imageOption
-	imgIdx      int
-	byoBackend  string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
-	byoOS       string // override for the selected BYO image's OS; "" means "use iso.Infer's guess"
-	mode        string // "live" | "disk"; meaningful only while the selected image's backend is apkovl
-	display     string // one of displayChoices; "auto" by default
-	err         string
-	fetching    bool
-	fetchingOS  string
-	recipeNames []string        // installed recipes matching the selected image's OS/backend
-	recipeIdx   int             // sub-cursor within the recipes row, moved by left/right
-	recipeSel   map[string]bool // names currently checked
+	inputs         []textinput.Model // name, ram, cpus, disk, share
+	focus          int
+	images         []imageOption
+	imgIdx         int
+	byoBackend     string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
+	byoOS          string // override for the selected BYO image's OS; "" means "use iso.Infer's guess"
+	mode           string // "live" | "disk"; meaningful only while the selected image's backend is apkovl
+	display        string // one of displayChoices; "auto" by default
+	err            string
+	fetching       bool
+	fetchingOS     string
+	recipeNames    []string        // installed recipes matching the selected image's OS/backend
+	recipeIdx      int             // sub-cursor within the recipes row, moved by left/right
+	recipeSel      map[string]bool // names currently checked
+	recipeExplicit map[string]bool
+	paramValues    map[string]map[string]string
+	paramForm      *paramForm
 	// randomPassword swaps the fixed, documented console password for a
 	// generated one. Cloud images only, see build().
 	randomPassword bool
@@ -416,6 +420,9 @@ func (f formModel) effectiveMode() string {
 func (f *formModel) refreshRecipes() {
 	f.recipeNames, _ = recipes.List(f.resolvedOS(), f.resolvedBackend())
 	f.recipeSel = map[string]bool{}
+	f.recipeExplicit = map[string]bool{}
+	f.paramValues = map[string]map[string]string{}
+	f.paramForm = nil
 	f.recipeIdx = 0
 }
 
@@ -439,7 +446,7 @@ func (f *formModel) selectImage(idx int) {
 }
 
 func newForm() formModel {
-	f := formModel{mode: "live", display: "auto", recipeSel: map[string]bool{}}
+	f := formModel{mode: "live", display: "auto", recipeSel: map[string]bool{}, recipeExplicit: map[string]bool{}, paramValues: map[string]map[string]string{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
 		ti := theme.TextInput()
@@ -510,6 +517,52 @@ func fetchImage(ctx context.Context, id string, gen int) tea.Cmd {
 }
 
 func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.form.paramForm != nil {
+		param := m.form.paramForm
+		if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" {
+			m.form.paramForm = nil
+			m.form.recipeExplicit[param.recipe] = false
+			delete(m.form.paramValues, param.recipe)
+			m.form.recomputeRecipeSelection()
+			return m, nil
+		}
+		_, cmd := param.form.Update(msg)
+		if key, ok := msg.(tea.KeyPressMsg); ok {
+			switch key.String() {
+			case "tab":
+				if len(param.form.Errors()) == 0 {
+					param.form.NextField()
+				}
+				cmd = nil
+			case "shift+tab":
+				param.form.PrevField()
+				cmd = nil
+			case "enter":
+				if len(param.form.Errors()) == 0 {
+					if next := param.form.NextField(); next != nil {
+						if followUp := next(); followUp != nil {
+							param.form.Update(followUp)
+						}
+					}
+				}
+				cmd = nil
+			}
+		}
+		switch param.form.State {
+		case huh.StateCompleted:
+			if m.form.paramValues == nil {
+				m.form.paramValues = map[string]map[string]string{}
+			}
+			m.form.paramValues[param.recipe] = param.valuesSnapshot()
+			m.form.paramForm = nil
+		case huh.StateAborted:
+			m.form.paramForm = nil
+			m.form.recipeExplicit[param.recipe] = false
+			m.form.recomputeRecipeSelection()
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case dlTickMsg:
 		// Anchored to m.form.fetching, not dlGen: the tick chain only needs
@@ -677,6 +730,9 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if m.form.recipeSel[name] {
 					m.form.recipeSel[name] = false
+					m.form.recipeExplicit[name] = false
+					delete(m.form.paramValues, name)
+					m.form.recomputeRecipeSelection()
 					return m, nil
 				}
 				// Checking a box can pull in a recipe it depends on. A
@@ -689,8 +745,13 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.showToast(err.Error(), true)
 				}
 				m.form.recipeSel[name] = true
+				m.form.recipeExplicit[name] = true
 				for _, a := range added {
 					m.form.recipeSel[a.Recipe] = true
+				}
+				if recipe, err := core.RecipeShow(name); err == nil && len(recipe.Params) > 0 {
+					m.form.paramForm = newParamForm(recipe)
+					return m, tea.Batch(m.form.paramForm.init(), m.showToast(depMessage(added), false))
 				}
 				return m, m.showToast(depMessage(added), false)
 			}
@@ -794,6 +855,40 @@ func (f formModel) spec() (core.Spec, error) {
 			selected = append(selected, r)
 		}
 	}
+	params := map[string]map[string]string{}
+	secrets := config.Secrets{}
+	for _, name := range selected {
+		recipe, err := core.RecipeShow(name)
+		if err != nil {
+			return core.Spec{}, err
+		}
+		values := f.paramValues[name]
+		if f.paramForm != nil && f.paramForm.recipe == name {
+			values = f.paramForm.valuesSnapshot()
+		}
+		for _, param := range recipe.Params {
+			value := param.Default
+			if values != nil {
+				if given, ok := values[param.Name]; ok {
+					value = given
+				}
+			}
+			if value == "" || param.Type != "secret" && value == param.Default {
+				continue
+			}
+			if param.Type == "secret" {
+				if secrets[name] == nil {
+					secrets[name] = map[string]string{}
+				}
+				secrets[name][param.Name] = value
+			} else {
+				if params[name] == nil {
+					params[name] = map[string]string{}
+				}
+				params[name][param.Name] = value
+			}
+		}
+	}
 	// The form's numeric fields are free text, so a non-number has to become
 	// something core will reject rather than silently reading as 0, which core
 	// treats as "use the default".
@@ -817,6 +912,8 @@ func (f formModel) spec() (core.Spec, error) {
 		Disk:    strings.TrimSpace(f.inputs[fDisk].Value()),
 		Share:   strings.TrimSpace(f.inputs[fShare].Value()),
 		Recipes: selected,
+		Params:  params,
+		Secrets: secrets,
 	}
 	if f.display != "auto" {
 		s.Display = f.display
@@ -839,6 +936,9 @@ func createVM(s core.Spec) tea.Cmd {
 }
 
 func (m model) viewForm() string {
+	if m.form.paramForm != nil {
+		return m.viewParamForm()
+	}
 	f := m.form
 	b := fields{width: formContentWidth}
 
