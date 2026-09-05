@@ -102,12 +102,12 @@ type getCmd struct {
 }
 
 type upCmd struct {
-	VM      string `arg:"" help:"vm name"`
+	VM      string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	NoApply bool   `name:"no-apply" aliases:"no-provision" help:"start only; skip the automatic post-boot apply"`
 }
 
 type downCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 }
 
 type sshCmd struct {
@@ -119,7 +119,7 @@ type sshCmdCmd struct {
 }
 
 type rmCmd struct {
-	VM  string `arg:"" help:"vm name"`
+	VM  string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	Yes bool   `short:"y" help:"skip the delete confirmation"`
 }
 
@@ -227,14 +227,14 @@ type pruneCmd struct {
 }
 
 type waitCmd struct {
-	VM      string        `arg:"" help:"vm name"`
+	VM      string        `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	Until   string        `enum:"reachable,applied,stopped" default:"reachable" help:"state to wait for"`
 	Healthy bool          `help:"wait for every applied recipe's health check to pass"`
 	Timeout time.Duration `default:"2m" help:"give up after this long"`
 }
 
 type applyCmd struct {
-	VM     string   `arg:"" help:"vm name"`
+	VM     string   `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	Only   []string `help:"subset of the VM's own recipes"`
 	DryRun bool     `name:"dry-run" help:"print what would run without running it"`
 }
@@ -593,7 +593,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "mcp install":
 		i := g.MCP.Install
 		a.Cmd, a.Sub = "mcp", "install"
-		a.Client, a.Project, a.Print = i.Client, i.Project, i.Print
+		a.Client, a.InstallProject, a.Print = i.Client, i.Project, i.Print
 
 	case "mcp doctor":
 		a.Cmd, a.Sub = "mcp", "doctor"

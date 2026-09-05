@@ -31,6 +31,7 @@ import (
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/mcpsrv"
+	"github.com/novusedge/stoat/internal/project"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -138,14 +139,18 @@ type Args struct {
 	Changed []string
 	Params  []ParamEdit
 
-	// HTTP, Limits, Client, Project and Print belong to "mcp". HTTP is the
-	// loopback address for "mcp serve --http"; empty means stdio. Client,
-	// Project and Print belong to "mcp install".
-	HTTP    string
-	Limits  mcpsrv.Limits
-	Client  string
-	Project bool
-	Print   bool
+	// HTTP, Limits, Client, InstallProject and Print belong to "mcp". HTTP is
+	// the loopback address for "mcp serve --http"; empty means stdio. Client,
+	// InstallProject and Print belong to "mcp install".
+	HTTP           string
+	Limits         mcpsrv.Limits
+	Client         string
+	InstallProject bool
+	Print          bool
+
+	// Project is the stoat.toml in the current directory, nil outside a
+	// project. Main fills it after Parse; Parse itself never reads disk.
+	Project *project.Project
 }
 
 // ParamEdit is one recipe parameter edit parsed from create or update flags.
@@ -331,6 +336,23 @@ func (a *Args) ok(stdout io.Writer, data any) int {
 	return ExitOK
 }
 
+// coreGet is core.Get behind a variable so resolveScope's "does this VM
+// exist" probe stays one call the tests can see failing.
+var coreGet = core.Get
+
+// failUsage reports a usage error the CLI detected itself and returns
+// ExitUsage. failMsg returns ExitFail, which is the wrong code for "you did
+// not name a VM": a script that branches on 2 for a usage mistake would read
+// it as a runtime failure.
+func (a *Args) failUsage(stdout, stderr io.Writer, msg string) int {
+	if a.JSON {
+		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd, wire.UsageError(msg))
+		return ExitUsage
+	}
+	fmt.Fprintf(stderr, "stoat: %s: %s\n", a.Cmd, msg)
+	return ExitUsage
+}
+
 // fail reports err and returns ExitFail: one JSON result line on STDOUT under
 // --json (§4: everything structured goes to stdout, errors included, because a
 // consumer that has to merge two pipes to read one result will eventually
@@ -438,6 +460,16 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	_ = logx.Init()
 	defer func() { _ = logx.Close() }()
 	logx.L().Debug("cli", "cmd", a.Cmd, "vm", a.VM)
+
+	if err := resolveScope(a); err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	// fanOutCommands, not vmCommands: logs is in vmCommands too, so a bare
+	// "dev" still resolves for it, but "stoat logs" with no VM has always
+	// meant "tail stoat's own log" and stays legal outside a project.
+	if a.VM == "" && fanOutCommands[a.Cmd] && a.Project == nil {
+		return a.failUsage(stdout, stderr, "missing vm name")
+	}
 
 	if err := guest.Load(filepath.Join(config.Root(), "guests")); err != nil {
 		if a.JSON {
