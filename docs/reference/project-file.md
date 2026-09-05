@@ -25,7 +25,7 @@ name = "myrepo"                 # string, default: the directory name.
 tailscale = "v1.2"
 
 [vms.dev]                       # the key "dev" is the name you type
-image        = "ubuntu-24"      # string, required. A catalog id, or a path
+image        = "ubuntu-24.04"   # string, required. A catalog id, or a path
                                  # to your own image, relative to this file.
 name         = "shared-dev"     # string, default "<project>-<key>". The VM's
                                  # global name under ~/.stoat.
