@@ -278,6 +278,8 @@ func plan(s Spec) (*config.VM, error) {
 		AllowExec:   allowExec,
 		AgentAccess: agentAccess,
 		Display:     s.Display,
+		Project:     s.Project,
+		Shares:      s.Shares,
 	}
 
 	if img.backend == "cloudinit" {
