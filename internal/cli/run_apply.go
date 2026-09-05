@@ -37,9 +37,6 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{Only: a.Only}) }()
-
 	// Under --json, raw log bytes must not reach stdout: they would sit
 	// inside the JSON Lines stream and break every consumer's parse. Each
 	// appended line becomes a "log" event instead.
@@ -49,7 +46,17 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		lw = &jsonLogWriter{em: wire.NewEmitter(stdout), cmd: a.Cmd}
 		out = lw
 	}
-	aerr := streamFile(v.Paths.ApplyLog, out, done)
+	redactor, err := newSecretRedactor(v.Paths.Dir, out)
+	if err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- core.Apply(context.Background(), a.VM, core.ApplyOpts{Only: a.Only}) }()
+	aerr := streamFile(v.Paths.ApplyLog, redactor, done)
+	if redactorErr := redactor.Flush(); aerr == nil && redactorErr != nil {
+		aerr = redactorErr
+	}
 	if lw != nil {
 		lw.Flush()
 	}

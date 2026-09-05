@@ -441,11 +441,27 @@ func (m model) viewDetail() string {
 		for _, r := range v.Recipes {
 			inConfig[r] = true
 			status := dimStyle.Render("pending")
-			if a, ok := v.Applied[r]; ok {
+			if state, ok := recipeStateByName(v.RecipeStates, r); ok {
+				if state.Applied {
+					status = upStyle.Render("applied " + state.Health)
+				}
+			} else if a, ok := v.Applied[r]; ok {
 				status = upStyle.Render("applied " + a.At.Format("2006-01-02"))
 			}
 			line(label, recipeLabel(r)+" ("+status+")")
 			label = ""
+			if state, ok := recipeStateByName(v.RecipeStates, r); ok {
+				for _, name := range sortedKeys(state.Params) {
+					value := state.Params[name]
+					if isSecretParam(state, name) && value != core.SecretUnset {
+						value = core.SecretSet
+					}
+					line("", "param "+name+": "+value)
+				}
+				for _, name := range sortedKeys(state.Outputs) {
+					line("", "out "+name+": "+state.Outputs[name])
+				}
+			}
 		}
 		// Stale means applied but since removed from v.Recipes: the user
 		// edited it out of vm.toml. The applied record survives that edit.
@@ -487,4 +503,31 @@ func (m model) viewDetail() string {
 		consolePassword: consolePasswordAvailable(v),
 	}, m.width, m.showHelp))
 	return column(appContentWidth, parts...)
+}
+
+func recipeStateByName(states []core.RecipeState, name string) (core.RecipeState, bool) {
+	for _, state := range states {
+		if state.Name == name {
+			return state, true
+		}
+	}
+	return core.RecipeState{}, false
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func isSecretParam(state core.RecipeState, name string) bool {
+	for _, secret := range state.SecretNames {
+		if secret == name {
+			return true
+		}
+	}
+	return false
 }

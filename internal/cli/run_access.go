@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -156,6 +157,69 @@ func (w *jsonLogWriter) line(s string) {
 		_ = w.em.Event(wire.TypeStage, w.cmd, map[string]any{"recipe": name})
 	}
 	_ = w.em.Event(wire.TypeLog, w.cmd, map[string]any{"line": s})
+}
+
+// secretRedactor sits in front of every CLI apply-log reader. The log can be
+// written in chunks that split a secret, so keeping a short suffix is needed
+// in addition to replacing complete chunks.
+type secretRedactor struct {
+	out     io.Writer
+	values  []string
+	pending string
+	keep    int
+}
+
+func newSecretRedactor(dir string, out io.Writer) (*secretRedactor, error) {
+	secrets, err := config.LoadSecrets(dir)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]string, 0)
+	for _, recipe := range secrets {
+		for _, value := range recipe {
+			if value != "" {
+				values = append(values, value)
+			}
+		}
+	}
+	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	keep := 0
+	for _, value := range values {
+		if len(value) > keep {
+			keep = len(value)
+		}
+	}
+	return &secretRedactor{out: out, values: values, keep: keep}, nil
+}
+
+func (r *secretRedactor) Write(p []byte) (int, error) {
+	r.pending += string(p)
+	if len(r.pending) <= r.keep {
+		return len(p), nil
+	}
+	safe := len(r.pending) - r.keep
+	if err := r.writeRedacted(r.pending[:safe]); err != nil {
+		return 0, err
+	}
+	r.pending = r.pending[safe:]
+	return len(p), nil
+}
+
+func (r *secretRedactor) Flush() error {
+	if r.pending == "" {
+		return nil
+	}
+	err := r.writeRedacted(r.pending)
+	r.pending = ""
+	return err
+}
+
+func (r *secretRedactor) writeRedacted(value string) error {
+	for _, secret := range r.values {
+		value = strings.ReplaceAll(value, secret, "<redacted>")
+	}
+	_, err := io.WriteString(r.out, value)
+	return err
 }
 
 // streamFile copies newly-appended bytes of path to out every tick until

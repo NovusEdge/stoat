@@ -120,9 +120,51 @@ type VMStatus struct {
 	RecipeStates []RecipeState `json:"recipes_detail"`
 }
 
+// VMStatusResult is the named result for `get --json`.
+type VMStatusResult struct {
+	VM VMStatus `json:"vm"`
+}
+
 // FromVMStatus converts the stored VM status into its additive wire shape.
 func FromVMStatus(v core.VM, graphical bool) VMStatus {
-	return VMStatus{VM: FromVM(v, graphical), Health: string(v.Health), RecipeStates: []RecipeState{}}
+	health := string(v.Health)
+	if health == "" {
+		health = string(core.HealthUnknown)
+	}
+	out := VMStatus{VM: FromVM(v, graphical), Health: health, RecipeStates: []RecipeState{}}
+	for _, state := range v.RecipeStates {
+		params := nonNilMap(state.Params)
+		redacted := make(map[string]string, len(params)+len(state.SecretNames))
+		for name, value := range params {
+			redacted[name] = value
+		}
+		for _, name := range state.SecretNames {
+			if redacted[name] != core.SecretUnset {
+				redacted[name] = core.SecretSet
+			}
+		}
+		at := ""
+		if !state.At.IsZero() {
+			at = state.At.UTC().Format(time.RFC3339)
+		}
+		stateHealth := state.Health
+		if stateHealth == "" {
+			stateHealth = string(core.HealthUnknown)
+		}
+		out.RecipeStates = append(out.RecipeStates, RecipeState{
+			Name: state.Name, Applied: state.Applied, Version: state.Version,
+			At: at, Health: stateHealth, Params: redacted,
+			Outputs: nonNilMap(state.Outputs),
+		})
+	}
+	return out
+}
+
+func nonNilMap(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 // FromVM takes graphical (core.GraphicalSession) rather than calling it,

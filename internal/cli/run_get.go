@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
@@ -15,7 +16,7 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+		return a.ok(stdout, wire.VMStatusResult{VM: wire.FromVMStatus(v, core.GraphicalSession())})
 	}
 	fmt.Fprintf(stdout, "name: %s\n", v.Name)
 	fmt.Fprintf(stdout, "os: %s\n", v.OS)
@@ -29,6 +30,19 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "ssh port: %d\n", v.SSHPort)
 	fmt.Fprintf(stdout, "ssh user: %s\n", v.SSHUser)
 	fmt.Fprintf(stdout, "recipes: %s\n", strings.Join(v.Recipes, ", "))
+	for _, state := range v.RecipeStates {
+		status := "pending"
+		if state.Applied {
+			status = "applied " + state.Version
+		}
+		fmt.Fprintf(stdout, "  %-14s %-18s health %s\n", state.Name, status, state.Health)
+		for _, name := range sortedKeys(state.Params) {
+			fmt.Fprintf(stdout, "    param %-12s %s\n", name, state.Params[name])
+		}
+		for _, name := range sortedKeys(state.Outputs) {
+			fmt.Fprintf(stdout, "    out   %-12s %s\n", name, state.Outputs[name])
+		}
+	}
 	forwards := make([]string, len(v.Forwards))
 	for i, f := range v.Forwards {
 		forwards[i] = fmt.Sprintf("%d:%d", f.HostPort, f.GuestPort)
@@ -42,6 +56,15 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "error: %s\n", v.Error)
 	}
 	return ExitOK
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func runSSHCommand(a *Args, stdout, stderr io.Writer) int {
