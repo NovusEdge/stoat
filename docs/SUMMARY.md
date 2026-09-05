@@ -28,6 +28,7 @@
 
 * [Overview](recipes/overview.md)
 * [Writing your own](recipes/writing-your-own.md)
+* [Sharing recipes](recipes/sharing.md)
 
 ## Troubleshooting
 

@@ -86,11 +86,11 @@ reviewer rejects a PR that ignores them.
 
 Bundled recipes are `xfce`, `docker`, `devtools`, `tailscale`, and the set
 is closed. Write a new recipe in `~/.stoat/recipes/<name>/` from `stoat
-recipe new`; see `docs/recipes/writing-your-own.md`. A recipe index for
-sharing them is planned and not built yet. Every recipe script
-starts with `set -e` and carries the live-vs-disk block that `stoat recipe
-new` scaffolds; `internal/recipes/recipes_test.go` checks both for the
-bundled set.
+recipe new`; see `docs/recipes/writing-your-own.md` and
+`docs/recipes/sharing.md` for installing and pinning remote recipes. Every
+recipe script starts with `set -e` and carries the live-vs-disk block that
+`stoat recipe new` scaffolds; `internal/recipes/recipes_test.go` checks both
+for the bundled set.
 
 ## Reporting a security issue
 
