@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -211,24 +212,50 @@ func sshBannerUp(ctx context.Context, v *config.VM) bool {
 // waitApplied blocks until v's most recent recipe run has finished
 // successfully.
 //
-// The signal is the apply log. sshx.Provision truncates last-provision.log
-// at the start of every run (os.Create) and writes a bare "done" as its
-// final line only on success. internal/tui/autoprov.go's
-// lastProvisionSucceeded already treats that line as the definition of
-// "applied", so Wait reuses it. There is no separate progress record
-// (design doc §1's Progress is not produced yet; see State in vm.go), so
-// Wait only ever answers "not yet" or "done".
+// For an ssh-provisioned VM the signal is the apply log. sshx.Provision
+// truncates last-provision.log at the start of every run (os.Create) and
+// writes a bare "done" as its final line only on success.
+// internal/tui/autoprov.go's lastProvisionSucceeded already treats that line
+// as the definition of "applied", so Wait reuses it. There is no separate
+// progress record (design doc §1's Progress is not produced yet; see State
+// in vm.go), so Wait only ever answers "not yet" or "done".
 //
-// A VM with no recipes can never produce a "done" line, so that case is
-// refused up front, like waitReachable's not-running check. A failed run
-// ("FAILED: ..." as the final line) is not treated the same way: Provision
-// truncates the log again on retry, and a caller may be about to retry the
-// apply that just failed. That case is left to ctx.
+// A cloud VM's cloudinit backend runs recipes from cloud-init's own runcmd
+// and writes no host apply log; discoverCloudInitApplied (apply.go) records
+// completion into v.Applied instead, from a separate process. waitApplied
+// resolves that case from v.Applied, reloading vm.toml on each poll since
+// the copy Wait holds goes stale the moment that other process saves.
+//
+// A VM with no recipes can never satisfy either check, so that case is
+// refused up front, like waitReachable's not-running check. A failed
+// ssh-provisioned run ("FAILED: ..." as the final line) is not treated the
+// same way: Provision truncates the log again on retry, and a caller may be
+// about to retry the apply that just failed. That case is left to ctx.
 func waitApplied(ctx context.Context, v *config.VM) error {
 	if len(v.Recipes) == 0 {
 		return fmt.Errorf("%w: %s: no recipes configured", ErrCannotReach, v.Name)
 	}
+	if v.Mode == "cloud" {
+		return pollUntil(ctx, func() bool { return allRecipesApplied(v) })
+	}
 	return pollUntil(ctx, func() bool { return lastProvisionLineIs(v, "done") })
+}
+
+// allRecipesApplied reloads vm.toml by v's directory name and reports
+// whether every recipe in v.Recipes has an entry in the reloaded Applied
+// map. It reloads rather than reading v.Applied because discoverCloudInitApplied
+// runs in the apply process, not this one.
+func allRecipesApplied(v *config.VM) bool {
+	fresh, err := config.Load(filepath.Base(v.Dir))
+	if err != nil {
+		return false
+	}
+	for _, r := range v.Recipes {
+		if _, ok := fresh.Applied[r]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // lastProvisionLineIs reports whether the last non-blank line of v's apply
