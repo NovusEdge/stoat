@@ -92,6 +92,12 @@ type Spec struct {
 	// given", so plan() can default it to true for a caller that never
 	// mentions it, such as the TUI's form today.
 	AllowExec *bool
+
+	// AgentAccess is the MCP create tool's agent_access input, recorded on
+	// the new VM. Empty means "manage", plan()'s default. The MCP server
+	// validates the string against its Level enum before calling Create;
+	// core stores whatever it is given.
+	AgentAccess string
 }
 
 // Create validates a Spec, writes vm.toml and allocates the disk. It does not
@@ -243,21 +249,26 @@ func plan(s Spec) (*config.VM, error) {
 	if s.AllowExec != nil {
 		allowExec = *s.AllowExec
 	}
+	agentAccess := s.AgentAccess
+	if agentAccess == "" {
+		agentAccess = "manage"
+	}
 
 	v := &config.VM{
-		Name:      name,
-		Mode:      mode,
-		OS:        img.osName,
-		Backend:   img.backend,
-		SSHUser:   img.sshUser,
-		RAM:       ram,
-		CPUs:      cpus,
-		Disk:      disk,
-		Share:     strings.TrimSpace(s.Share),
-		SSHPort:   port,
-		Recipes:   s.Recipes,
-		AllowExec: allowExec,
-		Display:   s.Display,
+		Name:        name,
+		Mode:        mode,
+		OS:          img.osName,
+		Backend:     img.backend,
+		SSHUser:     img.sshUser,
+		RAM:         ram,
+		CPUs:        cpus,
+		Disk:        disk,
+		Share:       strings.TrimSpace(s.Share),
+		SSHPort:     port,
+		Recipes:     s.Recipes,
+		AllowExec:   allowExec,
+		AgentAccess: agentAccess,
+		Display:     s.Display,
 	}
 
 	if img.backend == "cloudinit" {

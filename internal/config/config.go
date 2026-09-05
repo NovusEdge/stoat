@@ -105,8 +105,11 @@ type VM struct {
 	// cannot tell "false" from "not written".
 	AllowExec bool `toml:"allow_exec"`
 
-	// AgentAccess is not implemented yet. Task 8 replaces AllowExec with
-	// this field and maps a legacy allow_exec key onto it in Load.
+	// AgentAccess is what an MCP agent may do in this VM: none, observe,
+	// manage or exec. AllowExec stays for CLI/core callers that already read
+	// it; the MCP server gates on this field instead. Empty means no
+	// vm.toml value was ever written; core.Create fills in "manage" for a
+	// VM it creates.
 	AgentAccess string `toml:"agent_access,omitempty"`
 
 	// Applied tracks which recipes have been run on this VM, keyed by recipe name.

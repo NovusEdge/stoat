@@ -70,6 +70,12 @@ type Patch struct {
 	// Safe: it only changes which -display argument qemu.Args builds next
 	// start, nothing about the running process.
 	Display *string
+
+	// AgentAccess sets vm.toml's agent_access. Safe: the MCP server reads it
+	// fresh on every call, so it takes effect immediately, not at next
+	// start. The MCP tool may only lower it; core applies whatever it is
+	// given, since core is also the CLI and TUI's library, which may raise.
+	AgentAccess *string
 }
 
 // checkImmutable reports ErrImmutableField, naming the field, when a Patch sets
@@ -160,6 +166,9 @@ func Update(name string, p Patch) (VM, error) {
 			return VM{}, err
 		}
 		work.Display = *p.Display
+	}
+	if p.AgentAccess != nil {
+		work.AgentAccess = *p.AgentAccess
 	}
 
 	if p.SSHPort != nil && *p.SSHPort != work.SSHPort {

@@ -1,9 +1,19 @@
 package mcpsrv
 
-import "fmt"
+import (
+	"fmt"
 
-// Level is an agent_access level. Task 8 adds requireAccess and its table;
-// this chunk only needs the type for toolTable's Access field.
+	"github.com/novusedge/stoat/internal/config"
+)
+
+// Level is an agent_access level. Each level includes the ones below it.
+//
+//	none    host side only: status, start, stop, snapshot, restore, logs,
+//	        forward, update
+//	observe read_file, list_dir, stat, ps, svc_status, tail_log
+//	manage  write_file, copy_to, copy_from, pkg_install, svc, useradd,
+//	        apply_recipes
+//	exec    exec, exec_bg, job_status, job_output, job_kill, list_jobs
 type Level int
 
 const (
@@ -28,13 +38,40 @@ func (l Level) String() string {
 // rank, since each level includes every one below it.
 func (l Level) rank() int { return int(l) }
 
-// ParseLevel is not implemented yet. Task 8 validates s against levelNames.
+// ParseLevel validates s against the four declared level names.
 func ParseLevel(s string) (Level, error) {
-	return LevelNone, fmt.Errorf("agent_access %q: not implemented", s)
+	for i, name := range levelNames {
+		if s == name {
+			return Level(i), nil
+		}
+	}
+	return 0, fmt.Errorf("invalid agent_access %q: one of none, observe, manage, exec", s)
 }
 
-// requireAccess is not implemented yet. Task 8 gates every guest-touching
-// tool at the level toolTable declares for it.
+// currentLevel reads vm's agent_access straight off vm.toml.
+func currentLevel(vm string) (Level, error) {
+	name, err := checkVMName(vm)
+	if err != nil {
+		return 0, err
+	}
+	v, err := config.Load(name)
+	if err != nil {
+		return 0, err
+	}
+	return ParseLevel(v.AgentAccess)
+}
+
+// requireAccess gates every guest-touching tool. core.Exec does not enforce
+// it, because core is a library the CLI and TUI also call and a blanket
+// refusal there would be the wrong layer. The refusal names both levels, so
+// an agent knows what to ask a person for.
 func requireAccess(vm string, need Level) error {
-	return fmt.Errorf("requireAccess(%q, %s): not implemented", vm, need)
+	have, err := currentLevel(vm)
+	if err != nil {
+		return err
+	}
+	if have.rank() < need.rank() {
+		return fmt.Errorf("vm %q has agent_access = %s; needs %s", vm, have, need)
+	}
+	return nil
 }
