@@ -357,20 +357,20 @@ func validateHealth(path string, h Health) error {
 	return nil
 }
 
-// ManifestFor resolves name (an entry in the recipes root, the same
-// identifier VM.Recipes/ApplyOpts.Only use) to its recipe.toml manifest
-// (docs/recipe-spec-v2.md).
+// ManifestFor resolves name to its recipe.toml through ResolvePath, so a
+// project recipe shadows a home one of the same name.
 //
-// ok is false with a nil error when name has no recipe.toml at all: an
-// unrelated or nonexistent name that CheckRecipes/List reject elsewhere. A
-// caller decides what absence means for it. A recipe.toml that exists but
-// fails to parse is a real problem, and comes back as err instead.
+// ok is false with a nil error when no root holds name. A recipe.toml that
+// exists but fails to parse comes back as err instead.
 func ManifestFor(name string) (m Manifest, ok bool, err error) {
-	path := filepath.Join(dir(), name, "recipe.toml")
-	if _, statErr := os.Stat(path); statErr != nil {
+	d, _, found, resolveErr := resolvePath(name)
+	if resolveErr != nil {
+		return Manifest{}, false, resolveErr
+	}
+	if !found {
 		return Manifest{}, false, nil
 	}
-	m, err = ParseManifest(path)
+	m, err = ParseManifest(filepath.Join(d, "recipe.toml"))
 	if err != nil {
 		return Manifest{}, false, err
 	}

@@ -298,39 +298,52 @@ func List(osName, _ string) ([]string, error) {
 	return out, nil
 }
 
-// ListManifests scans dir() for v2 recipes: subdirectories holding a
-// recipe.toml (docs/recipe-spec-v2.md). Unlike List, it does not filter by
-// OS or backend. A caller that needs that filters against the parsed
-// Manifest's OS/Requires fields (see MatchesVM).
+// ListManifests scans every root for v2 recipes: subdirectories holding a
+// recipe.toml (docs/recipe-spec-v2.md). Unlike List, it does not filter by OS
+// or backend. A caller that needs that filters against the parsed Manifest's
+// OS/Requires fields (see MatchesVM).
 //
 // A subdirectory with no recipe.toml, a stray directory or leftover .bak
 // territory, is silently skipped. A directory that is a recipe but fails to
-// parse is also skipped, but logged: one typo'd manifest should not take
-// every other recipe down with it.
+// parse is claimed by its root and logged, so a lower-priority recipe cannot
+// replace it.
 func ListManifests() ([]Manifest, error) {
-	entries, err := os.ReadDir(dir())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
+	seen := map[string]bool{}
 	var out []Manifest
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		path := filepath.Join(dir(), e.Name(), "recipe.toml")
-		if _, err := os.Stat(path); err != nil {
-			continue // not a v2 recipe directory
-		}
-		m, err := ParseManifest(path)
+	for _, root := range Roots() {
+		entries, err := os.ReadDir(root.Path)
 		if err != nil {
-			logx.L().Warn("skipping recipe with an invalid manifest", "dir", e.Name(), "err", err)
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		out = append(out, m)
+		for _, e := range entries {
+			if !e.IsDir() || seen[e.Name()] {
+				continue
+			}
+			owned, err := owns(root, e.Name())
+			if err != nil {
+				return nil, err
+			}
+			if !owned {
+				continue
+			}
+			path := filepath.Join(root.Path, e.Name(), "recipe.toml")
+			if _, err := os.Stat(path); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, err
+			}
+			seen[e.Name()] = true
+			m, err := ParseManifest(path)
+			if err != nil {
+				logx.L().Warn("skipping recipe with an invalid manifest", "dir", e.Name(), "err", err)
+				continue
+			}
+			out = append(out, m)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
