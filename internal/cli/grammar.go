@@ -120,6 +120,11 @@ type createCmd struct {
 	// value) sets true, matching every other bool flag. Verified by running
 	// `stoat create --help` and `stoat create x --image y --allow-exec=false`.
 	AllowExec bool `default:"true" help:"allow exec/copy_to/copy_from on this VM (enforced by the MCP server, not stoat itself)"`
+	// AgentAccess is the successor to AllowExec: a level rather than a bool.
+	// Both are read; toArgs keeps AllowExec's own behaviour unchanged and
+	// applies this one independently, so an old script's --allow-exec still
+	// does exactly what it always did.
+	AgentAccess string `name:"agent-access" default:"manage" enum:"none,observe,manage,exec" help:"what an MCP agent may do in this VM"`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.
@@ -134,6 +139,9 @@ type updateCmd struct {
 	Set     []string  `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Unset   []string  `help:"clear a recipe param back to its manifest default"`
 	Secret  []string  `help:"set a secret recipe param"`
+	// AgentAccess is unrestricted here: only the MCP update tool may lower,
+	// never raise, a VM's level. The CLI and TUI may do either.
+	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"change what an MCP agent may do in this VM"`
 }
 
 type cloneCmd struct {
@@ -333,7 +341,8 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			Name: c.Name, Image: c.Image, OS: c.OS, Backend: c.Backend, Mode: c.Mode,
 			RAM: c.RAM, CPUs: c.CPUs, Disk: c.Disk, Share: c.Share,
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
-			AllowExec: &allowExec,
+			AllowExec:   &allowExec,
+			AgentAccess: c.AgentAccess,
 		}
 		edits, err := parseParamFlags(c.Set, nil, c.Secret)
 		if err != nil {
@@ -346,7 +355,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.VM = u.VM
 		a.Patch = core.Patch{
 			RAM: u.RAM, CPUs: u.CPUs, SSHPort: u.SSHPort,
-			Disk: u.Disk, Share: u.Share,
+			Disk: u.Disk, Share: u.Share, AgentAccess: u.AgentAccess,
 		}
 		if u.Recipes != nil {
 			// The POINTER carries "was it given"; the slice it points at
@@ -362,7 +371,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			name string
 			set  bool
 		}{
-			{"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"ram", u.RAM != nil},
+			{"agent_access", u.AgentAccess != nil}, {"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"ram", u.RAM != nil},
 			{"recipes", u.Recipes != nil}, {"share", u.Share != nil}, {"ssh_port", u.SSHPort != nil},
 		} {
 			if f.set {
