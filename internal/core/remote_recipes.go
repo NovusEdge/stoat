@@ -54,12 +54,28 @@ func cacheCurrent(scope recipes.Scope, lock recipes.Lock) (bool, error) {
 	}
 	for name, entry := range lock.Recipes {
 		path := filepath.Join(scope.CachePath, name)
+		if _, statErr := os.Lstat(path); statErr != nil {
+			if os.IsNotExist(statErr) {
+				return false, nil
+			}
+			return false, statErr
+		}
+		dirty, dirtyErr := gitx.Dirty(path)
+		if dirtyErr != nil {
+			return false, dirtyErr
+		}
+		if dirty {
+			return false, fmt.Errorf("%s: %w; copy it to a local recipe first", name, recipes.ErrDirty)
+		}
 		have, err := gitx.RevParse(path, "HEAD")
-		if err != nil || have != entry.Commit {
+		if err != nil {
+			return false, err
+		}
+		if have != entry.Commit {
 			return false, nil
 		}
 		if err := recipes.ValidateTree(path, name); err != nil {
-			return false, nil
+			return false, err
 		}
 	}
 	for _, entry := range entries {

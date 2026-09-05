@@ -133,6 +133,7 @@ var codeTable = []struct {
 	{CodeNoSuchImage, iso.ErrNoSuchImage},
 	{CodeScreenshotFailed, qemu.ErrScreenshotFailed},
 	{CodeNotRunning, qemu.ErrNotRunning},
+	{CodeLockOutOfDate, core.ErrLockOutOfDate},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking

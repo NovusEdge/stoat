@@ -93,6 +93,21 @@ func within(root, path string) bool {
 // CheckCollision rejects local, bundled, and same-scope remote recipes. A
 // remote recipe in another scope may shadow the lower-priority entry.
 func CheckCollision(name, scope string) error {
+	if scope == "global" || scope == "project" {
+		target, err := ScopeFor(scope == "global")
+		if err != nil {
+			return err
+		}
+		if scope == "global" || target.Name == "project" {
+			lock, err := target.Lock()
+			if err != nil {
+				return err
+			}
+			if _, ok := lock.Recipes[name]; ok {
+				return fmt.Errorf("%q is already a %s remote recipe; pick another name or use --force", name, scope)
+			}
+		}
+	}
 	have, err := ScopeOf(name)
 	if err != nil {
 		return err

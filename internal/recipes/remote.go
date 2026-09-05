@@ -23,11 +23,20 @@ var ErrDirty = errors.New("local changes")
 // by a host and colon, not by a ref.
 func ParseRef(in string) (source, gitRef string, isURL bool) {
 	source = in
-	if i := strings.LastIndexByte(in, '@'); i > 0 && i+1 < len(in) && !strings.ContainsAny(in[i+1:], "/:") {
-		source, gitRef = in[:i], in[i+1:]
+	if i := strings.LastIndexByte(in, '@'); i > 0 && i+1 < len(in) {
+		candidateSource, candidateRef := in[:i], in[i+1:]
+		sourceLike := strings.Contains(candidateSource, "://") || strings.Contains(candidateSource, ":") || strings.Contains(candidateSource, "/") ||
+			strings.HasPrefix(candidateSource, "/") || strings.HasPrefix(candidateSource, ".")
+		indexLike := !strings.ContainsAny(candidateSource, "/:") && !strings.HasPrefix(candidateSource, ".")
+		// An scp-style source has the form user@host:path. Its colon is
+		// part of the source unless the source itself already contains path
+		// syntax before a second at-sign carrying the requested ref.
+		if sourceLike || (indexLike && !strings.Contains(candidateRef, ":")) {
+			source, gitRef = candidateSource, candidateRef
+		}
 	}
 	isURL = strings.Contains(source, "://") || strings.Contains(source, ":") ||
-		strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".")
+		strings.Contains(source, "/") || strings.HasPrefix(source, ".") || strings.HasSuffix(source, ".git")
 	return source, gitRef, isURL
 }
 
@@ -83,7 +92,7 @@ func Preview(source, gitRef string) (Manifest, string, error) {
 
 func refError(source, gitRef string, err error) error {
 	if errors.Is(err, gitx.ErrNoRef) {
-		return fmt.Errorf("%s: no tag or branch %q", nameFromURL(source), gitRef)
+		return fmt.Errorf("%s: no tag or branch %q", source, gitRef)
 	}
 	return err
 }
@@ -309,6 +318,9 @@ func prepareIgnoreArtifact(dir, stageRoot string) (*artifact, error) {
 	if err := os.WriteFile(stage, body, mode); err != nil {
 		return nil, err
 	}
+	if err := os.Chmod(stage, mode); err != nil {
+		return nil, err
+	}
 	return &artifact{target: path, stage: stage}, nil
 }
 
@@ -392,10 +404,14 @@ func makeBackupPath(parent string) (string, error) {
 }
 
 func lockScope(s Scope) (func() error, error) {
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+	coordinationDir := s.Dir
+	if s.Name == "project" {
+		coordinationDir = filepath.Dir(s.CachePath)
+	}
+	if err := os.MkdirAll(coordinationDir, 0o755); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(s.Dir, ".stoat-recipe.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(filepath.Join(coordinationDir, "recipe.lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -413,9 +429,14 @@ func lockScope(s Scope) (func() error, error) {
 	}, nil
 }
 
-// LockAll resolves every project declaration to a fresh commit. It does not
-// write a lock or touch the recipe cache.
+// LockAll resolves every project declaration to a fresh commit and persists
+// the result under the scope coordination lock. It does not touch the cache.
 func LockAll(s Scope) (Lock, error) {
+	unlock, err := lockScope(s)
+	if err != nil {
+		return Lock{}, err
+	}
+	defer func() { _ = unlock() }()
 	old, err := s.Lock()
 	if err != nil {
 		return Lock{}, err
@@ -459,7 +480,10 @@ func LockAll(s Scope) (Lock, error) {
 		}
 		next.Recipes[name] = LockEntry{Source: source, Ref: decl.Ref, Commit: commit, Added: added}
 	}
-	return next, nil
+	if err := s.Save(next); err != nil {
+		return Lock{}, err
+	}
+	return s.Lock()
 }
 
 func resolveCommit(source, gitRef string) (string, error) {
@@ -506,7 +530,11 @@ func Sync(s Scope) error {
 	for _, name := range names {
 		entry := lock.Recipes[name]
 		dst := filepath.Join(s.CachePath, name)
-		if cacheMatches(dst, name, entry) {
+		matches, matchErr := cacheMatches(dst, name, entry)
+		if matchErr != nil {
+			return matchErr
+		}
+		if matches {
 			continue
 		}
 		stage := filepath.Join(stageRoot, name)
@@ -538,12 +566,31 @@ func Sync(s Scope) error {
 	return publishArtifacts(artifacts)
 }
 
-func cacheMatches(path, name string, entry LockEntry) bool {
-	have, err := gitx.RevParse(path, "HEAD")
-	if err != nil || have != entry.Commit {
-		return false
+func cacheMatches(path, name string, entry LockEntry) (bool, error) {
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
 	}
-	return ValidateTree(path, name) == nil
+	dirty, err := gitx.Dirty(path)
+	if err != nil {
+		return false, err
+	}
+	if dirty {
+		return false, fmt.Errorf("%s: %w; copy it to a local recipe first", name, ErrDirty)
+	}
+	have, err := gitx.RevParse(path, "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if have != entry.Commit {
+		return false, nil
+	}
+	if err := ValidateTree(path, name); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // StaleLock reports the first project declaration that is absent or differs
@@ -604,12 +651,18 @@ func Update(s Scope, names []string) ([]LockEntry, error) {
 			return nil, fmt.Errorf("%s is not a remote recipe in this scope", name)
 		}
 		dir := filepath.Join(s.CachePath, name)
-		dirty, dirtyErr := gitx.Dirty(dir)
-		if dirtyErr != nil {
-			return nil, dirtyErr
-		}
-		if dirty {
-			return nil, fmt.Errorf("%s: %w; copy it to a local recipe first", name, ErrDirty)
+		if _, statErr := os.Lstat(dir); statErr != nil {
+			if !os.IsNotExist(statErr) {
+				return nil, statErr
+			}
+		} else {
+			dirty, dirtyErr := gitx.Dirty(dir)
+			if dirtyErr != nil {
+				return nil, dirtyErr
+			}
+			if dirty {
+				return nil, fmt.Errorf("%s: %w; copy it to a local recipe first", name, ErrDirty)
+			}
 		}
 		stage := filepath.Join(stageRoot, name)
 		if err := gitx.Clone(entry.Source, entry.Ref, stage); err != nil {
