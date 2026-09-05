@@ -337,6 +337,9 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 				return wire.CommandResult{}, err
 			}
 			if code != 0 {
+				if runErr := requireRunning(v); runErr != nil {
+					return wire.CommandResult{}, runErr
+				}
 				return wire.CommandResult{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
 			}
 			return runToResult(ctx, v, true, []string{"chmod", mode, path})

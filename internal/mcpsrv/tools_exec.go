@@ -135,6 +135,9 @@ func (s *srv) registerExec(server *mcp.Server) {
 			if _, _, code, err := sshx.Run(ctx, v, false, []string{"mkdir", "-p", dir}, nil); err != nil {
 				return wire.JobStarted{}, err
 			} else if code != 0 {
+				if runErr := requireRunning(v); runErr != nil {
+					return wire.JobStarted{}, runErr
+				}
 				return wire.JobStarted{}, fmt.Errorf("%s: cannot create %s", v.Name, dir)
 			}
 			// The runner is a constant shell body. The job directory is $1
