@@ -954,13 +954,16 @@ func FromDrifts(ds []core.Drift) []Drift {
 
 // ProjectStatusVM is one declaration's line in stoat status. State is
 // "missing" for a declared VM that has not been created; every other value is
-// a core.State.
+// a core.State. Error carries core.Diff's message for an immutable-field
+// mismatch; Drift is empty whenever Error is set, since Diff refuses to
+// compare the rest of the fields once image or disk disagrees.
 type ProjectStatusVM struct {
 	Key    string  `json:"key"`
 	Name   string  `json:"name"`
 	State  string  `json:"state"`
 	Health string  `json:"health"`
 	Drift  []Drift `json:"drift"`
+	Error  string  `json:"error,omitempty"`
 }
 
 // ProjectStatus is stoat status, and the MCP project_status tool.

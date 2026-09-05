@@ -35,7 +35,7 @@ func runStatus(a *Args, stdout, stderr io.Writer) int {
 			if err != nil {
 				// An immutable change is a real answer about this VM, not a
 				// reason to refuse the whole table.
-				row.Drift = []wire.Drift{{Field: "image", From: "", To: "", NeedsRestart: true}}
+				row.Error = err.Error()
 				fmt.Fprintf(stderr, "stoat: status: %v\n", err)
 			} else {
 				row.Drift = wire.FromDrifts(drift)
@@ -49,8 +49,12 @@ func runStatus(a *Args, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "%-12s %-20s %-9s %-9s %s\n", "KEY", "NAME", "STATE", "HEALTH", "DRIFT")
 	for _, r := range rows {
+		cell := r.Error
+		if cell == "" {
+			cell = renderDrift(r.Drift)
+		}
 		fmt.Fprintf(stdout, "%-12s %-20s %-9s %-9s %s\n",
-			r.Key, r.Name, r.State, dash(r.Health), dash(renderDrift(r.Drift)))
+			r.Key, r.Name, r.State, dash(r.Health), dash(cell))
 	}
 	return ExitOK
 }
