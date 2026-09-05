@@ -154,7 +154,7 @@ func TestProvisionStoresUndeclaredOutputsEvenWhenManifestDeclaresNone(t *testing
 	installOutputSSH(t, "rogue="+secret+"\n")
 	port := acceptOnly(t, "SSH-2.0-fake\r\n")
 	v := &config.VM{
-		Name: "work", Dir: vmDir, OS: "alpine", SSHPort: port,
+		Name: "work", Dir: vmDir, OS: "alpine", SSHPort: port, SSHUser: "stoat",
 		Recipes: []string{"docker"}, Applied: map[string]config.AppliedRecipe{},
 	}
 	if err := config.SaveSecrets(vmDir, config.Secrets{"docker": {"authkey": secret}}); err != nil {
@@ -243,14 +243,51 @@ func containsOutputName(names []string, want string) bool {
 	return false
 }
 
+// installOutputSSH models real ssh: it joins the argv after the user@host
+// spec into one space-separated string and, only for the output read-back
+// command (the "/tmp/.stoat-out/docker" path), hands that string to
+// /bin/sh -c the way a real remote login shell re-splits it. A script built
+// from several unquoted argv elements (the bug this guards against) falls
+// apart here exactly as it would over a real connection: only the first word
+// after "-c" reaches the inner "sh -c", and any escalation prefix covers only
+// that word, not the rest of the line. Every other ssh call Provision makes
+// (bootstrap, package refresh, recipe run) still no-ops, since this dev host
+// has no real guest to run them against.
+//
+// The fake sudo strips leading flags and sets FAKE_SUDO before exec'ing the
+// rest of argv; the fake rm refuses to run unless FAKE_SUDO is set, standing
+// in for a root-owned output directory an unprivileged rm cannot touch.
 func installOutputSSH(t *testing.T, output string) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"input=$(cat)\n" +
-		"case \"$*\" in *'cat /tmp/.stoat-out/docker'*) printf '%s' " + shellQuoteForTest(output) + ";; esac\n"
-	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	sshScript := "#!/bin/sh\n" +
+		"found=0\nremote=\"\"\n" +
+		"for a in \"$@\"; do\n" +
+		"\tif [ \"$found\" = 0 ]; then\n" +
+		"\t\tcase \"$a\" in *@*) found=1 ;; esac\n" +
+		"\t\tcontinue\n" +
+		"\tfi\n" +
+		"\tif [ -z \"$remote\" ]; then remote=$a; else remote=\"$remote $a\"; fi\n" +
+		"done\n" +
+		"case \"$remote\" in\n" +
+		"\t*/tmp/.stoat-out/docker*) exec sh -c \"$remote\" ;;\n" +
+		"esac\n" +
+		"exit 0\n"
+	sudoScript := "#!/bin/sh\n" +
+		"while [ $# -gt 0 ]; do\n" +
+		"\tcase \"$1\" in -*) shift ;; *) break ;; esac\n" +
+		"done\n" +
+		"FAKE_SUDO=1 exec \"$@\"\n"
+	rmScript := "#!/bin/sh\n" +
+		"if [ -z \"$FAKE_SUDO\" ]; then\n" +
+		"\tprintf \"rm: cannot remove '%s': Permission denied\\n\" \"$2\" >&2\n" +
+		"\texit 1\n" +
+		"fi\n"
+	catScript := "#!/bin/sh\nprintf '%s' " + shellQuoteForTest(output) + "\n"
+	for name, script := range map[string]string{"ssh": sshScript, "sudo": sudoScript, "rm": rmScript, "cat": catScript} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
