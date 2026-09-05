@@ -89,9 +89,61 @@ func Wait(ctx context.Context, name string, until Until) error {
 		return waitApplied(ctx, v)
 	case UntilStopped:
 		return waitStopped(ctx, v)
+	case UntilHealthy:
+		return waitHealthy(ctx, v)
 	default:
 		return waitReachable(ctx, v)
 	}
+}
+
+// waitHealthy waits for ssh first, then evaluates every applied recipe that
+// declares a check until all checks pass or the health budget expires. A
+// caller deadline still bounds the operation; cancellation is returned
+// unchanged when no health result is available.
+func waitHealthy(ctx context.Context, v *config.VM) error {
+	if err := waitReachable(ctx, v); err != nil {
+		return err
+	}
+	budget := HealthTimeout(v)
+	if budget <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(budget)
+	var first RecipeHealth
+	for {
+		verdicts, err := HealthChecks(ctx, v.Name)
+		if err != nil {
+			return err
+		}
+		first = RecipeHealth{}
+		for _, verdict := range verdicts {
+			if verdict.Status == HealthFailed {
+				first = verdict
+				break
+			}
+		}
+		if first.Name == "" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return healthFailure(first)
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return healthFailure(first)
+			}
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+func healthFailure(verdict RecipeHealth) error {
+	if verdict.Detail == "" {
+		return fmt.Errorf("%s: health check failed", verdict.Name)
+	}
+	return fmt.Errorf("%s: %s", verdict.Name, verdict.Detail)
 }
 
 // waitReachable blocks until sshd answers on v's forwarded port.

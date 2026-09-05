@@ -224,6 +224,7 @@ type checkRecipesCmd struct {
 type recipeCmd struct {
 	List recipeListCmd `cmd:"" help:"list installed recipes and where they live"`
 	New  recipeNewCmd  `cmd:"" help:"scaffold a recipe in the recipes directory"`
+	Show recipeShowCmd `cmd:"" help:"print one recipe's params, outputs and health check"`
 }
 
 type recipeListCmd struct{}
@@ -232,6 +233,10 @@ type recipeNewCmd struct {
 	Name    string `arg:"" help:"recipe name"`
 	OS      string `help:"target OS for a new shell recipe"`
 	Backend string `help:"\"cloudinit\" for a cloud-init fragment; shell otherwise"`
+}
+
+type recipeShowCmd struct {
+	Name string `arg:"" help:"recipe name"`
 }
 
 type recipeGuestCmd struct {
@@ -417,7 +422,15 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		if w.Timeout <= 0 {
 			return nil, usageError("wait: --timeout must be positive")
 		}
-		a.VM, a.Until, a.Timeout = w.VM, core.Until(w.Until), w.Timeout
+		if w.Healthy {
+			if w.Until != "reachable" {
+				return nil, usageError("wait: --healthy and --until are two different waits; pass one")
+			}
+			a.Until = core.UntilHealthy
+		} else {
+			a.Until = core.Until(w.Until)
+		}
+		a.VM, a.Timeout = w.VM, w.Timeout
 
 	case "apply":
 		a.VM, a.Only, a.DryRun = g.Apply.VM, trimList(g.Apply.Only), g.Apply.DryRun
@@ -438,6 +451,10 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		n := g.Recipe.New
 		a.Cmd, a.Sub = "recipe", "new"
 		a.VM, a.OS, a.Backend = n.Name, n.OS, n.Backend
+
+	case "recipe show":
+		a.Cmd, a.Sub = "recipe", "show"
+		a.VM = g.Recipe.Show.Name
 
 	case "guest ls":
 		a.Cmd, a.Sub = "guest", "ls"

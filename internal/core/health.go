@@ -101,9 +101,9 @@ func VMHealth(rs []RecipeHealth) Health {
 
 // HealthTimeout is the longest declared health check among applied recipes.
 func HealthTimeout(v *config.VM) time.Duration {
-	longest := recipes.DefaultHealthTimeout
+	var longest time.Duration
 	for name := range v.Applied {
-		if m, ok, _ := recipes.ManifestFor(name); ok && m.Health.Duration() > longest {
+		if m, ok, _ := recipes.ManifestFor(name); ok && m.Health.Check != "" && m.Health.Duration() > longest {
 			longest = m.Health.Duration()
 		}
 	}
