@@ -9,6 +9,7 @@ import (
 	"github.com/novusedge/stoat/internal/gitx"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // Code is a stable, machine-readable error code. Codes are only ever ADDED:
@@ -107,6 +108,7 @@ var codeTable = []struct {
 	{CodeBroken, core.ErrBroken},
 	{CodeNameTaken, core.ErrNameTaken},
 	{CodeInvalidSpec, core.ErrInvalidSpec},
+	{CodeInvalidSpec, recipes.ErrInvalidTree},
 	{CodeInUse, core.ErrInUse},
 	{CodeGitRequired, gitx.ErrNoGit},
 	{CodeImageNotDownloaded, core.ErrImageNotDownloaded},

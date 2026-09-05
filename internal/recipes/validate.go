@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -8,11 +9,18 @@ import (
 	"strings"
 )
 
+// ErrInvalidTree is the sentinel for a cloned recipe tree the user cannot fix
+// by retrying: a bad name, a missing manifest, a manifest that names the
+// wrong recipe, or a script/symlink path that escapes the tree. wire.MapError
+// routes it to invalid_spec, the CLI-layer code for "the request itself is
+// malformed" (as opposed to a transient or environmental failure).
+var ErrInvalidTree = errors.New("invalid recipe tree")
+
 // ValidateTree checks a cloned recipe before it becomes an active cache
 // entry. It validates the manifest and every script path the manifest names.
 func ValidateTree(dir, name string) error {
 	if err := validateRecipeName(name); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrInvalidTree, err)
 	}
 	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
@@ -25,26 +33,29 @@ func ValidateTree(dir, name string) error {
 	manifestPath := filepath.Join(root, "recipe.toml")
 	if _, err := os.Stat(manifestPath); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%s: no recipe.toml at the repository root", name)
+			return fmt.Errorf("%w: %s: no recipe.toml at the repository root", ErrInvalidTree, name)
 		}
 		return err
 	}
 	m, err := ParseManifest(manifestPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrInvalidTree, err)
 	}
 	if m.Name != name {
-		return fmt.Errorf("%s: recipe.toml is named %q", name, m.Name)
+		return fmt.Errorf("%w: %s: recipe.toml is named %q", ErrInvalidTree, name, m.Name)
 	}
 	if err := validateScriptPath(root, m.Script); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrInvalidTree, err)
 	}
 	for osName, script := range m.Scripts {
 		if err := validateScriptPath(root, script); err != nil {
-			return fmt.Errorf("%s script %q: %w", osName, script, err)
+			return fmt.Errorf("%w: %s script %q: %v", ErrInvalidTree, osName, script, err)
 		}
 	}
-	return validateTreeSymlinks(root)
+	if err := validateTreeSymlinks(root); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidTree, err)
+	}
+	return nil
 }
 
 func validateScriptPath(root, script string) error {
