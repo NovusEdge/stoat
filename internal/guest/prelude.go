@@ -98,7 +98,7 @@ func preludePython(o OS) string {
 	fmt.Fprintf(&b, "def stoat_pkg_setup(): _run(\"sh\", \"-c\", %q)\n", setup)
 	fmt.Fprintf(&b, "def stoat_pkg_install(*pkgs): _run(%s, *pkgs)\n", pyArgv(o.Pkg.Install))
 	for _, v := range verbs(o) {
-		fmt.Fprintf(&b, "def %s(name): _run(\"sh\", \"-c\", '%s', \"stoat\", name)\n", v.name, shTemplate(v.tmpl))
+		fmt.Fprintf(&b, "def %s(*args): _run(\"sh\", \"-c\", '%s', \"stoat\", *args)\n", v.name, shTemplate(v.tmpl))
 	}
 	return b.String()
 }

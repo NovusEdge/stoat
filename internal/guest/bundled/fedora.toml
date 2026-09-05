@@ -25,5 +25,9 @@ stop = "systemctl stop {name}"
 restart = "systemctl restart {name}"
 status = "systemctl status {name}"
 
+[cmd]
+download = "curl -fsSL -o"
+useradd = "useradd -m -s /bin/bash {name}"
+
 [backend.cloudinit]
 skip_9p = false
