@@ -80,7 +80,6 @@ var forbiddenInputFields = []string{"share", "base", "iso", "console_password", 
 // not exist yet, so TestEveryTableToolIsRegistered fails for them until
 // their implementer lands.
 var pending = map[string]string{
-	"list_guests": "Task 14", "guest_info": "Task 14", "recipe_schema": "Task 14",
 	"search_recipes": "Task 14", "add_recipe": "Task 15", "update_recipe": "Task 15",
 	"remove_recipe": "Task 15",
 }
