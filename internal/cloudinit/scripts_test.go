@@ -373,14 +373,14 @@ func TestWrapScriptsExecutesHyphenatedSecretsAndCleansUp(t *testing.T) {
 			Secrets: map[string]string{"token": "upper-case-secret"},
 		},
 		{
-			Name:    "a_b/c",
-			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = pair-left-secret\n",
-			Secrets: map[string]string{"token": "pair-left-secret"},
+			Name:    "a-b",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_C\" = pair-left-secret\n",
+			Secrets: map[string]string{"c": "pair-left-secret"},
 		},
 		{
-			Name:    "a/b_c",
-			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_TOKEN\" = pair-right-secret\n",
-			Secrets: map[string]string{"token": "pair-right-secret"},
+			Name:    "a",
+			Content: "#!/bin/sh\nset -eu\ntest \"$STOAT_PARAM_B_C\" = pair-right-secret\n",
+			Secrets: map[string]string{"b_c": "pair-right-secret"},
 		},
 	}
 	f := parseWrapped(t, WrapScripts(scripts, ""))

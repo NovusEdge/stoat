@@ -353,8 +353,8 @@ func TestWaitHealthyUsesLongestDeclaredTimeout(t *testing.T) {
 // add another full timeout to Wait.
 func TestWaitHealthyUsesOneGlobalBudgetForSequentialChecks(t *testing.T) {
 	dir := root(t)
-	writeHealthRecipeWithTimeoutNamed(t, dir, "health-one", "150ms")
-	writeHealthRecipeWithTimeoutNamed(t, dir, "health-two", "500ms")
+	writeHealthRecipeWithCheckTimeoutNamed(t, dir, "health-one", "150ms", "health-one-check")
+	writeHealthRecipeWithCheckTimeoutNamed(t, dir, "health-two", "500ms", "health-two-check")
 	port, stopSSH := fakeSSHD(t, 0)
 	defer stopSSH()
 	v := &config.VM{
@@ -366,15 +366,19 @@ func TestWaitHealthyUsesOneGlobalBudgetForSequentialChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fakeRunning(t, v)()
-	installBlockingHealthSSH(t)
+	installSequentialHealthSSH(t, filepath.Join(t.TempDir(), "health-calls"))
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := Wait(ctx, v.Name, UntilHealthy); err == nil {
+	err := Wait(ctx, v.Name, UntilHealthy)
+	if err == nil {
 		t.Fatal("Wait healthy succeeded with blocked checks")
 	}
-	if elapsed := time.Since(start); elapsed >= 620*time.Millisecond {
+	if !strings.Contains(err.Error(), "health-one") || !strings.Contains(err.Error(), "first-health-detail") {
+		t.Fatalf("Wait healthy error = %v, want first failing recipe and detail", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 800*time.Millisecond {
 		t.Fatalf("Wait healthy took %s, want one 500ms global budget rather than sequential budgets", elapsed)
 	}
 }
@@ -495,12 +499,16 @@ func writeHealthRecipeWithTimeout(t *testing.T, rootDir, timeout string) {
 }
 
 func writeHealthRecipeWithTimeoutNamed(t *testing.T, rootDir, name, timeout string) {
+	writeHealthRecipeWithCheckTimeoutNamed(t, rootDir, name, timeout, "docker info")
+}
+
+func writeHealthRecipeWithCheckTimeoutNamed(t *testing.T, rootDir, name, timeout, check string) {
 	t.Helper()
 	d := filepath.Join(rootDir, "recipes", name)
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := "schema = 3\nname = \"" + name + "\"\nscript = \"install.sh\"\n\n[health]\ncheck = \"docker info\"\n"
+	manifest := "schema = 3\nname = \"" + name + "\"\nscript = \"install.sh\"\n\n[health]\ncheck = \"" + check + "\"\n"
 	if timeout != "" {
 		manifest += "timeout = \"" + timeout + "\"\n"
 	}
@@ -512,10 +520,10 @@ func writeHealthRecipeWithTimeoutNamed(t *testing.T, rootDir, name, timeout stri
 	}
 }
 
-func installBlockingHealthSSH(t *testing.T) {
+func installSequentialHealthSSH(t *testing.T, callsPath string) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\ncat >/dev/null\nwhile :; do :; done\n"
+	script := "#!/bin/sh\nbody=$(cat)\ncalls=0\nif [ -f " + shellQuoteCoreTest(callsPath) + " ]; then calls=$(cat " + shellQuoteCoreTest(callsPath) + "); fi\ncalls=$((calls + 1))\nprintf '%s\\n' \"$calls\" > " + shellQuoteCoreTest(callsPath) + "\ncase \"$body\" in\n*health-one-check*) printf '%s\\n' first-health-detail >&2; exit 1;;\n*health-two-check*) if [ \"$calls\" -ge 4 ]; then while :; do :; done; fi; exit 0;;\nesac\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -227,6 +227,9 @@ func TestBundledDockerScriptsRerunWithNonInteractiveKeyring(t *testing.T) {
 			if curlCalls != 2 {
 				t.Fatalf("curl calls = %q, want one per run", calls)
 			}
+			if !strings.Contains(string(calls), "gpg-existing=true") {
+				t.Fatalf("gpg did not exercise an existing-keyring overwrite: %q", calls)
+			}
 			if output, err := os.ReadFile(filepath.Join(fakeRoot, "output")); err != nil || strings.Count(string(output), "socket=/var/run/docker.sock\n") != 2 {
 				t.Fatalf("STOAT_OUTPUT = %q, err %v, want one output per run", output, err)
 			}
@@ -253,11 +256,27 @@ if [ "${1:-}" = version ]; then printf '24.0.0\n'; fi
 `,
 		"gpg": `#!/bin/sh
 out=
+batch=false
+yes=false
+no_tty=false
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = -o ]; then out=$2; shift 2; continue; fi
+  case "$1" in
+    --batch) batch=true;;
+    --yes) yes=true;;
+    --no-tty) no_tty=true;;
+    -o) out=$2; shift;;
+  esac
   shift
 done
-mkdir -p "$FAKE_ROOT$(dirname "$out")"
+target=$FAKE_ROOT$out
+existing=false
+if [ -e "$target" ]; then existing=true; fi
+printf 'gpg-existing=%s\n' "$existing" >> "$FAKE_ROOT/calls"
+if [ "$batch" != true ] || [ "$yes" != true ] || [ "$no_tty" != true ]; then
+  printf 'gpg missing noninteractive overwrite flags\n' >&2
+  exit 43
+fi
+mkdir -p "$(dirname "$target")"
 cat > "$FAKE_ROOT$out"
 `,
 		"id": `#!/bin/sh
