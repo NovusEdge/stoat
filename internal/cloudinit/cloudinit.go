@@ -273,6 +273,13 @@ type archiveDoc struct {
 // archive as a whole merges by appending rather than by cloud-init's
 // default first-one-wins.
 func buildArchive(docs []string) (string, error) {
+	// An archive is a top-level YAML list. cloud-init 24.4 on AlmaLinux 9 and
+	// Rocky 9 calls .get() on the parsed user-data before it checks the type,
+	// so the list fails the init-local stage and pins `cloud-init status` at
+	// error for the life of the VM. One document does not need the wrapper.
+	if len(docs) == 1 {
+		return withMergeHow(docs[0]), nil
+	}
 	items := make([]archiveDoc, len(docs))
 	for i, d := range docs {
 		items[i] = archiveDoc{Type: "text/cloud-config", Content: withMergeHow(d)}
