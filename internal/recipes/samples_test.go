@@ -490,20 +490,24 @@ exec "$@"
 			t.Fatal(err)
 		}
 	}
+	// busybox su, which is what Alpine has, recognises options anywhere on the
+	// command line. A -p among the trailing arguments becomes su's own
+	// preserve-environment flag and never reaches the command, so this fake
+	// drops every dash argument and passes nothing positional to the shell.
 	if err := os.WriteFile(filepath.Join(bin, "su"), []byte(`#!/bin/sh
 set -eu
 user=
 command=
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    -c) command=$2; shift 2; break;;
+    -c) command=$2; shift 2;;
     -s) shift 2;;
     -*) shift;;
-    *) user=$1; shift;;
+    *) [ -n "$user" ] || user=$1; shift;;
   esac
 done
 [ -n "$command" ]
-exec sh -c "$command" "$@"
+exec sh -c "$command"
 `), 0o755); err != nil {
 		t.Fatal(err)
 	}

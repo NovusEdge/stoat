@@ -12,6 +12,17 @@ fi
 stoat_pkg_setup
 stoat_pkg_install python3 python3-pip python3-venv
 
+# busybox su recognises options anywhere, so a -p among the trailing arguments
+# becomes su's own preserve-environment flag and never reaches the command.
+# Quote the argument list into -c instead of passing it positionally.
+su_user() {
+    quoted=
+    for arg do
+        quoted="$quoted'$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")' "
+    done
+    su -s /bin/sh "$user" -c "exec $quoted"
+}
+
 # A sudo binary on PATH is not a working sudo: Alpine's sudoers grants root
 # nothing. Probe each tool once and keep the first that runs.
 as_user() {
@@ -27,11 +38,7 @@ as_user() {
     case "$as_user_tool" in
     runuser) runuser -u "$user" -- "$@" ;;
     sudo) sudo -n -u "$user" -- "$@" ;;
-    *)
-        command=$1
-        shift
-        su -s /bin/sh "$user" -c 'exec "$@"' stoat "$command" "$@"
-        ;;
+    *) su_user "$@" ;;
     esac
 }
 
