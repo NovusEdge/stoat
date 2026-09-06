@@ -1,0 +1,23 @@
+name = "pkg-tools"
+description = "tools for querying the package manager"
+os = ["alpine", "ubuntu", "debian", "fedora", "arch", "almalinux", "rocky", "opensuse"]
+stage = "provision"
+script = "install-debian.sh"
+schema = 3
+
+[scripts]
+alpine = "install-alpine.sh"
+ubuntu = "install-debian.sh"
+debian = "install-debian.sh"
+fedora = "install-rpm.sh"
+almalinux = "install-rpm.sh"
+rocky = "install-rpm.sh"
+opensuse = "install-zypper.sh"
+arch = "install-arch.sh"
+
+[outputs]
+query_tool = "path to the tool that answers which package owns a file"
+manager = "name of the package manager binary"
+
+[health]
+check = "command -v apt-file >/dev/null 2>&1 || command -v repoquery >/dev/null 2>&1 || command -v zypper >/dev/null 2>&1 || command -v pacman >/dev/null 2>&1 || command -v apk >/dev/null 2>&1"

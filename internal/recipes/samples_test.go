@@ -148,6 +148,7 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 		{name: "devtools", outputs: []string{"compiler", "editor", "git"}},
 		{name: "python-dev", outputs: []string{"pip", "python", "python_version", "venv", "venv_python"}},
 		{name: "build-deps", outputs: []string{"compiler", "make", "pkg_config"}},
+		{name: "pkg-tools", outputs: []string{"manager", "query_tool"}},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -256,6 +257,98 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
+	cases := []struct {
+		os        string
+		request   string
+		queryTool string
+	}{
+		{os: "ubuntu", request: "apt-file dpkg-dev", queryTool: "apt-file"},
+		{os: "debian", request: "apt-file dpkg-dev", queryTool: "apt-file"},
+		{os: "fedora", request: "dnf-utils", queryTool: "repoquery"},
+		{os: "almalinux", request: "dnf-utils", queryTool: "repoquery"},
+		{os: "rocky", request: "dnf-utils", queryTool: "repoquery"},
+		{os: "opensuse", request: "zypper libzypp", queryTool: "zypper"},
+		{os: "arch", request: "pacman-contrib", queryTool: "pacman"},
+		{os: "alpine", request: "apk-tools", queryTool: "apk"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.os, func(t *testing.T) {
+			body := bundledScript(t, "pkg-tools", tc.os)
+			root := t.TempDir()
+			outputPath := filepath.Join(root, "output")
+			callsPath := filepath.Join(root, "calls")
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// The query tool must resolve via a real executable; the manager
+			// check is left to whatever the test host actually has, same as
+			// build-deps trusts the host for cc/make/pkg-config.
+			if err := os.WriteFile(filepath.Join(bin, tc.queryTool), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tc.os == "alpine" {
+				if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if output, err := runBundledBuildDeps(t, body, outputPath, callsPath, bin); err != nil {
+				t.Fatalf("%s: %v\n%s", tc.os, err, output)
+			}
+			calls, err := os.ReadFile(callsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			installRequests := 0
+			for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+				if !strings.HasPrefix(line, "install ") {
+					continue
+				}
+				installRequests++
+				if got := strings.TrimPrefix(line, "install "); got != tc.request {
+					t.Errorf("%s package request = %q, want %q", tc.os, got, tc.request)
+				}
+			}
+			if installRequests == 0 {
+				t.Errorf("%s: no captured package installation request", tc.os)
+			}
+			outputs := parseOutputs(t, outputPath)
+			if outputs["manager"] == "" {
+				t.Errorf("%s: output %q is empty; outputs = %#v", tc.os, "manager", outputs)
+			}
+			if got := filepath.Base(outputs["query_tool"]); got != tc.queryTool {
+				t.Errorf("%s: query_tool = %q, want basename %q", tc.os, outputs["query_tool"], tc.queryTool)
+			}
+		})
+	}
+}
+
+// manager must resolve to the first of apt-get, dnf, zypper, pacman, apk
+// found on PATH, in that order, regardless of which family script runs it.
+func TestBundledPkgToolsManagerResolutionOrder(t *testing.T) {
+	body := bundledScript(t, "pkg-tools", "fedora")
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"apt-get", "dnf", "repoquery"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	if output, err := runBundledBuildDeps(t, body, outputPath, callsPath, bin); err != nil {
+		t.Fatalf("%v\n%s", err, output)
+	}
+	outputs := parseOutputs(t, outputPath)
+	if got := filepath.Base(outputs["manager"]); got != "apt-get" {
+		t.Errorf("manager = %q, want apt-get to win over dnf", outputs["manager"])
 	}
 }
 
