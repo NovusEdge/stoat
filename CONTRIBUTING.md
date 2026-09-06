@@ -85,9 +85,11 @@ reviewer rejects a PR that ignores them.
 
 ## Recipes
 
-Bundled recipes are `xfce`, `docker`, `devtools`, `tailscale`, and the set
-is closed. Write a new recipe in `~/.stoat/recipes/<name>/` from `stoat
-recipe new`; see `docs/recipes/writing-your-own.md` and
+Bundled recipes are `devtools`, `docker`, `python-dev`, `tailscale`, and
+`xfce`. The bundled catalog changes only through an approved design. Do not
+add opportunistic recipe IDs. `devtools` and `python-dev` are the two common
+developer recipes. Write a new recipe in `~/.stoat/recipes/<name>/` from
+`stoat recipe new`; see `docs/recipes/writing-your-own.md` and
 `docs/recipes/sharing.md` for installing and pinning remote recipes. Every
 recipe script starts with `set -e` and carries the live-vs-disk block that
 `stoat recipe new` scaffolds; `internal/recipes/recipes_test.go` checks both
