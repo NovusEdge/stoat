@@ -1,0 +1,13 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+
+site:
+  title: Stoat
+  structure:
+    - type: space
+      key: stoat-docs
+      title: Stoat documentation
+      path: docs
+      default: true
+      content:
+        directory: ./
+        language: en
