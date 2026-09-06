@@ -30,8 +30,9 @@ stoat mcp doctor
 ```
 
 The report includes contract version, transport, and client-entry status. The
-server advertises the same contract used by `stoat --json`; see [JSON output](../reference/json.md)
-for the shared data types and error rules.
+server shares a contract version and DTO package with the JSON CLI.
+Tool schemas and results are MCP-specific; see
+[JSON output](../reference/json.md) for the differences.
 
 ## Choose a transport
 

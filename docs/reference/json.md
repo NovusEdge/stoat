@@ -9,11 +9,12 @@ named VM invocation when the complete stdout stream must be JSON.
 This document is the contract. The human-facing CLI is documented in
 [cli.md](cli.md).
 
-`stoat mcp` serves the same contract over MCP from inside the same binary.
-Every tool's output type in `internal/mcpsrv` is a `wire` struct, the same Go
-type the matching `--json` command emits, so the two cannot drift: the MCP
-schema is generated from these types, not maintained separately. See
-`internal/mcpsrv/table_test.go` for the tool table.
+`stoat mcp` exposes Stoat operations from inside the same binary and reuses
+the `wire` DTO package for tool results. MCP does not use the CLI's JSON-lines
+envelope, and some tool result DTOs differ from the corresponding CLI payload
+(for example, MCP `wait` returns `healthy`, while CLI `wait --json` returns
+`reached` and `waited_ms`). See `internal/mcpsrv/table_test.go` for the tool
+table and each tool's schema.
 
 ```
 stoat --json ls
@@ -130,7 +131,6 @@ bump the contract version. Do not write code that requires them.
 | `immutable_field` | `update` was asked to change a field that cannot change |
 | `disk_shrink` | a disk can only grow |
 | `cannot_reach` | `wait` was asked for a state this VM can never reach |
-| `applied_at_boot` | reserved; no command emits it. A cloud VM whose recipes ran at boot answers `ok:true` with `applied: []` |
 | `unknown_log` | bad `--which` |
 | `qemu_missing` | `qemu-system-x86_64` is not on `PATH` |
 | `kvm_unusable` | `/dev/kvm` cannot be opened; the user is usually not in the `kvm` group |
@@ -457,6 +457,13 @@ so a leak fails the build rather than shipping.
 | `version` | `{"version":"1.2.3","contract":3}` |
 | `help` | `{"usage":"..."}` |
 | `ssh` | **refused**, see below |
+
+The table above is for the CLI's `--json` results. MCP uses the same DTO
+package but has tool-specific payloads: for example, MCP `copy_to` and
+`copy_from` return `CopyResult` (`vm`, `local`, `remote`, `to_remote`), MCP
+`forward` returns `ForwardList` (`forwards`), and MCP `apply_recipes` returns
+`ApplyResult` (`vm`, `recipes_detail`). Consult the MCP tool schema for those
+fields rather than assuming the CLI row applies.
 
 `get` returns `{"vm":VMStatus}`: `VMStatus` embeds the VM fields directly;
 only the outer get result has the `vm` member. `recipes` remains the compatible

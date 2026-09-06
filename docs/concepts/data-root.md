@@ -24,6 +24,8 @@ than an error.
 ├── guest_host_ed25519_key.pub
 ├── isos/                      # downloaded ISOs and cloud images
 ├── recipes/                   # global and bundled recipe scripts/fragments
+├── shared/
+│   └── <vm-name>/             # host-side writable per-VM 9p export
 ├── stoat.lock                 # global recipe pins, when used outside a project
 ├── logs/
 │   └── stoat.log              # one shared log for the whole tool
@@ -32,6 +34,9 @@ than an error.
     ├── disk.qcow2             # disk/cloud modes only
     ├── qemu.pid                # written by QEMU's -pidfile while running
     ├── monitor.sock            # QEMU monitor, unix socket, for Stop()
+    ├── qmp.sock                # QMP socket, used for VM snapshots
+    ├── vnc.sock                # VNC socket when the VM uses VNC display
+    ├── console.log             # QEMU serial console log
     ├── last-provision.log      # output of the most recent `p` run, truncated each time
     └── ovl/
         ├── stoat.apkovl.tar.gz # live mode: rebuilt on every start
@@ -40,6 +45,13 @@ than an error.
             ├── user-data
             └── meta-data
 ```
+
+The `shared/<vm-name>/` directory is a host-side export. Whether the guest
+mounts it depends on its 9p support and boot backend: live Alpine VMs mount
+`/mnt/work` from the apkovl, cloud VMs use cloud-init when their guest
+definition permits 9p, and disk VMs need a manual mount. Debian cloud VMs
+skip the mount because their cloud kernel has no 9p module. See [Networking
+and sharing](networking-and-sharing.md) for the other share paths.
 
 Project recipe state is stored beside the repository instead of in the data
 root. `stoat.lock` contains project pins and `.stoat/recipes/` contains the

@@ -64,10 +64,11 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
+| [`mcp`](mcp.md) | Serve MCP, or configure and inspect a client entry | 0, 1, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
-Anything not on this list, a missing VM name, or extra arguments is a **usage error** (exit 2), printed to stderr together with the full usage text.
+Anything not on this list, a missing VM name, or extra arguments is a **usage error** (exit 2), printed to stderr together with the full usage text. The `mcp` subcommands and their client-specific flags are documented in [the MCP reference](mcp.md).
 
 ## `stoat ls`
 

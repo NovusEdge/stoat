@@ -25,11 +25,11 @@ reachable over SSH. `--only` restricts the run to names already present in the
 VM's recipe list. `stoat apply --dry-run` reports the run or skip decision for
 each selected recipe without contacting the guest.
 
-The TUI offers provisioning after SSH becomes reachable. A live VM is offered
-again after every reboot because its root filesystem is temporary. A disk VM
-is offered while it needs provisioning. Cloud-init recipes run from the seed
-at first boot; stoat discovers their marker files if a later `apply` needs to
-reconcile state.
+The TUI starts provisioning automatically after SSH becomes reachable. A live
+VM is provisioned on each start because its root filesystem is temporary. A
+disk VM is provisioned automatically while it needs provisioning. Cloud-init
+recipes run from the seed at first boot; stoat discovers their marker files if
+a later `apply` needs to reconcile state.
 
 ## Targeting and execution
 

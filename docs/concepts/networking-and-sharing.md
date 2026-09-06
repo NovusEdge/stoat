@@ -8,8 +8,9 @@ and no interference with your host's real network, but it also means the
 guest is behind NAT, reachable from the host only through explicit port
 forwards.
 
-stoat forwards exactly one port per VM: the guest's SSH port (22) is mapped
-to a host-side loopback port. The forward is bound explicitly to
+stoat always forwards the guest's SSH port (22) to a host-side loopback port.
+You can declare additional host-to-guest TCP forwards in the project file or
+VM configuration. Every forward is bound explicitly to
 `127.0.0.1`, not `0.0.0.0`: QEMU's default would otherwise publish every
 guest's SSH to your LAN, which is not something a local dev VM tool should
 do without asking.
@@ -49,9 +50,9 @@ Whether the share actually gets *mounted* inside the guest depends on mode:
   entry for the 9p mount and enables the `localmount` init script at boot,
   so `/mnt/host` is there and mounted the moment the VM comes up, no action
   needed.
-- **`disk`** and **`cloud`** guests get the same `-virtfs` device from QEMU,
-  but nothing stoat controls injects an `/etc/fstab` entry for them. You
-  need to mount it yourself once inside the guest, e.g.:
+- **`disk`** guests get the same `-virtfs` device from QEMU, but nothing stoat
+  controls injects an `/etc/fstab` entry for them. You need to mount it
+  yourself once inside the guest, e.g.:
 
   ```sh
   mkdir -p /mnt/host
@@ -60,6 +61,10 @@ Whether the share actually gets *mounted* inside the guest depends on mode:
 
   (add that to `/etc/fstab` yourself if you want it to persist across
   reboots on a `disk` VM).
+
+  **`cloud`** guests receive cloud-init mount entries for the writable work
+  share, the legacy `share` when configured, and project shares. Debian cloud
+  images skip these entries because their cloud kernel has no 9p module.
 
 ## Project shares
 

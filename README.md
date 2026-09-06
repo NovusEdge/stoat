@@ -80,11 +80,11 @@ declared VMs. See the [project file reference](docs/reference/project-file.md).
 The recording shows Stoat's TUI list and detail screens followed by an XFCE
 desktop in a QEMU window.
 
-[Watch the MP4](assets/demo.mp4) · [Capture details](assets/README.md)
+[Watch the MP4](assets/demo.mp4)
 
 Stoat stores VM configuration and state under `~/.stoat`; set `STOAT_HOME` to
 use another data root. See [modes and backends](docs/concepts/modes-and-backends.md)
 and [the data root](docs/concepts/data-root.md) for storage behavior.
 
-Stoat is pre-1.0. [Contributing](CONTRIBUTING.md) covers development setup
-and checks. It is licensed under [AGPL-3.0-or-later](LICENSE).
+[Contributing](CONTRIBUTING.md) covers development setup and checks.
+Stoat is licensed under [AGPL-3.0-or-later](LICENSE).

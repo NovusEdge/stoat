@@ -2,7 +2,8 @@
 
 ## v0.2.0
 
-First published release. Stoat remains pre-1.0, for single-user Linux systems.
+First published release, for single-user Linux systems. This is a regular
+release rather than a prerelease; its version number is below 1.0.
 
 ### Features
 

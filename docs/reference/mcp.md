@@ -2,8 +2,9 @@
 
 `stoat mcp` serves Stoat's Model Context Protocol server over stdio. MCP
 clients launch it as a subprocess, normally with the working directory of the
-project they should manage. The server uses the same Go wire types as
-`--json`; see [JSON output](json.md).
+project they should manage. The server shares the wire DTO package and
+contract version with the JSON CLI. Tool schemas, payloads, and envelopes
+are MCP-specific; see [JSON output](json.md).
 
 ## Install a client entry
 
