@@ -30,7 +30,9 @@ var binChecks = []struct {
 	{"qemu-system-x86_64", Pkg{Arch: "qemu-full", Debian: "qemu-system-x86", Fedora: "qemu-kvm"}, false},
 	{"qemu-img", Pkg{Arch: "qemu-full", Debian: "qemu-utils", Fedora: "qemu-img"}, false},
 	{"ssh", Pkg{Arch: "openssh", Debian: "openssh-client", Fedora: "openssh-clients"}, false},
-	{"xorriso", Pkg{Arch: "libisoburn", Debian: "xorriso", Fedora: "xorriso"}, false},
+	// Only an Alpine disk install needs xorriso, to read the kernel out of the
+	// Alpine ISO. Every other path, cloud seeds included, writes its own image.
+	{"xorriso", Pkg{Arch: "libisoburn", Debian: "xorriso", Fedora: "xorriso"}, true},
 	{"git", Pkg{Arch: "git", Debian: "git", Fedora: "git"}, true},
 }
 

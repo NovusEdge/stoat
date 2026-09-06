@@ -159,16 +159,6 @@ though the file is there.
 - Sidestep it: use a glibc-based cloud VM (Ubuntu/Debian/Fedora via the
   cloudinit backend) instead of an Alpine guest.
 
-## `xorriso is required for cloud-init provisioning; install libisoburn`
-
-Exact string, from `internal/cloudinit/cloudinit.go`'s `Seed` (via
-`haveXorriso`, which just checks `exec.LookPath("xorriso")`). Building the
-cloud-init seed ISO shells out to `xorriso`, and stoat doesn't vendor it.
-
-**Fix:** install the package that provides `xorriso`, on most distros that's
-`libisoburn` (the message names it directly), e.g. `apk add xorriso` on
-Alpine or your distro's equivalent of `libisoburn`/`xorriso`.
-
 ## `/dev/kvm not usable`
 
 ```
