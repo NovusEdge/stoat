@@ -2,14 +2,7 @@
 
 `stoat mcp` serves Stoat's Model Context Protocol server over stdio. MCP
 clients launch it as a subprocess, normally with the working directory of the
-project they should manage.
-
-The read-only capabilities tool reads host checks and stored VM metadata. Its
-optional vm argument selects one VM; omit it for host and project scope. It
-does not start or connect to a VM, and it reports MCP access limits plus
-unavailable fork and continuation proposals. Discovery does not mutate a VM.
-
-The server uses the same Go wire types as
+project they should manage. The server uses the same Go wire types as
 `--json`; see [JSON output](json.md).
 
 ## Install a client entry
@@ -98,8 +91,10 @@ that run guest code are marked by their required level.
 
 ### Host and recipe tools
 
-The capabilities tool reads host checks and optional stored VM metadata. It
-uses no VM connection or guest mutation.
+The read-only capabilities tool reads host checks and stored VM metadata. Its
+optional vm argument selects one VM; omit it for host and project scope. It
+does not start or connect to a VM, and it reports MCP access limits plus
+unavailable fork and continuation proposals. Discovery does not mutate a VM.
 
 | Tool | Purpose |
 |---|---|
@@ -132,9 +127,6 @@ seconds capped at 600, not a duration string.
 Guest operations require a running VM. `copy_to` and `copy_from` restrict the
 host side to the VM's configured shared directory. `pkg_install` uses the
 loaded guest definition's package manager. `svc` uses its service templates.
-
-agent_access is enforced by MCP guest tools. Direct CLI stoat exec and stoat cp
-remain outside that policy.
 
 ## Project tools and scope
 

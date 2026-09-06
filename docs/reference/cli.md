@@ -63,8 +63,8 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
-| [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`capabilities`](#stoat-capabilities-vm) | Report current agent capabilities | 0, 1 |
+| [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
