@@ -91,8 +91,7 @@ reviewer rejects a PR that ignores them.
 
 Bundled recipes are `devtools`, `python-dev`, `build-deps`, `service-tools`,
 `pkg-tools`, `docker`, `tailscale`, and `xfce`. The bundled catalog changes
-only through an approved design. Do not
-add opportunistic recipe IDs. `devtools` and `python-dev` are the two common
+only through an approved design. Do not add opportunistic recipe IDs. `devtools` and `python-dev` are the two common
 developer recipes. Write a new recipe in `~/.stoat/recipes/<name>/` from
 `stoat recipe new`; see `docs/recipes/writing-your-own.md` and
 `docs/recipes/sharing.md` for installing and pinning remote recipes. Every

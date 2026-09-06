@@ -9,8 +9,8 @@
 - Apply the `build-deps`, `service-tools`, and `pkg-tools` recipes on all eight
   bundled guests. `build-deps` installs a C compiler, `make`, and
   `pkg-config`, then reports each as an output. `service-tools` installs
-  `lsof`, `strace`, and the guest's own service inspector, then reports the
-  service manager, `lsof`, and `strace`. `pkg-tools` installs the tool that
+  `lsof`, `strace`, and the process tools, then reports whether the guest runs
+  systemd or OpenRC, and where `lsof` and `strace` are. `pkg-tools` installs the tool that
   answers which package owns a file, then reports that tool and the package
   manager.
 
