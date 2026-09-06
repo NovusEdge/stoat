@@ -179,7 +179,7 @@ func TestEmbedContainsBundledDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"xfce": true, "docker": true, "devtools": true, "python-dev": true, "tailscale": true, "build-deps": true, "service-tools": true}
+	want := map[string]bool{"xfce": true, "docker": true, "devtools": true, "python-dev": true, "tailscale": true, "build-deps": true, "service-tools": true, "pkg-tools": true}
 	for _, e := range recipes {
 		if !e.IsDir() {
 			continue
