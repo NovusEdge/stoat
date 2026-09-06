@@ -260,6 +260,28 @@ func TestBundledPythonDevCreatesAndPreservesVenv(t *testing.T) {
 	}
 }
 
+// Alpine ships a sudoers file that grants root nothing, so sudo is on PATH and
+// still refuses every command. The recipe must fall through to su instead of
+// failing the runcmd and leaving cloud-init in error.
+func TestBundledPythonDevFallsBackWhenEscalationRefuses(t *testing.T) {
+	t.Setenv("STOAT_FAKE_NO_ESCALATION", "1")
+	account := currentTestAccount(t)
+	root := t.TempDir()
+
+	for _, guestOS := range []string{"alpine", "debian", "arch", "fedora"} {
+		body := bundledScript(t, "python-dev", guestOS)
+		venvDir := filepath.Join(root, guestOS, "env")
+		output, err := runBundledPython(t, body, account.Username, venvDir,
+			filepath.Join(root, guestOS+"-output"), filepath.Join(root, guestOS+"-calls"))
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", guestOS, err, output)
+		}
+		if _, err := os.Stat(filepath.Join(venvDir, "pyvenv.cfg")); err != nil {
+			t.Errorf("%s: environment was not created: %v", guestOS, err)
+		}
+	}
+}
+
 func TestBundledPythonDevRefusesInvalidTargets(t *testing.T) {
 	body := bundledScript(t, "python-dev", "alpine")
 	account := currentTestAccount(t)
@@ -449,6 +471,10 @@ func writeHermeticCommandFakes(t *testing.T, bin string) {
 	t.Helper()
 	accountSwitch := `#!/bin/sh
 set -eu
+if [ -n "${STOAT_FAKE_NO_ESCALATION:-}" ]; then
+  echo "root is not in the sudoers file." >&2
+  exit 1
+fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -u|-g|-s) shift 2;;
@@ -470,14 +496,14 @@ user=
 command=
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    -c) command=$2; shift 2; break;;
     -s) shift 2;;
     -*) shift;;
-    -c) command=$2; shift 2; break;;
     *) user=$1; shift;;
   esac
 done
 [ -n "$command" ]
-exec sh -c "$command"
+exec sh -c "$command" "$@"
 `), 0o755); err != nil {
 		t.Fatal(err)
 	}

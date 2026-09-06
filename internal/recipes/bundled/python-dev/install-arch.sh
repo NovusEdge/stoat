@@ -12,16 +12,27 @@ fi
 stoat_pkg_setup
 stoat_pkg_install python python-pip
 
+# A sudo binary on PATH is not a working sudo: Alpine's sudoers grants root
+# nothing. Probe each tool once and keep the first that runs.
 as_user() {
-    if command -v runuser >/dev/null 2>&1; then
-        runuser -u "$user" -- "$@"
-    elif command -v sudo >/dev/null 2>&1; then
-        sudo -n -u "$user" -- "$@"
-    else
+    if [ -z "${as_user_tool:-}" ]; then
+        if command -v runuser >/dev/null 2>&1 && runuser -u "$user" -- true 2>/dev/null; then
+            as_user_tool=runuser
+        elif command -v sudo >/dev/null 2>&1 && sudo -n -u "$user" -- true 2>/dev/null; then
+            as_user_tool=sudo
+        else
+            as_user_tool=su
+        fi
+    fi
+    case "$as_user_tool" in
+    runuser) runuser -u "$user" -- "$@" ;;
+    sudo) sudo -n -u "$user" -- "$@" ;;
+    *)
         command=$1
         shift
         su -s /bin/sh "$user" -c 'exec "$@"' stoat "$command" "$@"
-    fi
+        ;;
+    esac
 }
 
 python_bin=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
