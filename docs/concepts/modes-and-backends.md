@@ -77,8 +77,9 @@ Alongside the overlay, stoat builds a small NoCloud cloud-init seed ISO
 (volume label `CIDATA`) containing:
 
 - a `stoat` user, password-less sudo, and stoat's public key
-- cloud-init documents for the user, mounts, OS packages, and the selected
-  recipe scripts
+- cloud-init documents for the user and selected recipe scripts, plus a mounts
+  document when the guest backend supports the 9p share and an OS package
+  document when that guest declares `seed_packages`
 
 Cloud-init applies the seed **at first boot only**. The seed carries selected
 recipe fragments and scripts as cloud-init archive documents. Stoat may run a

@@ -9,7 +9,7 @@ named VM invocation when the complete stdout stream must be JSON.
 This document is the contract. The human-facing CLI is documented in
 [cli.md](cli.md).
 
-`stoat mcp` exposes the same operations from inside the same binary and reuses
+`stoat mcp` exposes Stoat operations from inside the same binary and reuses
 the `wire` DTO package for tool results. MCP does not use the CLI's JSON-lines
 envelope, and some tool result DTOs differ from the corresponding CLI payload
 (for example, MCP `wait` returns `healthy`, while CLI `wait --json` returns
