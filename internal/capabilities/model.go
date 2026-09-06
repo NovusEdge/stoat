@@ -2,6 +2,32 @@ package capabilities
 
 import "github.com/novusedge/stoat/internal/core"
 
+const (
+	StatusSupported   = "supported"
+	StatusLimited     = "limited"
+	StatusUnsupported = "unsupported"
+	StatusUnknown     = "unknown"
+
+	ScopeHost    = "host"
+	ScopeVM      = "vm"
+	ScopeProject = "project"
+	ScopeRuntime = "runtime"
+	ScopeMCP     = "mcp"
+	ScopeCLI     = "cli"
+
+	ReasonNotImplemented       = "not_implemented"
+	ReasonHostProbeUnavailable = "host_probe_unavailable"
+	ReasonAgentAccessUnknown   = "agent_access_unknown"
+	ReasonTargetModeUnknown    = "target_mode_unknown"
+	ReasonProjectStateUnknown  = "project_state_unknown"
+
+	LimitAgentAccessRequired    = "agent_access_required"
+	LimitTargetRequired         = "target_required"
+	LimitDiskRequired           = "disk_required"
+	LimitProjectFileRequired    = "project_file_required"
+	LimitHostRequirementMissing = "host_requirement_missing"
+)
+
 // Report is the versioned capability discovery document shared by the CLI and
 // MCP adapters.
 type Report struct {

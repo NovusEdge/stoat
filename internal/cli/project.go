@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/project"
 )
 
@@ -16,7 +17,7 @@ var vmCommands = map[string]bool{
 	"get": true, "up": true, "down": true, "ssh": true, "ssh-command": true,
 	"rm": true, "clone": true, "exec": true, "cp": true, "forward": true,
 	"snapshot": true, "wait": true, "apply": true,
-	"update": true, "logs": true,
+	"update": true, "logs": true, "capabilities": true,
 }
 
 // fanOutCommands are the commands that act on every declared VM when given no
@@ -49,6 +50,12 @@ func resolveScope(a *Args) error {
 	}
 	// The name may still be a global VM that this project never declared;
 	// only refuse when the data root does not have it either.
+	if a.Cmd == "capabilities" {
+		if _, err := capabilities.LoadTarget(a.VM); err != nil {
+			return err
+		}
+		return nil
+	}
 	if _, err := coreGet(a.VM); err != nil {
 		return fmt.Errorf("no VM %q in %s or ~/.stoat/vms", a.VM, project.FileName)
 	}

@@ -2,7 +2,14 @@
 
 `stoat mcp` serves Stoat's Model Context Protocol server over stdio. MCP
 clients launch it as a subprocess, normally with the working directory of the
-project they should manage. The server uses the same Go wire types as
+project they should manage.
+
+The read-only capabilities tool reads host checks and stored VM metadata. Its
+optional vm argument selects one VM; omit it for host and project scope. It
+does not start or connect to a VM, and it reports MCP access limits plus
+unavailable fork and continuation proposals. Discovery does not mutate a VM.
+
+The server uses the same Go wire types as
 `--json`; see [JSON output](json.md).
 
 ## Install a client entry
@@ -91,6 +98,9 @@ that run guest code are marked by their required level.
 
 ### Host and recipe tools
 
+The capabilities tool reads host checks and optional stored VM metadata. It
+uses no VM connection or guest mutation.
+
 | Tool | Purpose |
 |---|---|
 | `list_vms`, `vm_status` | List VMs or inspect one VM, including recipe state and health. |
@@ -100,6 +110,7 @@ that run guest code are marked by their required level.
 | `add_recipe`, `update_recipe`, `remove_recipe` | Add, repin, or remove remote recipes. `add_recipe` accepts curated index names only; it refuses Git URLs. `remove_recipe` has no force option. |
 | `list_guests`, `guest_info` | Inspect loaded guest definitions and their package/service commands. |
 | `doctor`, `logs` | Check host prerequisites or tail a VM's console/apply log. |
+| `capabilities` | Read host checks and optional stored VM metadata; report current capabilities and limits. |
 | `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM and its disk. |
 | `snapshot`, `restore`, `forward`, `wait`, `prune` | Manage disk snapshots, port forwards, state waits, and stale files. `prune` is dry-run unless `apply=true`. |
 | `project_status`, `project_up`, `project_down`, `project_apply`, `project_wait` | Inspect or operate on every VM declared by the server working directory's `stoat.toml`, in declaration order. A failure stops the run and later VMs are marked skipped. |
@@ -121,6 +132,9 @@ seconds capped at 600, not a duration string.
 Guest operations require a running VM. `copy_to` and `copy_from` restrict the
 host side to the VM's configured shared directory. `pkg_install` uses the
 loaded guest definition's package manager. `svc` uses its service templates.
+
+agent_access is enforced by MCP guest tools. Direct CLI stoat exec and stoat cp
+remain outside that policy.
 
 ## Project tools and scope
 

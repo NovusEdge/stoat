@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
 )
@@ -14,6 +15,10 @@ type emptyIn struct{}
 
 type vmIn struct {
 	VM string `json:"vm" jsonschema:"name of the VM"`
+}
+
+type capabilitiesIn struct {
+	VM string `json:"vm,omitempty" jsonschema:"optional VM name; omit for host scope"`
 }
 
 type listRecipesIn struct {
@@ -128,6 +133,34 @@ func (s *srv) registerRead(server *mcp.Server) {
 		"Check host prerequisites: qemu and KVM, qemu-img, ssh, xorriso, git and /dev/kvm. The check always succeeds; an unhealthy host is reported in the result rather than raised as a failure. Read-only: it changes nothing on the host.",
 		func(ctx context.Context, _ emptyIn) (wire.DoctorReport, error) {
 			return wire.FromDoctor(core.Doctor()), nil
+		})
+
+	register(server, "capabilities", classRead,
+		"Read host checks and stored VM metadata to report current capabilities, MCP access limits, and unavailable fork or continuation proposals. It does not start or connect to a VM. Read-only.",
+		func(ctx context.Context, in capabilitiesIn) (wire.Capabilities, error) {
+			var target *capabilities.Target
+			if in.VM != "" {
+				name, err := checkVMName(in.VM)
+				if err != nil {
+					return wire.Capabilities{}, err
+				}
+				loaded, err := capabilities.LoadTarget(name)
+				if err != nil {
+					return wire.Capabilities{}, err
+				}
+				target = &loaded
+			}
+			projectState := "absent"
+			switch {
+			case s.projErr != nil:
+				projectState = "unknown"
+			case s.proj != nil:
+				projectState = "available"
+			}
+			return wire.Capabilities(capabilities.Build(capabilities.Input{
+				Version: s.opts.Version, ProjectState: projectState,
+				HostChecks: core.Doctor(), Target: target,
+			})), nil
 		})
 
 	register(server, "plan_recipes", classRead,

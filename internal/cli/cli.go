@@ -425,6 +425,15 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		// lines: they are all already gated on it.
 		a.Quiet = true
 	}
+	// Capabilities is deliberately dispatched before generic setup: discovery
+	// reads host checks and stored metadata, so it must not create a data root,
+	// install recipes, generate keys, initialize logs, or load guest overrides.
+	if a.Cmd == "capabilities" {
+		if err := resolveScope(a); err != nil {
+			return a.fail(stdout, stderr, err)
+		}
+		return runCapabilities(a, version, stdout, stderr)
+	}
 	if len(a.Params) > 0 {
 		resolved, err := resolveParamEdits(a.Params, stdin, stderr, !jsonMode && streamIsTTY(stdin))
 		if err != nil {
@@ -542,6 +551,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runUpdate(a, stdout, stderr)
 	case "doctor":
 		return runDoctor(a, stdout, stderr)
+	case "capabilities":
+		return runCapabilities(a, version, stdout, stderr)
 	case "mcp":
 		return runMCP(a, version, stdout, stderr)
 	case "status":
