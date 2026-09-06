@@ -265,13 +265,20 @@ func TestRecipeScriptsHaveLiveVsDiskCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The original four bundled recipes carry live-vs-disk persistence notes.
+	// python-dev is deliberately excluded: its behavior is valid on both root
+	// filesystem modes without needing a mount-type probe.
+	legacyLiveDisk := map[string]bool{"xfce": true, "docker": true, "devtools": true, "tailscale": true}
 	for _, m := range manifests {
+		if !legacyLiveDisk[m.Name] {
+			continue
+		}
 		content, err := m.ScriptContent("alpine")
 		if err != nil {
 			continue // OS override may not exist
 		}
 
-		// Each recipe should detect live vs disk
+		// Each legacy recipe should detect live vs disk.
 		if !strings.Contains(content, "/proc/mounts") {
 			t.Errorf("%s script does not check /proc/mounts for live vs disk detection", m.Name)
 		}
