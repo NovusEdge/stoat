@@ -46,7 +46,7 @@ generated at provision time is stale by the first time anyone reads it.
 | Family | Packages |
 |---|---|
 | Debian, Ubuntu | `build-essential`, `pkg-config`, `autoconf`, `automake`, `libtool`, `dpkg-dev` |
-| Fedora, AlmaLinux, Rocky | `@development-tools`, `pkgconf-pkg-config`, `rpm-build` |
+| Fedora, AlmaLinux, Rocky | the development tools group, `pkgconf-pkg-config`, `rpm-build` |
 | openSUSE | pattern `devel_basis` |
 | Arch | `base-devel` |
 | Alpine | `alpine-sdk`, `build-base` |
@@ -55,7 +55,9 @@ Outputs: `compiler`, `make`, `pkg_config`.
 Health: each of the three responds to `--version`.
 
 The RPM and openSUSE entries are a group and a pattern, which the package
-manager expands. Arch's `base-devel` is a metapackage that pulls the same
+manager expands. The group carries two ids: dnf5 on Fedora calls it
+`development-tools`, and dnf4 on AlmaLinux 9 and Rocky 9 calls it
+`development`. The script asks for the first id and falls back to the second. Arch's `base-devel` is a metapackage that pulls the same
 tools in one name. That is the OS-specific behaviour this recipe exists for.
 
 ### service-tools

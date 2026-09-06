@@ -202,18 +202,19 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 }
 
 func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
+	rpm := []string{"@development-tools", "pkgconf-pkg-config rpm-build"}
 	cases := []struct {
-		os      string
-		request string
+		os       string
+		requests []string
 	}{
-		{os: "ubuntu", request: "build-essential pkg-config autoconf automake libtool dpkg-dev"},
-		{os: "debian", request: "build-essential pkg-config autoconf automake libtool dpkg-dev"},
-		{os: "fedora", request: "@development-tools pkgconf-pkg-config rpm-build"},
-		{os: "almalinux", request: "@development-tools pkgconf-pkg-config rpm-build"},
-		{os: "rocky", request: "@development-tools pkgconf-pkg-config rpm-build"},
-		{os: "opensuse", request: "-t pattern devel_basis"},
-		{os: "arch", request: "base-devel"},
-		{os: "alpine", request: "alpine-sdk build-base"},
+		{os: "ubuntu", requests: []string{"build-essential pkg-config autoconf automake libtool dpkg-dev"}},
+		{os: "debian", requests: []string{"build-essential pkg-config autoconf automake libtool dpkg-dev"}},
+		{os: "fedora", requests: rpm},
+		{os: "almalinux", requests: rpm},
+		{os: "rocky", requests: rpm},
+		{os: "opensuse", requests: []string{"-t pattern devel_basis"}},
+		{os: "arch", requests: []string{"base-devel"}},
+		{os: "alpine", requests: []string{"alpine-sdk build-base"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.os, func(t *testing.T) {
@@ -242,18 +243,8 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			installRequests := 0
-			for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
-				if !strings.HasPrefix(line, "install ") {
-					continue
-				}
-				installRequests++
-				if got := strings.TrimPrefix(line, "install "); got != tc.request {
-					t.Errorf("%s package request = %q, want %q", tc.os, got, tc.request)
-				}
-			}
-			if installRequests == 0 {
-				t.Errorf("%s: no captured package installation request", tc.os)
+			if got := installRequests(string(calls)); !slices.Equal(got, tc.requests) {
+				t.Errorf("%s package requests = %v, want %v", tc.os, got, tc.requests)
 			}
 			outputs := parseOutputs(t, outputPath)
 			want := map[string]string{"compiler": "cc", "make": "make", "pkg_config": "pkg-config"}
@@ -264,6 +255,59 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 			}
 		})
 	}
+}
+
+// installRequests returns the package sets the script asked for, in order.
+func installRequests(calls string) []string {
+	var requests []string
+	for _, line := range strings.Split(strings.TrimSpace(calls), "\n") {
+		if after, ok := strings.CutPrefix(line, "install "); ok {
+			requests = append(requests, after)
+		}
+	}
+	return requests
+}
+
+// dnf4 on AlmaLinux 9 and Rocky 9 rejects the development-tools group id and
+// wants development instead. The script must try the second id rather than
+// fail the recipe.
+func TestBundledBuildDepsFallsBackToTheOtherGroupID(t *testing.T) {
+	body := bundledScript(t, "build-deps", "almalinux")
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cc", "make", "pkg-config"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	installer := `stoat_pkg_install() {
+  printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"
+  if [ "$1" = "@development-tools" ]; then
+    echo "Module or Group 'development-tools' is not available." >&2
+    return 1
+  fi
+}`
+	if output, err := runBundledScriptWithInstaller(t, installer, body, outputPath, callsPath, bin); err != nil {
+		t.Fatalf("script failed where the group id was rejected: %v\n%s", err, output)
+	}
+	want := []string{"@development-tools", "@development", "pkgconf-pkg-config rpm-build"}
+	if got := installRequests(readFileString(t, callsPath)); !slices.Equal(got, want) {
+		t.Errorf("package requests = %v, want %v", got, want)
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }
 
 // opensuse and the rpm family (fedora, almalinux, rocky) fall back to pkgconf
@@ -402,9 +446,16 @@ func TestBundledServiceToolsFailsWithoutKnownServiceManager(t *testing.T) {
 // or other real binary the recipe would find first and use instead of a fake.
 func runBundledScript(t *testing.T, body, outputPath, callsPath, bin string) ([]byte, error) {
 	t.Helper()
-	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
-stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }
-`
+	return runBundledScriptWithInstaller(t,
+		`stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }`,
+		body, outputPath, callsPath, bin)
+}
+
+// runBundledScriptWithInstaller lets one test supply its own stoat_pkg_install
+// so a script that reacts to a failed package request can be exercised.
+func runBundledScriptWithInstaller(t *testing.T, installer, body, outputPath, callsPath, bin string) ([]byte, error) {
+	t.Helper()
+	prefix := "stoat_pkg_setup() { printf 'setup\\n' >> \"$STOAT_PKG_CALLS\"; }\n" + installer + "\n"
 	cmd := exec.Command("sh", "-eu", "-c", prefix+body)
 	cmd.Env = append(os.Environ(),
 		"PATH="+bin,

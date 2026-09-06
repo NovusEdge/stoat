@@ -4,7 +4,13 @@
 set -e
 
 stoat_pkg_setup
-stoat_pkg_install @development-tools pkgconf-pkg-config rpm-build
+# The group carries the same packages under two ids: dnf5 on Fedora calls it
+# development-tools, and dnf4 on AlmaLinux 9 and Rocky 9 calls it development.
+# dnf fails with "Module or Group is not available" on the wrong id.
+if ! stoat_pkg_install @development-tools; then
+    stoat_pkg_install @development
+fi
+stoat_pkg_install pkgconf-pkg-config rpm-build
 
 compiler=$(command -v cc 2>/dev/null || command -v gcc 2>/dev/null || true)
 make_bin=$(command -v make 2>/dev/null || true)
@@ -19,4 +25,4 @@ if [ -n "${STOAT_OUTPUT:-}" ]; then
         printf 'pkg_config=%s\n' "$pkg_config"
     } >> "$STOAT_OUTPUT"
 fi
-echo "build-deps installed: @development-tools, pkgconf-pkg-config, rpm-build"
+echo "build-deps installed: the development tools group, pkgconf-pkg-config, rpm-build"
