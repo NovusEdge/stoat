@@ -4,52 +4,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
-	"gopkg.in/yaml.v3"
 )
 
-// unpackArchive strips the required "#cloud-config-archive" header and
-// unmarshals the rest as the YAML list of {type, content} documents, so
-// tests can inspect individual documents instead of grepping the whole
-// rendered file.
-
-// withoutMounts returns the archive's documents minus the 9p mounts document.
-// Every VM except debian gets one mounts document; debian's cloud kernel has
-// no 9p module, so it gets none. The helper accepts zero or one and fails on
-// more, so tests about the base and recipe documents filter it out instead of
-// counting around it.
-func withoutMounts(t *testing.T, ud string) []archiveDoc {
+// listOf returns the merged user-data's value for key as a list of strings.
+// Every caller here asks about packages: or runcmd:, both of which cloud-init
+// treats as lists of scalars.
+func listOf(t *testing.T, ud, key string) []string {
 	t.Helper()
-	var rest []archiveDoc
-	found := 0
-	for _, d := range unpackArchive(t, ud) {
-		if strings.Contains(d.Content, "mounts:") {
-			found++
-			continue
-		}
-		rest = append(rest, d)
+	raw, ok := parseMapping(t, ud)[key]
+	if !ok {
+		return nil
 	}
-	if found > 1 {
-		t.Fatalf("want at most one mounts document, got %d:\n%s", found, ud)
+	items, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("%s is not a list:\n%s", key, ud)
 	}
-	return rest
-}
-
-func unpackArchive(t *testing.T, ud string) []archiveDoc {
-	t.Helper()
-	const header = "#cloud-config-archive\n"
-	if !strings.HasPrefix(ud, header) {
-		t.Fatalf("user-data does not start with %q:\n%s", header, ud)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, fmt.Sprint(item))
 	}
-	var docs []archiveDoc
-	if err := yaml.Unmarshal([]byte(strings.TrimPrefix(ud, header)), &docs); err != nil {
-		t.Fatalf("user-data is not a valid cloud-config-archive: %v\n%s", err, ud)
-	}
-	return docs
+	return out
 }
 
 const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
@@ -84,31 +64,33 @@ func TestSeedWritesUserDataAndMetaData(t *testing.T) {
 	}
 	ud := string(userData)
 
-	if !strings.Contains(ud, testPubkey) {
-		t.Error("user-data missing the pubkey")
+	// The seed is one merged mapping, so these are the parsed values rather
+	// than the template's own quoting. yaml.Marshal emits the sudo rule as a
+	// plain scalar; the value cloud-init reads is the same.
+	parsed := parseMapping(t, ud)
+	users, ok := parsed["users"].([]any)
+	if !ok || len(users) != 1 {
+		t.Fatalf("user-data does not declare exactly one user:\n%s", ud)
 	}
-	if !strings.Contains(ud, "name: stoat") {
-		t.Error("user-data missing the stoat user")
+	account := users[0].(map[string]any)
+	if account["name"] != User {
+		t.Errorf("user name = %v, want %q", account["name"], User)
 	}
-	if !strings.Contains(ud, `sudo: "ALL=(ALL) NOPASSWD:ALL"`) {
-		t.Error("user-data missing quoted sudo directive")
+	if account["sudo"] != "ALL=(ALL) NOPASSWD:ALL" {
+		t.Errorf("sudo = %v, want the passwordless rule", account["sudo"])
 	}
-	if !strings.Contains(ud, "shell: /bin/bash") {
-		t.Error("user-data missing shell directive")
+	if account["shell"] != "/bin/bash" {
+		t.Errorf("shell = %v, want /bin/bash", account["shell"])
 	}
-	if !strings.Contains(ud, "ssh_pwauth: false") {
-		t.Error("user-data missing ssh_pwauth: false")
+	keys, ok := account["ssh_authorized_keys"].([]any)
+	if !ok || len(keys) != 1 || keys[0] != testPubkey {
+		t.Errorf("authorized keys = %v, want the caller's key", account["ssh_authorized_keys"])
+	}
+	if parsed["ssh_pwauth"] != false {
+		t.Errorf("ssh_pwauth = %v, want false", parsed["ssh_pwauth"])
 	}
 	if strings.Contains(ud, "- default") {
 		t.Error("user-data must not include the distro default user")
-	}
-
-	docs := withoutMounts(t, ud)
-	if len(docs) != 1 {
-		t.Fatalf("want exactly one document (no recipes, no extra packages), got %d", len(docs))
-	}
-	if docs[0].Type != "text/cloud-config" {
-		t.Errorf("document type = %q, want text/cloud-config", docs[0].Type)
 	}
 
 	metaData, err := os.ReadFile(filepath.Join(seedDir, "meta-data"))
@@ -169,13 +151,15 @@ func TestValidateFragmentDegradesWithoutCloudInit(t *testing.T) {
 	}
 }
 
-// TestSeedNoRecipesByteIdentical guards the hardware-proven baseline. A VM
-// with no cloud recipes must get exactly the same users:/ssh_pwauth: body
+// TestSeedNoRecipesKeepsTheProvenAccount guards the hardware-proven baseline.
+// A VM with no cloud recipes must declare the same account that was
 // hand-verified against a real Ubuntu 24.04 boot (see
-// .cloudinit-test/seed/user-data), with nothing appended. That body is now
-// the sole document's content inside the cloud-config-archive, plus the
-// merge_how directive every document gets (see withMergeHow).
-func TestSeedNoRecipesByteIdentical(t *testing.T) {
+// .cloudinit-test/seed/user-data): one user named stoat, passwordless sudo,
+// the guest's shell, the caller's key, and no distro default user.
+//
+// The seed is one merged mapping now, so this compares the parsed account
+// rather than the file's bytes. mergeDocs reorders keys and drops comments.
+func TestSeedNoRecipesKeepsTheProvenAccount(t *testing.T) {
 	// Seed() hard-errors without xorriso by design: a silent fallback used
 	// to leave a missing xorriso as a permanent "Could not open seed.iso"
 	// at qemu start. That contract has its own test below. This test only
@@ -200,22 +184,41 @@ func TestSeedNoRecipesByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs := withoutMounts(t, string(got))
-	if len(docs) != 1 {
-		t.Fatalf("want exactly one document (no recipes, no extra packages), got %d", len(docs))
+	parsed := parseMapping(t, string(got))
+	users, ok := parsed["users"].([]any)
+	if !ok || len(users) != 1 {
+		t.Fatalf("want exactly one declared user:\n%s", got)
 	}
-
-	want := withMergeHow(fmt.Sprintf(userDataTemplate, "/bin/bash", testPubkey, ""))
-	if docs[0].Content != want {
-		t.Errorf("no-recipe user-data changed from the proven baseline:\ngot:\n%s\nwant:\n%s", docs[0].Content, want)
+	account, ok := users[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the user entry is not a mapping:\n%s", got)
+	}
+	for key, want := range map[string]any{
+		"name":  User,
+		"sudo":  "ALL=(ALL) NOPASSWD:ALL",
+		"shell": "/bin/bash",
+	} {
+		if account[key] != want {
+			t.Errorf("user %s = %v, want %v", key, account[key], want)
+		}
+	}
+	keys, ok := account["ssh_authorized_keys"].([]any)
+	if !ok || len(keys) != 1 || keys[0] != testPubkey {
+		t.Errorf("authorized keys = %v, want exactly the caller's key", account["ssh_authorized_keys"])
+	}
+	if parsed["ssh_pwauth"] != false {
+		t.Errorf("ssh_pwauth = %v, want false", parsed["ssh_pwauth"])
+	}
+	if strings.Contains(string(got), "- default") {
+		t.Errorf("user-data includes the distro default user:\n%s", got)
+	}
+	if _, ok := parsed["packages"]; ok {
+		t.Errorf("a VM with no recipes declared packages:\n%s", got)
 	}
 }
 
 // TestSeedMergesCloudRecipe is the C1 regression. A cloud VM with a recipe
-// selected must produce a cloud-config-archive whose first document still
-// contains the proven users: block verbatim, plus the merge_how directive.
-// The second document is the recipe's fragment, byte-for-byte, plus its own
-// directive.
+// selected keeps the proven account and gains the recipe's own keys.
 func TestSeedMergesCloudRecipe(t *testing.T) {
 	// Seed() hard-errors without xorriso by design: a silent fallback used
 	// to leave a missing xorriso as a permanent "Could not open seed.iso"
@@ -243,25 +246,21 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs := withoutMounts(t, string(got))
-	if len(docs) != 2 {
-		t.Fatalf("want two documents (base + one recipe), got %d:\n%s", len(docs), got)
+	ud := string(got)
+	users, ok := parseMapping(t, ud)["users"].([]any)
+	if !ok || len(users) != 1 {
+		t.Fatalf("the recipe displaced the proven account:\n%s", ud)
 	}
-
-	wantBase := withMergeHow(fmt.Sprintf(userDataTemplate, "/bin/bash", testPubkey, ""))
-	if docs[0].Content != wantBase {
-		t.Errorf("first document is not the proven users block:\ngot:\n%s\nwant:\n%s", docs[0].Content, wantBase)
+	if name := users[0].(map[string]any)["name"]; name != User {
+		t.Errorf("account name = %v, want %q", name, User)
 	}
-
-	wantFragment := withMergeHow(fragment)
-	if docs[1].Content != wantFragment {
-		t.Errorf("second document is not the recipe fragment, verbatim plus its directive:\ngot:\n%s\nwant:\n%s", docs[1].Content, wantFragment)
+	for _, want := range []string{"xfce4", "xfce4-terminal"} {
+		if !slices.Contains(listOf(t, ud, "packages"), want) {
+			t.Errorf("packages lost %q:\n%s", want, ud)
+		}
 	}
-	if !strings.Contains(docs[1].Content, "  - xfce4\n") {
-		t.Errorf("recipe document missing xfce4 package:\n%s", docs[1].Content)
-	}
-	if !strings.Contains(docs[1].Content, "systemctl enable dbus") {
-		t.Errorf("recipe document missing runcmd entry:\n%s", docs[1].Content)
+	if !slices.Contains(listOf(t, ud, "runcmd"), "systemctl enable dbus") {
+		t.Errorf("runcmd lost the recipe's entry:\n%s", ud)
 	}
 }
 
@@ -324,32 +323,27 @@ func shellQuoteCloudinitTest(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-// TestSeedArchiveHeaderIsFirstLine pins what NoCloud checks to recognise a
-// cloud-config-archive: "#cloud-config-archive" must be the first line of
-// the file, verbatim. Same shape as the "#cloud-config" match this package
-// already relied on for the pre-archive format.
-func TestSeedArchiveHeaderIsFirstLine(t *testing.T) {
+// NoCloud matches "#cloud-config" on the first line, verbatim, to parse the
+// payload at all. cloud-init 24.4 on AlmaLinux and Rocky also fails on a
+// top-level list, which is what the cloud-config-archive this package used to
+// emit was; see mergeDocs.
+func TestSeedHeaderIsFirstLine(t *testing.T) {
 	ud, err := userData(&config.VM{Name: "vm"}, testPubkey, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.SplitN(ud, "\n", 2)
-	if lines[0] != "#cloud-config-archive" {
-		t.Errorf("first line = %q, want %q", lines[0], "#cloud-config-archive")
+	if first := strings.SplitN(ud, "\n", 2)[0]; first != "#cloud-config" {
+		t.Errorf("first line = %q, want %q", first, "#cloud-config")
+	}
+	if strings.Contains(ud, "#cloud-config-archive") {
+		t.Errorf("user-data is still an archive:\n%s", ud)
 	}
 }
 
-// TestArchiveBothPackagesFragmentsSurvive is the regression for the merge
-// fix (guest-subsystem.md §6). Two fragments that both declare packages:
-// must survive as distinct documents, each carrying the merge_how directive
-// that makes cloud-init append instead of letting the second one silently
-// lose to cloud-init's default no_replace=True ("first wins").
-//
-// This package no longer parses packages: out of fragments. Proving
-// survival here means proving the fragment bodies pass through unparsed and
-// each is tagged with the append directive. It does not assert what
-// cloud-init itself would do; that needs a real boot.
-func TestArchiveBothPackagesFragmentsSurvive(t *testing.T) {
+// Two fragments that both declare packages: must both survive. cloud-init's
+// own default merge is first-wins, which is why stoat used to declare
+// merge_how; mergeDocs now appends before cloud-init ever sees the file.
+func TestBothPackagesFragmentsSurvive(t *testing.T) {
 	fragA := "#cloud-config\npackages:\n  - xfce4\n"
 	fragB := "#cloud-config\npackages:\n  - docker\n"
 
@@ -357,59 +351,33 @@ func TestArchiveBothPackagesFragmentsSurvive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs := withoutMounts(t, ud)
-	if len(docs) != 3 {
-		t.Fatalf("want 3 documents (base + 2 fragments), got %d:\n%s", len(docs), ud)
-	}
-
-	for i, want := range []string{
-		withMergeHow(fmt.Sprintf(userDataTemplate, "/bin/bash", testPubkey, "")),
-		withMergeHow(fragA),
-		withMergeHow(fragB),
-	} {
-		if docs[i].Content != want {
-			t.Errorf("document %d:\ngot:\n%s\nwant:\n%s", i, docs[i].Content, want)
+	packages := listOf(t, ud, "packages")
+	for _, want := range []string{"xfce4", "docker"} {
+		if !slices.Contains(packages, want) {
+			t.Errorf("packages = %v, missing %q", packages, want)
 		}
 	}
-
-	// Every document except conceivably the last carries merge_how, and
-	// since this package can't know which fragment a caller passes last,
-	// every one of them does (see withMergeHow). Pin that directly: this is
-	// what turns "first wins" into "both survive" on a real boot.
-	directive := fmt.Sprintf("merge_how: %q", mergeHow)
-	for i, d := range docs {
-		if !strings.Contains(d.Content, directive) {
-			t.Errorf("document %d missing merge_how directive:\n%s", i, d.Content)
-		}
-	}
-	if !strings.Contains(docs[1].Content, "xfce4") {
-		t.Error("fragment A's package was dropped")
-	}
-	if !strings.Contains(docs[2].Content, "docker") {
-		t.Error("fragment B's package was dropped")
+	if users, ok := parseMapping(t, ud)["users"].([]any); !ok || len(users) != 1 {
+		t.Errorf("the fragments displaced the account:\n%s", ud)
 	}
 }
 
-// TestArchiveWriteFilesSurvives is the write_files: regression this change
-// fixes: mergeCloudRecipes used to understand only packages:/runcmd: and
-// silently dropped everything else (guest-subsystem.md §1c). Fragments now
-// pass to cloud-init verbatim, so any key survives.
-func TestArchiveWriteFilesSurvives(t *testing.T) {
+// A fragment key this package knows nothing about must survive. The old
+// mergeCloudRecipes understood packages: and runcmd: only, and silently
+// dropped everything else (guest-subsystem.md §1c).
+func TestWriteFilesSurvives(t *testing.T) {
 	fragment := "#cloud-config\nwrite_files:\n  - path: /etc/motd\n    content: hello\n"
 
 	ud, err := userData(&config.VM{Name: "vm"}, testPubkey, []string{fragment})
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs := withoutMounts(t, ud)
-	if len(docs) != 2 {
-		t.Fatalf("want 2 documents (base + 1 fragment), got %d:\n%s", len(docs), ud)
+	files, ok := parseMapping(t, ud)["write_files"].([]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("write_files was dropped:\n%s", ud)
 	}
-	if !strings.Contains(docs[1].Content, "write_files:") {
-		t.Errorf("write_files: was dropped:\n%s", docs[1].Content)
-	}
-	if !strings.Contains(docs[1].Content, "/etc/motd") {
-		t.Errorf("write_files: entry was dropped:\n%s", docs[1].Content)
+	if path := files[0].(map[string]any)["path"]; path != "/etc/motd" {
+		t.Errorf("write_files path = %v, want /etc/motd", path)
 	}
 }
 
@@ -526,48 +494,38 @@ func TestSeedSkipsMountsOnDebian(t *testing.T) {
 	}
 }
 
-// A cloud-config-archive is a top-level YAML list. cloud-init 24.4 as shipped
-// by AlmaLinux 9 calls .get() on the parsed user-data before it checks the
-// type, so the list raises AttributeError, init-local fails, and `cloud-init
-// status` reports error for the life of the VM. Upstream added the isinstance
-// guard after that build. A guest that skips 9p and selects no recipes has one
-// document, and one document needs no archive.
-func TestSeedSendsASingleDocumentAsPlainCloudConfig(t *testing.T) {
-	for _, os := range []string{"almalinux", "rocky", "opensuse", "debian"} {
-		ud, err := userData(&config.VM{Name: "vm", OS: os}, testPubkey, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.HasPrefix(ud, "#cloud-config\n") {
-			t.Errorf("%s user-data is not a plain cloud-config:\n%s", os, ud)
-		}
-		var top map[string]any
-		if err := yaml.Unmarshal([]byte(ud), &top); err != nil {
-			t.Errorf("%s user-data does not parse as a mapping: %v\n%s", os, err, ud)
-			continue
-		}
-		if _, ok := top["users"]; !ok {
-			t.Errorf("%s user-data lost its users block:\n%s", os, ud)
+// cloud-init 24.4 as shipped by AlmaLinux 9 and Rocky 9 calls .get() on the
+// parsed user-data before it checks the type, so a top-level list raises
+// AttributeError, init-local fails, and `cloud-init status` reports error for
+// the life of the VM. Upstream added the isinstance guard after that build.
+// Every seed is a mapping now, with or without recipes.
+func TestSeedIsAlwaysAMapping(t *testing.T) {
+	for _, osName := range []string{"almalinux", "rocky", "opensuse", "debian", "ubuntu", "alpine"} {
+		for _, recipes := range [][]string{nil, {"#cloud-config\npackages:\n  - git\n"}} {
+			ud, err := userData(&config.VM{Name: "vm", OS: osName}, testPubkey, recipes)
+			if err != nil {
+				t.Fatalf("%s: %v", osName, err)
+			}
+			if _, ok := parseMapping(t, ud)["users"]; !ok {
+				t.Errorf("%s with %d recipes lost its users block:\n%s", osName, len(recipes), ud)
+			}
 		}
 	}
 }
 
-// More than one document still needs the archive, and its header must stay on
-// the first line.
-func TestSeedKeepsTheArchiveForSeveralDocuments(t *testing.T) {
-	ud, err := userData(&config.VM{Name: "vm", OS: "almalinux"}, testPubkey, []string{"packages:\n  - git\n"})
+// A recipe with packages must reach a guest whose cloud-init cannot read an
+// archive. This is what #93 unblocks for #85.
+func TestSeedCarriesRecipesOnAlmaLinux(t *testing.T) {
+	ud, err := userData(&config.VM{Name: "vm", OS: "almalinux"}, testPubkey, []string{"#cloud-config\npackages:\n  - git\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs := unpackArchive(t, ud)
-	if len(docs) != 2 {
-		t.Fatalf("want base plus recipe, got %d documents:\n%s", len(docs), ud)
+	if !slices.Contains(listOf(t, ud, "packages"), "git") {
+		t.Errorf("the recipe's package was dropped:\n%s", ud)
 	}
 }
 
-// Recipe fragments must still merge after the base block, whatever the OS:
-// this is the existing contract and the reason the cloud-config-archive
-// exists (see buildArchive).
+// Recipe fragments must still merge after the base block, whatever the OS.
 func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
 	v := &config.VM{Name: "vm", OS: "alpine"}
 	got, err := userData(v, "ssh-ed25519 AAAA test", []string{"packages:\n  - git\n"})
@@ -579,13 +537,11 @@ func TestSeedStillMergesRecipesOnAlpine(t *testing.T) {
 	}
 }
 
-// Alpine's own extra-packages fragment (sudo) and a recipe's fragment (git,
-// tmux) both declare packages:. They live in separate archive documents
-// instead of being spliced into one packages: list by hand, and each
-// carries merge_how so cloud-init appends instead of letting the later one
-// win. TestArchiveBothPackagesFragmentsSurvive covers this regression
-// generically; this test pins it for extraPackages specifically, since that
-// document is one this package builds itself, not one it was handed.
+// Alpine's own extra-packages fragment declares sudo, and a recipe's fragment
+// declares git and tmux. Both must end up in the one packages: list. Alpine's
+// sudo losing to a recipe means every escalating recipe on that guest fails,
+// since the users: block writes a sudoers fragment for a binary that is not
+// installed.
 func TestSeedMergesAlpineSudoWithRecipePackages(t *testing.T) {
 	v := &config.VM{Name: "vm", OS: "alpine"}
 	fragment := "packages:\n  - git\n  - tmux\n\nruncmd:\n  - echo hi\n"
@@ -594,24 +550,14 @@ func TestSeedMergesAlpineSudoWithRecipePackages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	docs := withoutMounts(t, got)
-	if len(docs) != 3 {
-		t.Fatalf("want 3 documents (base + alpine's extraPackages + recipe), got %d:\n%s", len(docs), got)
-	}
-	if !strings.Contains(docs[1].Content, "sudo") {
-		t.Errorf("alpine's extraPackages document missing sudo:\n%s", docs[1].Content)
-	}
-	for _, want := range []string{"git", "tmux"} {
-		if !strings.Contains(docs[2].Content, want) {
-			t.Errorf("recipe document missing %q:\n%s", want, docs[2].Content)
+	packages := listOf(t, got, "packages")
+	for _, want := range []string{"sudo", "git", "tmux"} {
+		if !slices.Contains(packages, want) {
+			t.Errorf("packages = %v, missing %q", packages, want)
 		}
 	}
-	// Both packages-declaring documents (extraPackages and the recipe) must
-	// carry merge_how, or the recipe's packages would silently overwrite
-	// alpine's sudo instead of appending to it.
-	directive := fmt.Sprintf("merge_how: %q", mergeHow)
-	if !strings.Contains(docs[1].Content, directive) {
-		t.Errorf("extraPackages document missing merge_how:\n%s", docs[1].Content)
+	if !slices.Contains(listOf(t, got, "runcmd"), "echo hi") {
+		t.Errorf("runcmd lost the recipe's entry:\n%s", got)
 	}
 }
 
