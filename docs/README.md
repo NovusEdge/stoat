@@ -40,10 +40,11 @@ Stoat runs on Linux with KVM, QEMU, and OpenSSH. Cloud images also require
 `xorriso`. The [installation guide](getting-started/installation.md) covers
 host packages and permissions; `stoat doctor` checks your setup.
 
-Stoat is pre-1.0 and single-user. It manages VMs on the local machine and
+Stoat is single-user. It manages VMs on the local machine and
 assumes it is the only process managing its data root. It does not provide
 multi-tenant isolation. Read [Access and auth](concepts/access-and-auth.md)
 before granting an agent guest access or sharing host files.
 
 If a command fails, start with [Troubleshooting](troubleshooting.md).
-The source and releases are on [GitHub](https://github.com/NovusEdge/stoat).
+See the [source code](https://github.com/NovusEdge/stoat) and
+[published releases](https://github.com/NovusEdge/stoat/releases).
