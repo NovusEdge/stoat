@@ -42,11 +42,11 @@ func TestRunChecksAllMissing(t *testing.T) {
 		if !strings.HasPrefix(c.Fix[0], "sudo pacman") {
 			t.Errorf("%s: Fix = %v, want an arch command", c.Name, c.Fix)
 		}
-		if c.Name == "git" && !c.Optional {
-			t.Errorf("%s: Optional = false, want true", c.Name)
-		}
-		if c.Name != "git" && c.Optional {
-			t.Errorf("%s: Optional = true, want false", c.Name)
+		// git serves remote recipes and xorriso serves an Alpine disk install.
+		// A host that does neither still runs VMs.
+		optional := c.Name == "git" || c.Name == "xorriso"
+		if c.Optional != optional {
+			t.Errorf("%s: Optional = %v, want %v", c.Name, c.Optional, optional)
 		}
 	}
 }

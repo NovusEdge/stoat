@@ -36,8 +36,8 @@ can set up a desktop, development tools, or other software after the VM starts.
 
 ## Requirements and limits
 
-Stoat runs on Linux with KVM, QEMU, and OpenSSH. Cloud images also require
-`xorriso`. The [installation guide](getting-started/installation.md) covers
+Stoat runs on Linux with KVM, QEMU, and OpenSSH. An Alpine disk install also
+requires `xorriso`. The [installation guide](getting-started/installation.md) covers
 host packages and permissions; `stoat doctor` checks your setup.
 
 Stoat is single-user. It manages VMs on the local machine and

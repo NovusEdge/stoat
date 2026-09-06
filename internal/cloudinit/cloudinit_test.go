@@ -2,11 +2,14 @@ package cloudinit
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	diskfs "github.com/diskfs/go-diskfs"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
@@ -35,15 +38,6 @@ func listOf(t *testing.T, ud, key string) []string {
 const testPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMEJWDI8nb2ebdwSCKALxAUfgV97KKvVFxyDf+OnpgKA stoat"
 
 func TestSeedWritesUserDataAndMetaData(t *testing.T) {
-	// Seed() hard-errors without xorriso by design: a silent fallback used
-	// to leave a missing xorriso as a permanent "Could not open seed.iso"
-	// at qemu start. That contract has its own test below. This test only
-	// checks the seed's contents, so it skips instead of failing CI on a
-	// machine without the tool.
-	if !haveXorriso() {
-		t.Skip("xorriso not installed: skipping seed-content test")
-	}
-
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 
@@ -125,11 +119,6 @@ func TestSeedWritesUserDataAndMetaData(t *testing.T) {
 	}
 }
 
-func TestHaveXorriso(t *testing.T) {
-	// Just exercise the function; result depends on the environment.
-	_ = haveXorriso()
-}
-
 func TestHaveCloudInit(t *testing.T) {
 	// Just exercise the function; result depends on the environment.
 	_ = haveCloudInit()
@@ -160,14 +149,6 @@ func TestValidateFragmentDegradesWithoutCloudInit(t *testing.T) {
 // The seed is one merged mapping now, so this compares the parsed account
 // rather than the file's bytes. mergeDocs reorders keys and drops comments.
 func TestSeedNoRecipesKeepsTheProvenAccount(t *testing.T) {
-	// Seed() hard-errors without xorriso by design: a silent fallback used
-	// to leave a missing xorriso as a permanent "Could not open seed.iso"
-	// at qemu start. That contract has its own test below. This test only
-	// checks the seed's contents, so it skips instead of failing CI on a
-	// machine without the tool.
-	if !haveXorriso() {
-		t.Skip("xorriso not installed: skipping seed-content test")
-	}
 
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
@@ -220,15 +201,6 @@ func TestSeedNoRecipesKeepsTheProvenAccount(t *testing.T) {
 // TestSeedMergesCloudRecipe is the C1 regression. A cloud VM with a recipe
 // selected keeps the proven account and gains the recipe's own keys.
 func TestSeedMergesCloudRecipe(t *testing.T) {
-	// Seed() hard-errors without xorriso by design: a silent fallback used
-	// to leave a missing xorriso as a permanent "Could not open seed.iso"
-	// at qemu start. That contract has its own test below. This test only
-	// checks the seed's contents, so it skips instead of failing CI on a
-	// machine without the tool.
-	if !haveXorriso() {
-		t.Skip("xorriso not installed: skipping seed-content test")
-	}
-
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
 
@@ -267,31 +239,12 @@ func TestSeedMergesCloudRecipe(t *testing.T) {
 func TestSeedSecretArtifactsArePrivate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
-	bin := t.TempDir()
-	// The stand-in deliberately unlinks and recreates the ISO, inheriting the
-	// caller's umask. Seed must protect the replacement inode before xorriso
-	// writes bytes.
-	modeFile := filepath.Join(root, "xorriso-create-mode")
-	modeFileQ := shellQuoteCloudinitTest(modeFile)
-	xorriso := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=$2; shift 2; else shift; fi\ndone\nrm -f \"$out\"\n: > \"$out\"\nstat -c '%a' \"$out\" > " + modeFileQ + "\nprintf 'private seed' > \"$out\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "xorriso"), []byte(xorriso), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-
 	const sentinel = "cloud-secret-value"
 	v := &config.VM{
 		Name: "cloudy", Mode: "cloud", OS: "ubuntu", Dir: filepath.Join(root, "cloudy"),
 	}
 	if _, err := Seed(v, testPubkey, []string{"#cloud-config\nruncmd:\n  - echo " + sentinel + "\n"}); err != nil {
 		t.Fatal(err)
-	}
-	createdMode, err := os.ReadFile(modeFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(createdMode)) != "600" {
-		t.Fatalf("xorriso replacement mode before payload = %q, want 600", createdMode)
 	}
 	seedDir := filepath.Join(v.OvlDir(), "seed")
 	for _, item := range []struct {
@@ -319,8 +272,48 @@ func TestSeedSecretArtifactsArePrivate(t *testing.T) {
 	}
 }
 
-func shellQuoteCloudinitTest(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+// The seed is only useful if a guest can read it back: the volume label is how
+// NoCloud finds it, and the lowercase names survive only through the Joliet
+// and Rock Ridge trees that plain ISO9660 has no room for.
+func TestSeedISOIsReadableWithTheNamesCloudInitLooksFor(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &config.VM{Name: "web1", Mode: "cloud", RAM: 2048, CPUs: 2, Dir: filepath.Join(root, "web1")}
+
+	isoPath, err := Seed(v, testPubkey, []string{"#cloud-config\npackages:\n  - git\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := diskfs.Open(isoPath, diskfs.WithOpenMode(diskfs.ReadOnly))
+	if err != nil {
+		t.Fatalf("opening the seed image: %v", err)
+	}
+	defer func() { _ = image.Close() }()
+	fs, err := image.GetFilesystem(0)
+	if err != nil {
+		t.Fatalf("reading the seed filesystem: %v", err)
+	}
+	if got := strings.TrimSpace(fs.Label()); got != "CIDATA" {
+		t.Errorf("volume label = %q, want CIDATA", got)
+	}
+	for _, name := range []string{"user-data", "meta-data"} {
+		f, err := fs.OpenFile("/"+name, os.O_RDONLY)
+		if err != nil {
+			t.Errorf("seed has no %q: %v", name, err)
+			continue
+		}
+		body, err := io.ReadAll(f)
+		if err != nil {
+			t.Errorf("reading %q from the seed: %v", name, err)
+			continue
+		}
+		if len(body) == 0 {
+			t.Errorf("%q is empty in the seed", name)
+		}
+		if name == "user-data" && !strings.Contains(string(body), "git") {
+			t.Errorf("user-data in the seed lost the recipe's package:\n%s", body)
+		}
+	}
 }
 
 // NoCloud matches "#cloud-config" on the first line, verbatim, to parse the
@@ -381,28 +374,30 @@ func TestWriteFilesSurvives(t *testing.T) {
 	}
 }
 
-// TestSeedErrorsWithoutXorriso is the I1 regression. Seed must hard-error,
-// never fall back silently to the seed directory. That dead vvfat fallback
-// used to turn a missing xorriso into a permanent, silent "Could not open
-// seed.iso" failure at qemu start: ensureCloudOverlay discards Seed's return
-// and never re-seeds once the overlay exists.
-func TestSeedErrorsWithoutXorriso(t *testing.T) {
+// TestSeedLeavesNoImageWhenItFails is the I1 regression. Seed must hard-error
+// and leave nothing at seed.iso. A half-written image is permanent: qemu then
+// reports "Could not open seed.iso" at every start, because ensureCloudOverlay
+// discards Seed's return and never re-seeds once the overlay exists.
+func TestSeedLeavesNoImageWhenItFails(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("STOAT_HOME", root)
-	// An empty PATH guarantees exec.LookPath("xorriso") fails, regardless of
-	// whether xorriso happens to be installed on the machine running tests.
-	t.Setenv("PATH", t.TempDir())
 
 	v := &config.VM{
 		Name: "web1", Mode: "cloud", RAM: 2048, CPUs: 2,
 		Dir: filepath.Join(root, "web1"),
 	}
-	_, err := Seed(v, testPubkey, nil)
-	if err == nil {
-		t.Fatal("expected an error when xorriso is unavailable, got nil")
+	// The image is built beside its final name. A non-empty directory in that
+	// place cannot be removed, so the write fails partway.
+	blocked := filepath.Join(v.OvlDir(), "seed.iso.building")
+	if err := os.MkdirAll(filepath.Join(blocked, "occupied"), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if _, statErr := os.Stat(filepath.Join(v.OvlDir(), "seed.iso")); statErr == nil {
-		t.Error("seed.iso must not exist when Seed errored")
+
+	if _, err := Seed(v, testPubkey, nil); err == nil {
+		t.Fatal("Seed reported success where the image could not be written")
+	}
+	if _, err := os.Stat(filepath.Join(v.OvlDir(), "seed.iso")); err == nil {
+		t.Error("seed.iso exists after Seed failed")
 	}
 }
 

@@ -16,6 +16,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	diskfs "github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/disk"
+	"github.com/diskfs/go-diskfs/filesystem"
+	"github.com/diskfs/go-diskfs/filesystem/iso9660"
+
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
 )
@@ -175,14 +180,8 @@ const metaDataTemplate = `instance-id: %q
 local-hostname: %q
 `
 
-// haveXorriso reports whether the xorriso binary is on PATH.
-func haveXorriso() bool {
-	_, err := exec.LookPath("xorriso")
-	return err == nil
-}
-
-// haveCloudInit reports whether the cloud-init binary is on PATH. Mirrors
-// haveXorriso above: Arch does not install cloud-init by default (see
+// haveCloudInit reports whether the cloud-init binary is on PATH. Arch does
+// not install cloud-init by default (see
 // guest-subsystem.md §10). Schema validation must degrade to "not checked",
 // not "assumed valid". Callers of ValidateFragment must treat a nil error
 // with no annotated output as "not checked", never as "passed".
@@ -234,10 +233,6 @@ func ValidateFragment(body string) (annotated string, err error) {
 // cloud VM's recipes get applied, unlike the ssh-provisioning path other
 // backends use.
 func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
-	if !haveXorriso() {
-		return "", fmt.Errorf("xorriso is required for cloud-init provisioning; install libisoburn")
-	}
-
 	seedDir := filepath.Join(v.OvlDir(), "seed")
 	if err := os.MkdirAll(seedDir, 0o700); err != nil {
 		return "", err
@@ -260,29 +255,91 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	}
 
 	isoPath := filepath.Join(v.OvlDir(), "seed.iso")
-	iso, err := os.OpenFile(isoPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
+	if err := writeSeedISO(isoPath, []seedFile{
+		{name: "user-data", body: []byte(ud)},
+		{name: "meta-data", body: []byte(metaData)},
+	}); err != nil {
 		return "", err
 	}
-	if err := iso.Chmod(0o600); err != nil {
-		_ = iso.Close()
-		return "", err
-	}
-	if err := iso.Close(); err != nil {
-		return "", err
-	}
-	xorrisoArgs := []string{"-as", "mkisofs", "-o", isoPath, "-V", "CIDATA", "-J", "-r", seedDir}
-	commandArgs := append([]string{"-c", "umask 0077; exec \"$@\"", "stoat-xorriso", "xorriso"}, xorrisoArgs...)
-	cmd := exec.Command("sh", commandArgs...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("xorriso: %w: %s", err, out)
-	}
-	if err := os.Chmod(isoPath, 0o600); err != nil {
-		return "", err
+	return isoPath, nil
+}
+
+type seedFile struct {
+	name string
+	body []byte
+}
+
+// seedISOSlack is the space ISO9660 needs beyond the file data: a 32 KiB
+// system area, the volume descriptors, and a directory record per file in both
+// the primary and the Joliet tree. The image keeps the size it is created
+// with, so this is the whole cost of a seed on disk.
+const seedISOSlack = 1 << 20
+
+const isoBlockSize = 2048
+
+// writeSeedISO writes files into an ISO9660 image labelled CIDATA, with Joliet
+// and Rock Ridge. cloud-init's NoCloud datasource finds the seed by that label
+// and reads the lowercase names, which plain ISO9660 cannot hold.
+//
+// The image is built beside its final path and renamed, because the writer
+// demands a file that does not exist yet and creates it under the caller's
+// umask. user-data carries the recipe bodies, so the image is never readable
+// by another account: the enclosing directory is private, and the file is
+// 0600 before it takes the seed's name.
+func writeSeedISO(isoPath string, files []seedFile) error {
+	size := int64(seedISOSlack)
+	for _, f := range files {
+		size += int64(len(f.body))
 	}
 
-	return isoPath, nil
+	building := isoPath + ".building"
+	if err := os.Remove(building); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// ISO9660 accepts a 2048-byte block and nothing smaller; the writer's
+	// default of 512 is rejected outright.
+	image, err := diskfs.Create(building, size, isoBlockSize)
+	if err != nil {
+		return fmt.Errorf("create seed image: %w", err)
+	}
+	defer func() { _ = os.Remove(building) }()
+	if err := os.Chmod(building, 0o600); err != nil {
+		return err
+	}
+
+	fs, err := image.CreateFilesystem(disk.FilesystemSpec{Partition: 0, FSType: filesystem.TypeISO9660})
+	if err != nil {
+		return fmt.Errorf("create seed filesystem: %w", err)
+	}
+	for _, f := range files {
+		out, err := fs.OpenFile("/"+f.name, os.O_CREATE|os.O_RDWR)
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", f.name, err)
+		}
+		if _, err := out.Write(f.body); err != nil {
+			return fmt.Errorf("seed %s: %w", f.name, err)
+		}
+	}
+	iso, ok := fs.(*iso9660.FileSystem)
+	if !ok {
+		return fmt.Errorf("seed filesystem is %T, want iso9660", fs)
+	}
+	// The writer copies the identifier into a zero-filled field, and ISO9660
+	// pads that field with spaces. A label read back with trailing NULs is not
+	// the label NoCloud looks for, so pad it here. The Joliet descriptor takes
+	// the first 16 characters of the same string as UCS-2.
+	label := fmt.Sprintf("%-32s", "CIDATA")
+	if err := iso.Finalize(iso9660.FinalizeOptions{
+		VolumeIdentifier: label,
+		Joliet:           true,
+		RockRidge:        true,
+	}); err != nil {
+		return fmt.Errorf("finalize seed image: %w", err)
+	}
+	if err := image.Close(); err != nil {
+		return err
+	}
+	return os.Rename(building, isoPath)
 }
 
 func writePrivateFile(path string, data []byte) error {

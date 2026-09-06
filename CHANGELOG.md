@@ -13,6 +13,9 @@
   systemd or OpenRC, and where `lsof` and `strace` are. `pkg-tools` installs
   the tool that answers which package owns a file, then reports that tool and
   the package manager.
+- Create a cloud VM without `xorriso` on the host. Stoat writes the cloud-init
+  seed image itself. `xorriso` is now needed only to install an Alpine disk VM,
+  and `stoat doctor` reports it as optional.
 
 ### Fixes
 
