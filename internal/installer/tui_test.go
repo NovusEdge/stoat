@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/novusedge/stoat/internal/theme"
 )
 
 func newTestModel(t *testing.T, pathEnv string) Model {
@@ -35,6 +37,57 @@ func TestChecksAdvanceToDirPrompt(t *testing.T) {
 	for _, want := range []string{"qemu-img", "/usr/bin", "xorriso", "not found"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// The six-line mark costs more rows than a 24-row terminal can spare once the
+// transcript reaches the PATH warning, and Bubble Tea scrolls the top away
+// rather than dropping it. View trades the mark for a one-line label instead.
+// The transcript itself must survive that trade.
+func TestViewTradesTheBannerForHeight(t *testing.T) {
+	bannerTop := strings.SplitN(theme.BannerArt, "\n", 2)[0]
+	m := New("/repo", "/home/u", "/bin/sh", "/usr/bin", "")
+	m.checks = []Check{
+		{Name: "qemu-system-x86_64", OK: true, Detail: "/usr/bin"},
+		{Name: "ssh", OK: true, Detail: "/usr/bin"},
+		{Name: "/dev/kvm", OK: true, Detail: "read/write"},
+	}
+	m.width = 80
+
+	m.height = 60
+	tall := m.View().Content
+	if !strings.Contains(tall, bannerTop) {
+		t.Errorf("a 60-row terminal lost the mark:\n%s", tall)
+	}
+
+	m.height = 10
+	short := m.View().Content
+	if strings.Contains(short, bannerTop) {
+		t.Errorf("a 10-row terminal kept the mark:\n%s", short)
+	}
+	if !strings.Contains(short, "stoat") {
+		t.Errorf("the compact header lost the product name:\n%s", short)
+	}
+	for _, want := range []string{"qemu-system-x86_64", "/dev/kvm"} {
+		if !strings.Contains(short, want) {
+			t.Errorf("the compact header dropped %q from the transcript:\n%s", want, short)
+		}
+	}
+}
+
+// Every phase draws the mark at most once. A capture taken mid-redraw can show
+// its top row twice; the rendered view must not.
+func TestViewDrawsTheBannerOnce(t *testing.T) {
+	bannerTop := strings.SplitN(theme.BannerArt, "\n", 2)[0]
+	m := New("/repo", "/home/u", "/bin/sh", "/usr/bin", "")
+	m.checks = []Check{{Name: "ssh", OK: true, Detail: "/usr/bin"}}
+	m.width, m.height = 80, 60
+
+	for _, p := range []phase{phaseChecks, phaseDir, phaseBuild, phaseRC, phaseDone} {
+		m.phase = p
+		if got := strings.Count(m.View().Content, bannerTop); got > 1 {
+			t.Errorf("phase %d draws the mark %d times", p, got)
 		}
 	}
 }
