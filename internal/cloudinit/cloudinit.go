@@ -302,7 +302,7 @@ func writeSeedISO(isoPath string, files []seedFile) error {
 	if err != nil {
 		return fmt.Errorf("create seed image: %w", err)
 	}
-	defer os.Remove(building)
+	defer func() { _ = os.Remove(building) }()
 	if err := os.Chmod(building, 0o600); err != nil {
 		return err
 	}
