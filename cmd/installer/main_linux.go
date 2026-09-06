@@ -13,6 +13,11 @@ import (
 )
 
 func run() int {
+	noTTY, err := parseFlags(os.Args[1:], os.Stderr)
+	if err != nil {
+		return exitUsage
+	}
+
 	repoDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cannot determine the working directory:", err)
@@ -25,8 +30,7 @@ func run() int {
 		return 1
 	}
 
-	// ponytail: --no-tty is the only flag; full flag parsing if more needed
-	if len(os.Args) > 1 && os.Args[1] == "--no-tty" {
+	if noTTY {
 		return runHeadless(repoDir, home)
 	}
 
@@ -75,11 +79,6 @@ func runHeadless(repoDir, home string) int {
 	binPath, err := installer.Install(outPath, dir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		return 1
-	}
-
-	if err := installer.InstallData(repoDir, home); err != nil {
-		fmt.Fprintln(os.Stderr, "error setting up ~/.stoat:", err)
 		return 1
 	}
 

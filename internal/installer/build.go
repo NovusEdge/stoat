@@ -62,58 +62,6 @@ func (e *BuildError) Error() string {
 
 func (e *BuildError) Unwrap() error { return e.Err }
 
-// InstallData creates ~/.stoat subdirectories and copies bundled recipes from
-// the repo. Safe to call on reinstall: existing user files are not overwritten.
-func InstallData(repoDir, home string) error {
-	root := filepath.Join(home, ".stoat")
-	for _, d := range []string{"recipes", "isos", "logs"} {
-		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
-			return err
-		}
-	}
-	// Copy bundled recipes from repo, skipping any the user already has.
-	srcDir := filepath.Join(repoDir, "internal", "recipes")
-	destDir := filepath.Join(root, "recipes")
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".sh") {
-			continue
-		}
-		dst := filepath.Join(destDir, name)
-		if _, err := os.Stat(dst); err == nil {
-			continue // ponytail: don't clobber user edits
-		}
-		if err := copyFile(filepath.Join(srcDir, name), dst); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
-}
-
 // Install copies srcPath into destDir as an executable, creating destDir if
 // needed.
 func Install(srcPath, destDir string) (string, error) {

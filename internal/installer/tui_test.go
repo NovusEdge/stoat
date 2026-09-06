@@ -550,13 +550,7 @@ func TestInstallCmdRemovesBuildTempDirOnSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// InstallData needs internal/recipes/ to exist in repoDir.
-	repoDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repoDir, "internal", "recipes"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	msg := installCmd(src, t.TempDir(), repoDir, t.TempDir())()
+	msg := installCmd(src, t.TempDir())()
 	if _, ok := msg.(installedMsg); !ok {
 		t.Fatalf("expected installedMsg, got %T: %+v", msg, msg)
 	}
@@ -572,7 +566,7 @@ func TestInstallCmdRemovesBuildTempDirOnFailure(t *testing.T) {
 	}
 	src := filepath.Join(tmp, "stoat") // never created, so Install's Open fails
 
-	msg := installCmd(src, t.TempDir(), t.TempDir(), t.TempDir())()
+	msg := installCmd(src, t.TempDir())()
 	if _, ok := msg.(errMsg); !ok {
 		t.Fatalf("expected errMsg for a missing src binary, got %T: %+v", msg, msg)
 	}
