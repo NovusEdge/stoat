@@ -174,7 +174,12 @@ func writeV2Recipe(t *testing.T, rootDir, name, run, version, script string) {
 func installFakeSSHClient(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\ncat >/dev/null\nexit 0\n"
+	script := "#!/bin/sh\n" +
+		"case \"$*\" in\n" +
+		"  *\"cloud-init status\"*) printf '%s\\n' '{\"status\":\"done\",\"extended_status\":\"done\",\"errors\":[],\"recoverable_errors\":{}}' ;;\n" +
+		"  *) cat >/dev/null ;;\n" +
+		"esac\n" +
+		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

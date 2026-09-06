@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,54 @@ func TestCatalog_EntriesValid(t *testing.T) {
 		// entry that forgets it renders as a blank row.
 		if e.Variant == "" {
 			t.Errorf("entry %q: empty Variant", e.ID)
+		}
+	}
+}
+
+func TestCatalogEnterpriseLinuxImages(t *testing.T) {
+	wants := map[string]struct {
+		os, variant, url, checksum, notes, disk string
+		size                                    int64
+	}{
+		"almalinux-9": {
+			os: "almalinux", variant: "9",
+			url:      "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2",
+			checksum: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/CHECKSUM",
+			notes:    "AlmaLinux 9 GenericCloud", size: 562 * mib, disk: "12G",
+		},
+		"rocky-9": {
+			os: "rocky", variant: "9",
+			url:      "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2",
+			checksum: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2.CHECKSUM",
+			notes:    "Rocky 9 GenericCloud Base", size: 616 * mib, disk: "12G",
+		},
+		"opensuse-leap-16.0": {
+			os: "opensuse", variant: "16.0",
+			url:      "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2",
+			checksum: "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2.sha256",
+			notes:    "openSUSE Leap 16.0 Minimal Cloud", size: 322 * mib,
+		},
+	}
+	byID := map[string]Entry{}
+	for _, e := range Catalog() {
+		byID[e.ID] = e
+	}
+	for id, want := range wants {
+		e, ok := byID[id]
+		if !ok {
+			t.Errorf("catalog lacks %q", id)
+			continue
+		}
+		if e.OS != want.os || e.Variant != want.variant || e.URL != want.url || e.ChecksumURL != want.checksum {
+			t.Errorf("%s identity = os=%q variant=%q url=%q checksum=%q", id, e.OS, e.Variant, e.URL, e.ChecksumURL)
+		}
+		if e.Size != want.size || e.Backend != "cloudinit" || e.SSHUser != "stoat" || e.CPUModel != "host" || e.RequiredCPU != "x86-64-v2" || e.DefaultDisk != want.disk {
+			t.Errorf("%s facts = size=%d backend=%q user=%q cpu=%q/%q disk=%q", id, e.Size, e.Backend, e.SSHUser, e.CPUModel, e.RequiredCPU, e.DefaultDisk)
+		}
+		for _, phrase := range strings.Fields(want.notes) {
+			if !strings.Contains(strings.ToLower(e.Notes), strings.ToLower(phrase)) {
+				t.Errorf("%s notes %q lacks %q", id, e.Notes, phrase)
+			}
 		}
 	}
 }
@@ -208,6 +257,9 @@ func TestInfer(t *testing.T) {
 		// internal/tui/form.go to guestShell(""), which returns /bin/bash,
 		// and Alpine has no bash.
 		{"alpine cloud qcow2", "generic_alpine-3.24.1-x86_64-bios-cloudinit-r0.qcow2", "cloudinit", "alpine"},
+		{"almalinux generic cloud", "AlmaLinux-9-GenericCloud-9.8-20260810.x86_64.qcow2", "cloudinit", "almalinux"},
+		{"rocky generic cloud", "Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2", "cloudinit", "rocky"},
+		{"opensuse leap cloud", "Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2", "cloudinit", "opensuse"},
 		{"random unrecognised name", "my-random-install.raw", "ssh", ""},
 	}
 	for _, c := range cases {
@@ -310,6 +362,70 @@ func TestResolveAndDownload_Entry(t *testing.T) {
 	if _, err := os.Stat(badFinal + ".part"); !os.IsNotExist(err) {
 		t.Fatalf(".part left behind after checksum mismatch")
 	}
+}
+
+func TestResolveEnterpriseLinuxMutableAliases(t *testing.T) {
+	checksums := map[string]string{
+		"AlmaLinux-9-GenericCloud-latest.x86_64.qcow2":  "6bdab6376d46d42e4203ace3733efafc7c5d37c7cb443a6cc74750097002d74b",
+		"Rocky-9-GenericCloud-Base.latest.x86_64.qcow2": "92c206cc6f790c61583247eefe87890f8828420662c17cacf247cec78ab4eec8",
+		"Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2":       "c5cd6904632c86d5368dea3896da8c17571c238ef96a0e2c8b0ca1835d796e07",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "CHECKSUM") {
+			if strings.HasSuffix(r.URL.Path, ".CHECKSUM") {
+				_, _ = fmt.Fprintf(w, "SHA256 (Rocky-9-GenericCloud-Base.latest.x86_64.qcow2) = %s\n", checksums["Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"])
+			} else {
+				_, _ = fmt.Fprintf(w, "%s  AlmaLinux-9-GenericCloud-latest.x86_64.qcow2\n", checksums["AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"])
+			}
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, ".sha256") {
+			_, _ = fmt.Fprintf(w, "%s  Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2\n", checksums["Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2"])
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	for _, original := range Catalog() {
+		wantSum, ok := checksums[pathBase(original.URL)]
+		if !ok {
+			continue
+		}
+		e := original
+		e.URL = rewriteHost(t, e.URL, srv.URL)
+		e.ChecksumURL = rewriteHost(t, e.ChecksumURL, srv.URL)
+		r, err := Resolve(e)
+		if err != nil {
+			t.Fatalf("Resolve(%s): %v", e.ID, err)
+		}
+		if r.File != pathBase(original.URL) || r.SHA256 != wantSum || r.URL != e.URL {
+			t.Errorf("Resolve(%s) = file=%q sum=%q url=%q, want file=%q sum=%q url=%q", e.ID, r.File, r.SHA256, r.URL, pathBase(original.URL), wantSum, e.URL)
+		}
+	}
+}
+
+func pathBase(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.TrimRight(u.Path, "/"), "/")
+	return parts[len(parts)-1]
+}
+
+func rewriteHost(t *testing.T, raw, hostURL string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := url.Parse(hostURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Scheme, u.Host = h.Scheme, h.Host
+	return u.String()
 }
 
 // TestDownload_SHA512 exercises the algorithm-agnostic verification path: a

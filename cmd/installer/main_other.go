@@ -8,11 +8,13 @@ import (
 	"runtime"
 )
 
-// This build skips internal/installer entirely. That package imports
-// kvm_linux.go's KVMCheck unconditionally, so it refuses to compile on this
-// GOOS. Without this file, a non-Linux user would see a bare
-// "undefined: KVMCheck" compiler error instead of this message.
+// The source installer remains Linux-only. The command binary itself builds
+// on other hosts so users can run read-only diagnostics, while native VM
+// operations remain unqualified there.
 func run() int {
-	fmt.Fprintln(os.Stderr, "stoat is Linux-only: it needs KVM, and it does not compile for "+runtime.GOOS+" yet.")
+	host := runtime.GOOS + "/" + runtime.GOARCH
+	fmt.Fprintln(os.Stderr, "The guided installer runs on Linux only. This host is "+host+".")
+	fmt.Fprintln(os.Stderr, "Run `just install` to build the diagnostic binary here.")
+	fmt.Fprintln(os.Stderr, "Native VM operations are not qualified on "+host+".")
 	return 1
 }

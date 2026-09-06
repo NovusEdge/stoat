@@ -20,9 +20,10 @@ type HostCheck struct {
 // nothing, so an MCP server or TUI panel can reuse it. The two earlier doctors
 // (installer's checklist, the CLI's `stoat doctor`) both wrote to a Writer.
 //
-// It adapts hostcheck.RunChecks, which probes qemu-system-x86_64, qemu-img,
-// ssh, xorriso and /dev/kvm. ssh-keygen gets no separate check: it ships in
-// the same package as ssh on every supported distro.
+// It adapts hostcheck.RunChecks, which probes Linux's qemu-system-x86_64,
+// qemu-img, ssh, xorriso and /dev/kvm requirements. Other hosts receive one
+// native qualification result instead of Linux dependency claims. ssh-keygen
+// gets no separate check: it ships in the same package as ssh on Linux.
 func Doctor() []HostCheck {
 	checks := hostcheck.RunChecks(hostcheck.DetectDistro())
 	out := make([]HostCheck, len(checks))

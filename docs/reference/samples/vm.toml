@@ -7,6 +7,8 @@ os               = "alpine"       # string; default inferred from image; stoat w
 iso              = "isos/x.iso"   # string path; default none; stoat writes it relative to the data root.
 ram              = 2048            # int MB; default 4096; stoat writes at create/update.
 cpus             = 2               # int; default 4; stoat writes at create/update.
+cpu_model        = ""              # optional; the three new catalog images select host with required_cpu=x86-64-v2.
+required_cpu     = ""              # optional; empty here keeps this Alpine example's legacy CPU behavior.
 disk             = "16G"           # string; default 8G in disk mode; stoat writes, grow-only after creation.
 installed        = true            # bool; default false; stoat writes for disk mode and flips boot order.
 share            = "~/src"         # string path; default empty; user/TUI and stoat update write the host share.

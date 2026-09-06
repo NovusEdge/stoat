@@ -1,10 +1,24 @@
 # Guest definitions
 
 A guest OS's facts (its init system, package manager, service commands...)
-live in one `guest.toml` file, not in Go. Five come bundled
-(`internal/guest/bundled/*.toml`: alpine, ubuntu, debian, fedora, arch).
+live in one `guest.toml` file, not in Go. Eight come bundled
+(`internal/guest/bundled/*.toml`: alpine, ubuntu, debian, fedora, arch,
+almalinux, rocky, opensuse).
 Add or override one by dropping a file in `~/.stoat/guests/<name>.toml`; see
 `stoat guest ls` and `stoat guest show <name>`.
+
+The catalog IDs for the three additional cloud images are `almalinux-9`,
+`rocky-9`, and `opensuse-leap-16.0`. AlmaLinux and Rocky use a `12G` default
+disk; openSUSE keeps the existing `8G` default. Catalog creation persists the
+CPU pair `cpu_model = "host"` and `required_cpu = "x86-64-v2"`; legacy or
+custom images leave both fields empty, and there is no CLI CPU override.
+Older Stoat binaries ignore these optional fields and are not qualified readers
+for the new guest definitions. For the three new guests, cloud-init omits the
+automatic 9p mount; shared-directory support is not qualified for these
+images. These catalog entries describe guest images and do not claim native
+host OS or release support.
+
+The FreeBSD definition below is a custom guest example, not catalog support.
 
 ```toml
 schema  = 1
@@ -54,8 +68,10 @@ skip_9p = true
 - `default_backend` and `default_ssh_user` only seed a new VM's fields at
   create time. Every code path reads the VM's own field afterward, never
   these, so a catalog entry or a user's explicit choice always wins.
-- `escalate` is an OS fact, not a VM fact: Alpine and OpenBSD ship `doas`,
-  not `sudo`. `sshx` applies it only when the VM's ssh user is not root.
+- `escalate` is an OS fact, not a VM fact: each guest definition supplies the
+  command, and the bundled definitions use `sudo -n`. `seed_packages` records
+  packages the cloud-init seed may need to provide, such as Alpine's `sudo`.
+  `sshx` applies `escalate` only when the VM's ssh user is not root.
 - Every `[svc]` value is a template: `{name}` renders to `"$1"`; a template
   without `{name}` gets `"$@"` appended instead. A template may not contain
   a single quote: the python prelude wraps each one in a single-quoted

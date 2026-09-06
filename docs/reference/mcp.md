@@ -92,6 +92,11 @@ that run guest code are marked by their required level.
 
 ### Host and recipe tools
 
+The read-only capabilities tool reads host checks and stored VM metadata. Its
+optional vm argument selects one VM; omit it for host and project scope. It
+does not start or connect to a VM, and it reports MCP access limits plus
+unavailable fork and continuation proposals. Discovery does not mutate a VM.
+
 | Tool | Purpose |
 |---|---|
 | `list_vms`, `vm_status` | List VMs or inspect one VM, including recipe state and health. |
@@ -101,6 +106,7 @@ that run guest code are marked by their required level.
 | `add_recipe`, `update_recipe`, `remove_recipe` | Add, repin, or remove remote recipes. `add_recipe` accepts curated index names only; it refuses Git URLs. `remove_recipe` has no force option. |
 | `list_guests`, `guest_info` | Inspect loaded guest definitions and their package/service commands. |
 | `doctor`, `logs` | Check host prerequisites or tail a VM's console/apply log. |
+| `capabilities` | Read host checks and optional stored VM metadata; report current capabilities and limits. |
 | `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM and its disk. |
 | `snapshot`, `restore`, `forward`, `wait`, `prune` | Manage disk snapshots, port forwards, state waits, and stale files. `prune` is dry-run unless `apply=true`. |
 | `project_status`, `project_up`, `project_down`, `project_apply`, `project_wait` | Inspect or operate on every VM declared by the server working directory's `stoat.toml`, in declaration order. A failure stops the run and later VMs are marked skipped. |
@@ -139,11 +145,21 @@ refuses a stale declaration or dirty checkout.
 ## Output and limits
 
 MCP tool results use the DTOs described in [JSON output](json.md). Errors are
-returned as tool errors with the same human-readable message as the CLI; a
-caller should branch on the documented operation and level rather than parse
-that message. Binary file content is base64 encoded. Read, directory, process,
-log, and command output sizes are capped by the server; the tool schema states
-the cap for each input.
+returned with `isError: true`. The first content block is a text block with the
+same human-readable message as the CLI. The server also adds the complete
+`wire.ErrorInfo` under `_meta["io.github.novusedge.stoat/error"]` and appends a
+second text block containing JSON in the form `{"error":{...}}`. Callers
+should inspect `isError`, then branch on `error.code` from metadata or the
+second text block. They must not branch on `structuredContent`: for typed
+handler errors, the SDK owns that field and keeps the schema-valid typed
+output. Receiving-middleware errors, such as rate-limit refusals, can leave
+that field unset.
+
+Successful results keep their existing DTO, `structuredContent`, content
+fallback, and output schema. SDK argument validation and MCP protocol errors
+are outside this tool-result contract. Binary file content is base64 encoded.
+Read, directory, process, log, and command output sizes are capped by the
+server; the tool schema states the cap for each input.
 
 Recipe and guest tools read manifests and definitions on the host. They do not
 run a recipe unless the caller selects `apply_recipes`, a project apply tool,

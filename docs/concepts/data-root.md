@@ -44,6 +44,13 @@ and files are created when their features first use them.
             └── meta-data
 ```
 
+The `shared/<vm-name>/` directory is a host-side export. Whether the guest
+mounts it depends on its 9p support and boot backend: live Alpine VMs mount
+`/mnt/work` from the apkovl, cloud VMs use cloud-init when their guest
+definition permits 9p, and disk VMs need a manual mount. Debian cloud VMs
+skip the mount because their cloud kernel has no 9p module. See [Networking
+and sharing](networking-and-sharing.md) for the other share paths.
+
 Project recipe state is stored beside the repository instead of in the data
 root. `stoat.lock` contains project pins and `.stoat/recipes/` contains the
 project recipe cache. `.stoat/secrets.toml` contains project recipe secrets and

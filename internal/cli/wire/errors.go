@@ -18,10 +18,10 @@ import (
 type Code string
 
 // Stable snake_case error codes (§2), one per typed error in internal/core
-// plus the three the CLI layer owns (usage, confirmation_required,
-// internal). Codes are only ever ADDED: never renamed, never repurposed,
-// never removed (§2's compatibility promise). A consumer MUST treat an
-// unrecognized code as a generic failure, never crash on it.
+// plus codes owned by the CLI and MCP server. Codes are only ever ADDED:
+// never renamed, never repurposed, never removed (§2's compatibility
+// promise). A consumer MUST treat an unrecognized code as a generic failure,
+// never crash on it.
 const (
 	CodeNotFound             Code = "not_found"
 	CodeBroken               Code = "broken"
@@ -42,6 +42,8 @@ const (
 	CodeCanceled             Code = "canceled"
 	CodeUsage                Code = "usage"
 	CodeConfirmationRequired Code = "confirmation_required"
+	CodeAccessDenied         Code = "access_denied"
+	CodeRateLimited          Code = "rate_limited"
 	CodeInternal             Code = "internal"
 
 	CodeQemuMissing        Code = "qemu_missing"
@@ -73,6 +75,7 @@ func Codes() []Code {
 		CodeAlreadyRunning, CodeNoDisk, CodeImmutableField, CodeDiskShrink,
 		CodeCannotReach, CodeUnknownLog, CodeTimeout, CodeCanceled,
 		CodeUsage, CodeConfirmationRequired, CodeInternal,
+		CodeAccessDenied, CodeRateLimited,
 		CodeQemuMissing, CodeKVMUnusable, CodeQemuStartFailed,
 		CodeMonitorUnreachable, CodeMonitorRejected, CodeNoConsolePassword,
 		CodeShareInvalid, CodeNoXattr,
@@ -92,9 +95,36 @@ func Codes() []Code {
 // fmt.Errorf("%w: %s", wire.ErrConfirmationRequired, name).
 var ErrConfirmationRequired = errors.New("confirmation required; pass -y under --json")
 
+// ErrAccessDenied identifies an MCP guest operation refused by agent_access.
+var ErrAccessDenied = errors.New("access denied")
+
+// ErrRateLimited identifies an MCP tool call refused by a rate limiter.
+var ErrRateLimited = errors.New("rate limited")
+
+type sentinelError struct {
+	err      error
+	sentinel error
+}
+
+func (e *sentinelError) Error() string { return e.err.Error() }
+
+func (e *sentinelError) Unwrap() []error { return []error{e.err, e.sentinel} }
+
+// WithSentinel preserves err's text and identity while adding sentinel to its
+// errors.Is chain. It returns nil when err is nil.
+func WithSentinel(err, sentinel error) error {
+	if err == nil {
+		return nil
+	}
+	if sentinel == nil {
+		return err
+	}
+	return &sentinelError{err: err, sentinel: sentinel}
+}
+
 // codeTable is the ordered errors.Is chain (§2): first match wins, checked
 // by MapError. It holds one row per typed error in internal/core, plus this
-// package's own ErrConfirmationRequired.
+// package's own CLI and MCP sentinels.
 //
 // Order does not currently break a tie: no core error wraps two of these
 // sentinels at once. update.go's disk-grow-while-running path wraps
@@ -124,6 +154,8 @@ var codeTable = []struct {
 	{CodeTimeout, context.DeadlineExceeded},
 	{CodeCanceled, context.Canceled},
 	{CodeConfirmationRequired, ErrConfirmationRequired},
+	{CodeAccessDenied, ErrAccessDenied},
+	{CodeRateLimited, ErrRateLimited},
 	{CodeQemuMissing, qemu.ErrBinaryMissing},
 	{CodeKVMUnusable, qemu.ErrKVMUnusable},
 	{CodeQemuStartFailed, qemu.ErrStartFailed},

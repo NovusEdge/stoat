@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/filelock"
 	"github.com/novusedge/stoat/internal/gitx"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/tomlx"
@@ -131,12 +131,12 @@ func lockIndex() (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(f, filelock.Exclusive, false); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return func() error {
-		unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		unlockErr := filelock.Unlock(f)
 		closeErr := f.Close()
 		if unlockErr != nil {
 			return unlockErr

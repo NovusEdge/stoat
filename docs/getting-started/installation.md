@@ -83,7 +83,7 @@ hooks; that step belongs to the Just targets.
 | Linux with KVM | Stoat opens `/dev/kvm` directly and runs QEMU with hardware acceleration |
 | `qemu-system-x86_64` and `qemu-img` | run and create VMs |
 | `ssh` (an OpenSSH client) | connect into a running VM, and provision it |
-| `xorriso` | used when you create Ubuntu/Debian/Fedora/Arch/Alpine cloud VMs: it builds the cloud-init seed image |
+| `xorriso` | used when you install an Alpine disk VM: it reads the kernel out of the Alpine ISO. Cloud VMs no longer need it |
 | Go 1.26 | **only** if you're building from source (the exact version pinned in `go.mod`) |
 
 ### QEMU and SSH
@@ -138,13 +138,9 @@ instructions. It detects the session from `DISPLAY`, `WAYLAND_DISPLAY`, and
 
 If a VM still fails to start with a display or GL error, your host has a session QEMU cannot draw on. Set `STOAT_GRAPHICAL=0` to take the window out of play; see [troubleshooting](../troubleshooting.md). No source edit and no rebuild.
 
-### xorriso (cloud VMs)
+### xorriso (Alpine disk installs)
 
-Provisioning an Ubuntu, Debian, Fedora, Arch, or Alpine cloud image builds a small ISO9660 seed via `xorriso`. Alpine live and disk VMs do not need it. If it is missing, creating or starting a cloud VM fails with:
-
-```
-xorriso is required for cloud-init provisioning; install libisoburn
-```
+Installing an Alpine disk VM reads the kernel and initramfs out of the Alpine ISO with `xorriso`. Cloud VMs write their own cloud-init seed and need no external tool.
 
 On Debian/Ubuntu the package is `xorriso`; on Arch it's `libisoburn` (which provides the `xorriso` binary).
 

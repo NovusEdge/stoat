@@ -3,12 +3,16 @@
 ## Setup
 
 ```sh
+just dev-setup  # enables the repository git hooks
 just setup      # builds, installs to ~/.local/bin, reports missing host deps
 just dev        # runs the TUI against a scratch STOAT_HOME
 ```
 
-`just setup` also installs the git hooks. A repository with a `stoat.toml`
-declares its own VMs; run `stoat up` in it to build them.
+Run `just dev-setup` once per clone. The `commit-msg` hook it enables strips
+tool-attribution trailers, and the `pre-commit` hook runs the fast checks.
+
+A repository with a `stoat.toml` declares its own VMs. Run `stoat up` in it to
+build them.
 
 Go 1.26 (pinned in `go.mod`), `just`, and for anything that boots a VM:
 KVM, `qemu-system-x86_64`, `qemu-img`, `ssh`. `stoat doctor` lists what is
@@ -85,9 +89,11 @@ reviewer rejects a PR that ignores them.
 
 ## Recipes
 
-Bundled recipes are `xfce`, `docker`, `devtools`, `tailscale`, and the set
-is closed. Write a new recipe in `~/.stoat/recipes/<name>/` from `stoat
-recipe new`; see `docs/recipes/writing-your-own.md` and
+Bundled recipes are `devtools`, `python-dev`, `build-deps`, `service-tools`,
+`pkg-tools`, `docker`, `tailscale`, and `xfce`. The bundled catalog changes
+only through an approved design. Do not add opportunistic recipe IDs. `devtools` and `python-dev` are the two common
+developer recipes. Write a new recipe in `~/.stoat/recipes/<name>/` from
+`stoat recipe new`; see `docs/recipes/writing-your-own.md` and
 `docs/recipes/sharing.md` for installing and pinning remote recipes. Every
 recipe script starts with `set -e` and carries the live-vs-disk block that
 `stoat recipe new` scaffolds; `internal/recipes/recipes_test.go` checks both

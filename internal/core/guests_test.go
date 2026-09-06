@@ -7,8 +7,14 @@ import (
 
 func TestGuestsSorted(t *testing.T) {
 	gs := Guests()
-	if len(gs) < 5 || gs[0].Name != "alpine" || gs[1].Name != "arch" {
-		t.Errorf("got %d guests, first two %q %q", len(gs), gs[0].Name, gs[1].Name)
+	want := []string{"almalinux", "alpine", "arch", "debian", "fedora", "opensuse", "rocky", "ubuntu"}
+	if len(gs) != len(want) {
+		t.Fatalf("got %d guests, want %d: %v", len(gs), len(want), gs)
+	}
+	for i, name := range want {
+		if gs[i].Name != name {
+			t.Errorf("guest[%d] = %q, want %q", i, gs[i].Name, name)
+		}
 	}
 }
 

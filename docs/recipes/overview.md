@@ -68,19 +68,28 @@ succeeded. It does not reboot live VMs because a live root is temporary.
 
 ## Bundled recipes
 
-The bundled set is closed and currently contains these four recipes:
+The bundled catalog changes only through an approved design. Do not add
+opportunistic recipe IDs. It currently contains these eight recipes:
 
 | Recipe | Supported guests | Purpose |
 |---|---|---|
-| `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch | Git, compiler tools, editor and basic fetch tools |
+| `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Git, compiler tools, editor and basic fetch tools |
+| `python-dev` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Python 3, pip, and an isolated development environment; schema 3 parameters `user` and optional `venv_dir`, with smoke-only mode when `venv_dir` is empty |
+| `build-deps` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | What building someone else's source tree needs; schema 3 outputs `compiler`, `make`, `pkg_config`, health check each responds to `--version` |
+| `service-tools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Inspecting a running service and the processes behind it; schema 3 outputs `service_manager` (`systemd` or `openrc`), `lsof`, `strace`, health check service manager answers status query and `lsof -v` runs |
+| `pkg-tools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Querying the package manager beyond install and remove; schema 3 outputs `query_tool`, `manager`, health check query tool runs |
 | `docker` | Alpine, Ubuntu, Debian, Fedora, Arch | Docker engine and compose plugin; schema 3 parameter `user`, output `socket`, health check `docker info` |
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 
-Each bundled recipe has a manifest. Docker, devtools, and Tailscale use
-OS-specific script overrides because package names and repository setup
-differ. XFCE uses one script with guest prelude verbs and therefore has no
-`[scripts]` table.
+`python-dev` takes the configured guest account. A cloud guest whose SSH
+account is `stoat` needs `python-dev.user=stoat`; an Alpine guest using `root`
+needs `python-dev.user=root`.
+
+The scripts are in `internal/recipes/bundled/` in the source tree. Each recipe
+has a manifest. Every recipe except XFCE uses OS-specific script overrides
+because package names and repository setup differ. XFCE uses one script with
+guest prelude verbs and therefore has no `[scripts]` table.
 
 Cloud images use their own package manager and a cloud-init seed. Cloud-init
 currently wraps recipe bodies in shell commands; it does not perform the SSH

@@ -140,11 +140,22 @@ func TestSaveLoadRoundtripCloudVM(t *testing.T) {
 		Backend:     "cloudinit",
 		Base:        "/home/someone/.stoat/base/ubuntu-24.04.qcow2",
 		SSHUser:     "ubuntu",
+		CPUModel:    "host",
+		RequiredCPU: "x86-64-v2",
 		AgentAccess: "manage",
 		Dir:         filepath.Join(Root(), "ubuntu-cloud"),
 	}
 	if err := want.Save(); err != nil {
 		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(want.Dir, "vm.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`cpu_model = "host"`, `required_cpu = "x86-64-v2"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("saved vm.toml lacks %q:\n%s", key, raw)
+		}
 	}
 
 	got, err := Load("ubuntu-cloud")
@@ -214,6 +225,9 @@ sshport = 2201
 	}
 	if v.SSHUser != "" {
 		t.Errorf("pre-phase VM should have empty SSHUser (defaults to root elsewhere), got %q", v.SSHUser)
+	}
+	if v.CPUModel != "" || v.RequiredCPU != "" {
+		t.Errorf("pre-phase VM should have an empty CPU contract, got CPUModel=%q RequiredCPU=%q", v.CPUModel, v.RequiredCPU)
 	}
 	if len(v.Forwards) != 0 {
 		t.Errorf("pre-phase VM should have no port forwards, got %v", v.Forwards)

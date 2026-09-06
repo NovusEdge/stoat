@@ -131,6 +131,39 @@ func TestArgsCloud(t *testing.T) {
 	}
 }
 
+func TestArgsCPUContractPreservesLegacyVector(t *testing.T) {
+	t.Setenv("STOAT_HOME", "/data")
+	v := &config.VM{
+		Name: "cloudy", Mode: "cloud", Base: "/data/base/alpine.qcow2",
+		OS: "alpine", Backend: "cloudinit", RAM: 2048, CPUs: 2, SSHPort: 2204,
+		Dir: filepath.Join("/data", "cloudy"),
+	}
+	legacy := joined(Args(v, false))
+	wantLegacy := "-enable-kvm -m 2048 -smp 2 -daemonize -pidfile /data/cloudy/qemu.pid -monitor unix:/data/cloudy/monitor.sock,server,nowait -qmp unix:/data/cloudy/qmp.sock,server,nowait -chardev file,id=con0,path=/data/cloudy/console.log,append=on -serial chardev:con0 -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2204-:22 -device virtio-net,netdev=n0 -display none -vnc unix:/data/cloudy/vnc.sock -device qemu-xhci,id=xhci -device usb-tablet -virtfs local,path=/data/shared/cloudy,mount_tag=work,security_model=mapped-xattr -drive file=/data/cloudy/disk.qcow2,if=virtio -drive file=/data/cloudy/ovl/seed.iso,media=cdrom"
+	if legacy != wantLegacy {
+		t.Fatalf("legacy argv changed:\n got %s\nwant %s", legacy, wantLegacy)
+	}
+	if strings.Contains(legacy, "-cpu") {
+		t.Fatal("legacy VM unexpectedly received a -cpu argument")
+	}
+
+	v.CPUModel = "host"
+	v.RequiredCPU = "x86-64-v2"
+	profiled := Args(v, false)
+	if got := strings.Count(joined(profiled), "-cpu"); got != 1 {
+		t.Fatalf("profiled argv has %d -cpu tokens, want one: %v", got, profiled)
+	}
+	for i := 0; i+1 < len(profiled); i++ {
+		if profiled[i] == "-cpu" {
+			if profiled[i+1] != "host" {
+				t.Fatalf("profiled -cpu value = %q, want host: %v", profiled[i+1], profiled)
+			}
+			return
+		}
+	}
+	t.Fatal("profiled argv did not contain an adjacent -cpu host pair")
+}
+
 // Every VM writes its guest console to a file, in every mode. When an
 // automated VM fails at 3am there is no window to look at and no operator
 // watching, so the log on disk is the whole postmortem.

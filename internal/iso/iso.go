@@ -88,6 +88,15 @@ type Entry struct {
 	Size        int64
 	ChecksumURL string
 	SSHUser     string
+	// CPUModel and RequiredCPU describe the launch CPU contract required by
+	// this image. They are creation and launch facts, unlike Size, which is
+	// display-only catalog metadata.
+	CPUModel    string
+	RequiredCPU string
+	// DefaultDisk is the minimum safe qcow2 overlay size for this image. An
+	// explicit user disk size still takes precedence; empty uses core's
+	// existing default.
+	DefaultDisk string
 	Notes       string
 }
 
@@ -198,6 +207,47 @@ func Catalog() []Entry {
 			ChecksumURL: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256",
 			SSHUser:     "stoat",
 			Notes:       "Arch Linux rolling cloud image",
+		},
+		{
+			ID:          "almalinux-9",
+			OS:          "almalinux",
+			Variant:     "9",
+			Size:        562 * mib,
+			Backend:     "cloudinit",
+			URL:         "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2",
+			ChecksumURL: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/CHECKSUM",
+			SSHUser:     "stoat",
+			CPUModel:    "host",
+			RequiredCPU: "x86-64-v2",
+			DefaultDisk: "12G",
+			Notes:       "AlmaLinux 9 GenericCloud",
+		},
+		{
+			ID:          "rocky-9",
+			OS:          "rocky",
+			Variant:     "9",
+			Size:        616 * mib,
+			Backend:     "cloudinit",
+			URL:         "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2",
+			ChecksumURL: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2.CHECKSUM",
+			SSHUser:     "stoat",
+			CPUModel:    "host",
+			RequiredCPU: "x86-64-v2",
+			DefaultDisk: "12G",
+			Notes:       "Rocky 9 GenericCloud Base",
+		},
+		{
+			ID:          "opensuse-leap-16.0",
+			OS:          "opensuse",
+			Variant:     "16.0",
+			Size:        322 * mib,
+			Backend:     "cloudinit",
+			URL:         "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2",
+			ChecksumURL: "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2.sha256",
+			SSHUser:     "stoat",
+			CPUModel:    "host",
+			RequiredCPU: "x86-64-v2",
+			Notes:       "openSUSE Leap 16.0 Minimal Cloud",
 		},
 		{
 			ID:      "alpine-standard",

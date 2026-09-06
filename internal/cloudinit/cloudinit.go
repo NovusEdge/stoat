@@ -16,9 +16,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	diskfs "github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/disk"
+	"github.com/diskfs/go-diskfs/filesystem"
+	"github.com/diskfs/go-diskfs/filesystem/iso9660"
+
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
-	"gopkg.in/yaml.v3"
 )
 
 // User is the account the seed creates. Anything provisioned through this
@@ -93,13 +97,12 @@ func extraPackages(osName string) string {
 	return b.String()
 }
 
-// userData builds the seed's user-data as a cloud-config-archive: the
-// hardware-proven users: block (parameterized by the guest's shell), the
-// OS's own extra packages if it needs any, and every selected cloud
-// recipe's body verbatim, each as its own document. cloud-init merges the
-// documents itself; see buildArchive. This package does not parse any
-// document for packages:/runcmd:, so a fragment using write_files: or any
-// other key survives instead of being silently dropped.
+// userData builds the seed's user-data: the hardware-proven users: block
+// (parameterized by the guest's shell), the OS's own extra packages if it
+// needs any, and every selected cloud recipe's body. mergeDocs folds them
+// into one #cloud-config document. Nothing here looks for packages: or
+// runcmd: by name, so a fragment using write_files: or any other key
+// survives.
 func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
 
@@ -112,7 +115,7 @@ func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error
 	}
 	docs = append(docs, recipeBodies...)
 
-	return buildArchive(docs)
+	return mergeDocs(docs)
 }
 
 // SkipShares reports whether osName's guest.toml sets backend.cloudinit's
@@ -177,14 +180,8 @@ const metaDataTemplate = `instance-id: %q
 local-hostname: %q
 `
 
-// haveXorriso reports whether the xorriso binary is on PATH.
-func haveXorriso() bool {
-	_, err := exec.LookPath("xorriso")
-	return err == nil
-}
-
-// haveCloudInit reports whether the cloud-init binary is on PATH. Mirrors
-// haveXorriso above: Arch does not install cloud-init by default (see
+// haveCloudInit reports whether the cloud-init binary is on PATH. Arch does
+// not install cloud-init by default (see
 // guest-subsystem.md §10). Schema validation must degrade to "not checked",
 // not "assumed valid". Callers of ValidateFragment must treat a nil error
 // with no annotated output as "not checked", never as "passed".
@@ -227,63 +224,6 @@ func ValidateFragment(body string) (annotated string, err error) {
 	return string(out), nil
 }
 
-// mergeHow is the explicit merge directive every document in the archive
-// carries. cloud-init's default merge is dict(no_replace)+list()+str(): two
-// documents both declaring packages: do NOT append, the first one wins and
-// the second is silently discarded. append+recurse_list makes list values
-// (packages:, runcmd:, ...) concatenate instead.
-const mergeHow = "list(append)+dict(recurse_list)"
-
-// withMergeHow injects merge_how as a top-level key into a #cloud-config
-// document body.
-//
-// A document's own merge_how does not govern how it merges in. It governs
-// how the NEXT document in the archive merges into the accumulated result
-// (cloud-init's merging.rst, "Specifying multiple types"). The first
-// document always merges with the built-in default, regardless of what it
-// declares.
-//
-// Every document except the last needs the directive, or a later document
-// silently loses to an earlier one. Callers may pass any number of recipe
-// bodies, so the last one is not known in advance; every document gets the
-// directive. This matches cloud-init's own worked example in merging.rst,
-// which puts merge_how in both halves of a two-document merge.
-func withMergeHow(doc string) string {
-	directive := fmt.Sprintf("merge_how: %q\n", mergeHow)
-	if rest, ok := strings.CutPrefix(doc, "#cloud-config\n"); ok {
-		return "#cloud-config\n" + directive + rest
-	}
-	return directive + doc
-}
-
-// archiveDoc is one entry of a cloud-config-archive: cloud-init's own
-// format for a list of {type, content} documents that it merges itself,
-// replacing the packages:/runcmd:-only splicing this package used to do by
-// hand (see doc/examples/cloud-config-archive.txt upstream).
-type archiveDoc struct {
-	Type    string `yaml:"type"`
-	Content string `yaml:"content"`
-}
-
-// buildArchive renders docs as a cloud-config-archive. The
-// "#cloud-config-archive" header is required verbatim on its own first
-// line: it is what NoCloud's format-detection matches on to unpack the
-// payload as an archive rather than parse it (and fail) as one big
-// #cloud-config document. Each doc is carried through withMergeHow so the
-// archive as a whole merges by appending rather than by cloud-init's
-// default first-one-wins.
-func buildArchive(docs []string) (string, error) {
-	items := make([]archiveDoc, len(docs))
-	for i, d := range docs {
-		items[i] = archiveDoc{Type: "text/cloud-config", Content: withMergeHow(d)}
-	}
-	out, err := yaml.Marshal(items)
-	if err != nil {
-		return "", fmt.Errorf("marshaling cloud-config-archive: %w", err)
-	}
-	return "#cloud-config-archive\n" + string(out), nil
-}
-
 // Seed writes <v.OvlDir()>/seed/{user-data,meta-data} and builds
 // <v.OvlDir()>/seed.iso (ISO9660, volume label CIDATA) via xorriso. It
 // returns the iso path. recipeBodies are the bodies of v's selected cloud
@@ -293,10 +233,6 @@ func buildArchive(docs []string) (string, error) {
 // cloud VM's recipes get applied, unlike the ssh-provisioning path other
 // backends use.
 func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
-	if !haveXorriso() {
-		return "", fmt.Errorf("xorriso is required for cloud-init provisioning; install libisoburn")
-	}
-
 	seedDir := filepath.Join(v.OvlDir(), "seed")
 	if err := os.MkdirAll(seedDir, 0o700); err != nil {
 		return "", err
@@ -319,29 +255,91 @@ func Seed(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	}
 
 	isoPath := filepath.Join(v.OvlDir(), "seed.iso")
-	iso, err := os.OpenFile(isoPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
+	if err := writeSeedISO(isoPath, []seedFile{
+		{name: "user-data", body: []byte(ud)},
+		{name: "meta-data", body: []byte(metaData)},
+	}); err != nil {
 		return "", err
 	}
-	if err := iso.Chmod(0o600); err != nil {
-		_ = iso.Close()
-		return "", err
-	}
-	if err := iso.Close(); err != nil {
-		return "", err
-	}
-	xorrisoArgs := []string{"-as", "mkisofs", "-o", isoPath, "-V", "CIDATA", "-J", "-r", seedDir}
-	commandArgs := append([]string{"-c", "umask 0077; exec \"$@\"", "stoat-xorriso", "xorriso"}, xorrisoArgs...)
-	cmd := exec.Command("sh", commandArgs...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("xorriso: %w: %s", err, out)
-	}
-	if err := os.Chmod(isoPath, 0o600); err != nil {
-		return "", err
+	return isoPath, nil
+}
+
+type seedFile struct {
+	name string
+	body []byte
+}
+
+// seedISOSlack is the space ISO9660 needs beyond the file data: a 32 KiB
+// system area, the volume descriptors, and a directory record per file in both
+// the primary and the Joliet tree. The image keeps the size it is created
+// with, so this is the whole cost of a seed on disk.
+const seedISOSlack = 1 << 20
+
+const isoBlockSize = 2048
+
+// writeSeedISO writes files into an ISO9660 image labelled CIDATA, with Joliet
+// and Rock Ridge. cloud-init's NoCloud datasource finds the seed by that label
+// and reads the lowercase names, which plain ISO9660 cannot hold.
+//
+// The image is built beside its final path and renamed, because the writer
+// demands a file that does not exist yet and creates it under the caller's
+// umask. user-data carries the recipe bodies, so the image is never readable
+// by another account: the enclosing directory is private, and the file is
+// 0600 before it takes the seed's name.
+func writeSeedISO(isoPath string, files []seedFile) error {
+	size := int64(seedISOSlack)
+	for _, f := range files {
+		size += int64(len(f.body))
 	}
 
-	return isoPath, nil
+	building := isoPath + ".building"
+	if err := os.Remove(building); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// ISO9660 accepts a 2048-byte block and nothing smaller; the writer's
+	// default of 512 is rejected outright.
+	image, err := diskfs.Create(building, size, isoBlockSize)
+	if err != nil {
+		return fmt.Errorf("create seed image: %w", err)
+	}
+	defer func() { _ = os.Remove(building) }()
+	if err := os.Chmod(building, 0o600); err != nil {
+		return err
+	}
+
+	fs, err := image.CreateFilesystem(disk.FilesystemSpec{Partition: 0, FSType: filesystem.TypeISO9660})
+	if err != nil {
+		return fmt.Errorf("create seed filesystem: %w", err)
+	}
+	for _, f := range files {
+		out, err := fs.OpenFile("/"+f.name, os.O_CREATE|os.O_RDWR)
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", f.name, err)
+		}
+		if _, err := out.Write(f.body); err != nil {
+			return fmt.Errorf("seed %s: %w", f.name, err)
+		}
+	}
+	iso, ok := fs.(*iso9660.FileSystem)
+	if !ok {
+		return fmt.Errorf("seed filesystem is %T, want iso9660", fs)
+	}
+	// The writer copies the identifier into a zero-filled field, and ISO9660
+	// pads that field with spaces. A label read back with trailing NULs is not
+	// the label NoCloud looks for, so pad it here. The Joliet descriptor takes
+	// the first 16 characters of the same string as UCS-2.
+	label := fmt.Sprintf("%-32s", "CIDATA")
+	if err := iso.Finalize(iso9660.FinalizeOptions{
+		VolumeIdentifier: label,
+		Joliet:           true,
+		RockRidge:        true,
+	}); err != nil {
+		return fmt.Errorf("finalize seed image: %w", err)
+	}
+	if err := image.Close(); err != nil {
+		return err
+	}
+	return os.Rename(building, isoPath)
 }
 
 func writePrivateFile(path string, data []byte) error {

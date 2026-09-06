@@ -11,8 +11,8 @@ import (
 // KVMCheck reports whether this user can open /dev/kvm read/write. That is
 // the failure mode that matters, not whether the file exists.
 //
-// This file is the installer's one platform seam. Windows support needs a
-// kvm_windows.go with a WHPX probe. Stoat does not compile for Windows yet.
+// This file is the Linux-specific host-check seam. Other hosts report the
+// native qualification boundary without claiming /dev/kvm as their runtime.
 func KVMCheck() Check { return kvmCheckAt("/dev/kvm") }
 
 func kvmCheckAt(path string) Check {

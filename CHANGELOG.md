@@ -1,8 +1,93 @@
 # Changelog
 
+## v0.4.0
+
+A bundled recipe catalog with a rule, three new common recipes on every guest,
+and a cloud path that needs no external tool. The JSON contract version stays
+**3**.
+
+### Features
+
+- Apply the `devtools` and `python-dev` recipes on AlmaLinux, Rocky, and
+  openSUSE. All eight bundled guests now carry both recipes.
+- Apply the `build-deps`, `service-tools`, and `pkg-tools` recipes on all eight
+  bundled guests. `build-deps` installs a C compiler, `make`, and
+  `pkg-config`, then reports each as an output. `service-tools` installs
+  `lsof`, `strace`, and the process tools, then reports whether the guest runs
+  systemd or OpenRC, and where `lsof` and `strace` are. `pkg-tools` installs
+  the tool that answers which package owns a file, then reports that tool and
+  the package manager.
+- Create a cloud VM without `xorriso` on the host. Stoat writes the cloud-init
+  seed image itself. `xorriso` is now needed only to install an Alpine disk VM,
+  and `stoat doctor` reports it as optional.
+
+### Fixes
+
+- `stoat up` no longer hangs on a guest whose cloud-init keeps its run
+  directory root-only. Stoat polls `cloud-init status` on its own deadline and
+  retries an unreadable probe under the guest's escalation. Fedora 44 ships the
+  cloud-init version that caused the hang.
+- `pacman` skips a package the Arch guest already has. A VM that selects both
+  `devtools` and `build-deps` reinstalled the whole `base-devel` group.
+- The terminal UI follows the terminal's own background colour.
+
+### Known limitations
+
+- `docs/specs` describes VM forks and runtime continuation. Neither is
+  implemented.
+- Native VM operations run on Linux only. macOS and Windows report an
+  unqualified host. See #82 and #83.
+
+## v0.3.0
+
+Three enterprise Linux guests, common developer recipes, and read-only
+capability discovery for agents. The JSON contract version stays **3**.
+
+### Features
+
+- Create VMs from AlmaLinux 9, Rocky 9, and openSUSE Leap 16.0 cloud images.
+  Stoat checks the host CPU against the `x86-64-v2` baseline these guests
+  require and reports a missing feature before it starts QEMU. These three
+  guests carry no recipes and skip the 9p mount.
+- Apply the `devtools` and `python-dev` recipes on Alpine, Arch, Debian,
+  Fedora, and Ubuntu. `devtools` installs git, curl, a compiler, vim, tmux,
+  less, and bash. `python-dev` installs Python and pip, then creates a virtual
+  environment for a named user.
+- Inspect agent-visible state with `stoat capabilities [VM] [--json]` and the
+  MCP `capabilities` tool. Discovery reads configuration only. It creates no
+  data root, generates no keys, and removes no stale PID files.
+- MCP tools return machine-readable errors with stable codes.
+
+### Fixes
+
+- Cloud VMs wait for cloud-init to finish before provisioning starts. A
+  recoverable cloud-init warning no longer blocks the wait; a hard error still
+  fails it.
+- Native VM operations that the host cannot support now fail with a named
+  reason instead of an unqualified QEMU error.
+- File locks work on every supported host.
+- A seed that holds one cloud-config document is sent as plain
+  `#cloud-config`. cloud-init 24.4 on AlmaLinux and Rocky fails its init-local
+  stage on the archive's top-level list, which left `cloud-init status` in
+  error for the life of the VM.
+- The `python-dev` recipe tests each privilege-escalation tool before it uses
+  one. Alpine's sudoers grants root nothing, and busybox `su` takes options
+  from the trailing arguments. Both broke the recipe on Alpine.
+- The guides state the runtime and interface behavior that stoat implements.
+
+### Known limitations
+
+- A cloud VM with recipes on AlmaLinux or Rocky still fails, because the seed
+  keeps more than one document. See #93.
+- The `devtools` and `python-dev` recipes do not cover AlmaLinux, Rocky, or
+  openSUSE. See #85.
+- `docs/specs` describes VM forks and runtime continuation. Neither is
+  implemented.
+
 ## v0.2.0
 
-First published release. Stoat remains pre-1.0, for single-user Linux systems.
+First published release, for single-user Linux systems. This is a regular
+release rather than a prerelease; its version number is below 1.0.
 
 ### Features
 

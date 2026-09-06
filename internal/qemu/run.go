@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/hostops"
 	"github.com/novusedge/stoat/internal/logx"
 )
 
@@ -26,62 +25,6 @@ func Preflight() error {
 	}
 	_ = f.Close()
 	return nil
-}
-
-func pid(v *config.VM) int {
-	b, err := os.ReadFile(v.PidPath())
-	if err != nil {
-		return 0
-	}
-	p, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil {
-		return 0
-	}
-	return p
-}
-
-// cmdlineMatches reports whether a /proc/<pid>/cmdline blob belongs to the VM
-// whose directory is dir. It anchors on dir+"/" rather than a bare substring
-// match: cmdline always contains "-pidfile <dir>/qemu.pid", so the trailing
-// separator is present for a genuine match, but a bare Contains would also
-// match a sibling VM whose directory name has dir's as a prefix (e.g. "work"
-// matching inside "work2").
-func cmdlineMatches(cmdline []byte, dir string) bool {
-	return bytes.Contains(cmdline, []byte(dir+"/"))
-}
-
-// Running reports whether this VM's QEMU process is alive. The cmdline check
-// matters: pids are reused, and a stale pidfile would otherwise report a ghost.
-func Running(v *config.VM) bool {
-	p := pid(v)
-	if p == 0 {
-		return false
-	}
-	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", p))
-	if err != nil {
-		_ = os.Remove(v.PidPath())
-		return false
-	}
-	if !cmdlineMatches(cmdline, v.Dir) {
-		_ = os.Remove(v.PidPath())
-		return false
-	}
-	return true
-}
-
-// StartedAt returns when the VM's QEMU process started (the pidfile's
-// mtime), or the zero time if it is stopped. -daemonize rewrites the
-// pidfile at the moment QEMU forks into the background, so its mtime is a
-// start time and not a stale value from an earlier boot.
-func StartedAt(v *config.VM) time.Time {
-	if !Running(v) {
-		return time.Time{}
-	}
-	fi, err := os.Stat(v.PidPath())
-	if err != nil {
-		return time.Time{}
-	}
-	return fi.ModTime()
 }
 
 // installedBytes is how much has to be written into a disk VM's qcow2 before
@@ -103,8 +46,14 @@ func diskWritten(v *config.VM) bool {
 // Start launches QEMU. -daemonize means it detaches itself; stoat supervises
 // nothing and tracks the process by pidfile.
 func Start(v *config.VM) error {
+	if err := hostops.RequireVM(); err != nil {
+		return err
+	}
 	if Running(v) {
 		return fmt.Errorf("%w: %s is already running", ErrAlreadyRunning, v.Name)
+	}
+	if err := validateCPU(v); err != nil {
+		return err
 	}
 	_ = os.Remove(v.MonitorPath())
 	// The interactive install happens inside the guest, where stoat can't
@@ -198,6 +147,9 @@ func consoleCredential(v *config.VM, user string) string {
 // back to SIGTERM. The fallback is a power cut: fine for live VMs, lossy for
 // disk ones, which is why it is not the first move.
 func Stop(v *config.VM) error {
+	if err := hostops.RequireVM(); err != nil {
+		return err
+	}
 	if !Running(v) {
 		return nil
 	}
@@ -214,7 +166,7 @@ func Stop(v *config.VM) error {
 	}
 	if p := pid(v); p != 0 {
 		logx.L().Warn("graceful powerdown timed out, sending SIGTERM", "vm", v.Name, "pid", p)
-		_ = syscall.Kill(p, syscall.SIGTERM)
+		_ = terminate(p)
 	}
 	return nil
 }

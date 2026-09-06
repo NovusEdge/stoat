@@ -78,6 +78,40 @@ func TestPlanDiskModeGetsADefaultSize(t *testing.T) {
 	}
 }
 
+func TestPlanEnterpriseCatalogRequirements(t *testing.T) {
+	dir := root(t)
+	for _, tc := range []struct {
+		id, file, disk string
+	}{
+		{id: "almalinux-9", file: "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2", disk: "12G"},
+		{id: "rocky-9", file: "Rocky-9-GenericCloud-Base.latest.x86_64.qcow2", disk: "12G"},
+		{id: "opensuse-leap-16.0", file: "Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2", disk: "8G"},
+	} {
+		haveImage(t, dir, tc.file)
+		v, err := Plan(Spec{Name: tc.id, Image: tc.id})
+		if err != nil {
+			t.Fatalf("Plan(%s): %v", tc.id, err)
+		}
+		if v.CPUModel != "host" || v.RequiredCPU != "x86-64-v2" {
+			t.Errorf("Plan(%s) CPU contract = (%q, %q), want (host, x86-64-v2)", tc.id, v.CPUModel, v.RequiredCPU)
+		}
+		if v.Disk != tc.disk {
+			t.Errorf("Plan(%s) Disk = %q, want %q", tc.id, v.Disk, tc.disk)
+		}
+	}
+
+	for name, disk := range map[string]string{"explicit": "16G", "explicit-too-small": "8G"} {
+		haveImage(t, dir, "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2")
+		v, err := Plan(Spec{Name: name, Image: "almalinux-9", Disk: disk})
+		if err != nil {
+			t.Fatalf("Plan(%s): %v", name, err)
+		}
+		if v.Disk != disk {
+			t.Errorf("Plan(%s) Disk = %q, want explicit %q", name, v.Disk, disk)
+		}
+	}
+}
+
 // A cloud image is dispatched by the backend its entry declares, not by its
 // OS. alpine-cloud is OS alpine but backend cloudinit. Recording apkovl here
 // would give it an apkovl drive it never boots from, no cloud-init seed, and

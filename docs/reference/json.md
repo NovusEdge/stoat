@@ -147,6 +147,8 @@ bump the contract version. Do not write code that requires them.
 | `canceled` | the context was cancelled |
 | `usage` | a bad flag, a missing argument, an unknown subcommand |
 | `confirmation_required` | a destructive command was run without `-y` |
+| `access_denied` | MCP guest access was refused because the VM's `agent_access` level is too low |
+| `rate_limited` | MCP refused a tool call because its per-tool or shared rate bucket was exhausted |
 | `lock_out_of_date` | a project declaration is not pinned in `stoat.lock` |
 | `internal` | anything unanticipated; the escape hatch |
 
@@ -600,3 +602,63 @@ and five MCP tools (`project_status`, `project_up`, `project_down`,
 `project_apply`, `project_wait`) alongside `start`, `stop`, `apply_recipes`
 and `wait`, which keep their existing inputs and outputs. All additions; the
 contract stays 3.
+
+## Capability discovery
+
+stoat capabilities [VM] --json returns a report with schema 1 in the usual
+result envelope. The command reads host checks and one VM's stored metadata.
+It does not start, connect to, or mutate a VM. Omit VM for host and project
+scope; a target adds its directory name, stored mode, and normalized
+agent_access values.
+
+The report has these fields:
+
+| Field | Meaning |
+|---|---|
+| schema | Capability report schema, currently 1. |
+| stoat_version | Build version supplied by Stoat. |
+| host | os, arch, and project_state (available, absent, or unknown). |
+| target | Optional stored VM snapshot with name, mode, and agent_access. |
+| access_policy | mcp_agent_access_enforced, cli_agent_access_enforced, and cli_commands (exec, cp). |
+| profiles | Implemented runtime profiles and their host or guest requirements. |
+| capabilities | Implemented current surfaces and their requirements, limits, and evidence. |
+| unavailable | Explicitly unavailable surfaces. |
+
+Each profile or capability has name, status, scope, requirements, limits,
+optional reason, and evidence. Status is supported, limited, unsupported, or
+unknown. supported means the implementation is available and its required
+observations are available. Discovery does not establish VM readiness. limited
+carries a limit code; unsupported and unknown carry a reason code. Every list
+is [] when empty, never null.
+
+The stable reason codes are not_implemented, host_probe_unavailable,
+agent_access_unknown, target_mode_unknown, and project_state_unknown. The
+stable limit codes are agent_access_required, target_required, disk_required,
+project_file_required, and host_requirement_missing. MCP enforces
+agent_access; direct CLI exec and cp do not. A live target limits vm.snapshot
+with disk_required. runtime.fork and runtime.continuation always appear under
+unavailable with unsupported/not_implemented.
+
+```json
+{
+  "schema": 1,
+  "stoat_version": "dev",
+  "host": {"os": "linux", "arch": "amd64", "project_state": "absent"},
+  "access_policy": {
+    "mcp_agent_access_enforced": true,
+    "cli_agent_access_enforced": false,
+    "cli_commands": ["exec", "cp"]
+  },
+  "profiles": [],
+  "capabilities": [],
+  "unavailable": [
+    {"name": "runtime.fork", "status": "unsupported", "scope": "runtime", "requirements": [], "limits": [], "reason": {"code": "not_implemented"}, "evidence": [{"kind": "implementation", "source": "runtime.fork", "result": "not_implemented"}]},
+    {"name": "runtime.continuation", "status": "unsupported", "scope": "runtime", "requirements": [], "limits": [], "reason": {"code": "not_implemented"}, "evidence": [{"kind": "implementation", "source": "runtime.continuation", "result": "not_implemented"}]}
+  ]
+}
+```
+
+The example abbreviates profiles and capabilities; a real report always
+contains the implemented entries. The proposal evidence identifies the report
+entry, while its status and reason state that the runtime surface is
+unavailable.

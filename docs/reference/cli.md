@@ -78,6 +78,7 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
+| [`capabilities`](#stoat-capabilities-vm) | Report current agent capabilities | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`mcp`](mcp.md) | Serve MCP, or configure and inspect a client entry | 0, 1, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
@@ -529,8 +530,12 @@ not an additional manifest-match condition.
 ```
 $ stoat recipes --os alpine --backend apkovl
 NAME                           DESCRIPTION
+build-deps                     toolchain for building software from source
 devtools                       git, a compiler, an editor and basic fetch tools
 docker                         Docker engine and the compose plugin
+pkg-tools                      tools for querying the package manager
+python-dev                     Python 3 with pip and an isolated development environment
+service-tools                  tools for inspecting services and the processes behind them
 tailscale                      Tailscale daemon, installed and started (join manually)
 xfce                           XFCE desktop with autologin startx on tty1
 ```
@@ -566,8 +571,12 @@ search order.
 ```
 $ stoat recipe list
 NAME                 SCOPE     COMMIT   DESCRIPTION
+build-deps           bundled            toolchain for building software from source
 devtools             bundled            git, a compiler, an editor and basic fetch tools
 docker               bundled            Docker engine and the compose plugin
+pkg-tools            bundled            tools for querying the package manager
+python-dev           bundled            Python 3 with pip and an isolated development environment
+service-tools        bundled            tools for inspecting services and the processes behind them
 tailscale            bundled            Tailscale daemon, installed and started (join manually)
 xfce                 bundled            XFCE desktop with autologin startx on tty1
 ```
@@ -761,6 +770,19 @@ receive `-2`, `-3`, and later numeric suffixes.
 `-o` names the file instead. qemu writes it as its own user, so a relative path resolves against the caller's working directory before qemu sees it.
 
 **Exit codes:** 0 on success; 1 if the VM does not exist, is not running (`not_running`), or qemu refuses the dump (`screenshot_failed`).
+
+## `stoat capabilities [VM]`
+
+Reports the host checks, the implemented Stoat surfaces, the target access
+limits, and the unavailable runtime proposals. It reads stored VM metadata
+only. It does not start or contact a VM.
+
+Omit the VM name for host and project scope. In a project, a bare name first
+resolves against the current `stoat.toml`, then against a global VM name.
+Without `--json`, Stoat prints a NAME, STATUS, SCOPE table. With `--json`, it
+prints the standard result envelope carrying the schema 1 capability report.
+
+MCP enforces `agent_access`. The CLI's own `stoat exec` and `stoat cp` do not.
 
 ## `stoat doctor`
 

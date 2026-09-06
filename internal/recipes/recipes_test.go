@@ -14,7 +14,7 @@ func TestInstallCopiesV2Recipes(t *testing.T) {
 	}
 
 	// v2 recipes live in subdirectories with recipe.toml
-	for _, name := range []string{"xfce", "docker", "devtools", "tailscale"} {
+	for _, name := range []string{"devtools", "docker", "python-dev", "tailscale", "xfce"} {
 		toml := filepath.Join(dir(), name, "recipe.toml")
 		if _, err := os.Stat(toml); err != nil {
 			t.Errorf("Install did not install %s/recipe.toml: %v", name, err)
@@ -179,7 +179,7 @@ func TestEmbedContainsBundledDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"xfce": true, "docker": true, "devtools": true, "tailscale": true}
+	want := map[string]bool{"xfce": true, "docker": true, "devtools": true, "python-dev": true, "tailscale": true, "build-deps": true, "service-tools": true, "pkg-tools": true}
 	for _, e := range recipes {
 		if !e.IsDir() {
 			continue
@@ -214,18 +214,18 @@ func TestListFiltersbyOS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"xfce", "docker", "devtools", "tailscale"} {
+	for _, want := range []string{"xfce", "docker", "devtools", "python-dev", "tailscale"} {
 		if !contains(alpineRecipes, want) {
 			t.Errorf("List(alpine) missing %q, got %v", want, alpineRecipes)
 		}
 	}
 
-	// Ubuntu should get xfce, devtools, docker, tailscale (all have ubuntu in OS list)
+	// Ubuntu should get xfce, devtools, docker, python-dev, tailscale (all have ubuntu in OS list)
 	ubuntuRecipes, err := List("ubuntu", "ssh")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"xfce", "devtools", "docker", "tailscale"} {
+	for _, want := range []string{"xfce", "devtools", "docker", "python-dev", "tailscale"} {
 		if !contains(ubuntuRecipes, want) {
 			t.Errorf("List(ubuntu) missing %s, got %v", want, ubuntuRecipes)
 		}
@@ -265,13 +265,20 @@ func TestRecipeScriptsHaveLiveVsDiskCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The original four bundled recipes carry live-vs-disk persistence notes.
+	// python-dev is deliberately excluded: its behavior is valid on both root
+	// filesystem modes without needing a mount-type probe.
+	legacyLiveDisk := map[string]bool{"xfce": true, "docker": true, "devtools": true, "tailscale": true}
 	for _, m := range manifests {
+		if !legacyLiveDisk[m.Name] {
+			continue
+		}
 		content, err := m.ScriptContent("alpine")
 		if err != nil {
 			continue // OS override may not exist
 		}
 
-		// Each recipe should detect live vs disk
+		// Each legacy recipe should detect live vs disk.
 		if !strings.Contains(content, "/proc/mounts") {
 			t.Errorf("%s script does not check /proc/mounts for live vs disk detection", m.Name)
 		}

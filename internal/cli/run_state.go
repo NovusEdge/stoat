@@ -176,9 +176,9 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// runDoctor prints core.Doctor's findings: the same checks the installer's
-// pre-install checklist runs (qemu-system-x86_64, qemu-img, ssh, xorriso,
-// /dev/kvm), so `stoat doctor` and `just setup` agree on host readiness.
+// runDoctor prints core.Doctor's platform-specific findings. On Linux,
+// `stoat doctor` and `just setup` agree on host readiness where the source
+// installer is available.
 //
 // It prints every failed check's fix command, including optional dependencies.
 // Optional checks are warnings only; required failures remain FAIL and make

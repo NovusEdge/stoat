@@ -13,9 +13,9 @@ seed_packages = []
 
 [pkg]
 setup = "pacman -Sy --noconfirm"
-install = ["pacman", "-S", "--noconfirm"]
+install = ["pacman", "-S", "--noconfirm", "--needed"]
 scaffold_setup = "pacman -Sy --noconfirm\n"
-scaffold_install = "pacman -S --noconfirm "
+scaffold_install = "pacman -S --noconfirm --needed "
 # Arch names its Python 3 package "python".
 runtime_packages = { python3 = "python" }
 

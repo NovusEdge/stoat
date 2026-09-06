@@ -3,6 +3,7 @@ package mcpsrv
 import (
 	"fmt"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -71,7 +72,7 @@ func requireAccess(vm string, need Level) error {
 		return err
 	}
 	if have.rank() < need.rank() {
-		return fmt.Errorf("vm %q has agent_access = %s; needs %s", vm, have, need)
+		return wire.WithSentinel(fmt.Errorf("vm %q has agent_access = %s; needs %s", vm, have, need), wire.ErrAccessDenied)
 	}
 	return nil
 }

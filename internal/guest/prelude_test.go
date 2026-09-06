@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -169,5 +170,21 @@ func TestWithPreludeKeepsShebangFirst(t *testing.T) {
 	}
 	if got := WithPrelude("echo hi\n", "P\n"); got != "P\necho hi\n" {
 		t.Errorf("no-shebang case: %q", got)
+	}
+}
+
+// pacman reinstalls a package it already has unless --needed is passed.
+// devtools and build-deps both install base-devel on Arch, so a VM that
+// selects both would download the whole group twice.
+func TestArchInstallSkipsSatisfiedPackages(t *testing.T) {
+	o, ok := Lookup("arch")
+	if !ok {
+		t.Fatal("bundled arch missing")
+	}
+	if !slices.Contains(o.Pkg.Install, "--needed") {
+		t.Errorf("arch install = %v, want --needed", o.Pkg.Install)
+	}
+	if !strings.Contains(o.Pkg.ScaffoldInstall, "--needed") {
+		t.Errorf("arch scaffold_install = %q, want --needed", o.Pkg.ScaffoldInstall)
 	}
 }

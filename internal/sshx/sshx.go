@@ -2,12 +2,16 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -230,6 +234,143 @@ const recipeShutdownGrace = 5 * time.Second
 // not extend Wait's single health budget by the normal recipe grace period.
 const healthShutdownGrace = 100 * time.Millisecond
 
+// cloudInitStatus is the stable subset of `cloud-init status --format json`.
+// cloud-init adds informational fields over time; readiness only depends on
+// the terminal status and hard-error list. Recoverable errors remain available
+// for a degraded diagnostic without making a warning block provisioning.
+type cloudInitStatus struct {
+	Status            string              `json:"status"`
+	ExtendedStatus    string              `json:"extended_status"`
+	Errors            []string            `json:"errors"`
+	RecoverableErrors map[string][]string `json:"recoverable_errors"`
+}
+
+func parseCloudInitStatus(body []byte) (cloudInitStatus, error) {
+	var status cloudInitStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return cloudInitStatus{}, fmt.Errorf("invalid cloud-init status JSON: %w", err)
+	}
+	if status.Status == "" {
+		return cloudInitStatus{}, fmt.Errorf("cloud-init status JSON has no status")
+	}
+	return status, nil
+}
+
+// cloudInitPollInterval spaces the readiness probes. `cloud-init status`
+// answers at once, so the interval is the whole cost of a probe.
+const cloudInitPollInterval = 5 * time.Second
+
+// cloudInitProbeTimeout bounds one probe. A guest that stops answering must
+// not wedge the loop that owns the deadline.
+const cloudInitProbeTimeout = time.Minute
+
+// cloudInitReadinessBudget bounds the wait when the caller gives no deadline.
+// A cloud image that installs a large package set takes minutes, and every
+// recipe in the seed runs before cloud-init reports done.
+const cloudInitReadinessBudget = 30 * time.Minute
+
+// sshTransportExit is ssh's own failure code. The guest never returns it, so
+// it means the connection failed rather than the command.
+const sshTransportExit = 255
+
+// cloudInitProbe asks the guest for cloud-init's status once. It asks as the
+// seeded SSH account first, because that account exists before cloud-init
+// installs the guest's sudo package. cloud-init 25.3 keeps /run/cloud-init at
+// mode 0700, so the unprivileged answer there is a Python traceback and no
+// JSON; the escalated retry covers that guest. The exit code carries meaning
+// beside the JSON, so a body that parses wins over any status the command
+// exited with.
+func cloudInitProbe(ctx context.Context, v *config.VM, log io.Writer) (cloudInitStatus, int, error) {
+	attempt := func(argv []string) (cloudInitStatus, int, error) {
+		probeCtx, cancel := context.WithTimeout(ctx, cloudInitProbeTimeout)
+		defer cancel()
+
+		var out bytes.Buffer
+		ci := exec.CommandContext(probeCtx, "ssh", Args(v, argv...)...)
+		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
+		ci.WaitDelay = recipeShutdownGrace
+		ci.Stdout = &out
+		ci.Stderr = log
+
+		runErr := ci.Run()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return cloudInitStatus{}, 0, ctxErr
+		}
+		exitCode := 0
+		if runErr != nil {
+			var exitErr *exec.ExitError
+			if !errors.As(runErr, &exitErr) {
+				return cloudInitStatus{}, 0, fmt.Errorf("cloud-init readiness command failed: %w", runErr)
+			}
+			exitCode = exitErr.ExitCode()
+		}
+		status, err := parseCloudInitStatus(out.Bytes())
+		if err != nil {
+			return cloudInitStatus{}, exitCode, err
+		}
+		return status, exitCode, nil
+	}
+
+	remote := []string{"cloud-init", "status", "--format", "json"}
+	status, exitCode, err := attempt(remote)
+	if err == nil || ctx.Err() != nil || exitCode == sshTransportExit {
+		return status, exitCode, err
+	}
+	escalated := escalate(v, remote)
+	if slices.Equal(escalated, remote) {
+		return status, exitCode, err
+	}
+	return attempt(escalated)
+}
+
+// waitCloudInit waits for cloud-init to reach a terminal status. cloud-init's
+// own `status --wait` cannot be trusted to return: on a guest whose run
+// directory it has already made root-only, the unprivileged wait loop never
+// observes the result. Stoat therefore owns the deadline and polls.
+//
+// Exit 2 is cloud-init's recoverable degraded result; the JSON still has to
+// say done and list no hard errors before provisioning may continue.
+func waitCloudInit(ctx context.Context, v *config.VM, log io.Writer) error {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cloudInitReadinessBudget)
+		defer cancel()
+	}
+
+	last := "no answer yet"
+	for {
+		status, exitCode, err := cloudInitProbe(ctx, v, log)
+		switch {
+		case ctx.Err() != nil:
+		case exitCode == sshTransportExit:
+			return fmt.Errorf("cloud-init readiness command exited with status %d", exitCode)
+		case err != nil:
+			last = err.Error()
+		case status.Status == "error":
+			if len(status.Errors) > 0 {
+				return fmt.Errorf("cloud-init reported hard errors: %s", strings.Join(status.Errors, "; "))
+			}
+			return fmt.Errorf("cloud-init is not ready: status %q", status.Status)
+		case status.Status == "done":
+			if len(status.Errors) > 0 {
+				return fmt.Errorf("cloud-init reported hard errors: %s", strings.Join(status.Errors, "; "))
+			}
+			if exitCode == 2 {
+				fmt.Fprintf(log, "cloud-init completed with recoverable warnings: %v\n", status.RecoverableErrors)
+			}
+			return nil
+		default:
+			last = fmt.Sprintf("status %q", status.Status)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cloud-init did not report done (%s): %w", last, ctx.Err())
+		case <-time.After(cloudInitPollInterval):
+		}
+	}
+}
+
 // RunCheck runs one command inside v's guest through the guest prelude, as
 // the recipe's ssh user and under the guest's escalation. The command is
 // sent over stdin so it does not become a local ssh argv element.
@@ -287,18 +428,18 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	// A cloud image runs cloud-init at first boot; it may still be installing
 	// packages when sshd comes up. A recipe that calls apt or dnf then races
 	// cloud-init for the package-manager lock and fails. Wait for cloud-init
-	// to finish first. The exit code is ignored on purpose: Alpine reports
-	// "degraded" over a missing fingerprint helper (harmless), and a real
-	// cloud-init failure surfaces when the recipe itself runs. apkovl and BYO
-	// images ship no cloud-init and skip this.
+	// to finish before mounts, package setup, or recipes. apkovl and BYO images
+	// ship no cloud-init and skip this.
 	if v.Backend == "cloudinit" {
 		fmt.Fprintln(log, "waiting for cloud-init to finish…")
-		ci := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"cloud-init", "status", "--wait"})...)...)
-		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
-		ci.WaitDelay = recipeShutdownGrace
-		ci.Stdout = io.Discard
-		ci.Stderr = log
-		_ = ci.Run()
+		if err := waitCloudInit(ctx, v, log); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				fmt.Fprintf(log, "CANCELLED: %v\n", ctxErr)
+				return ctxErr
+			}
+			fmt.Fprintf(log, "FAILED: cloud-init readiness: %v\n", err)
+			return fmt.Errorf("cloud-init readiness: %w", err)
+		}
 	}
 
 	mountShares(ctx, v, log)

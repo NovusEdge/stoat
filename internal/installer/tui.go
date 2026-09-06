@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,18 +19,9 @@ import (
 
 // defaultWidth applies until the first WindowSizeMsg arrives. It also floors
 // a terminal that reports an unusably narrow width.
-const defaultWidth = 60
-
-var (
-	okStyle     = lipgloss.NewStyle().Foreground(theme.Up)
-	warnStyle   = lipgloss.NewStyle().Foreground(theme.Warn)
-	errStyle    = lipgloss.NewStyle().Foreground(theme.Err)
-	accentStyle = lipgloss.NewStyle().Foreground(theme.Accent)
-	dimStyle    = lipgloss.NewStyle().Foreground(theme.Dim)
-
-	// cellStyle spaces the check table's columns. lipgloss/table measures cells
-	// ANSI-aware, so pre-colored status cells still align.
-	cellStyle = lipgloss.NewStyle().PaddingRight(2)
+const (
+	defaultWidth  = 60
+	defaultHeight = 24
 )
 
 // keys use key.Binding, not raw string comparison. This is the Bubbles idiom.
@@ -43,17 +35,11 @@ var keys = struct {
 	Install, Accept, Decline, Interrupt, Quit key.Binding
 }{
 	Install:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "install here")),
-	Accept:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "append it")),
+	Accept:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("enter/y", "append it")),
 	Decline:   key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "skip")),
 	Interrupt: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 }
-
-// helpModel returns a fresh help.Model instead of a shared package-level
-// value. ShortHelpView never mutates it today, but a mutable package-level
-// UI model is the kind of shared state that breaks later. help.New() is a
-// small struct literal; building one per render costs nothing.
-func helpModel() help.Model { return help.New() }
 
 type phase int
 
@@ -94,9 +80,14 @@ type Model struct {
 	// AppendRC runs, the build and install already succeeded, so the user
 	// can finish the rc write by hand: this failure does not fail the whole
 	// run. See Failed and done.
-	rcErr error
-	err   error
-	width int
+	rcErr  error
+	err    error
+	width  int
+	height int
+	// darkBackground follows Bubble Tea's background-colour report. It
+	// defaults dark because terminals that cannot answer the query are more
+	// commonly dark, and the shared Stoat palette was designed for that case.
+	darkBackground bool
 	// cancelled is set when ctrl+c or q exits before the run reaches
 	// phaseDone on its own. See Failed and done: it counts as a failure
 	// only if binPath was still empty at that point.
@@ -114,19 +105,22 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = accentStyle
 
-	return Model{
-		phase:   phaseChecks,
-		input:   in,
-		spin:    sp,
-		repoDir: repoDir,
-		home:    home,
-		shell:   shell,
-		pathEnv: pathEnv,
-		dir:     dir,
-		width:   defaultWidth,
+	m := Model{
+		phase:          phaseChecks,
+		input:          in,
+		spin:           sp,
+		repoDir:        repoDir,
+		home:           home,
+		shell:          shell,
+		pathEnv:        pathEnv,
+		dir:            dir,
+		width:          defaultWidth,
+		height:         defaultHeight,
+		darkBackground: true,
 	}
+	m.spin.Style = m.accentStyle()
+	return m
 }
 
 // Failed reports whether the installer stopped on an error, so main can pick
@@ -143,7 +137,52 @@ func New(repoDir, home, shell, pathEnv, prefixEnv string) Model {
 func (m Model) Failed() bool { return m.err != nil || (m.cancelled && m.binPath == "") }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, runChecksCmd())
+	return tea.Batch(m.spin.Tick, runChecksCmd(), tea.RequestBackgroundColor)
+}
+
+// The palette lives in internal/theme so the installer and the main TUI name
+// one set of colours. Each style is built per render from the background the
+// terminal reported.
+func (m Model) styleFor(pick func(theme.Palette) color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(pick(theme.For(m.darkBackground)))
+}
+
+func (m Model) accentStyle() lipgloss.Style {
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Accent })
+}
+
+func (m Model) okStyle() lipgloss.Style {
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Up })
+}
+
+func (m Model) warnStyle() lipgloss.Style {
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Warn })
+}
+
+func (m Model) errStyle() lipgloss.Style {
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Err })
+}
+
+func (m Model) dimStyle() lipgloss.Style {
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Dim })
+}
+
+// helpModel uses Bubbles' width-aware help renderer with the installer's
+// adaptive palette. Bubbles defaults to its dark palette, which is too faint
+// on Stoat's dark background and has no way to follow a later background
+// colour message without being restyled here.
+func (m Model) helpModel() help.Model {
+	h := help.New()
+	h.SetWidth(m.width - 4)
+	h.Styles.ShortKey = m.accentStyle()
+	h.Styles.ShortDesc = m.dimStyle()
+	h.Styles.ShortSeparator = m.dimStyle()
+	h.Styles.Ellipsis = m.dimStyle()
+	return h
+}
+
+func inset(n int, s string) string {
+	return lipgloss.NewStyle().MarginLeft(n).Render(s)
 }
 
 func runChecksCmd() tea.Cmd {
@@ -168,7 +207,10 @@ func buildCmd(repoDir, version string) tea.Cmd {
 	}
 }
 
-func installCmd(src, destDir, repoDir, home string) tea.Cmd {
+// installCmd copies the built binary into place. It creates no data root:
+// every stoat command runs config.EnsureRoot, recipes.Install and keys.Ensure
+// first, and those honour STOAT_HOME.
+func installCmd(src, destDir string) tea.Cmd {
 	return func() tea.Msg {
 		// buildCmd's temp dir has done its job once the binary is copied out,
 		// whether the copy succeeds or fails. It is removed here
@@ -176,9 +218,6 @@ func installCmd(src, destDir, repoDir, home string) tea.Cmd {
 		defer func() { _ = os.RemoveAll(filepath.Dir(src)) }()
 		path, err := Install(src, destDir)
 		if err != nil {
-			return errMsg{err: err}
-		}
-		if err := InstallData(repoDir, home); err != nil {
 			return errMsg{err: err}
 		}
 		return installedMsg{path: path}
@@ -198,7 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case builtMsg:
-		return m, installCmd(msg.tmpPath, m.dir, m.repoDir, m.home)
+		return m, installCmd(msg.tmpPath, m.dir)
 
 	case installedMsg:
 		m.binPath = msg.path
@@ -215,6 +254,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.width < defaultWidth {
 			m.width = defaultWidth
 		}
+		m.height = msg.Height
+		return m, nil
+
+	case tea.BackgroundColorMsg:
+		m.darkBackground = msg.IsDark()
+		m.spin.Style = m.accentStyle()
 		return m, nil
 
 	case spinner.TickMsg:
@@ -311,11 +356,11 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 // reading a `\`-continued paste treats leading whitespace before the
 // reopened quote as ordinary inter-token whitespace, not part of the
 // quoted value. The indent is invisible in what gets pasted.
-func (m Model) rcLineLines(indent string) []string {
-	chunks := WrapRCLine(m.shell, m.dir, m.width-len(indent))
+func (m Model) rcLineLines(indent int) []string {
+	chunks := WrapRCLine(m.shell, m.dir, m.width-indent)
 	lines := make([]string, len(chunks))
 	for i, c := range chunks {
-		lines[i] = indent + dimStyle.Render(c)
+		lines[i] = inset(indent, m.dimStyle().Render(c))
 	}
 	return lines
 }
@@ -331,22 +376,37 @@ func expandHome(p, home string) string {
 }
 
 func (m Model) View() tea.View {
+	s := m.render(true)
+	// Keep the transcript, but trade the six-line mark for a compact product
+	// label when the current terminal cannot show the active state beneath it.
+	// Reserving one row also leaves the final shell prompt from scrolling the
+	// first line away when Bubble Tea exits.
+	if m.height > 0 && lipgloss.Height(s) >= m.height {
+		s = m.render(false)
+	}
+	return tea.NewView(s)
+}
+
+func (m Model) render(fullBanner bool) string {
 	var blocks []string
 
-	blocks = append(blocks, accentStyle.Render(theme.BannerArt), "")
+	if fullBanner {
+		blocks = append(blocks, m.accentStyle().Render(theme.BannerArt), "")
+	} else {
+		blocks = append(blocks, inset(2, m.accentStyle().Bold(true).Render("stoat")), "")
+	}
 
 	if len(m.checks) > 0 {
 		blocks = append(blocks,
-			"  checking host",
+			inset(2, "checking host"),
 			m.checkTable(),
 			"",
-			dimStyle.Render("  "+strings.Repeat("─", m.ruleWidth())),
+			inset(2, m.dimStyle().Render(strings.Repeat("─", m.ruleWidth()))),
 			"",
 		)
 	}
 
-	s := lipgloss.JoinVertical(lipgloss.Left, append(blocks, m.active())...) + "\n"
-	return tea.NewView(s)
+	return lipgloss.JoinVertical(lipgloss.Left, append(blocks, m.active())...) + "\n"
 }
 
 // checkTable renders the probe results as an aligned table.
@@ -368,11 +428,33 @@ func (m Model) checkTable() string {
 		BorderTop(false).BorderBottom(false).
 		BorderLeft(false).BorderRight(false).
 		BorderColumn(false).BorderRow(false).BorderHeader(false).
-		StyleFunc(func(_, _ int) lipgloss.Style { return cellStyle })
+		StyleFunc(func(_, col int) lipgloss.Style {
+			s := lipgloss.NewStyle().PaddingRight(2)
+			if col == 0 {
+				s = s.PaddingLeft(2)
+			}
+			return s
+		})
 
 	for _, c := range m.checks {
-		t.Row("   "+status(c), checkLabel(c), c.Detail)
+		t.Row(m.status(c), checkLabel(c), c.Detail)
 	}
+	return t.Render()
+}
+
+func (m Model) statusRow(status, label, detail string) string {
+	t := table.New().
+		BorderTop(false).BorderBottom(false).
+		BorderLeft(false).BorderRight(false).
+		BorderColumn(false).BorderRow(false).BorderHeader(false).
+		StyleFunc(func(_, col int) lipgloss.Style {
+			s := lipgloss.NewStyle().PaddingRight(2)
+			if col == 0 {
+				s = s.PaddingLeft(2)
+			}
+			return s
+		})
+	t.Row(status, label, detail)
 	return t.Render()
 }
 
@@ -412,30 +494,40 @@ func (m Model) ruleWidth() int {
 func (m Model) active() string {
 	switch m.phase {
 	case phaseChecks:
-		return "  " + m.spin.View() + " checking host"
+		return m.statusRow(m.spin.View(), "checking", "host")
 
 	case phaseDir:
+		prompt := inset(2, lipgloss.JoinHorizontal(lipgloss.Left,
+			lipgloss.NewStyle().PaddingRight(1).Render("install to:"),
+			m.input.View(),
+		))
 		return lipgloss.JoinVertical(lipgloss.Left,
-			"  install to: "+m.input.View(),
+			prompt,
 			"",
-			"  "+helpModel().ShortHelpView([]key.Binding{keys.Install, keys.Interrupt}),
+			inset(2, m.helpModel().ShortHelpView([]key.Binding{keys.Install, keys.Interrupt})),
 		)
 
 	case phaseBuild:
-		return "    " + m.spin.View() + "  building    " + m.version
+		return lipgloss.JoinVertical(lipgloss.Left,
+			m.statusRow(m.spin.View(), "building", m.version),
+			"",
+			inset(2, m.helpModel().ShortHelpView([]key.Binding{keys.Quit, keys.Interrupt})),
+		)
 
 	case phaseRC:
 		lines := []string{
-			"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
+			m.statusRow(m.okStyle().Render("ok"), "installed", m.binPath),
 			"",
-			"  " + m.dir + " is not on your PATH",
-			"  append to " + m.rcPath + ":",
+			m.statusRow(m.warnStyle().Render("warn"), "PATH", m.dir+" is not on your PATH"),
+			inset(2, "append to "+m.rcPath+":"),
 		}
-		lines = append(lines, m.rcLineLines("    ")...)
+		lines = append(lines, m.rcLineLines(4)...)
 		lines = append(lines,
 			"",
-			"  append it? [Y/n]",
-			"  "+helpModel().ShortHelpView([]key.Binding{keys.Accept, keys.Decline}),
+			inset(2, "append it? [Y/n]"),
+			inset(2, m.helpModel().ShortHelpView([]key.Binding{
+				keys.Accept, keys.Decline, keys.Quit, keys.Interrupt,
+			})),
 		)
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 
@@ -456,12 +548,12 @@ func (m Model) done() string {
 	case m.cancelled && m.binPath == "":
 		// Left before the build or install finished. Unlike every other
 		// branch here, nothing was installed. Failed() keys on the same fact.
-		lines = []string{"", errStyle.Render("cancelled") + ": nothing was installed"}
+		lines = []string{"", m.errStyle().Render("cancelled") + ": nothing was installed"}
 	case m.err != nil:
-		lines = []string{"", errStyle.Render("failed") + ": " + m.err.Error()}
+		lines = []string{"", m.errStyle().Render("failed") + ": " + m.err.Error()}
 	default:
 		lines = []string{
-			"    " + okStyle.Render("ok") + "    installed   " + m.binPath,
+			m.statusRow(m.okStyle().Render("ok"), "installed", m.binPath),
 			"",
 			"done: stoat " + m.version,
 		}
@@ -469,16 +561,16 @@ func (m Model) done() string {
 		case m.rcAdded:
 			lines = append(lines,
 				"",
-				"  added the PATH line to "+m.rcPath,
-				"  open a new shell, or source it, to pick it up",
+				inset(2, "added the PATH line to "+m.rcPath),
+				inset(2, "open a new shell, or source it, to pick it up"),
 			)
 		case m.rcErr != nil:
 			lines = append(lines,
 				"",
-				"  "+warnStyle.Render("warn")+"  could not write "+m.rcPath+": "+m.rcErr.Error(),
-				"        add this line yourself:",
+				m.statusRow(m.warnStyle().Render("warn"), "PATH", "could not write "+m.rcPath+": "+m.rcErr.Error()),
+				inset(8, "add this line yourself:"),
 			)
-			lines = append(lines, m.rcLineLines("          ")...)
+			lines = append(lines, m.rcLineLines(10)...)
 		case m.rcLine != "":
 			// Declined. rcLine is set only once the rc prompt has shown (see
 			// the installedMsg case in Update), so this branch is reachable
@@ -487,9 +579,9 @@ func (m Model) done() string {
 			// hand.
 			lines = append(lines,
 				"",
-				"  skipped, add this yourself:",
+				inset(2, "skipped, add this yourself:"),
 			)
-			lines = append(lines, m.rcLineLines("        ")...)
+			lines = append(lines, m.rcLineLines(8)...)
 		}
 	}
 
@@ -497,7 +589,7 @@ func (m Model) done() string {
 		lines = append(lines, "", "before your first VM:")
 		seen := map[string]bool{}
 		for _, c := range problems {
-			lines = append(lines, "", "  "+warnStyle.Render(checkLabel(c))+": "+c.Detail)
+			lines = append(lines, "", inset(2, m.warnStyle().Render(checkLabel(c))+": "+c.Detail))
 			for _, f := range c.Fix {
 				// Fixes are deduplicated here, not in Check. Two checks
 				// (qemu-img, qemu-system-x86_64) can share one package. The
@@ -507,7 +599,7 @@ func (m Model) done() string {
 					continue
 				}
 				seen[f] = true
-				lines = append(lines, "    "+dimStyle.Render(f))
+				lines = append(lines, inset(4, m.dimStyle().Render(f)))
 			}
 		}
 	}
@@ -515,9 +607,9 @@ func (m Model) done() string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func status(c Check) string {
+func (m Model) status(c Check) string {
 	if c.OK {
-		return okStyle.Render("ok")
+		return m.okStyle().Render("ok")
 	}
-	return warnStyle.Render("warn")
+	return m.warnStyle().Render("warn")
 }

@@ -134,23 +134,25 @@ func TestWrapScriptsMultilineContentSurvives(t *testing.T) {
 	}
 }
 
-// TestWrapScriptsFragmentMergesIntoSeed is the integration case.
-// WrapScripts' output is meant to be passed to Seed exactly like any other
-// recipe fragment, so it must survive withMergeHow/buildArchive the same
-// way (see TestArchiveWriteFilesSurvives for the same contract on a
-// hand-written fragment).
+// TestWrapScriptsFragmentMergesIntoSeed is the integration case. WrapScripts'
+// output is passed to Seed exactly like any other recipe fragment, so both of
+// its keys must survive the merge (see TestWriteFilesSurvives for the same
+// contract on a hand-written fragment).
 func TestWrapScriptsFragmentMergesIntoSeed(t *testing.T) {
 	fragment := WrapScripts([]Script{{Name: "xfce", Content: "echo hi\n"}}, "")
 
-	got := withMergeHow(fragment)
+	got, err := mergeDocs([]string{"#cloud-config\nusers:\n  - name: stoat\n", fragment})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.HasPrefix(got, "#cloud-config\n") {
 		t.Errorf("merged fragment lost its #cloud-config header:\n%s", got)
 	}
-	if !strings.Contains(got, "write_files:") || !strings.Contains(got, "runcmd:") {
-		t.Errorf("merged fragment lost write_files/runcmd:\n%s", got)
-	}
-	if !strings.Contains(got, "merge_how:") {
-		t.Errorf("merged fragment missing merge_how directive:\n%s", got)
+	merged := parseMapping(t, got)
+	for _, key := range []string{"write_files", "runcmd", "users"} {
+		if _, ok := merged[key]; !ok {
+			t.Errorf("merged fragment lost %s:\n%s", key, got)
+		}
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
+	"github.com/novusedge/stoat/internal/hostops"
 	"github.com/novusedge/stoat/internal/keys"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/mcpsrv"
@@ -425,12 +426,14 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		// lines: they are all already gated on it.
 		a.Quiet = true
 	}
-	if len(a.Params) > 0 {
-		resolved, err := resolveParamEdits(a.Params, stdin, stderr, !jsonMode && streamIsTTY(stdin))
-		if err != nil {
-			return a.failMsg(stdout, stderr, core.ErrInvalidSpec, err.Error())
+	// Capabilities is deliberately dispatched before generic setup: discovery
+	// reads host checks and stored metadata, so it must not create a data root,
+	// install recipes, generate keys, initialize logs, or load guest overrides.
+	if a.Cmd == "capabilities" {
+		if err := resolveScope(a); err != nil {
+			return a.fail(stdout, stderr, err)
 		}
-		a.Params = resolved
+		return runCapabilities(a, version, stdout, stderr)
 	}
 
 	switch a.Cmd {
@@ -446,6 +449,25 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		}
 		fmt.Fprintln(stdout, "stoat", version)
 		return ExitOK
+	case "doctor":
+		// Doctor is read-only by design: it may report an unqualified native
+		// host before root setup or parameter resolution.
+		return runDoctor(a, stdout, stderr)
+	}
+
+	// Every mutating or process-facing command must reject before resolving
+	// secrets, reading project scope, creating the data root, or initializing
+	// logs. The independent capabilities command is dispatched before this
+	// boundary by its owner and remains metadata-only.
+	if err := hostops.RequireVM(); err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	if len(a.Params) > 0 {
+		resolved, err := resolveParamEdits(a.Params, stdin, stderr, !jsonMode && streamIsTTY(stdin))
+		if err != nil {
+			return a.failMsg(stdout, stderr, core.ErrInvalidSpec, err.Error())
+		}
+		a.Params = resolved
 	}
 
 	// Every other subcommand touches the data root, so it must be
@@ -540,8 +562,6 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runCheckRecipes(a, stdout, stderr)
 	case "update":
 		return runUpdate(a, stdout, stderr)
-	case "doctor":
-		return runDoctor(a, stdout, stderr)
 	case "mcp":
 		return runMCP(a, version, stdout, stderr)
 	case "status":

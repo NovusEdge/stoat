@@ -1,0 +1,36 @@
+name = "python-dev"
+description = "Python 3 with pip and an isolated development environment"
+os = ["alpine", "ubuntu", "debian", "fedora", "arch", "almalinux", "rocky", "opensuse"]
+stage = "provision"
+script = "install-debian.sh"
+schema = 3
+
+[scripts]
+alpine = "install-alpine.sh"
+ubuntu = "install-debian.sh"
+debian = "install-debian.sh"
+fedora = "install-rpm.sh"
+almalinux = "install-rpm.sh"
+rocky = "install-rpm.sh"
+opensuse = "install-zypper.sh"
+arch = "install-arch.sh"
+
+[params.user]
+type = "string"
+required = true
+help = "configured SSH account that owns the development environment"
+
+[params.venv_dir]
+type = "string"
+default = ""
+help = "absolute path for a persistent virtual environment; empty runs a smoke check only"
+
+[outputs]
+python = "path to the Python interpreter"
+python_version = "Python version"
+pip = "path to pip"
+venv = "persistent virtual environment path, or empty for smoke-only mode"
+venv_python = "persistent virtual environment interpreter path, or empty for smoke-only mode"
+
+[health]
+check = "python3 --version >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1"
