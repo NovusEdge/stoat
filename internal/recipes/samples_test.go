@@ -140,7 +140,7 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantOS := []string{"alpine", "arch", "debian", "fedora", "ubuntu"}
+	wantOS := []string{"almalinux", "alpine", "arch", "debian", "fedora", "opensuse", "rocky", "ubuntu"}
 	checks := []struct {
 		name    string
 		outputs []string
@@ -268,7 +268,7 @@ func TestBundledPythonDevFallsBackWhenEscalationRefuses(t *testing.T) {
 	account := currentTestAccount(t)
 	root := t.TempDir()
 
-	for _, guestOS := range []string{"alpine", "debian", "arch", "fedora"} {
+	for _, guestOS := range []string{"alpine", "debian", "arch", "fedora", "almalinux", "rocky", "opensuse"} {
 		body := bundledScript(t, "python-dev", guestOS)
 		venvDir := filepath.Join(root, guestOS, "env")
 		output, err := runBundledPython(t, body, account.Username, venvDir,
