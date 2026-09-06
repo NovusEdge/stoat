@@ -138,11 +138,19 @@ refuses a stale declaration or dirty checkout.
 ## Output and limits
 
 MCP tool results use the DTOs described in [JSON output](json.md). Errors are
-returned as tool errors with the same human-readable message as the CLI; a
-caller should branch on the documented operation and level rather than parse
-that message. Binary file content is base64 encoded. Read, directory, process,
-log, and command output sizes are capped by the server; the tool schema states
-the cap for each input.
+returned with `isError: true`. The first content block is a text block with the
+same human-readable message as the CLI. The server also adds the complete
+`wire.ErrorInfo` under `_meta["io.github.novusedge.stoat/error"]` and appends a
+second text block containing JSON in the form `{"error":{...}}`. Callers
+should inspect `isError`, then branch on `error.code` from metadata or the
+second text block. They must not branch on `structuredContent`: the SDK owns
+that field and keeps the schema-valid typed output, including on an error.
+
+Successful results keep their existing DTO, `structuredContent`, content
+fallback, and output schema. SDK argument validation and MCP protocol errors
+are outside this tool-result contract. Binary file content is base64 encoded.
+Read, directory, process, log, and command output sizes are capped by the
+server; the tool schema states the cap for each input.
 
 Recipe and guest tools read manifests and definitions on the host. They do not
 run a recipe unless the caller selects `apply_recipes`, a project apply tool,

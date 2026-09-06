@@ -149,6 +149,8 @@ bump the contract version. Do not write code that requires them.
 | `canceled` | the context was cancelled |
 | `usage` | a bad flag, a missing argument, an unknown subcommand |
 | `confirmation_required` | a destructive command was run without `-y` |
+| `access_denied` | MCP guest access was refused because the VM's `agent_access` level is too low |
+| `rate_limited` | MCP refused a tool call because its per-tool or shared rate bucket was exhausted |
 | `lock_out_of_date` | a project declaration is not pinned in `stoat.lock` |
 | `internal` | anything unanticipated; the escape hatch |
 
