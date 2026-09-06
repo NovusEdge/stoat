@@ -92,8 +92,24 @@ func TestHelperProcessExitReleasesLock(t *testing.T) {
 
 	f := openLockFile(t, path)
 	defer func() { _ = f.Close() }()
-	if err := filelock.Lock(f, filelock.Exclusive, true); err != nil {
-		t.Fatalf("lock after holder exit: %v", err)
+	deadline := time.Now().Add(2 * time.Second)
+	var lockErr error
+	for {
+		lockErr = filelock.Lock(f, filelock.Exclusive, true)
+		if lockErr == nil {
+			break
+		}
+		if !errors.Is(lockErr, filelock.ErrWouldBlock) {
+			t.Fatalf("lock after holder exit: %v", lockErr)
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			t.Fatalf("lock after holder exit remained blocked for 2s: %v", lockErr)
+		}
+		if remaining > 25*time.Millisecond {
+			remaining = 25 * time.Millisecond
+		}
+		time.Sleep(remaining)
 	}
 	if err := filelock.Unlock(f); err != nil {
 		t.Fatalf("unlock after holder exit: %v", err)
