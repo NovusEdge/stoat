@@ -3,6 +3,7 @@ package hostcheck
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,7 +24,11 @@ func TestFirstBinCheckMatchesQemuBinary(t *testing.T) {
 // carry no Fix, since the Done screen prints every Fix it is given.
 func TestRunChecksFindsBinary(t *testing.T) {
 	dir := t.TempDir()
-	stub := filepath.Join(dir, "qemu-img")
+	stubName := "qemu-img"
+	if runtime.GOOS == "windows" {
+		stubName += ".exe"
+	}
+	stub := filepath.Join(dir, stubName)
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
