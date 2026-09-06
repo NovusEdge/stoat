@@ -18,6 +18,7 @@ import (
 )
 
 const helperEnv = "STOAT_FILELOCK_HELPER"
+const helperResultPrefix = "FILELOCK_RESULT "
 
 type lockHelper struct {
 	cmd         *exec.Cmd
@@ -36,7 +37,7 @@ func TestExclusiveNonBlockingContenderIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("contender helper failed: output=%q, err=%v", output, err)
 	}
-	if got, want := strings.TrimSpace(output), "would-block"; got != want {
+	if got, want := output, "would-block"; got != want {
 		t.Fatalf("contender result = %q, want %q", got, want)
 	}
 }
@@ -52,7 +53,7 @@ func TestSharedHoldersCoexistAndRefuseExclusiveContender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exclusive contender helper failed: output=%q, err=%v", output, err)
 	}
-	if got, want := strings.TrimSpace(output), "would-block"; got != want {
+	if got, want := output, "would-block"; got != want {
 		t.Fatalf("exclusive contender result = %q, want %q", got, want)
 	}
 }
@@ -86,11 +87,11 @@ func TestHelperProcessExitReleasesLock(t *testing.T) {
 	if err := holder.cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill lock holder: %v", err)
 	}
-	waitHelper(t, holder)
+	waitKilledHelper(t, holder)
 	holderExited = true
 
 	f := openLockFile(t, path)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := filelock.Lock(f, filelock.Exclusive, true); err != nil {
 		t.Fatalf("lock after holder exit: %v", err)
 	}
@@ -111,7 +112,9 @@ func TestBlockingWaiterProgressesAfterRelease(t *testing.T) {
 	}
 
 	closeHelperInput(t, holder)
-	if line, ok := readHelperLine(waiter.stdout, 2*time.Second); !ok || line != "locked" {
+	line, ok := readHelperLine(waiter.stdout, 2*time.Second)
+	result, resultOK := helperResult(line)
+	if !ok || !resultOK || result != "locked" {
 		t.Fatalf("blocking waiter result after release = %q, ok=%t; want locked", line, ok)
 	}
 	closeHelperInput(t, waiter)
@@ -123,48 +126,48 @@ func TestFileLockHelperProcess(t *testing.T) {
 		return
 	}
 	if len(os.Args) < 7 || os.Args[len(os.Args)-5] != "--" {
-		fmt.Fprintln(os.Stdout, "error: malformed helper arguments")
+		writeHelperResult("error: malformed helper arguments")
 		os.Exit(2)
 	}
 	args := os.Args[len(os.Args)-4:]
 	path, modeName := args[0], args[1]
 	nonBlocking, err := strconv.ParseBool(args[2])
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "error: parse nonBlocking: %v\n", err)
+		writeHelperResult(fmt.Sprintf("error: parse nonBlocking: %v", err))
 		os.Exit(2)
 	}
 	hold, err := strconv.ParseBool(args[3])
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "error: parse hold: %v\n", err)
+		writeHelperResult(fmt.Sprintf("error: parse hold: %v", err))
 		os.Exit(2)
 	}
 	mode := filelock.Exclusive
 	if modeName == "shared" {
 		mode = filelock.Shared
 	} else if modeName != "exclusive" {
-		fmt.Fprintf(os.Stdout, "error: unknown mode %q\n", modeName)
+		writeHelperResult(fmt.Sprintf("error: unknown mode %q", modeName))
 		os.Exit(2)
 	}
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "error: open: %v\n", err)
+		writeHelperResult(fmt.Sprintf("error: open: %v", err))
 		os.Exit(2)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := filelock.Lock(f, mode, nonBlocking); err != nil {
 		if errors.Is(err, filelock.ErrWouldBlock) {
-			fmt.Fprintln(os.Stdout, "would-block")
+			writeHelperResult("would-block")
 			return
 		}
-		fmt.Fprintf(os.Stdout, "error: lock: %v\n", err)
+		writeHelperResult(fmt.Sprintf("error: lock: %v", err))
 		return
 	}
-	fmt.Fprintln(os.Stdout, "locked")
+	writeHelperResult("locked")
 	if hold {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 	} else {
-		fmt.Fprintln(os.Stdout, "entered")
+		writeHelperResult("entered")
 	}
 	_ = filelock.Unlock(f)
 }
@@ -188,7 +191,8 @@ func startHelper(t *testing.T, path string, mode filelock.Mode, nonBlocking, hol
 	t.Helper()
 	helper := startRawHelper(t, path, mode, nonBlocking, hold)
 	line, ok := readHelperLine(helper.stdout, 2*time.Second)
-	if !ok || line != "locked" {
+	result, resultOK := helperResult(line)
+	if !ok || !resultOK || result != "locked" {
 		closeHelperInput(t, helper)
 		waitHelper(t, helper)
 		t.Fatalf("lock helper result = %q, ok=%t; want locked", line, ok)
@@ -198,11 +202,11 @@ func startHelper(t *testing.T, path string, mode filelock.Mode, nonBlocking, hol
 
 func startRawHelper(t *testing.T, path string, mode filelock.Mode, nonBlocking, hold bool) *lockHelper {
 	t.Helper()
-	stdin, err := startCommand(t, path, mode, nonBlocking, hold)
+	helper, err := startCommand(t, path, mode, nonBlocking, hold)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return stdin
+	return helper
 }
 
 func startCommand(t *testing.T, path string, mode filelock.Mode, nonBlocking, hold bool) (*lockHelper, error) {
@@ -236,7 +240,11 @@ func runHelper(path string, mode filelock.Mode, nonBlocking, hold bool) (string,
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestFileLockHelperProcess", "--", path, modeName(mode), strconv.FormatBool(nonBlocking), strconv.FormatBool(hold))
 	cmd.Env = append(os.Environ(), helperEnv+"=1")
 	output, err := cmd.CombinedOutput()
-	return string(output), err
+	result, parseErr := parseHelperResult(string(output))
+	if parseErr != nil {
+		return "", parseErr
+	}
+	return result, err
 }
 
 func modeName(mode filelock.Mode) string {
@@ -274,6 +282,17 @@ func waitHelper(t *testing.T, helper *lockHelper) {
 	helper.waited = true
 }
 
+func waitKilledHelper(t *testing.T, helper *lockHelper) {
+	t.Helper()
+	if helper.waited {
+		return
+	}
+	if err := helper.cmd.Wait(); err == nil {
+		t.Errorf("killed lock helper exited successfully")
+	}
+	helper.waited = true
+}
+
 func readHelperLine(lines <-chan string, timeout time.Duration) (string, bool) {
 	select {
 	case line, ok := <-lines:
@@ -281,4 +300,25 @@ func readHelperLine(lines <-chan string, timeout time.Duration) (string, bool) {
 	case <-time.After(timeout):
 		return "", false
 	}
+}
+
+func writeHelperResult(result string) {
+	fmt.Fprintln(os.Stdout, helperResultPrefix+result)
+}
+
+func helperResult(line string) (string, bool) {
+	if !strings.HasPrefix(line, helperResultPrefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(line, helperResultPrefix), true
+}
+
+func parseHelperResult(output string) (string, error) {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, helperResultPrefix) {
+			result, _ := helperResult(line)
+			return result, nil
+		}
+	}
+	return "", fmt.Errorf("helper output missing protocol result: %q", output)
 }
