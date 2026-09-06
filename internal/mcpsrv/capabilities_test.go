@@ -3,7 +3,10 @@ package mcpsrv
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestCapabilitiesMCPToolIsOptionalVMReadOnly(t *testing.T) {
@@ -78,5 +81,22 @@ func TestCapabilitiesMCPToolIsOptionalVMReadOnly(t *testing.T) {
 	}
 	if out.Schema != 1 {
 		t.Errorf("capabilities schema = %d, want 1; output=%s", out.Schema, raw)
+	}
+}
+
+func TestCapabilitiesMCPMissingTargetIsNotFound(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	res := callTool(t, "capabilities", map[string]any{"vm": "missing"})
+	if !res.IsError {
+		t.Fatal("capabilities accepted a missing target")
+	}
+	var message strings.Builder
+	for _, content := range res.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			message.WriteString(text.Text)
+		}
+	}
+	if !strings.Contains(message.String(), "missing") || !strings.Contains(strings.ToLower(message.String()), "not found") {
+		t.Errorf("missing target MCP error = %q, want existing not-found message", message.String())
 	}
 }
