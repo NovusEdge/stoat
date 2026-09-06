@@ -3,6 +3,7 @@ description = "git, a compiler, an editor and basic fetch tools"
 os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
 stage = "provision"
 script = "install.sh"
+schema = 3
 
 [scripts]
 alpine = "install-alpine.sh"
@@ -10,3 +11,11 @@ ubuntu = "install-debian.sh"
 debian = "install-debian.sh"
 fedora = "install-fedora.sh"
 arch = "install-arch.sh"
+
+[outputs]
+compiler = "path to the C compiler"
+editor = "path to the editor"
+git = "path to Git"
+
+[health]
+check = "command -v git >/dev/null 2>&1 && command -v cc >/dev/null 2>&1 && command -v vim >/dev/null 2>&1 && git --version >/dev/null 2>&1 && cc --version >/dev/null 2>&1 && vim --version >/dev/null 2>&1"

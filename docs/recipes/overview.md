@@ -66,14 +66,24 @@ succeeded. It does not reboot live VMs because a live root is temporary.
 
 ## Bundled recipes
 
-The bundled set is closed and currently contains these four recipes:
+The bundled catalog changes only through an approved design. Do not add
+opportunistic recipe IDs. It currently contains these five recipes:
 
 | Recipe | Supported guests | Purpose |
 |---|---|---|
 | `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch | Git, compiler tools, editor and basic fetch tools |
 | `docker` | Alpine, Ubuntu, Debian, Fedora, Arch | Docker engine and compose plugin; schema 3 parameter `user`, output `socket`, health check `docker info` |
+| `python-dev` | Alpine, Ubuntu, Debian, Fedora, Arch | Python 3, pip, and an isolated development environment; schema 3 parameters `user` and optional `venv_dir`, with smoke-only mode when `venv_dir` is empty |
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
+
+`devtools` and `python-dev` are the two common developer recipes. The
+remaining bundled recipes are existing capabilities and are not part of that
+developer pair.
+
+`python-dev` requires the configured guest account. For example, a cloud guest
+whose SSH account is `stoat` must use `python-dev.user=stoat`; an Alpine guest
+using `root` must use `python-dev.user=root`.
 
 The scripts are in `internal/recipes/bundled/` in the source tree. Each
 recipe has a manifest. Docker, devtools and Tailscale use OS-specific script

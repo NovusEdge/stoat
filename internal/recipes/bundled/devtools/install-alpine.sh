@@ -20,13 +20,26 @@ done
 # Debian's build-essential. Alpine has no package called "build-essential".
 # --wait 60 makes apk wait up to 60s for the lock instead of failing with
 # exit 99 when another apk run holds it.
-apk --wait 60 add git curl ca-certificates build-base vim tmux less
+stoat_pkg_install git curl ca-certificates build-base vim tmux less
 
 # Alpine's default shell is ash and there is no bash unless asked for; scripts
 # copied in from elsewhere routinely assume it, so it is part of a baseline.
-apk --wait 60 add bash
+stoat_pkg_install bash
 
 git --version
+compiler=$(command -v cc 2>/dev/null || command -v gcc 2>/dev/null || true)
+editor=$(command -v vim 2>/dev/null || true)
+git_path=$(command -v git 2>/dev/null || true)
+[ -n "$compiler" ] || { echo "devtools: C compiler was not installed" >&2; exit 1; }
+[ -n "$editor" ] || { echo "devtools: editor was not installed" >&2; exit 1; }
+[ -n "$git_path" ] || { echo "devtools: git was not installed" >&2; exit 1; }
+if [ -n "${STOAT_OUTPUT:-}" ]; then
+    {
+        printf 'compiler=%s\n' "$compiler"
+        printf 'editor=%s\n' "$editor"
+        printf 'git=%s\n' "$git_path"
+    } >> "$STOAT_OUTPUT"
+fi
 echo "devtools installed: git, curl, build-base (gcc/make), vim, tmux, less, bash"
 
 # Live VMs are diskless: the root filesystem is a tmpfs/overlay in RAM, so
