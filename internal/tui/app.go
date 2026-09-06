@@ -49,7 +49,7 @@ type model struct {
 	// modal.
 	modal *imageModal
 
-	preflight string // non-empty when qemu or /dev/kvm is unusable
+	preflight string // non-empty when a host requirement is unavailable
 	width     int
 	height    int
 	// pendingDelete is the VM awaiting delete confirmation. One field covers

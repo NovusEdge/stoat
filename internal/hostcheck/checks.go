@@ -34,20 +34,6 @@ var binChecks = []struct {
 	{"git", Pkg{Arch: "git", Debian: "git", Fedora: "git"}, true},
 }
 
-// RunChecks probes every host requirement, in the order they are displayed.
-// None of these block the install: internal/qemu/run.go already gates VM start
-// at runtime with the same two probes, so the installer's job is to say it
-// early, not to enforce it.
-func RunChecks(d Distro) []Check {
-	checks := make([]Check, 0, len(binChecks)+1)
-	for _, b := range binChecks {
-		c := lookPathCheck(b.name, d.InstallCmd(b.pkg))
-		c.Optional = b.optional
-		checks = append(checks, c)
-	}
-	return append(checks, KVMCheck())
-}
-
 func lookPathCheck(name string, fix []string) Check {
 	path, err := exec.LookPath(name)
 	if err != nil {

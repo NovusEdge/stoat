@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/novusedge/stoat/internal/hostops"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
@@ -195,6 +196,9 @@ func Root() string {
 
 // EnsureRoot creates the data root and its fixed subdirectories.
 func EnsureRoot() error {
+	if err := hostops.RequireVM(); err != nil {
+		return err
+	}
 	for _, d := range []string{"isos", "recipes"} {
 		if err := os.MkdirAll(filepath.Join(Root(), d), 0o755); err != nil {
 			return err
@@ -266,6 +270,9 @@ func (v *VM) ISOPath() string {
 
 // Save writes vm.toml, creating the VM directory if needed.
 func (v *VM) Save() error {
+	if err := hostops.RequireVM(); err != nil {
+		return err
+	}
 	if v.Dir == "" {
 		v.Dir = filepath.Join(Root(), v.Name)
 	}
@@ -368,6 +375,9 @@ var sshPortLine = regexp.MustCompile(`(?m)^\s*sshport\s*=\s*(\d+)\s*$`)
 
 // Delete removes the VM directory. It never touches isos/.
 func (v *VM) Delete() error {
+	if err := hostops.RequireVM(); err != nil {
+		return err
+	}
 	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {
 		return fmt.Errorf("refusing to delete %q: outside the data root", v.Dir)
 	}

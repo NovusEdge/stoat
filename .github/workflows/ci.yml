@@ -70,5 +70,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
+      - name: build CLI
+        run: go build ./cmd/stoat
       - name: file locks
         run: go test ./internal/filelock
+      - name: host guards
+        run: go test ./internal/hostops ./internal/hostcheck
+      - name: refusal boundaries
+        run: go test ./internal/config ./internal/qemu ./internal/cli ./internal/tui -run '^(TestUnsupported|TestHostDiagnostics|TestHostConfig|TestCapabilitiesNative)'
