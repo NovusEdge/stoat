@@ -18,7 +18,6 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
-	"gopkg.in/yaml.v3"
 )
 
 // User is the account the seed creates. Anything provisioned through this
@@ -93,13 +92,12 @@ func extraPackages(osName string) string {
 	return b.String()
 }
 
-// userData builds the seed's user-data as a cloud-config-archive: the
-// hardware-proven users: block (parameterized by the guest's shell), the
-// OS's own extra packages if it needs any, and every selected cloud
-// recipe's body verbatim, each as its own document. cloud-init merges the
-// documents itself; see buildArchive. This package does not parse any
-// document for packages:/runcmd:, so a fragment using write_files: or any
-// other key survives instead of being silently dropped.
+// userData builds the seed's user-data: the hardware-proven users: block
+// (parameterized by the guest's shell), the OS's own extra packages if it
+// needs any, and every selected cloud recipe's body. mergeDocs folds them
+// into one #cloud-config document. Nothing here looks for packages: or
+// runcmd: by name, so a fragment using write_files: or any other key
+// survives.
 func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
 
@@ -112,7 +110,7 @@ func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error
 	}
 	docs = append(docs, recipeBodies...)
 
-	return buildArchive(docs)
+	return mergeDocs(docs)
 }
 
 // SkipShares reports whether osName's guest.toml sets backend.cloudinit's
@@ -225,70 +223,6 @@ func ValidateFragment(body string) (annotated string, err error) {
 		return string(out), fmt.Errorf("cloud-init schema: %w", err)
 	}
 	return string(out), nil
-}
-
-// mergeHow is the explicit merge directive every document in the archive
-// carries. cloud-init's default merge is dict(no_replace)+list()+str(): two
-// documents both declaring packages: do NOT append, the first one wins and
-// the second is silently discarded. append+recurse_list makes list values
-// (packages:, runcmd:, ...) concatenate instead.
-const mergeHow = "list(append)+dict(recurse_list)"
-
-// withMergeHow injects merge_how as a top-level key into a #cloud-config
-// document body.
-//
-// A document's own merge_how does not govern how it merges in. It governs
-// how the NEXT document in the archive merges into the accumulated result
-// (cloud-init's merging.rst, "Specifying multiple types"). The first
-// document always merges with the built-in default, regardless of what it
-// declares.
-//
-// Every document except the last needs the directive, or a later document
-// silently loses to an earlier one. Callers may pass any number of recipe
-// bodies, so the last one is not known in advance; every document gets the
-// directive. This matches cloud-init's own worked example in merging.rst,
-// which puts merge_how in both halves of a two-document merge.
-func withMergeHow(doc string) string {
-	directive := fmt.Sprintf("merge_how: %q\n", mergeHow)
-	if rest, ok := strings.CutPrefix(doc, "#cloud-config\n"); ok {
-		return "#cloud-config\n" + directive + rest
-	}
-	return directive + doc
-}
-
-// archiveDoc is one entry of a cloud-config-archive: cloud-init's own
-// format for a list of {type, content} documents that it merges itself,
-// replacing the packages:/runcmd:-only splicing this package used to do by
-// hand (see doc/examples/cloud-config-archive.txt upstream).
-type archiveDoc struct {
-	Type    string `yaml:"type"`
-	Content string `yaml:"content"`
-}
-
-// buildArchive renders docs as a cloud-config-archive. The
-// "#cloud-config-archive" header is required verbatim on its own first
-// line: it is what NoCloud's format-detection matches on to unpack the
-// payload as an archive rather than parse it (and fail) as one big
-// #cloud-config document. Each doc is carried through withMergeHow so the
-// archive as a whole merges by appending rather than by cloud-init's
-// default first-one-wins.
-func buildArchive(docs []string) (string, error) {
-	// An archive is a top-level YAML list. cloud-init 24.4 on AlmaLinux 9 and
-	// Rocky 9 calls .get() on the parsed user-data before it checks the type,
-	// so the list fails the init-local stage and pins `cloud-init status` at
-	// error for the life of the VM. One document does not need the wrapper.
-	if len(docs) == 1 {
-		return withMergeHow(docs[0]), nil
-	}
-	items := make([]archiveDoc, len(docs))
-	for i, d := range docs {
-		items[i] = archiveDoc{Type: "text/cloud-config", Content: withMergeHow(d)}
-	}
-	out, err := yaml.Marshal(items)
-	if err != nil {
-		return "", fmt.Errorf("marshaling cloud-config-archive: %w", err)
-	}
-	return "#cloud-config-archive\n" + string(out), nil
 }
 
 // Seed writes <v.OvlDir()>/seed/{user-data,meta-data} and builds
