@@ -17,6 +17,7 @@ var toolTable = []toolSpec{
 	{"guest_info", classRead, LevelNone},
 	{"recipe_schema", classRead, LevelNone},
 	{"search_recipes", classRead, LevelNone},
+	{"capabilities", classRead, LevelNone},
 
 	// Mutating, host side (Task 7).
 	{"create", classMutate, LevelNone},
