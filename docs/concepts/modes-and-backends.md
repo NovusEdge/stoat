@@ -27,11 +27,11 @@ into RAM: the root filesystem is an Alpine initramfs overlay, and nothing
 about it is written anywhere persistent. Stop or reboot the VM and you get a
 clean slate next time.
 
-What makes `live` mode useful: every time you start
-one, stoat builds a small Alpine overlay tarball (an "apkovl") and hands it to
-the guest as a fake FAT disk over `-virtfs`/vvfat. That overlay bakes in:
+What makes `live` mode useful: every time you start one, stoat builds a small
+Alpine overlay tarball (an "apkovl") and hands it to the guest as a
+FAT-formatted auxiliary drive. That overlay bakes in:
 
-- stoat's own SSH keypair, so `root@127.0.0.1:<port>` works the moment sshd
+- stoat's client public key, so `root@127.0.0.1:<port>` works the moment sshd
   comes up, with no login prompt, no password, no manual key copying
 - a stable host key, so a rebuilt VM (which happens on every single start,
   by design; see below) doesn't make your SSH client complain about a
@@ -77,8 +77,8 @@ Alongside the overlay, stoat builds a small NoCloud cloud-init seed ISO
 (volume label `CIDATA`) containing:
 
 - a `stoat` user, password-less sudo, and stoat's public key
-- the selected recipes' cloud-init fragments and script bodies, as separate
-  archive documents
+- cloud-init documents for the user, mounts, OS packages, and the selected
+  recipe scripts
 
 Cloud-init applies the seed **at first boot only**. The seed carries selected
 recipe fragments and scripts as cloud-init archive documents. Stoat may run a

@@ -24,6 +24,8 @@ than an error.
 ├── guest_host_ed25519_key.pub
 ├── isos/                      # downloaded ISOs and cloud images
 ├── recipes/                   # global and bundled recipe scripts/fragments
+├── shared/
+│   └── <vm-name>/             # writable per-VM 9p work share, mounted at /mnt/work
 ├── stoat.lock                 # global recipe pins, when used outside a project
 ├── logs/
 │   └── stoat.log              # one shared log for the whole tool
@@ -32,6 +34,9 @@ than an error.
     ├── disk.qcow2             # disk/cloud modes only
     ├── qemu.pid                # written by QEMU's -pidfile while running
     ├── monitor.sock            # QEMU monitor, unix socket, for Stop()
+    ├── qmp.sock                # QMP socket, used for VM snapshots
+    ├── vnc.sock                # VNC socket when the VM uses VNC display
+    ├── console.log             # QEMU serial console log
     ├── last-provision.log      # output of the most recent `p` run, truncated each time
     └── ovl/
         ├── stoat.apkovl.tar.gz # live mode: rebuilt on every start
