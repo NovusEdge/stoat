@@ -147,6 +147,9 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 	}{
 		{name: "devtools", outputs: []string{"compiler", "editor", "git"}},
 		{name: "python-dev", outputs: []string{"pip", "python", "python_version", "venv", "venv_python"}},
+		{name: "build-deps", outputs: []string{"compiler", "make", "pkg_config"}},
+		{name: "service-tools", outputs: []string{"lsof", "service_manager", "strace"}},
+		{name: "pkg-tools", outputs: []string{"manager", "query_tool"}},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,6 +196,379 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 			venvParam, ok := m.Params["venv_dir"]
 			if !ok || venvParam.Type != "string" || venvParam.Required || venvParam.Default != "" {
 				t.Errorf("venv_dir param = %+v, want optional string defaulting empty", venvParam)
+			}
+		})
+	}
+}
+
+func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
+	rpm := []string{"@development-tools", "pkgconf-pkg-config rpm-build"}
+	cases := []struct {
+		os       string
+		requests []string
+	}{
+		{os: "ubuntu", requests: []string{"build-essential pkg-config autoconf automake libtool dpkg-dev"}},
+		{os: "debian", requests: []string{"build-essential pkg-config autoconf automake libtool dpkg-dev"}},
+		{os: "fedora", requests: rpm},
+		{os: "almalinux", requests: rpm},
+		{os: "rocky", requests: rpm},
+		{os: "opensuse", requests: []string{"-t pattern devel_basis"}},
+		{os: "arch", requests: []string{"base-devel"}},
+		{os: "alpine", requests: []string{"alpine-sdk build-base"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.os, func(t *testing.T) {
+			body := bundledScript(t, "build-deps", tc.os)
+			root := t.TempDir()
+			outputPath := filepath.Join(root, "output")
+			callsPath := filepath.Join(root, "calls")
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"cc", "make", "pkg-config"} {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.os == "alpine" {
+				if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
+				t.Fatalf("%s: %v\n%s", tc.os, err, output)
+			}
+			calls, err := os.ReadFile(callsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := installRequests(string(calls)); !slices.Equal(got, tc.requests) {
+				t.Errorf("%s package requests = %v, want %v", tc.os, got, tc.requests)
+			}
+			outputs := parseOutputs(t, outputPath)
+			want := map[string]string{"compiler": "cc", "make": "make", "pkg_config": "pkg-config"}
+			for name, wantBase := range want {
+				if got := filepath.Base(outputs[name]); got != wantBase {
+					t.Errorf("%s: output %q = %q, want basename %q", tc.os, name, outputs[name], wantBase)
+				}
+			}
+		})
+	}
+}
+
+// installRequests returns the package sets the script asked for, in order.
+func installRequests(calls string) []string {
+	var requests []string
+	for _, line := range strings.Split(strings.TrimSpace(calls), "\n") {
+		if after, ok := strings.CutPrefix(line, "install "); ok {
+			requests = append(requests, after)
+		}
+	}
+	return requests
+}
+
+// dnf4 on AlmaLinux 9 and Rocky 9 rejects the development-tools group id and
+// wants development instead. The script must try the second id rather than
+// fail the recipe.
+func TestBundledBuildDepsFallsBackToTheOtherGroupID(t *testing.T) {
+	body := bundledScript(t, "build-deps", "almalinux")
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cc", "make", "pkg-config"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	installer := `stoat_pkg_install() {
+  printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"
+  if [ "$1" = "@development-tools" ]; then
+    echo "Module or Group 'development-tools' is not available." >&2
+    return 1
+  fi
+}`
+	if output, err := runBundledScriptWithInstaller(t, installer, body, outputPath, callsPath, bin); err != nil {
+		t.Fatalf("script failed where the group id was rejected: %v\n%s", err, output)
+	}
+	want := []string{"@development-tools", "@development", "pkgconf-pkg-config rpm-build"}
+	if got := installRequests(readFileString(t, callsPath)); !slices.Equal(got, want) {
+		t.Errorf("package requests = %v, want %v", got, want)
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// opensuse and the rpm family (fedora, almalinux, rocky) fall back to pkgconf
+// when pkg-config is absent; every other family only ships pkg-config, so
+// this is the only path that exercises the fallback.
+func TestBundledBuildDepsPkgConfigFallsBackToPkgconf(t *testing.T) {
+	body := bundledScript(t, "build-deps", "fedora")
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cc", "make", "pkgconf"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
+		t.Fatalf("%v\n%s", err, output)
+	}
+	outputs := parseOutputs(t, outputPath)
+	if got := filepath.Base(outputs["pkg_config"]); got != "pkgconf" {
+		t.Errorf("pkg_config = %q, want basename %q", outputs["pkg_config"], "pkgconf")
+	}
+}
+
+func TestBundledServiceToolsInstallsPerFamily(t *testing.T) {
+	cases := []struct {
+		os      string
+		request string
+	}{
+		{os: "ubuntu", request: "lsof strace procps"},
+		{os: "debian", request: "lsof strace procps"},
+		{os: "fedora", request: "lsof strace procps-ng"},
+		{os: "almalinux", request: "lsof strace procps-ng"},
+		{os: "rocky", request: "lsof strace procps-ng"},
+		{os: "opensuse", request: "lsof strace procps"},
+		{os: "arch", request: "lsof strace procps-ng"},
+		{os: "alpine", request: "lsof strace procps openrc"},
+	}
+	for _, tc := range cases {
+		for _, manager := range []string{"systemd", "openrc"} {
+			t.Run(tc.os+"/"+manager, func(t *testing.T) {
+				body := bundledScript(t, "service-tools", tc.os)
+				root := t.TempDir()
+				outputPath := filepath.Join(root, "output")
+				callsPath := filepath.Join(root, "calls")
+				bin := filepath.Join(root, "bin")
+				if err := os.MkdirAll(bin, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				fakeBin := "systemctl"
+				if manager == "openrc" {
+					fakeBin = "rc-status"
+				}
+				if err := os.WriteFile(filepath.Join(bin, fakeBin), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(bin, "lsof"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(bin, "strace"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if tc.os == "alpine" {
+					if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				output, err := runBundledScript(t, body, outputPath, callsPath, bin)
+				if err != nil {
+					t.Fatalf("%s/%s: %v\n%s", tc.os, manager, err, output)
+				}
+				calls, err := os.ReadFile(callsPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				installRequests := 0
+				for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+					if !strings.HasPrefix(line, "install ") {
+						continue
+					}
+					installRequests++
+					if got := strings.TrimPrefix(line, "install "); got != tc.request {
+						t.Errorf("%s package request = %q, want %q", tc.os, got, tc.request)
+					}
+				}
+				if installRequests == 0 {
+					t.Errorf("%s: no captured package installation request", tc.os)
+				}
+				outputs := parseOutputs(t, outputPath)
+				if outputs["service_manager"] != manager {
+					t.Errorf("%s/%s: service_manager = %q, want %q", tc.os, manager, outputs["service_manager"], manager)
+				}
+				for _, name := range []string{"lsof", "strace"} {
+					if outputs[name] == "" {
+						t.Errorf("%s/%s: output %q is empty; outputs = %#v", tc.os, manager, name, outputs)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Neither systemctl nor rc-status on PATH is a provisioning failure, not a
+// silently empty service_manager output.
+func TestBundledServiceToolsFailsWithoutKnownServiceManager(t *testing.T) {
+	body := bundledScript(t, "service-tools", "debian")
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "lsof"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "strace"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runBundledScript(t, body, outputPath, callsPath, bin)
+	if err == nil {
+		t.Fatalf("script succeeded without a service manager; output=%s", output)
+	}
+	want := "service-tools: no known service manager (systemd or openrc) was found"
+	if !strings.Contains(string(output), want) {
+		t.Errorf("error = %q, want it to contain %q", output, want)
+	}
+}
+
+// PATH is set to exactly the fake bin dir the caller built, not extended with
+// the host's real PATH: the test host may itself have a systemd, apt-get, dnf,
+// or other real binary the recipe would find first and use instead of a fake.
+func runBundledScript(t *testing.T, body, outputPath, callsPath, bin string) ([]byte, error) {
+	t.Helper()
+	return runBundledScriptWithInstaller(t,
+		`stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }`,
+		body, outputPath, callsPath, bin)
+}
+
+// runBundledScriptWithInstaller lets one test supply its own stoat_pkg_install
+// so a script that reacts to a failed package request can be exercised.
+func runBundledScriptWithInstaller(t *testing.T, installer, body, outputPath, callsPath, bin string) ([]byte, error) {
+	t.Helper()
+	prefix := "stoat_pkg_setup() { printf 'setup\\n' >> \"$STOAT_PKG_CALLS\"; }\n" + installer + "\n"
+	cmd := exec.Command("sh", "-eu", "-c", prefix+body)
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin,
+		"STOAT_OUTPUT="+outputPath,
+		"STOAT_PKG_CALLS="+callsPath,
+	)
+	return cmd.CombinedOutput()
+}
+
+func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
+	cases := []struct {
+		os        string
+		request   string
+		manager   string
+		queryTool string
+	}{
+		{os: "ubuntu", request: "apt-file dpkg-dev", manager: "apt-get", queryTool: "apt-file"},
+		{os: "debian", request: "apt-file dpkg-dev", manager: "apt-get", queryTool: "apt-file"},
+		{os: "fedora", request: "dnf-utils", manager: "dnf", queryTool: "repoquery"},
+		{os: "almalinux", request: "dnf-utils", manager: "dnf", queryTool: "repoquery"},
+		{os: "rocky", request: "dnf-utils", manager: "dnf", queryTool: "repoquery"},
+		{os: "opensuse", request: "zypper libzypp", manager: "zypper", queryTool: "zypper"},
+		{os: "arch", request: "pacman-contrib", manager: "pacman", queryTool: "pacman"},
+		{os: "alpine", request: "apk-tools", manager: "apk", queryTool: "apk"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.os, func(t *testing.T) {
+			body := bundledScript(t, "pkg-tools", tc.os)
+			root := t.TempDir()
+			outputPath := filepath.Join(root, "output")
+			callsPath := filepath.Join(root, "calls")
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{tc.manager, tc.queryTool} {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.os == "alpine" {
+				if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
+				t.Fatalf("%s: %v\n%s", tc.os, err, output)
+			}
+			calls, err := os.ReadFile(callsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			installRequests := 0
+			for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+				if !strings.HasPrefix(line, "install ") {
+					continue
+				}
+				installRequests++
+				if got := strings.TrimPrefix(line, "install "); got != tc.request {
+					t.Errorf("%s package request = %q, want %q", tc.os, got, tc.request)
+				}
+			}
+			if installRequests == 0 {
+				t.Errorf("%s: no captured package installation request", tc.os)
+			}
+			outputs := parseOutputs(t, outputPath)
+			if got := filepath.Base(outputs["manager"]); got != tc.manager {
+				t.Errorf("%s: manager = %q, want basename %q", tc.os, outputs["manager"], tc.manager)
+			}
+			if got := filepath.Base(outputs["query_tool"]); got != tc.queryTool {
+				t.Errorf("%s: query_tool = %q, want basename %q", tc.os, outputs["query_tool"], tc.queryTool)
+			}
+		})
+	}
+}
+
+// manager must resolve to the first of apt-get, dnf, zypper, pacman, apk
+// found on PATH, in that order, regardless of which family script runs it.
+// A hermetic PATH lets this also prove the negative: a manager earlier in
+// the order is absent, so the next one wins.
+func TestBundledPkgToolsManagerResolutionOrder(t *testing.T) {
+	cases := []struct {
+		name    string
+		present []string
+		want    string
+	}{
+		{name: "apt-get over dnf", present: []string{"apt-get", "dnf"}, want: "apt-get"},
+		{name: "dnf when apt-get absent", present: []string{"dnf"}, want: "dnf"},
+		{name: "zypper when apt-get and dnf absent", present: []string{"zypper"}, want: "zypper"},
+		{name: "pacman when zypper absent", present: []string{"pacman"}, want: "pacman"},
+		{name: "apk when pacman absent", present: []string{"apk"}, want: "apk"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := bundledScript(t, "pkg-tools", "fedora")
+			root := t.TempDir()
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range append(append([]string{}, tc.present...), "repoquery") {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outputPath := filepath.Join(root, "output")
+			callsPath := filepath.Join(root, "calls")
+			if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
+				t.Fatalf("%v\n%s", err, output)
+			}
+			outputs := parseOutputs(t, outputPath)
+			if got := filepath.Base(outputs["manager"]); got != tc.want {
+				t.Errorf("manager = %q, want %q", outputs["manager"], tc.want)
 			}
 		})
 	}

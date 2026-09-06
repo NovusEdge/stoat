@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Apply the `devtools` and `python-dev` recipes on AlmaLinux, Rocky, and
+  openSUSE. All eight bundled guests now carry both recipes.
+- Apply the `build-deps`, `service-tools`, and `pkg-tools` recipes on all eight
+  bundled guests. `build-deps` installs a C compiler, `make`, and
+  `pkg-config`, then reports each as an output. `service-tools` installs
+  `lsof`, `strace`, and the process tools, then reports whether the guest runs
+  systemd or OpenRC, and where `lsof` and `strace` are. `pkg-tools` installs
+  the tool that answers which package owns a file, then reports that tool and
+  the package manager.
+
+### Fixes
+
+- `stoat up` no longer hangs on a guest whose cloud-init keeps its run
+  directory root-only. Stoat polls `cloud-init status` on its own deadline and
+  retries an unreadable probe under the guest's escalation. Fedora 44 ships the
+  cloud-init version that caused the hang.
+
 ## v0.3.0
 
 Three enterprise Linux guests, common developer recipes, and read-only

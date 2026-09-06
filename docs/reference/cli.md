@@ -518,8 +518,12 @@ not an additional manifest-match condition.
 ```
 $ stoat recipes --os alpine --backend apkovl
 NAME                           DESCRIPTION
+build-deps                     toolchain for building software from source
 devtools                       git, a compiler, an editor and basic fetch tools
 docker                         Docker engine and the compose plugin
+pkg-tools                      tools for querying the package manager
+python-dev                     Python 3 with pip and an isolated development environment
+service-tools                  tools for inspecting services and the processes behind them
 tailscale                      Tailscale daemon, installed and started (join manually)
 xfce                           XFCE desktop with autologin startx on tty1
 ```
@@ -555,8 +559,12 @@ search order.
 ```
 $ stoat recipe list
 NAME                 SCOPE     COMMIT   DESCRIPTION
+build-deps           bundled            toolchain for building software from source
 devtools             bundled            git, a compiler, an editor and basic fetch tools
 docker               bundled            Docker engine and the compose plugin
+pkg-tools            bundled            tools for querying the package manager
+python-dev           bundled            Python 3 with pip and an isolated development environment
+service-tools        bundled            tools for inspecting services and the processes behind them
 tailscale            bundled            Tailscale daemon, installed and started (join manually)
 xfce                 bundled            XFCE desktop with autologin startx on tty1
 ```
