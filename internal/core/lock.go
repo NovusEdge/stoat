@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/novusedge/stoat/internal/filelock"
 )
 
 // ErrProvisionInProgress is returned when a second Apply finds
@@ -33,13 +34,13 @@ func WithProvisionLock(dir string, fn func() error) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+	if err := filelock.Lock(f, filelock.Exclusive, true); err != nil {
+		if errors.Is(err, filelock.ErrWouldBlock) {
 			return ErrProvisionInProgress
 		}
 		return fmt.Errorf("lock %s: %w", path, err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = filelock.Unlock(f) }()
 
 	return fn()
 }

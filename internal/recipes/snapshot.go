@@ -5,7 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
+
+	"github.com/novusedge/stoat/internal/filelock"
 )
 
 // RecipeSnapshot is a coherent view of visible manifests and their ownership
@@ -33,16 +34,16 @@ func lockScopeMode(s Scope, exclusive bool) (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	lockType := syscall.LOCK_SH
+	lockType := filelock.Shared
 	if exclusive {
-		lockType = syscall.LOCK_EX
+		lockType = filelock.Exclusive
 	}
-	if err := syscall.Flock(int(f.Fd()), lockType); err != nil {
+	if err := filelock.Lock(f, lockType, false); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return func() error {
-		unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		unlockErr := filelock.Unlock(f)
 		closeErr := f.Close()
 		if unlockErr != nil {
 			return unlockErr

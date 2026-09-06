@@ -3,7 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/novusedge/stoat/internal/filelock"
 )
 
 // lockName is the lock file in the data root. A dotfile so it never appears in
@@ -70,7 +71,7 @@ func lockFile(name string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(f, filelock.Exclusive, false); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
@@ -78,7 +79,7 @@ func lockFile(name string) (func(), error) {
 		// Unlock explicitly rather than relying on Close: the ordering is
 		// then visible to a reader, and Close alone would still be correct
 		// only because this fd is not shared.
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = filelock.Unlock(f)
 		_ = f.Close()
 	}, nil
 }
