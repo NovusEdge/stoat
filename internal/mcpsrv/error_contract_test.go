@@ -154,7 +154,7 @@ func TestMCPErrorContractAccessAndRateRefusals(t *testing.T) {
 		t.Fatal("guest tool succeeded below its required access level")
 	}
 	accessMeta, accessFirst := decodeErrorContract(t, access)
-	if accessMeta.Code != "access_denied" || accessFirst.Message != `vm "locked" has agent_access = none; needs observe` {
+	if accessMeta.Code != "access_denied" || accessMeta.Message != accessFirst.Message || accessFirst.Message != `vm "locked" has agent_access = none; needs observe` {
 		t.Fatalf("access refusal = %+v, first = %+v", accessMeta, accessFirst)
 	}
 
@@ -175,7 +175,8 @@ func TestMCPErrorContractAccessAndRateRefusals(t *testing.T) {
 			t.Fatal("second limited call was not refused")
 		}
 		meta, first := decodeErrorContract(t, res)
-		if meta.Code != "rate_limited" || first.Message == "" {
+		const ratePrefix = "rate limit reached for list_vms; retry in about "
+		if meta.Code != "rate_limited" || first.Message != meta.Message || !strings.HasPrefix(first.Message, ratePrefix) || strings.TrimPrefix(first.Message, ratePrefix) == "" {
 			t.Fatalf("rate refusal = %+v, first = %+v", meta, first)
 		}
 	}
