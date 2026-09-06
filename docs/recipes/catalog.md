@@ -32,7 +32,9 @@ set from growing without limit.
 `devtools` and `build-deps` overlap on a compiler and `make`. The boundary is
 the task: `devtools` equips the VM for writing code in it, and `build-deps`
 equips it for compiling a project that expects autotools, `pkg-config`, and the
-distribution's own packaging headers.
+distribution's own packaging headers. On Arch the boundary does not hold:
+`devtools` installs `base-devel`, and `build-deps` installs only `base-devel`,
+so `build-deps` is a subset of `devtools` on that guest.
 
 ## The three new common recipes
 
@@ -53,8 +55,8 @@ Outputs: `compiler`, `make`, `pkg_config`.
 Health: each of the three responds to `--version`.
 
 The RPM and openSUSE entries are a group and a pattern, which the package
-manager expands. Arch's `base-devel` is a group too. That is the OS-specific
-behaviour this recipe exists for.
+manager expands. Arch's `base-devel` is a metapackage that pulls the same
+tools in one name. That is the OS-specific behaviour this recipe exists for.
 
 ### service-tools
 
