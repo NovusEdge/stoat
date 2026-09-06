@@ -2,6 +2,7 @@ package mcpsrv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -24,6 +25,8 @@ const (
 	classDestructive
 	classExec
 )
+
+const errorMetaKey = "io.github.novusedge.stoat/error"
 
 type toolSpec struct {
 	Name   string
@@ -168,9 +171,21 @@ func fillEmpty(v reflect.Value) {
 // the same text a --json result line carries, so an agent reading a tool
 // failure and a user reading the CLI see one message.
 func toolError(err error) *mcp.CallToolResult {
+	info := wire.MapError(err)
+	// Keep the redaction that receiving middleware applies to the human block
+	// before copying the message into metadata and the JSON fallback.
+	info.Message = redactText(info.Message)
+	rawJSON, marshalErr := json.Marshal(map[string]any{"error": info})
+	if marshalErr != nil {
+		panic(fmt.Sprintf("marshal MCP error result: %v", marshalErr))
+	}
 	return &mcp.CallToolResult{
 		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: wire.MapError(err).Message}},
+		Meta:    mcp.Meta{errorMetaKey: info},
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: info.Message},
+			&mcp.TextContent{Text: string(rawJSON)},
+		},
 	}
 }
 

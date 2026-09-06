@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/novusedge/stoat/internal/cli/wire"
 )
 
 // Limits are the token bucket sizes. The MCP spec makes rate limiting a
@@ -92,10 +93,7 @@ func (s *srv) rateLimit() mcp.Middleware {
 				name = p.Name
 			}
 			if err := s.lim.check(name, time.Now()); err != nil {
-				return &mcp.CallToolResult{
-					IsError: true,
-					Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
-				}, nil
+				return toolError(wire.WithSentinel(err, wire.ErrRateLimited)), nil
 			}
 			return next(ctx, method, req)
 		}
