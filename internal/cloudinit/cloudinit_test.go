@@ -526,6 +526,45 @@ func TestSeedSkipsMountsOnDebian(t *testing.T) {
 	}
 }
 
+// A cloud-config-archive is a top-level YAML list. cloud-init 24.4 as shipped
+// by AlmaLinux 9 calls .get() on the parsed user-data before it checks the
+// type, so the list raises AttributeError, init-local fails, and `cloud-init
+// status` reports error for the life of the VM. Upstream added the isinstance
+// guard after that build. A guest that skips 9p and selects no recipes has one
+// document, and one document needs no archive.
+func TestSeedSendsASingleDocumentAsPlainCloudConfig(t *testing.T) {
+	for _, os := range []string{"almalinux", "rocky", "opensuse", "debian"} {
+		ud, err := userData(&config.VM{Name: "vm", OS: os}, testPubkey, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(ud, "#cloud-config\n") {
+			t.Errorf("%s user-data is not a plain cloud-config:\n%s", os, ud)
+		}
+		var top map[string]any
+		if err := yaml.Unmarshal([]byte(ud), &top); err != nil {
+			t.Errorf("%s user-data does not parse as a mapping: %v\n%s", os, err, ud)
+			continue
+		}
+		if _, ok := top["users"]; !ok {
+			t.Errorf("%s user-data lost its users block:\n%s", os, ud)
+		}
+	}
+}
+
+// More than one document still needs the archive, and its header must stay on
+// the first line.
+func TestSeedKeepsTheArchiveForSeveralDocuments(t *testing.T) {
+	ud, err := userData(&config.VM{Name: "vm", OS: "almalinux"}, testPubkey, []string{"packages:\n  - git\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := unpackArchive(t, ud)
+	if len(docs) != 2 {
+		t.Fatalf("want base plus recipe, got %d documents:\n%s", len(docs), ud)
+	}
+}
+
 // Recipe fragments must still merge after the base block, whatever the OS:
 // this is the existing contract and the reason the cloud-config-archive
 // exists (see buildArchive).
