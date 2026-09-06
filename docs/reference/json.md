@@ -236,6 +236,8 @@ RecipeSchema {"name":"docker","description":"Docker engine and the compose plugi
               "health":{"check":"docker info","timeout":"30s"}}
 RecipeParam {"name":"channel","type":"enum","required":false,
              "default":"stable","values":["stable","test"],"help":"..."}
+RecipeParam {"name":"user","type":"string","required":false,
+             "default":"","default_from":"ssh_user","values":[],"help":"..."}
 RecipeOutput {"name":"socket","help":"path of the socket"}
 RecipeHealth {"check":"docker info","timeout":"30s"}
 
@@ -292,6 +294,12 @@ ProjectRun   {"project":"myrepo","vms":[ProjectRunVM,...]}
 
 `MCPClient.current` is false when the client's entry names a different
 binary than the running one, which is the stale entry `mcp doctor` reports.
+
+`RecipeParam.default_from` is present only on a param that declares it.
+`"ssh_user"` is the only value: Stoat fills that param from the VM's
+configured SSH account at apply time when the caller sets no value. A value
+the caller sets still wins. A param declares `default` or `default_from`,
+never both.
 
 `VM.project` is the absolute directory of the `stoat.toml` that declared this
 VM, and `VM.key` is the declaration key, both empty for a VM `stoat create`
@@ -602,6 +610,10 @@ and five MCP tools (`project_status`, `project_up`, `project_down`,
 `project_apply`, `project_wait`) alongside `start`, `stop`, `apply_recipes`
 and `wait`, which keep their existing inputs and outputs. All additions; the
 contract stays 3.
+
+The `default_from` addition to `RecipeParam` is the same kind of change: a
+new optional field on an existing object, absent unless a param declares it.
+The contract stays 3.
 
 ## Capability discovery
 

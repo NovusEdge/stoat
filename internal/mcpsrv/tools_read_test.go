@@ -55,7 +55,8 @@ func TestRecipeSchemaListsParams(t *testing.T) {
 	raw, _ := json.Marshal(res.StructuredContent)
 	var out struct {
 		Params []struct {
-			Name string `json:"name"`
+			Name        string `json:"name"`
+			DefaultFrom string `json:"default_from"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -63,10 +64,44 @@ func TestRecipeSchemaListsParams(t *testing.T) {
 	}
 	var found bool
 	for _, p := range out.Params {
-		found = found || p.Name == "user"
+		if p.Name != "user" {
+			continue
+		}
+		found = true
+		if p.DefaultFrom != "ssh_user" {
+			t.Fatalf("recipe_schema(docker) user.default_from = %q, want ssh_user", p.DefaultFrom)
+		}
 	}
 	if !found {
 		t.Fatalf("recipe_schema(docker) params missing user: %s", raw)
+	}
+}
+
+func TestRecipeSchemaOmitsDefaultFromWhenUndeclared(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	res := callTool(t, "recipe_schema", map[string]any{"name": "python-dev"})
+	if res.IsError {
+		t.Fatalf("recipe_schema failed: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out struct {
+		Params []map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, p := range out.Params {
+		if p["name"] != "venv_dir" {
+			continue
+		}
+		found = true
+		if _, ok := p["default_from"]; ok {
+			t.Fatalf("recipe_schema(python-dev) venv_dir carries default_from unset by the manifest: %s", raw)
+		}
+	}
+	if !found {
+		t.Fatalf("recipe_schema(python-dev) params missing venv_dir: %s", raw)
 	}
 }
 
