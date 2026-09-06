@@ -240,6 +240,8 @@ type formModel struct {
 	byoBackend     string // override for the selected BYO image's backend; "" means "use iso.Infer's guess"
 	byoOS          string // override for the selected BYO image's OS; "" means "use iso.Infer's guess"
 	mode           string // "live" | "disk"; meaningful only while the selected image's backend is apkovl
+	diskDefault    string // current implicit disk default; catalog images may override the global default
+	diskExplicit   bool   // true after the user supplies a non-empty disk value
 	display        string // one of displayChoices; "auto" by default
 	err            string
 	fetching       bool
@@ -420,6 +422,16 @@ func (f formModel) effectiveMode() string {
 	}
 }
 
+// resolvedDiskDefault is the size used when the form's disk field is omitted.
+// Catalog entries own image-specific defaults; older entries and BYO images
+// retain the global default.
+func (f formModel) resolvedDiskDefault() string {
+	if opt := f.selected(); opt != nil && opt.entry != nil && opt.entry.DefaultDisk != "" {
+		return opt.entry.DefaultDisk
+	}
+	return core.DefaultDisk
+}
+
 // refreshRecipes recomputes the recipe list for the currently selected
 // image's OS/backend and clears any selection made against the old list:
 // a recipe name from one OS is meaningless once the picker moves to another.
@@ -445,14 +457,24 @@ func (f *formModel) selectImage(idx int) {
 	if idx < 0 || idx >= len(f.images) {
 		return
 	}
+	if len(f.inputs) > fDisk && !f.diskExplicit {
+		current := strings.TrimSpace(f.inputs[fDisk].Value())
+		if current != "" && current != f.diskDefault {
+			f.diskExplicit = true
+		}
+	}
 	f.imgIdx = idx
 	f.byoBackend = ""
 	f.byoOS = ""
+	f.diskDefault = f.resolvedDiskDefault()
+	if len(f.inputs) > fDisk && !f.diskExplicit {
+		f.inputs[fDisk].SetValue(f.diskDefault)
+	}
 	f.refreshRecipes()
 }
 
 func newForm() formModel {
-	f := formModel{mode: "live", display: "auto", recipeSel: map[string]bool{}, recipeExplicit: map[string]bool{}, paramValues: map[string]map[string]string{}}
+	f := formModel{mode: "live", display: "auto", diskDefault: core.DefaultDisk, recipeSel: map[string]bool{}, recipeExplicit: map[string]bool{}, paramValues: map[string]map[string]string{}}
 	labels := []string{"work", "4096", "4", "8G", "~/vms"}
 	for i := 0; i < fieldCount; i++ {
 		ti := theme.TextInput()
@@ -478,6 +500,10 @@ func newForm() formModel {
 			f.imgIdx = i
 			break
 		}
+	}
+	f.diskDefault = f.resolvedDiskDefault()
+	if !f.diskExplicit {
+		f.inputs[fDisk].SetValue(f.diskDefault)
 	}
 	f.refreshRecipes()
 	return f
@@ -814,8 +840,20 @@ func (m model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.form.focus < fieldCount {
+		beforeDisk := ""
+		if m.form.focus == fDisk {
+			beforeDisk = strings.TrimSpace(m.form.inputs[fDisk].Value())
+		}
 		var cmd tea.Cmd
 		m.form.inputs[m.form.focus], cmd = m.form.inputs[m.form.focus].Update(msg)
+		if m.form.focus == fDisk {
+			afterDisk := strings.TrimSpace(m.form.inputs[fDisk].Value())
+			if afterDisk == "" {
+				m.form.diskExplicit = false
+			} else if afterDisk != beforeDisk {
+				m.form.diskExplicit = true
+			}
+		}
 		return m, cmd
 	}
 	return m, nil
@@ -915,6 +953,10 @@ func (f formModel) spec() (core.Spec, error) {
 		return core.Spec{}, fmt.Errorf("cpus must be at least 1")
 	}
 
+	disk := strings.TrimSpace(f.inputs[fDisk].Value())
+	if !f.diskExplicit && (disk == "" || disk == f.diskDefault) {
+		disk = f.resolvedDiskDefault()
+	}
 	s := core.Spec{
 		Name:    strings.TrimSpace(f.inputs[fName].Value()),
 		Image:   image,
@@ -923,7 +965,7 @@ func (f formModel) spec() (core.Spec, error) {
 		Mode:    f.effectiveMode(),
 		RAM:     ram,
 		CPUs:    cpus,
-		Disk:    strings.TrimSpace(f.inputs[fDisk].Value()),
+		Disk:    disk,
 		Share:   strings.TrimSpace(f.inputs[fShare].Value()),
 		Recipes: selected,
 		Params:  params,
