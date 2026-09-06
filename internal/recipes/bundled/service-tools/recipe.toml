@@ -21,4 +21,4 @@ lsof = "path to lsof"
 strace = "path to strace"
 
 [health]
-check = "command -v lsof >/dev/null 2>&1 && lsof -v >/dev/null 2>&1"
+check = "( { command -v systemctl >/dev/null 2>&1 && systemctl list-units --type=service >/dev/null 2>&1; } || { command -v rc-status >/dev/null 2>&1 && rc-status >/dev/null 2>&1; } ) && command -v lsof >/dev/null 2>&1 && lsof -v >/dev/null 2>&1"

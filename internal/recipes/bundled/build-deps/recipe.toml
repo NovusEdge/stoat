@@ -21,4 +21,4 @@ make = "path to make"
 pkg_config = "path to pkg-config"
 
 [health]
-check = "cc --version >/dev/null 2>&1 && make --version >/dev/null 2>&1 && pkg-config --version >/dev/null 2>&1"
+check = "cc --version >/dev/null 2>&1 && make --version >/dev/null 2>&1 && { pkg-config --version >/dev/null 2>&1 || pkgconf --version >/dev/null 2>&1; }"
