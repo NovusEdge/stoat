@@ -1,8 +1,11 @@
 # stoat
 
-Run local QEMU virtual machines from a terminal UI, CLI, or MCP client.
-Stoat manages disposable Alpine sessions and persistent Linux guests through
-plain TOML files, using one Go binary.
+Stoat is a CLI for running local QEMU virtual machines, built for people and
+AI agents. Use its TUI for interactive work, JSON CLI output for automation,
+or MCP tools from an agent.
+
+It manages disposable Alpine sessions and persistent Linux guests through
+plain TOML files. One Go binary starts QEMU directly.
 
 [Get started](docs/getting-started/installation.md) ·
 [Documentation](docs/README.md) ·
