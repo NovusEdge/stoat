@@ -1,0 +1,24 @@
+name = "build-deps"
+description = "toolchain for building software from source"
+os = ["alpine", "ubuntu", "debian", "fedora", "arch", "almalinux", "rocky", "opensuse"]
+stage = "provision"
+script = "install-debian.sh"
+schema = 3
+
+[scripts]
+alpine = "install-alpine.sh"
+ubuntu = "install-debian.sh"
+debian = "install-debian.sh"
+fedora = "install-rpm.sh"
+almalinux = "install-rpm.sh"
+rocky = "install-rpm.sh"
+opensuse = "install-zypper.sh"
+arch = "install-arch.sh"
+
+[outputs]
+compiler = "path to the C compiler"
+make = "path to make"
+pkg_config = "path to pkg-config"
+
+[health]
+check = "cc --version >/dev/null 2>&1 && make --version >/dev/null 2>&1 && pkg-config --version >/dev/null 2>&1"

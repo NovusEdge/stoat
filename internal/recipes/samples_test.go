@@ -147,6 +147,7 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 	}{
 		{name: "devtools", outputs: []string{"compiler", "editor", "git"}},
 		{name: "python-dev", outputs: []string{"pip", "python", "python_version", "venv", "venv_python"}},
+		{name: "build-deps", outputs: []string{"compiler", "make", "pkg_config"}},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -196,6 +197,69 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
+	cases := []struct {
+		os      string
+		request string
+	}{
+		{os: "ubuntu", request: "build-essential pkg-config autoconf automake libtool dpkg-dev"},
+		{os: "debian", request: "build-essential pkg-config autoconf automake libtool dpkg-dev"},
+		{os: "fedora", request: "@development-tools pkgconf-pkg-config rpm-build"},
+		{os: "almalinux", request: "@development-tools pkgconf-pkg-config rpm-build"},
+		{os: "rocky", request: "@development-tools pkgconf-pkg-config rpm-build"},
+		{os: "opensuse", request: "-t pattern devel_basis"},
+		{os: "arch", request: "base-devel"},
+		{os: "alpine", request: "alpine-sdk build-base"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.os, func(t *testing.T) {
+			body := bundledScript(t, "build-deps", tc.os)
+			root := t.TempDir()
+			outputPath := filepath.Join(root, "output")
+			callsPath := filepath.Join(root, "calls")
+			if output, err := runBundledBuildDeps(t, body, outputPath, callsPath); err != nil {
+				t.Fatalf("%s: %v\n%s", tc.os, err, output)
+			}
+			calls, err := os.ReadFile(callsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			installRequests := 0
+			for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+				if !strings.HasPrefix(line, "install ") {
+					continue
+				}
+				installRequests++
+				if got := strings.TrimPrefix(line, "install "); got != tc.request {
+					t.Errorf("%s package request = %q, want %q", tc.os, got, tc.request)
+				}
+			}
+			if installRequests == 0 {
+				t.Errorf("%s: no captured package installation request", tc.os)
+			}
+			outputs := parseOutputs(t, outputPath)
+			for _, name := range []string{"compiler", "make", "pkg_config"} {
+				if outputs[name] == "" {
+					t.Errorf("%s: output %q is empty; outputs = %#v", tc.os, name, outputs)
+				}
+			}
+		})
+	}
+}
+
+func runBundledBuildDeps(t *testing.T, body, outputPath, callsPath string) ([]byte, error) {
+	t.Helper()
+	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
+stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }
+`
+	cmd := exec.Command("sh", "-eu", "-c", prefix+body)
+	cmd.Env = append(os.Environ(),
+		"STOAT_OUTPUT="+outputPath,
+		"STOAT_PKG_CALLS="+callsPath,
+	)
+	return cmd.CombinedOutput()
 }
 
 func TestBundledPythonDevCreatesAndPreservesVenv(t *testing.T) {
