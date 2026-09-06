@@ -2,7 +2,10 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -230,6 +233,73 @@ const recipeShutdownGrace = 5 * time.Second
 // not extend Wait's single health budget by the normal recipe grace period.
 const healthShutdownGrace = 100 * time.Millisecond
 
+// cloudInitStatus is the stable subset of `cloud-init status --format json`.
+// cloud-init adds informational fields over time; readiness only depends on
+// the terminal status and hard-error list. Recoverable errors remain available
+// for a degraded diagnostic without making a warning block provisioning.
+type cloudInitStatus struct {
+	Status            string              `json:"status"`
+	ExtendedStatus    string              `json:"extended_status"`
+	Errors            []string            `json:"errors"`
+	RecoverableErrors map[string][]string `json:"recoverable_errors"`
+}
+
+func parseCloudInitStatus(body []byte) (cloudInitStatus, error) {
+	var status cloudInitStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return cloudInitStatus{}, fmt.Errorf("invalid cloud-init status JSON: %w", err)
+	}
+	if status.Status == "" {
+		return cloudInitStatus{}, fmt.Errorf("cloud-init status JSON has no status")
+	}
+	return status, nil
+}
+
+// waitCloudInit waits for cloud-init as the seeded SSH account. The account
+// exists before cloud-init's package setup finishes, while its sudo package
+// may not, so this command must not use escalate. Exit 2 is cloud-init's
+// recoverable degraded result; the JSON still has to say done and list no hard
+// errors before provisioning may continue.
+func waitCloudInit(ctx context.Context, v *config.VM, log io.Writer) error {
+	var statusOut bytes.Buffer
+	ci := exec.CommandContext(ctx, "ssh", Args(v, "cloud-init", "status", "--wait", "--format", "json")...)
+	ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
+	ci.WaitDelay = recipeShutdownGrace
+	ci.Stdout = &statusOut
+	ci.Stderr = log
+
+	runErr := ci.Run()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	exitCode := 0
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			return fmt.Errorf("cloud-init readiness command failed: %w", runErr)
+		}
+		exitCode = exitErr.ExitCode()
+		if exitCode != 2 {
+			return fmt.Errorf("cloud-init readiness command exited with status %d", exitCode)
+		}
+	}
+
+	status, err := parseCloudInitStatus(statusOut.Bytes())
+	if err != nil {
+		return err
+	}
+	if status.Status != "done" {
+		return fmt.Errorf("cloud-init is not ready: status %q", status.Status)
+	}
+	if len(status.Errors) > 0 {
+		return fmt.Errorf("cloud-init reported hard errors: %s", strings.Join(status.Errors, "; "))
+	}
+	if exitCode == 2 {
+		fmt.Fprintf(log, "cloud-init completed with recoverable warnings: %v\n", status.RecoverableErrors)
+	}
+	return nil
+}
+
 // RunCheck runs one command inside v's guest through the guest prelude, as
 // the recipe's ssh user and under the guest's escalation. The command is
 // sent over stdin so it does not become a local ssh argv element.
@@ -287,18 +357,18 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	// A cloud image runs cloud-init at first boot; it may still be installing
 	// packages when sshd comes up. A recipe that calls apt or dnf then races
 	// cloud-init for the package-manager lock and fails. Wait for cloud-init
-	// to finish first. The exit code is ignored on purpose: Alpine reports
-	// "degraded" over a missing fingerprint helper (harmless), and a real
-	// cloud-init failure surfaces when the recipe itself runs. apkovl and BYO
-	// images ship no cloud-init and skip this.
+	// to finish before mounts, package setup, or recipes. apkovl and BYO images
+	// ship no cloud-init and skip this.
 	if v.Backend == "cloudinit" {
 		fmt.Fprintln(log, "waiting for cloud-init to finish…")
-		ci := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"cloud-init", "status", "--wait"})...)...)
-		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
-		ci.WaitDelay = recipeShutdownGrace
-		ci.Stdout = io.Discard
-		ci.Stderr = log
-		_ = ci.Run()
+		if err := waitCloudInit(ctx, v, log); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				fmt.Fprintf(log, "CANCELLED: %v\n", ctxErr)
+				return ctxErr
+			}
+			fmt.Fprintf(log, "FAILED: cloud-init readiness: %v\n", err)
+			return fmt.Errorf("cloud-init readiness: %w", err)
+		}
 	}
 
 	mountShares(ctx, v, log)
