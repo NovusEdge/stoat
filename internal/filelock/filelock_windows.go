@@ -18,7 +18,7 @@ func Lock(f *os.File, mode Mode, nonBlocking bool) error {
 		flags |= windows.LOCKFILE_FAIL_IMMEDIATELY
 	}
 	err := windows.LockFileEx(windows.Handle(f.Fd()), flags, 0, ^uint32(0), ^uint32(0), &windows.Overlapped{})
-	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+	if nonBlocking && errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 		return ErrWouldBlock
 	}
 	return err
