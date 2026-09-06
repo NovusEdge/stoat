@@ -3,12 +3,16 @@
 ## Setup
 
 ```sh
+just dev-setup  # enables the repository git hooks
 just setup      # builds, installs to ~/.local/bin, reports missing host deps
 just dev        # runs the TUI against a scratch STOAT_HOME
 ```
 
-`just setup` also installs the git hooks. A repository with a `stoat.toml`
-declares its own VMs; run `stoat up` in it to build them.
+Run `just dev-setup` once per clone. The `commit-msg` hook it enables strips
+tool-attribution trailers, and the `pre-commit` hook runs the fast checks.
+
+A repository with a `stoat.toml` declares its own VMs. Run `stoat up` in it to
+build them.
 
 Go 1.26 (pinned in `go.mod`), `just`, and for anything that boots a VM:
 KVM, `qemu-system-x86_64`, `qemu-img`, `ssh`. `stoat doctor` lists what is

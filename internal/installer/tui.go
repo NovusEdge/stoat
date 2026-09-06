@@ -168,7 +168,10 @@ func buildCmd(repoDir, version string) tea.Cmd {
 	}
 }
 
-func installCmd(src, destDir, repoDir, home string) tea.Cmd {
+// installCmd copies the built binary into place. It creates no data root:
+// every stoat command runs config.EnsureRoot, recipes.Install and keys.Ensure
+// first, and those honour STOAT_HOME.
+func installCmd(src, destDir string) tea.Cmd {
 	return func() tea.Msg {
 		// buildCmd's temp dir has done its job once the binary is copied out,
 		// whether the copy succeeds or fails. It is removed here
@@ -176,9 +179,6 @@ func installCmd(src, destDir, repoDir, home string) tea.Cmd {
 		defer func() { _ = os.RemoveAll(filepath.Dir(src)) }()
 		path, err := Install(src, destDir)
 		if err != nil {
-			return errMsg{err: err}
-		}
-		if err := InstallData(repoDir, home); err != nil {
 			return errMsg{err: err}
 		}
 		return installedMsg{path: path}
@@ -198,7 +198,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case builtMsg:
-		return m, installCmd(msg.tmpPath, m.dir, m.repoDir, m.home)
+		return m, installCmd(msg.tmpPath, m.dir)
 
 	case installedMsg:
 		m.binPath = msg.path

@@ -21,13 +21,18 @@ install: build
 
 # build and install stoat, interactively: checks the host too
 [group('build')]
-setup: hooks
+setup:
     go run ./cmd/installer
 
 # build and install stoat without a TTY: for CI and scripts
 [group('build')]
-setup-headless: hooks
+setup-headless:
     go run ./cmd/installer --no-tty
+
+# set this clone up for contributing: enables the repository git hooks
+[group('dev')]
+dev-setup: hooks
+    @echo "run 'just setup' to build and install stoat itself"
 
 # remove the installed binary: never touches ~/.stoat
 [group('build')]
