@@ -4,7 +4,10 @@ Decisions are settled here. This document is the source of truth for the
 implementation; `core-api.md` §10 and `json-contract-draft.md` §7 hold the
 original reasoning and should be read first, not re-argued.
 
-Contract: [../reference/json.md](../reference/json.md).
+For setup, access levels, and available tools, use the
+[MCP reference](../reference/mcp.md). The [JSON contract](../reference/json.md)
+defines the shared result types. This document records implementation decisions
+and the original validation plan.
 
 ## 0. Settled, do not relitigate
 

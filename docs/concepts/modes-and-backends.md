@@ -8,12 +8,15 @@ related but not the same thing:
   happens to the guest's storage. It's what stoat's QEMU argument builder
   branches on when constructing the `qemu-system-x86_64` command line, and
   what its start logic checks before launching a VM.
-- **Backend** (`vm.toml`'s `backend` field) records how the create form
-  picked recipes and provisioning at creation time. Once the VM exists,
-  nothing at runtime dispatches on this field: it's informational.
+- **Backend** (`vm.toml`'s `backend` field) identifies how stoat prepares the
+  VM and provisions its selected recipes. It is chosen at creation time and
+  remains part of the VM's runtime configuration; edit it only as part of a
+  deliberate migration.
 
-**`disk` mode gives you no SSH access until you install an OS yourself and
-tell stoat so.** See the section below.
+**`disk` mode's first boot depends on the image.** Alpine disk VMs install
+unattended; a bring-your-own image needs its own console install and SSH key
+setup. Stoat applies recipes only after the installed guest is ready. See the
+section below.
 
 ## The three modes
 
@@ -43,40 +46,29 @@ trade for SSH working immediately with zero setup.
 
 ### disk
 
-A `disk` VM has a real, persistent `disk.qcow2`. But stoat does not install
-anything onto it for you. The first time you start a `disk` VM, it boots the
-ISO you attached, the same as a bare-metal install would, and you install
-the guest OS yourself, interactively, in the QEMU console window.
+A `disk` VM has a real, persistent `disk.qcow2`. Alpine disk VMs install
+themselves on their first start. Stoat generates a `setup-alpine` answer file,
+bakes it into the boot overlay, waits for the installer to power off, and
+starts the VM again from the installed disk. The CLI waits up to 15 minutes
+for this sequence. A failed install leaves the installer running so you can
+inspect the console and logs.
 
-Until you do that, there is no operating system on the disk, which means
-there is no sshd running and no key installed anywhere. **Provisioning
-cannot work yet, because there is nothing on the other end of the SSH
-connection.** Pressing the provision key against a fresh `disk` VM doesn't
-time out mysteriously: stoat's `p` handler checks this up front and tells
-you so directly, rather than waiting the full SSH-connect timeout to fail
-with a generic "not reachable."
+Until the Alpine install completes, the SSH service belongs to the temporary
+installer environment. The TUI and CLI refuse to apply recipes to it. After
+the next start sees enough data on the qcow2 disk, stoat sets `installed =
+true` and stops attaching the ISO. The `i` key on the detail screen can still
+toggle this field when automatic detection is wrong.
 
-Two things need to happen before a `disk` VM becomes provisionable:
-
-1. **Install the OS at the console**, then mark stoat's SSH keypair
-   (`~/.stoat/id_stoat.pub`) as an authorized key inside the guest yourself,
-   for whichever user `vm.toml`'s `sshuser` names (root, if unset); nothing
-   in stoat injects it automatically for `disk` mode the way `apkovl.Build`
-   does for `live`.
-2. **Mark the VM installed**: press `i` on the VM's detail screen. This
-   flips the `installed` field in `vm.toml` and, from then on, changes the
-   QEMU boot order: with `installed = false`, the ISO stays attached and
-   forced first on *every* boot (so you can always get back to the
-   installer); once `installed = true`, the ISO is no longer attached at all
-   and the VM boots straight off `disk.qcow2`.
-
-`installed` only applies to `disk` mode; it's a no-op field for `live` and
-`cloud` VMs.
+A non-Alpine BYO ISO does not have Stoat's Alpine answer file. Install that OS
+at its console, add `~/.stoat/id_stoat.pub` to the account named by
+`vm.toml`'s `sshuser`, then stop and start the VM. Stoat can provision it only
+after the OS and SSH access are ready.
 
 ### cloud
 
 A `cloud` VM starts from a downloaded cloud image (Ubuntu, Debian, Fedora,
-Arch; see the image catalog) rather than an installer ISO. stoat creates a
+Arch, or Alpine cloud; see the image catalog) rather than an installer ISO.
+stoat creates a
 copy-on-write overlay backed by that shared base image, so the multi-hundred
 -megabyte download only happens once no matter how many `cloud` VMs you spin
 up from it.
@@ -85,15 +77,16 @@ Alongside the overlay, stoat builds a small NoCloud cloud-init seed ISO
 (volume label `CIDATA`) containing:
 
 - a `stoat` user, password-less sudo, and stoat's public key
-- any cloud-flavored recipes you selected, merged into the seed's
-  `packages:`/`runcmd:` lists
+- the selected recipes' cloud-init fragments and script bodies, as separate
+  archive documents
 
-Cloud-init applies all of this **at first boot only**: there is no ongoing
-SSH-based provisioning step for `cloud` VMs the way there is for `live`/`disk`.
-Pressing the provision key on a `cloud` VM is a deliberate no-op: it tells you
-recipes already ran at first boot, and that changing them means recreating
-the VM (the seed isn't rebuilt on later starts, since by then the overlay
-holds real guest state you don't want thrown away).
+Cloud-init applies the seed **at first boot only**. The seed carries selected
+recipe fragments and scripts as cloud-init archive documents. Stoat may run a
+post-boot apply pass to discover and record those results. The TUI's provision
+key and `stoat apply` still use the normal recipe run policy, so a changed
+script or a recipe with pending work can run over SSH later. Stoat does not
+rebuild the seed on later starts. Changing the recipe list requires recreating
+the VM so the new list is present in the seed.
 
 The host seed artifacts remain in the VM directory for inspection and later
 diagnosis. Stoat creates seed directories with mode `0700` and seed files with
@@ -106,9 +99,9 @@ detach those artifacts after boot.
 |---|---|---|---|
 | Storage | none, RAM only | `disk.qcow2`, persistent | `disk.qcow2`, CoW overlay over a shared base image |
 | Survives reboot | no | yes | yes |
-| SSH on first boot | yes, automatically | **no**, until installed | yes, via cloud-init (first boot only) |
-| Who installs the OS | nobody, it's the live ISO | you, at the console | nobody, image is prebuilt |
-| Recipes applied | over SSH, on demand (`p`) | over SSH, on demand (`p`), only once `installed` | baked into the cloud-init seed at first boot |
+| SSH on first boot | yes, automatically | Alpine: after unattended install; BYO: after your install | yes, via cloud-init (first boot only) |
+| Who installs the OS | nobody, it's the live ISO | Alpine: stoat; BYO: you, at the console | nobody, image is prebuilt |
+| Recipes applied | over SSH, on demand (`p`) | over SSH, on demand (`p`), only once `installed` | cloud-init fragments at first boot; pending or changed work over SSH |
 | Rebuilt on every start | yes (the apkovl) | no | no (overlay created once) |
 | Typical backend | `apkovl` | `apkovl` (Alpine, undeployed) or `ssh` (any other ISO) | `cloudinit` |
 
@@ -121,8 +114,8 @@ guess the right mode:
 - **`apkovl`**: Alpine only. Produces the `live`-mode overlay described
   above. An Alpine image can be run either as `live` or as `disk` mode (you
   choose at creation); either way, the backend is recorded as `apkovl`.
-- **`cloudinit`**: any recognized cloud image (Ubuntu, Debian, Fedora,
-  Arch). Always resolves to `cloud` mode; there's no other option.
+- **`cloudinit`**: any recognized cloud image (Ubuntu, Debian, Fedora, Arch,
+  or Alpine cloud). Always resolves to `cloud` mode; there's no other option.
 - **`ssh`**: the fallback for a bring-your-own image stoat doesn't
   recognize. Always resolves to `disk` mode: an unrecognized ISO is assumed
   to need a real install, followed by manual/SSH-based provisioning, since

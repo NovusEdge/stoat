@@ -1,9 +1,9 @@
 # Writing recipes
 
 A recipe is a directory with a `recipe.toml` manifest and one or more shell
-scripts. Stoat runs the right script over ssh (or bakes it into cloud-init)
-depending on the guest and backend. This is the v2 format; see
-`docs/recipe-spec-v2.md` for the full spec this guide summarizes.
+scripts. Stoat runs the selected script over SSH or places it in a cloud-init
+seed, depending on the VM backend. This is the shipped directory-manifest
+format; the [v2 spec](recipe-spec-v2.md) is historical design context.
 
 ## Directory structure
 
@@ -32,7 +32,6 @@ everything else is shell scripts referenced from it.
 name = "docker"
 description = "Docker engine and the compose plugin"
 os = ["alpine"]
-requires = ["apk", "openrc"]
 stage = "provision"
 script = "install.sh"
 ```
@@ -52,7 +51,7 @@ script = "install.sh"
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | string | yes | | Identifier, matches the directory name |
+| `name` | string | yes | | Recipe identifier; keep it a safe path component |
 | `description` | string | no | | One-line human description |
 | `version` | string | no | | Semver; tracked per-VM alongside applied state |
 | `os` | string[] | no | all OSes | Guest OSes this recipe applies to |
@@ -61,7 +60,7 @@ script = "install.sh"
 | `script` | string | yes | | Default script, path relative to the recipe dir |
 | `scripts` | table | no | | Per-OS script overrides; unlisted OSes fall back to `script` |
 | `run` | string | no | `"once"` | `"once"`, `"always"`, or `"manual"` |
-| `auto` | bool | no | `false` | Run automatically the first time the VM becomes reachable |
+| `auto` | bool | no | `false` | Stored manifest metadata; current TUI auto-provision does not read it |
 | `runtime` | string | no | `"sh"` | Interpreter the script runs under: `"sh"` or `"python3"` |
 
 `name` and `script` are the only required fields; a manifest missing either
@@ -82,11 +81,9 @@ guests that can't satisfy it:
 | `dnf` | dnf package manager | fedora |
 | `pacman` | pacman package manager | arch |
 
-`docker/recipe.toml` uses `requires = ["apk", "openrc"]` instead of
-`os = ["alpine"]` alone. Both narrow the recipe to Alpine today, but
-`requires` also documents *why*: if another OpenRC/apk distro shows up later,
-the recipe already applies to it with no manifest change. A recipe with both
-`os` and `requires` must satisfy both.
+The bundled recipes use `os` to name their supported guests. A recipe may also
+use `requires` to require every named guest capability and its init value. A
+recipe with both `os` and `requires` must satisfy both filters.
 
 A recipe requiring `systemd` is never offered to an Alpine VM; stoat resolves
 this against `guest.OS` at list/check time, before ssh is even involved.
@@ -102,6 +99,10 @@ case: install packages, enable services, write config.
   ssh, `sh -s` by default.
 - **cloudinit backend**: the script is wrapped into the cloud-config
   `runcmd` block at VM creation and runs at first boot.
+
+Cloud-init currently executes recipe bodies through a shell command and does
+not perform the SSH runtime bootstrap. Use `runtime = "sh"` for a cloud
+recipe; `runtime = "python3"` is not installed or invoked by cloud-init.
 
 ## Runtime
 
@@ -150,9 +151,9 @@ table in `vm.toml`:
 - `manual`: never runs automatically; only via an explicit
   `stoat apply <vm> --only <recipe>`.
 
-`auto = true` is a separate toggle: it makes the recipe run automatically the
-first time the VM becomes reachable, without waiting for an explicit
-`stoat apply`. Default is `false`.
+`auto` is accepted and stored as manifest metadata. The current TUI decides
+whether to offer provisioning from VM mode and applied state; it does not read
+`auto`.
 
 ## Verbs
 
@@ -236,8 +237,9 @@ Two conventions worth copying from the bundled scripts:
 
 ## Testing a recipe manually
 
-`stoat recipes` lists what's applicable to a given OS/backend, filtered by
-`os`/`requires`:
+`stoat recipes` lists what's applicable to a given guest OS, filtered by the
+manifest's `os` and `requires` fields. The accepted `--backend` flag is a
+compatibility argument and does not add another manifest filter:
 
 ```
 stoat recipes --os alpine
@@ -281,6 +283,6 @@ hand-edited recipe is left alone. Drop a new directory with its own
 `recipe.toml` anywhere under `~/.stoat/recipes/` and it's picked up the same
 way, no code changes or registration needed.
 
-Old-format flat files (`<name>.<os>.sh`, `<name>.cloud.yaml`) still work
-during the v1-to-v2 deprecation period, but stoat logs a warning whenever one
-is offered, suggesting migration to a `recipe.toml` directory.
+Old-format flat files (`<name>.<os>.sh`, `<name>.cloud.yaml`) are not a
+supported authoring format. Convert them to a directory with `recipe.toml`,
+or start with `stoat recipe new <name>`.

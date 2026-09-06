@@ -50,7 +50,7 @@ sign-off trailer on every commit in a PR.
 |---|---|---|
 | unit | `just test` | nothing |
 | race | `just race` | nothing |
-| TUI model tests | `just test-pkg internal/tui` | nothing |
+| TUI model tests | `just test-pkg tui` | nothing |
 | e2e | `just e2e` | KVM, network, ~15 minutes |
 
 A change to `internal/core`, `internal/sshx`, `internal/cloudinit`,

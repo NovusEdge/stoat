@@ -9,7 +9,7 @@ stoat is a single Go binary that shells out to `qemu-system-x86_64`, `qemu-img`,
 | Linux with KVM | stoat opens `/dev/kvm` directly and runs QEMU with hardware acceleration |
 | `qemu-system-x86_64` and `qemu-img` | run and create VMs |
 | `ssh` (an OpenSSH client) | connect into a running VM, and provision it |
-| `xorriso` | **only** if you'll create Ubuntu/Debian/Fedora/Arch cloud VMs: it builds the cloud-init seed image |
+| `xorriso` | used when you create Ubuntu/Debian/Fedora/Arch/Alpine cloud VMs: it builds the cloud-init seed image |
 | Go 1.26 | **only** if you're building from source (the exact version pinned in `go.mod`) |
 
 ### QEMU and SSH
@@ -20,7 +20,9 @@ On Arch:
 sudo pacman -S --needed qemu-full openssh
 ```
 
-(`qemu-desktop` also works and is smaller; either package provides `qemu-system-x86_64` and `qemu-img` with GTK/OpenGL display support, see below.)
+(`qemu-desktop` also works and is smaller. Choose a QEMU package that provides
+`qemu-system-x86_64`, `qemu-img`, and the GTK/OpenGL display backend described
+below.)
 
 On Debian/Ubuntu:
 
@@ -50,15 +52,18 @@ sudo usermod -aG kvm "$USER"   # then log out and back in
 
 ### GPU/display
 
-A VM opens a real QEMU window by default. That window is `-display gtk,gl=on`, so your QEMU build needs GTK and OpenGL support (the `qemu-full`/`qemu-desktop` Arch packages and the Debian/Ubuntu packages above provide this). Set `display = "vnc"` on a VM to keep it headless with its screen on a VNC socket instead.
+A VM opens a real QEMU window by default on a host with a graphical session.
+Stoat passes `-display gtk,gl=on`, so the QEMU binary on your `PATH` must have
+GTK and OpenGL support. Set `display = "vnc"` in `vm.toml` to keep a VM
+headless with its screen on a VNC socket.
 
 **On a host with no graphical session** (a server, an ssh session with no forwarding) stoat does not ask for a window at all: every VM's screen goes to a VNC socket and stoat prints how to attach, so a disk VM can still be installed from another machine. It detects this from `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0`.
 
 If a VM still fails to start with a display or GL error, your host has a session QEMU cannot draw on. Set `STOAT_GRAPHICAL=0` to take the window out of play; see [troubleshooting](../troubleshooting.md). No source edit and no rebuild.
 
-### xorriso (cloud VMs only)
+### xorriso (cloud VMs)
 
-Provisioning an Ubuntu, Debian, Fedora, or Arch cloud image builds a small ISO9660 seed via `xorriso`. Alpine VMs (live or disk) never need it. If it's missing, creating or starting a cloud VM fails with:
+Provisioning an Ubuntu, Debian, Fedora, Arch, or Alpine cloud image builds a small ISO9660 seed via `xorriso`. Alpine live and disk VMs do not need it. If it is missing, creating or starting a cloud VM fails with:
 
 ```
 xorriso is required for cloud-init provisioning; install libisoburn
@@ -70,7 +75,10 @@ On Debian/Ubuntu the package is `xorriso`; on Arch it's `libisoburn` (which prov
 
 Requires Go 1.26.
 
-There's both a `justfile` and a `Makefile` exposing the same targets, use whichever you have:
+The repository has a `justfile` and a smaller `Makefile`. They share `build`,
+`install`, `hooks`, and `test`; the `justfile` also provides `setup`, `check`,
+`lint`, `e2e`, and other development targets. Use the `justfile` for the
+installer and host checks:
 
 ```sh
 just build
@@ -84,11 +92,14 @@ make build
 make install
 ```
 
-`install` builds the binary and copies it to `~/.local/bin/stoat` (with `just`, override the destination via `PREFIX`). Make sure `~/.local/bin` is on your `PATH`.
+`just install` builds the binary and copies it to `~/.local/bin/stoat` by
+default. Set `PREFIX` to change that destination. The Makefile's `install`
+target always uses `~/.local/bin`. Make sure the destination is on your
+`PATH`.
 
-> If your shell aliases `make` to `just`, `make build`/`make install` still work: the alias resolves to the justfile, which has the same targets. To reach the real Makefile explicitly, use `command make ...`.
-
-Other useful `just`/`make` targets: `just test` runs the test suite, `just check` runs the same `gofmt`/`go vet`/`go build` checks as the pre-commit hook, and `just hooks` points git at `.githooks` to enable it.
+Other useful targets: `just test` runs the test suite, `just check` runs the
+same `gofmt`/`go vet`/`go build` checks as the pre-commit hook, and `just hooks`
+points Git at `.githooks` to enable it.
 
 ## Install from a release tarball
 
@@ -110,7 +121,11 @@ nix run            # build and run in one step
 nix develop        # a dev shell with go, just, qemu and openssh
 ```
 
-The `vendorHash` is pinned and the build works as-is, no hash dance required.
+The development shell provides the build tools and QEMU/OpenSSH packages. Add
+`xorriso` to the shell or host `PATH` when you use cloud VMs. The flake includes
+a pinned `vendorHash` for the current `go.mod` and
+`go.sum`. A dependency change requires updating that hash from the value Nix
+prints in its mismatch error.
 
 ### If `nix build` fails before it starts building
 
@@ -165,7 +180,9 @@ Once the binary is installed, check that your host is ready:
 stoat doctor
 ```
 
-This checks that `qemu-system-x86_64` is on your `PATH`, that `/dev/kvm` is usable, and that `ssh` is on your `PATH`. On success it prints:
+This checks `qemu-system-x86_64`, `qemu-img`, `ssh`, `xorriso`, Git (optional),
+and `/dev/kvm`. It prints failed checks and a suggested command for each. A
+missing required check exits with status 1. On a ready host it prints:
 
 ```
 ok

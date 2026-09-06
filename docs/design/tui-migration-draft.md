@@ -1,12 +1,17 @@
 # Migrating internal/tui onto internal/core
 
-Planning document. No code was changed. Written against the working tree of
+Historical migration plan. The build failures and unfinished work listed here
+describe the 2026-08-04 checkout. Use the [TUI reference](../reference/tui.md)
+for current behavior and the [manual checks](../qa/tui-clickthrough.md) for
+validation.
+
+The original plan was written against the working tree of
 2026-08-04, which has a large in-flight comment sweep on top of `d940ff9`
 plus `c3ba57b` (sshx ctx).
 
 ## 0. Blocking precondition
 
-`internal/tui` does not compile in the working tree right now:
+In that 2026-08-04 working tree, `internal/tui` did not compile:
 
 ```
 internal/tui/autoprov.go:30:26: not enough arguments in call to sshx.Wait

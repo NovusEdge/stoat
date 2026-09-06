@@ -13,11 +13,12 @@ share            = "~/src"         # string path; default empty; user/TUI and st
 sshport          = 2200            # int; default an allocated free port; stoat writes the host forward to guest sshd.
 recipes          = ["docker"]      # string[]; default []; user/TUI and stoat create/update write the selection.
 display          = "auto"          # string; default "auto"; user/TUI writes: auto, window, or vnc.
-backend          = "cloudinit"     # string; default inferred from image; stoat writes: apkovl, cloudinit, or ssh.
+backend          = "apkovl"        # string; default inferred from image; stoat writes: apkovl, cloudinit, or ssh.
 base             = ""              # string path; default empty; stoat writes the absolute shared base-image path.
-sshuser          = "stoat"         # string; default guest-defined user (empty means root); stoat writes it.
+sshuser          = "root"          # string; default guest-defined user (empty means root); stoat writes it.
 console_password = ""              # string; default "stoat" for cloud VMs, empty otherwise; stoat writes, never ssh.
-allow_exec       = true             # bool; default true; user/TUI and stoat create write the MCP exec/copy opt-in.
+allow_exec       = false            # bool; derived compatibility flag; agent_access=manage does not grant guest exec.
+agent_access     = "manage"         # string; default manage; none, observe, manage, or exec for MCP guest access.
 
 [[forwards]]                      # table[]; default []; user/TUI and `stoat forward` write extra forwards.
 hostport  = 8080                  # int; default none; user writes the host port.
@@ -25,7 +26,6 @@ guestport = 80                    # int; default none; user writes the guest por
 
 [params.docker]                   # table; default {}; stoat writes parameter values; do not edit by hand.
 user    = "dev"                   # string; default recipe value "dev"; stoat writes the non-secret override.
-channel = "stable"                # string; default recipe value; stoat writes the non-secret override.
 
 # Written by stoat; do not edit.
 [applied.docker]

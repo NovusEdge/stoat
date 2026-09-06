@@ -10,7 +10,7 @@ usage: stoat <command> [flags]
 
 ## Global flags
 
-- **`--json`** turns on machine output: one JSON object per line on stdout, errors included, never prose. It implies `--quiet` and never prompts (so `rm` without `-y` fails instead of asking). It is recognized anywhere in argv before kong ever parses flags, with one exception: for `exec`, only before the VM name, so `stoat exec work ls --json` still sends `--json` to the guest. This file only covers the human-facing CLI; the JSON shapes themselves are in [json.md](json.md).
+- **`--json`** turns on machine output for a named VM operation: one JSON object per line on stdout, errors included, never prose. It implies `--quiet` and never prompts (so `rm` without `-y` fails instead of asking). Project fan-out commands currently have a known limitation: no-name `up`, `down`, and `apply` can print progress prose before their terminal JSON result. Use a named VM command when a clean stream is required. The flag is recognized anywhere in argv before kong ever parses flags, with one exception: for `exec`, only before the VM name, so `stoat exec work ls --json` still sends `--json` to the guest. This file only covers the human-facing CLI; the JSON shapes themselves are in [json.md](json.md).
 - **`-q`, `--quiet`, `--no-interactive`** are three names for one flag, present on every subcommand. Where it has an effect, it suppresses "in-progress" chatter (`starting work...`, `provisioning work...`, ...); final results and all errors print regardless.
 - **`-h`, `--help`** prints the command's usage and flags and exits 0. `stoat help` (the subcommand) prints the same top-level text `stoat --help` does.
 - **`-v`, `--version`** prints `stoat <version>` and exits 0. It is matched as the **first argument only**, before any parsing (`cmd/stoat/main.go`), which has two consequences worth knowing: `stoat -v --json` prints plain text and ignores `--json`, and `stoat --json --version` is a usage error because `-v` is no longer first. **Scripts and machine consumers should use the `version` subcommand**, which behaves normally under `--json`.
@@ -38,7 +38,7 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`wait`](#stoat-wait-name) | Block until a VM reaches a state | 0, 1, 2 |
 | [`rm`](#stoat-rm-name--y) | Delete a VM | 0, 1 |
 | [`clone`](#stoat-clone-source-name) | Copy a VM: overlay disk, fresh ssh port, no forwards | 0, 1 |
-| [`exec`](#stoat-exec-name-command-) | Run a command in a VM, verbatim | 0-255, see below |
+| [`exec`](#stoat-exec-name-command) | Run a command in a VM, verbatim | 0-255, see below |
 | [`ssh`](#stoat-ssh-name) | ssh into a VM, replacing this process | 0, 1, 2 |
 | [`ssh-command`](#stoat-ssh-command-name) | Print the ssh argv instead of running it | 0, 1 |
 | [`cp`](#stoat-cp-source-dest) | Copy a file in or out; one side is `<vm>:<path>` | 0, 1, 2 |
@@ -53,6 +53,12 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`recipe list`](#stoat-recipe-list) | List installed recipes and where they live | 0, 1 |
 | [`recipe show`](#stoat-recipe-show-name) | Show one recipe's parameter and output contract | 0, 1 |
 | [`recipe new`](#stoat-recipe-new-name) | Scaffold a recipe in the recipes directory | 0, 1 |
+| [`recipe search`](#stoat-recipe-search-term) | Search the curated remote recipe index | 0, 1 |
+| [`recipe add`](#stoat-recipe-add-ref) | Add a remote recipe to the active scope | 0, 1 |
+| [`recipe lock`](#stoat-recipe-lock---global) | Resolve project recipe refs to commits | 0, 1 |
+| [`recipe sync`](#stoat-recipe-sync---global) | Synchronize a recipe cache to its lock | 0, 1 |
+| [`recipe update`](#stoat-recipe-update-names---global) | Repin remote recipes to current refs | 0, 1 |
+| [`recipe rm`](#stoat-recipe-rm-name--y) | Remove a remote recipe | 0, 1 |
 | [`guest ls`](#stoat-guest-ls) | List loaded guest OS definitions | 0 |
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
@@ -147,7 +153,7 @@ created work (alpine, live, ssh port 2222)
 start it with: stoat up work
 ```
 
-Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--allow-exec` (default true; `--allow-exec=false` opts this VM out of `exec`/`copy_to`/`copy_from`, enforced by the MCP server rather than stoat itself).
+Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--agent-access` (`none`, `observe`, `manage`, or `exec`; default `manage`, controls MCP guest access). The hidden `--allow-exec` flag remains as a compatibility alias: true maps to `exec`, false to `manage`.
 
 `create` (alias `new`) refuses at project scope: `a stoat.toml is present; declare the VM there and run stoat up, or pass --global`. `--global` creates the VM outside the project.
 
@@ -250,6 +256,11 @@ work stopped
 `-q` suppresses the `stopping <name>...` line only.
 
 At project scope, `<name>` is optional: with no name, every declared VM is stopped in declaration order, and a failure stops the run and reports every later VM as skipped.
+
+The stop request can return while QEMU is still exiting. Use
+`stoat wait <name> --until stopped` when a script needs confirmed termination.
+Under project fan-out, add the VM name to keep the JSON output machine-readable;
+no-name `down --json` can include progress prose before its result.
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded, is broken, isn't running, or fails to stop.
 
@@ -477,13 +488,17 @@ work: recipes applied
 
 At project scope, `<name>` is optional: with no name, every declared VM's recipes run in turn, in declaration order, and a failure stops the run.
 
-**Exit codes:** 0 on success; 1 if the VM can't be loaded, the run fails, or (for a cloud-mode VM) recipes were already applied at boot rather than by this command.
+**Exit codes:** 0 on success; 1 if the VM cannot be loaded, is not running, or the apply fails. Cloud VMs support the same apply path over SSH; recipe run modes determine which scripts run or are skipped.
 
 `provision` is a hidden alias of `apply`: `stoat provision work` behaves exactly like `stoat apply work`, and reports `"cmd":"apply"` under `--json`.
 
 ## `stoat recipes`
 
-Lists recipes, optionally filtered to ones applicable to a guest OS and/or backend.
+Lists recipes, optionally filtered to ones applicable to a guest OS and/or
+backend. Applicability is determined by the guest OS, manifest `os`, and
+manifest `requires`; the backend controls execution after selection. The
+`--backend` flag remains accepted for compatibility with older callers but is
+not an additional manifest-match condition.
 
 ```
 $ stoat recipes --os alpine --backend apkovl
@@ -494,7 +509,8 @@ tailscale                      Tailscale daemon, installed and started (join man
 xfce                           XFCE desktop with autologin startx on tty1
 ```
 
-`--os` alone means "what that OS gets" (its own backend is inferred); `--backend` alone means "every OS on that backend"; both together is the exact filter; neither is the full catalog.
+`--os` selects a guest OS. `--backend` is accepted but does not narrow the
+manifest match. With neither flag, the command lists the full catalog.
 
 **Exit codes:** 0 on success; 1 if the recipe list can't be built.
 
@@ -503,28 +519,35 @@ xfce                           XFCE desktop with autologin startx on tty1
 Reports, for each named recipe, why it would **not** apply to the given OS/backend; an empty result means every one of them would.
 
 ```
+$ stoat check-recipes xfce --os fedora --backend cloudinit
+xfce: xfce is not offered to fedora/cloudinit
 $ stoat check-recipes docker xfce --os debian --backend cloudinit
-docker: docker is not offered to debian/cloudinit
-$ stoat check-recipes xfce --os alpine --backend apkovl
 all applicable
 ```
 
-`--os` is required; `--backend` narrows further.
+`--os` is required. `--backend` is accepted for compatibility and is included
+in the diagnostic wording, but it does not add a manifest applicability filter.
 
 **Exit codes:** 0 on success, whether or not any recipe turned out inapplicable (an inapplicable recipe is a valid answer, not a failure); 1 if the check itself fails; 2 if no recipe names are given.
 
 ## `stoat recipe list`
 
-Lists recipes installed under stoat's recipes directory and prints where that directory is.
+Lists every visible recipe in shadow order and prints each recipe's scope and
+remote commit when available. Project scope is active only when the current
+directory contains `stoat.toml`. The JSON form also includes the roots in
+search order.
 
 ```
 $ stoat recipe list
-/home/user/.stoat/recipes
-  devtools
-  docker
-  tailscale
-  xfce
+NAME                 SCOPE     COMMIT   DESCRIPTION
+devtools             bundled            git, a compiler, an editor and basic fetch tools
+docker               bundled            Docker engine and the compose plugin
+tailscale            bundled            Tailscale daemon, installed and started (join manually)
+xfce                 bundled            XFCE desktop with autologin startx on tty1
 ```
+
+The bundled index currently has no remote entries. Use `recipe search` to
+inspect the curated index before adding a remote recipe by name.
 
 **Exit codes:** 0 on success; 1 if the directory can't be read.
 
@@ -573,6 +596,68 @@ VM and guest samples are [here](samples/vm.toml) and
 [here](samples/guest.toml).
 
 **Exit codes:** 0 on success; 1 if the recipe can't be created (e.g. the name is already taken).
+
+## `stoat recipe search [term...]`
+
+Searches the curated remote index by recipe name and description. With no
+terms it lists every index entry. `--refresh` refreshes the local index clone
+before searching; the clone is otherwise reused for 24 hours.
+
+```sh
+stoat recipe search docker
+stoat recipe search --refresh
+```
+
+The current shipped index may be empty. An index name can be passed to
+`recipe add`; a Git URL is also accepted by `recipe add` but is not accepted by
+the MCP `add_recipe` tool.
+
+## `stoat recipe add <ref>`
+
+Adds a remote recipe to the active scope. `<ref>` is an index name, an index
+name with `@tag-or-branch`, or a Git URL with an optional `@ref`.
+
+```sh
+stoat recipe add my-tools
+stoat recipe add my-tools@v1.2
+stoat recipe add https://github.com/example/stoat-my-tools@main -y
+```
+
+An index name does not prompt. A Git URL previews the manifest and asks for
+confirmation on a terminal; use `-y` for a non-interactive call. `--global`
+selects the global lock and cache from a project. `--force` allows a remote
+recipe to replace an existing bundled, local, or remote name.
+
+In project scope, the declaration is written to `stoat.toml` and the lock is
+updated by `recipe lock`; `recipe sync` then populates `.stoat/recipes/`.
+Without a project file, global scope records the source in
+`~/.stoat/stoat.lock` and checks out under `~/.stoat/recipes/`.
+
+## `stoat recipe lock [--global]`
+
+Resolves each active project declaration to a full 40-character commit and
+writes `stoat.lock`. It does not populate the recipe cache. In global scope,
+the existing global lock is repinned. A stale or missing project declaration
+must be locked before project recipe operations can proceed.
+
+## `stoat recipe sync [--global]`
+
+Makes the active cache match its lock. Missing or mismatched clean checkouts
+are replaced, and project cache directories absent from the lock are removed.
+A dirty checkout is refused; copy it to a local recipe before editing.
+
+## `stoat recipe update [names...] [--global]`
+
+Fetches the stored ref and repins it to a new commit. With no names, all
+remote recipes in the active lock are updated. It does not search the index
+again and refuses a dirty checkout.
+
+## `stoat recipe rm <name> [-y]`
+
+Removes a remote recipe's declaration, lock entry, and checkout. It refuses a
+recipe still selected by a VM unless `--force` is supplied. Confirmation is
+required unless `-y` is supplied; `--json` also requires `-y` because it never
+reads stdin.
 
 ## `stoat guest ls`
 
@@ -632,7 +717,7 @@ $ stoat logs -n 20
 
 ## `stoat screenshot <name> [-o path]`
 
-Writes the VM's screen to a PNG and prints the path, the pixel size and the byte count. qemu dumps its own framebuffer over the monitor socket, so the image is the same whether the display is a GTK window or a VNC socket, and a VM stuck at a boot prompt still answers.
+Writes the VM's screen to a PNG and prints the path, pixel size, and byte count. QEMU sends its framebuffer through the QMP socket with `screendump`. This works with a GTK window or VNC display, including when the guest is at a boot prompt.
 
 ```
 $ stoat screenshot work
@@ -687,12 +772,12 @@ Prints the full usage message (subcommands, global flags, exit codes) to stdout.
 | `1` | Runtime failure | Unknown VM name, VM already stopped for `down`, VM running for `rm`, ssh unreachable during provision, `doctor` found an issue, `rm` confirmation declined |
 | `2` | Usage error | Unknown subcommand, missing/extra arguments, an unparseable flag, `update` given no flags, `check-recipes` given no names |
 
-A usage error (2) always prints both the specific complaint and the full usage text to stderr; a runtime failure (1) prints only `stoat: <command>: <error>` to stderr. `exec` is the one command whose exit code, without `--json`, is neither: it is the guest's own status, 0-255 (see [`stoat exec`](#stoat-exec-name-command-)).
+A usage error (2) always prints both the specific complaint and the full usage text to stderr; a runtime failure (1) prints only `stoat: <command>: <error>` to stderr. `exec` is the one command whose exit code, without `--json`, is neither: it is the guest's own status, 0-255 (see [`stoat exec`](#stoat-exec-name-command)).
 
 ## Scripting
 
 - **`-q`, `--quiet`, `--no-interactive`** are three names for the same flag, present on every subcommand. Where it has an effect, it suppresses the "in-progress" chatter (`starting work...`, `provisioning work...`, ...); final results and all errors print regardless of this flag.
 - **`rm`** also treats `--no-interactive`/`-q`/`--json` as "there is no one to answer a confirmation prompt": without `-y` it refuses rather than blocking on stdin.
-- **`--json`** is the machine-readable mode: one JSON object per line on stdout, errors included, implying `--quiet` and never prompting. See [json.md](json.md) for the wire format.
+- **`--json`** is the machine-readable mode for named VM commands: one JSON object per line on stdout, errors included, implying `--quiet` and never prompting. Project fan-out `up`, `down`, and `apply` can currently add progress prose before the result; see [json.md](json.md) for the wire format and workaround.
 - **`NO_COLOR`** (any non-empty value) disables ANSI color in `ls`'s output.
 - Color is also **disabled automatically whenever stdout is not a terminal** (checked via `os.ModeCharDevice`), so piping `stoat ls` into `awk`, `grep`, or a file never carries escape codes even without setting `NO_COLOR`. Only `ls`'s `STATE` column is ever colored.

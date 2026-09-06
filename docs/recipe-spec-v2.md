@@ -1,10 +1,22 @@
-# Recipe Spec v2
+# Recipe Spec v2 (historical draft)
 
-Status: **draft**
+Status: **historical proposal**. This document records an earlier design and
+does not define all current behavior. For the shipped authoring workflow, see
+[Recipes](recipes/overview.md), [Writing your own recipe](recipes/writing-your-own.md),
+and the [current sample](reference/samples/recipe.toml).
+
+The implementation currently accepts schema 2 and schema 3 manifests. Schema
+3 adds parameters, secrets, outputs, and health checks. The current CLI also
+provides `stoat recipe new`, remote recipe lock/sync, and project recipe
+scopes; those shipped details are documented in the links above and in
+[Sharing recipes](recipes/sharing.md). Statements below describe the draft
+unless they are explicitly marked as current behavior.
 
 ## Summary
 
-Recipes become directories containing a `recipe.toml` manifest and one or more shell scripts. One format, one execution model, works on every backend.
+The draft proposed directories containing a `recipe.toml` manifest and one or
+more shell scripts. The directory and manifest format is now shipped, but the
+draft's backend and stage details are historical.
 
 ## Directory Structure
 
@@ -48,7 +60,7 @@ fedora = "install-fedora.sh"
 # unlisted OSes fall back to `script`
 ```
 
-### Fields
+### Fields in the draft
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -70,7 +82,7 @@ A recipe declaring `requires = ["systemd"]` is not offered to Alpine. Stoat reso
 
 ## Stages
 
-### `provision` (default)
+### `provision` (default, draft model)
 
 Runs after the VM is booted and reachable over SSH. This is the common case: install packages, configure services, etc.
 
@@ -78,7 +90,7 @@ Runs after the VM is booted and reachable over SSH. This is the common case: ins
   A non-`sh` runtime is bootstrapped first: stoat checks the guest for it and installs it with the guest's package manager if missing, over a separate SSH call, before piping the recipe body.
 - **cloudinit backend**: Wrapped into a cloud-config `runcmd` block at VM creation, runs at first boot.
 
-### `install`
+### `install` (draft model)
 
 Reserved for initial disk setup, before the first real boot. Alpine disk-mode VMs automate `setup-alpine` unattended without needing a recipe (see below); install-stage recipe bodies are not executed today.
 
@@ -88,7 +100,7 @@ Reserved for initial disk setup, before the first real boot. Alpine disk-mode VM
 
 ## Execution Model
 
-### For apkovl/ssh backends
+### For apkovl/ssh backends (draft model)
 
 ```
 VM boots
@@ -97,7 +109,7 @@ VM boots
   -> marks them applied in vm.toml
 ```
 
-### For cloudinit backend
+### For cloudinit backend (draft model)
 
 ```
 VM creation
@@ -152,7 +164,7 @@ This lets the TUI show:
 - Applied: recipe in both
 - Stale: recipe in `applied` but removed from `recipes`
 
-## Migration
+## Migration (historical proposal)
 
 ### Bundled recipes
 
@@ -166,11 +178,14 @@ Convert existing files:
 
 One `xfce/` directory replaces 6+ files.
 
-### User recipes
+### User recipes (historical proposal)
 
-Old-format recipes (`.sh` files in recipes root) continue to work during a deprecation period. Stoat logs a warning suggesting migration.
+The proposal suggested a deprecation period for old-format recipes. Current
+Stoat reads directory manifests; old flat recipe files are not a supported
+authoring format. Use `stoat recipe new` or convert a recipe to the current
+directory layout.
 
-## Decisions
+## Decisions recorded by the historical proposal
 
 1. **Auto-provision**: Toggle-able via a field in recipe.toml. Recipes can declare `auto = true` to run automatically when the VM becomes reachable for the first time. Default is `false` (require explicit Apply).
 

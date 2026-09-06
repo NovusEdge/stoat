@@ -1,11 +1,13 @@
 # Guest Subsystem: Design
 
-**Update, 2026-09-05:** the guest registry this document designs is now data,
-not Go: `internal/guest/bundled/*.toml` plus `~/.stoat/guests/*.toml` merged
-over it, loaded through `internal/tomlx`. See `docs/reference/guest.md` for
-the file format.
+**Implementation status:** the guest registry uses bundled TOML files in
+`internal/guest/bundled/` with overrides from `~/.stoat/guests/`, loaded
+through `internal/tomlx`. See the [guest reference](../reference/guest.md)
+for the current file format. The problem inventory and proposed types below
+describe the original design context.
 
-**Status:** accepted design, not yet a plan. Written 2026-08-02. The operation surface built on this layer is specified in [`core-api.md`](core-api.md).
+**Status:** accepted design, written 2026-08-02. The original operation
+surface is described in [Core API](core-api.md).
 
 **Why this exists:** guest-OS knowledge is scattered across 25 sites as ad-hoc string comparisons, provisioning has no contract at all, and the logic that creates a VM lives inside a Bubbletea form. Adding Alpine cloud support missed three of those sites and the feature silently did not work. This document defines the subsystem that makes that class of failure structural rather than a matter of remembering, and the API layer that lets something other than a keyboard drive stoat.
 
@@ -281,9 +283,17 @@ For phase-2 recipes, progress comes from the declared `stages` plus emitted mark
 
 ### 9.1 The problem
 
-**Creating a VM is only possible by driving a Bubbletea form.** `internal/tui/form.go`'s `build()` (:753+) resolves the image, infers the OS, picks the backend, allocates an SSH port via `config.FreePort()`, writes `vm.toml` and creates the qcow2. The CLI has `ls`, `up`, `down`, `ssh`, `provision`, `rm`, `recipe`, `logs`, `doctor`, and **no `create`**.
+**At the time of this proposal, creating a VM was only possible by driving a
+Bubbletea form.** `internal/tui/form.go`'s `build()` (:753+) resolved the image,
+inferred the OS, picked the backend, allocated an SSH port via
+`config.FreePort()`, wrote `vm.toml` and created the qcow2. The CLI then had
+`ls`, `up`, `down`, `ssh`, `provision`, `rm`, `recipe`, `logs`, `doctor`, and
+**no `create`**.
 
-So orchestration sits *above* the layer any programmatic caller would enter at. An MCP server would have to either re-implement `form.build()` (a second, drifting copy of the rules) or drive a TUI, which is absurd. The same is true of the CLI, which is why it has no `create` today.
+So orchestration sat *above* the layer any programmatic caller would enter at.
+An MCP server would have had to either re-implement `form.build()` (a second,
+drifting copy of the rules) or drive a TUI, which is absurd. The same was true
+of the CLI, which is why it had no `create` command at that time.
 
 This is a layering defect, not a missing feature.
 

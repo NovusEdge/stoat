@@ -1,114 +1,102 @@
 # Recipes
 
-A recipe is a small, named script that sets up something inside a guest
-(XFCE, Docker, a dev toolchain, Tailscale) so you don't type the same install
-commands into every VM you spin up. Recipes live as plain files on disk, in
-`~/.stoat/recipes/` (or `$STOAT_HOME/recipes` if you've set that), and stoat's
-picker offers you whichever ones make sense for the VM you're building.
+A recipe is a named directory with a `recipe.toml` manifest and one or more
+scripts. Stoat selects recipes by the guest OS and the capabilities declared by
+that guest. The same recipe can run over SSH on an already booted VM or from a
+cloud-init seed at first boot.
 
-## Two kinds
+## Recipe directories
 
-**Shell recipes** run as `root` over ssh, piped into `sh -s` on an
-already-booted guest. They're the right shape for the apkovl (live Alpine) and
-plain-ssh (installed disk) backends, where a real shell is sitting there
-waiting for you.
+User recipes live under `~/.stoat/recipes/`, or under `$STOAT_HOME/recipes/`
+when `STOAT_HOME` is set. A recipe directory must contain `recipe.toml` and
+the script named by its `script` field. The manifest's `[scripts]` table can
+select another script for a particular OS or one of that OS's aliases.
 
-**Cloud-config fragments** are `#cloud-config` YAML merged into the seed ISO
-that cloud-init reads on a cloud image's first boot. They're the only option
-for the cloudinit backend: a cloud image's `packages:`/`runcmd:` machinery runs
-once, at first boot, before stoat ever gets an ssh session, there's no "run
-this over ssh" step to hook into.
-
-## Naming, and how the picker filters
-
-The filename is the whole contract. `internal/recipes/recipes.go` reads it
-straight off the directory listing: there's no manifest, no registration
-step:
-
-| Pattern | Kind | Offered to |
-|---|---|---|
-| `<name>.<os>.sh` | shell recipe | that exact OS, on the apkovl/ssh backends |
-| `<name>.cloud.yaml` | shared cloud fragment | the OSes in the shared set (`ubuntu`, `debian`, `arch`), on the cloudinit backend |
-| `<name>.<os>.cloud.yaml` | per-OS cloud fragment | that exact OS, on the cloudinit backend; takes the place of the shared fragment for that OS |
-
-`List(osName, backend)` does the filtering: a shell recipe only ever shows up
-for its exact OS, and cloud fragments only ever show up on the cloudinit
-backend. `List("ubuntu", "cloudinit")` will never return `xfce.ubuntu.sh`, and
-`List("alpine", "apkovl")` will never return `xfce.cloud.yaml`. If both a
-per-OS fragment and the shared fragment could technically apply to one OS,
-only the per-OS one is offered: you never see two "xfce" entries for the same
-image.
-
-`Install()` copies the bundled recipes into the data root the first time stoat
-needs them, and (this matters if you ever edit one) **it never overwrites an
-existing file**. Drop your own version in place of a bundled recipe, or add a
-new one, and a stoat upgrade leaves it alone.
+Stoat installs bundled recipes into this directory. It records checksums in
+`.manifest`; an unchanged bundled file can be refreshed by an upgrade, while a
+hand-edited file is preserved. Remote recipes use a project cache at
+`.stoat/recipes/` or a global cache under `~/.stoat/recipes/`. See
+[Sharing recipes](sharing.md).
 
 ## When recipes run
 
-- **Manually**, with `p` on the list or detail screen, against a VM's already-
-  selected recipes (chosen when you created the VM, or later, see the edit
-  form).
-- **Offered automatically** after a start, once ssh comes up: stoat asks
-  `<name> is up, run <recipe>, <recipe> now? y/N` rather than running anything
-  unasked. A live VM gets asked every time (its root is wiped on every
-  reboot, so nothing survives to make asking again redundant); a disk or cloud
-  VM is only asked again if the last run didn't finish cleanly.
-- **At first boot**, automatically, for cloud VMs: cloud-init applies the
-  merged `packages:`/`runcmd:` fragment before you ever get an ssh prompt.
-  There's nothing for `p` to do on a cloud VM; pressing it just tells you so.
+`stoat apply <vm>` runs the VM's selected recipes after the VM is running and
+reachable over SSH. `--only` restricts the run to names already present in the
+VM's recipe list. `stoat apply --dry-run` reports the run or skip decision for
+each selected recipe without contacting the guest.
 
-A disk VM with no OS installed yet has no ssh to provision over at all:
-`p` refuses with a reminder to run the installer at the QEMU console first.
-See [troubleshooting](../troubleshooting.md) if you hit that.
+The TUI offers provisioning after SSH becomes reachable. A live VM is offered
+again after every reboot because its root filesystem is temporary. A disk VM
+is offered while it needs provisioning. Cloud-init recipes run from the seed
+at first boot; stoat discovers their marker files if a later `apply` needs to
+reconcile state.
+
+## Targeting and execution
+
+The manifest uses `os` to restrict a recipe to named guests and `requires` to
+require guest capabilities. An empty `os` applies to every loaded guest.
+Stoat must satisfy every entry in `requires`. The guest's `init` value is also
+available as a capability. `stoat guest show <name>` displays the values.
+
+The default `stage` is `provision`. An `install` stage is accepted in the
+manifest but is not executable; `stoat check-recipes` reports
+`install-stage recipes are not yet supported`. Alpine disk installation is
+handled by Stoat's unattended installer instead.
+
+The default `runtime` is `sh`, invoked as `sh -s`. `runtime = "python3"` is
+invoked as `python3 -`; Stoat installs `python3` with the guest package
+manager first when the guest does not provide it. The only accepted runtimes
+are `sh` and `python3`.
+
+`depends` names recipes that must run first. The dependency must be in the VM's
+recipe list, unless it was already applied. Stoat orders the run and rejects
+cycles or unsatisfied dependencies. The TUI can add missing dependencies when
+you select a recipe; the CLI requires you to include them in the recipe list.
+
+`run` defaults to `once`. `once` skips a recipe whose current script and
+resolved non-secret parameters match its applied record. A changed script or
+parameter runs again. `always` runs on every apply. `manual` runs only when its
+name appears in `stoat apply <vm> --only <name>`. The `auto` manifest field is
+stored and shown by the manifest parser but does not control the TUI's
+auto-provision decision; the TUI decides from VM mode and applied state.
+
+Set `reboot = true` when a recipe needs a disk VM to restart before its effect
+is visible. Stoat performs one reboot after all recipes in the apply run have
+succeeded. It does not reboot live VMs because a live root is temporary.
 
 ## Bundled recipes
 
-| Recipe | Files | What it does |
+The bundled set is closed and currently contains these four recipes:
+
+| Recipe | Supported guests | Purpose |
 |---|---|---|
-| **xfce** | `xfce.alpine.sh`, `xfce.arch.sh`, `xfce.ubuntu.sh`, `xfce.debian.sh`, `xfce.cloud.yaml`, `xfce.fedora.cloud.yaml` | Installs an XFCE desktop. The shell recipes autologin root on tty1 and start X; the cloud fragments install `lightdm` and give you a graphical login screen instead, since a cloud image has a real user account (`stoat`), so there is someone to log in *as*. |
-| **docker** | `docker.alpine.sh` | Installs Docker plus the compose plugin (`docker-cli-compose`, a separate package from `docker` on Alpine) and starts the daemon. |
-| **devtools** | `devtools.alpine.sh`, `devtools.cloud.yaml` | The baseline for a throwaway VM: `git`, `curl`, `ca-certificates`, `vim`, `tmux`, `less`. The Alpine version also installs `bash` (Alpine defaults to `ash`) and `build-base`, its gcc/make/libc-dev meta-package. |
-| **tailscale** | `tailscale.alpine.sh` | Installs Tailscale and starts `tailscaled`. |
+| `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch | Git, compiler tools, editor and basic fetch tools |
+| `docker` | Alpine, Ubuntu, Debian, Fedora, Arch | Docker engine and compose plugin; schema 3 parameter `user`, output `socket`, health check `docker info` |
+| `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
+| `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 
-Two recipes have a cloud-config side, `xfce` and `devtools`. A shared
-`<name>.cloud.yaml` covers Ubuntu, Debian and Arch, because cloud-init's
-`packages:` list is handed straight to the guest's own package manager with no
-per-distro syntax, so a shared fragment only works where the names happen to
-match on both apt and pacman.
+The scripts are in `internal/recipes/bundled/` in the source tree. Each
+recipe has a manifest. Docker, devtools and Tailscale use OS-specific script
+overrides because package names and repository setup differ. XFCE uses one
+script with guest prelude verbs and therefore has no `[scripts]` table.
 
-`devtools.cloud.yaml` deliberately drops the compiler toolchain that
-`devtools.alpine.sh` installs: it is `build-essential` on apt, `base-devel` on
-pacman and `@development-tools` on dnf: three names and three shapes for one
-thing. Install your distro's own if you need it.
+Cloud images use their own package manager and a cloud-init seed. Cloud-init
+currently wraps recipe bodies in shell commands; it does not perform the SSH
+runtime bootstrap. Use `runtime = "sh"` for a cloud recipe. A `python3`
+manifest is not installed or invoked by cloud-init. A shared package name must
+resolve on every guest listed in `os`; use an OS-specific script when it does
+not.
 
-Fedora is the recurring exception and stays out of the shared set entirely:
+## Recipe state
 
-- For xfce it has no package literally named `xfce4`, so it gets its own
-  `xfce.fedora.cloud.yaml` using the comps group `@xfce-desktop`.
-- For devtools, its `vim` is packaged as `vim-enhanced`, so even the shared
-  fragment's names don't hold.
+After a successful apply, Stoat records the recipe version, script and input
+hashes, outputs, health result and timestamp in the VM's `[applied]` table.
+Secret values never enter that table or JSON output. A secret is represented as
+`<set>` or `<unset>` when Stoat displays state.
 
-Worth knowing if you're writing your own: **Arch has no `xfce4` package
-either**: `xfce4` is a package *group* there. It works only because
-`pacman -S` accepts a group name where apt would want a real package. Do not
-assume a name that resolves on two distros resolves the same way on both.
+Run a declared health check after applying a recipe with `stoat wait <vm>
+--healthy`. A check exits with status 0 for healthy. If `health.timeout` is
+omitted, Stoat uses 30 seconds. A recipe with no `[health]` table has no check.
 
-See [writing your own](writing-your-own.md) for the details if you're adding
-another cross-distro recipe.
-
-### Tailscale installs but does not authenticate
-
-`tailscale.alpine.sh` installs the package and starts `tailscaled`, that's
-where it stops. It does not run `tailscale up`, and it does not carry an auth
-key. That's deliberate: stoat has nowhere to keep an auth key that isn't worse
-than not having one. Put it in `vm.toml` and it sits in plaintext in the data
-root; bake it into the recipe file and it ends up committed to git the first
-time someone shares their recipes directory. Neither is acceptable, so the
-recipe stops short and tells you the one command to run yourself:
-
-```
-tailscale installed and tailscaled running.
-To join your tailnet, ssh in and run:  tailscale up
-(stoat does not store auth keys, see this recipe's header for why.)
-```
+Continue with [Writing your own recipe](writing-your-own.md) or
+[Sharing recipes](sharing.md).
