@@ -36,12 +36,12 @@ broken VM was using is very likely still committed to that VM's disk image,
 so treating "unparseable" as "claims nothing" would silently hand the same
 port to a second VM, exactly the collision this fallback exists to avoid.
 
-## The `share` field
+## The legacy `share` field
 
 Setting `share` on a VM exposes a host directory to the guest over 9p, as
-`/mnt/host`. QEMU is passed `security_model=none` for this: the only
-unprivileged option: `passthrough` needs root, and `mapped-xattr` needs host
-filesystem xattr support that isn't guaranteed to be there.
+`/mnt/host`. Stoat exports this directory read-only. The guest can remount it
+with `rw`, but QEMU still rejects writes. Stoat uses `security_model=mapped-xattr`
+so guest-created symlinks cannot escape into the host filesystem.
 
 Whether the share actually gets *mounted* inside the guest depends on mode:
 
@@ -55,11 +55,24 @@ Whether the share actually gets *mounted* inside the guest depends on mode:
 
   ```sh
   mkdir -p /mnt/host
-  mount -t 9p -o trans=virtio,version=9p2000.L,rw host /mnt/host
+  mount -t 9p -o trans=virtio,version=9p2000.L,ro host /mnt/host
   ```
 
   (add that to `/etc/fstab` yourself if you want it to persist across
   reboots on a `disk` VM).
+
+## Project shares
+
+A project declaration can list `shares` under `[vms.<key>]`. Stoat resolves
+each entry relative to the directory containing `stoat.toml` and refuses a
+path that leaves the project, including through a symlink. `.` mounts at
+`/work`; a subdirectory mounts at `/work/<basename>`. These exports are
+separate from the legacy `share` export and are read-write inside the guest.
+
+Debian cloud images do not mount project shares because their cloud kernel has
+no 9p module. Ubuntu, Fedora, Arch, and Alpine use the guest's 9p support when
+the definition permits it. See [The project file](../reference/project-file.md#shares)
+for the declaration syntax.
 
 ## Sharing a binary built on the host: the musl/glibc trap
 

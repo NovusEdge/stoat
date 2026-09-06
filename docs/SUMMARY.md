@@ -7,6 +7,11 @@
 * [Installation](getting-started/installation.md)
 * [Your first VM](getting-started/first-vm.md)
 
+## Workflows
+
+* [Project workflow](guides/project-workflow.md)
+* [MCP workflow](guides/mcp-workflow.md)
+
 ## Concepts
 
 * [Modes and backends](concepts/modes-and-backends.md)

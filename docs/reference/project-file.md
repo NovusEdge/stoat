@@ -87,10 +87,11 @@ step there. Ubuntu cloud VMs mount shares as usual.
 
 ## Secrets
 
-Secrets live in `.stoat/secrets.toml`, mode 0600, keyed
-`<key>.<recipe>.<param>`. `stoat init` adds `.stoat/` to `.gitignore` in
-a git checkout. Every reader renders a secret as `<set>` or `<unset>`,
-never as its value.
+Secrets declared by a project live in `.stoat/secrets.toml`, mode 0600, keyed
+`<key>.<recipe>.<param>`. `stoat init` adds `.stoat/` to `.gitignore` in a git
+checkout. Every reader renders a secret as `<set>` or `<unset>`, never as its
+value. A VM created outside a project keeps secrets in its own data-directory
+`secrets.toml`.
 
 ## Commands
 
@@ -100,6 +101,13 @@ never as its value.
 | `stoat status` | one line per declared VM: global name, state, health, drift |
 | `stoat ls --project` | filters the VM list to the current project |
 | `stoat up`, `down`, `apply`, `wait`, `rm` with no VM argument | act on every declared VM, in declaration order |
+
+Project fan-out currently has a JSON limitation: `stoat up --json`,
+`down --json`, and `apply --json` can emit human progress lines before the
+terminal JSON result. Use a named VM command such as `stoat up dev --json`
+when a clean JSON stream is required. After `down`, use
+`stoat wait <key> --until stopped` when a caller needs confirmed termination;
+the stop request can return while QEMU is still exiting.
 
 ## Errors
 

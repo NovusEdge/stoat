@@ -1,9 +1,10 @@
 # Access and auth
 
 Every VM stoat manages is reached over SSH, forwarded to a loopback port on
-the host. There is no console-based login flow for day-to-day use, no
-password, and no separate stoat-level credential system. It's all built on
-one SSH keypair stoat generates for itself.
+the host. SSH is the day-to-day credential path; cloud images also receive a
+password for their graphical console. There is no separate stoat-level
+credential system. SSH access is built on one keypair stoat generates for
+itself.
 
 ## The client keypair
 
@@ -59,7 +60,7 @@ per image when a VM is created from the catalog:
 | Image | Backend | SSH user |
 |---|---|---|
 | `alpine-standard`, `alpine-virt` | `apkovl` | `root` |
-| `ubuntu-24.04`, `debian-13`, `fedora-cloud`, `arch-cloud` | `cloudinit` | `stoat` |
+| `ubuntu-24.04`, `debian-13`, `fedora-cloud`, `arch-cloud`, `alpine-cloud` | `cloudinit` | `stoat` |
 
 The `stoat` user is used for the cloud images specifically because that's the
 user stoat's own cloud-init seed creates and keys, not each distro's usual
@@ -159,3 +160,27 @@ whatever it was created with. The detail screen says so plainly:
 To fix one, either recreate it, or set `console_password` in its `vm.toml`
 (`E` on the detail screen) and delete its `disk.qcow2` so the overlay and
 seed are rebuilt on the next start, which discards everything in that VM.
+
+## MCP agent access
+
+The `agent_access` field controls which operations an MCP client may perform
+for a VM. The levels are cumulative:
+
+| Level | Additional operations allowed |
+|---|---|
+| `none` | host-side operations only: status, start, stop, snapshots, logs, forwards, and updates |
+| `observe` | read guest files, directories, metadata, processes, service status, and logs |
+| `manage` | write files, copy files, install packages, manage services, add users, and apply recipes |
+| `exec` | run foreground or background guest commands and manage their jobs |
+
+New VMs default to `manage`. Set the level with `stoat create --agent-access`
+or the project file's `agent_access` field. The CLI and TUI can raise or lower
+the level. The MCP `update` tool can lower it but cannot raise it, so a human
+must explicitly grant broader access. The older `allow_exec` field remains
+understood for existing VM files; `true` maps to `exec` and `false` maps to
+`manage`.
+
+MCP access is an authorization boundary for the server. It does not change
+what a person can do with `stoat ssh` or `stoat exec` from the CLI. See the
+[MCP workflow](../guides/mcp-workflow.md) for client setup and transport
+details.

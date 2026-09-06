@@ -25,7 +25,7 @@ The list shows every VM directory under the data root as one sequence: valid VMs
 
 ### Row format
 
-A good VM's row is `name  mode  RAMMc  cpus` followed by either a dim `-` (stopped) or `up <uptime>  :<sshport>` (running):
+A good VM's row is `name  mode  RAMMc  cpus` followed by either a dim `-` (stopped) or `up <uptime>  :<sshport>` (running). The elapsed value is rendered when the list redraws; opening the list does not start a separate uptime timer:
 
 ```
 ❯ ● work           live   4096M  4c   up 2h15m  :2222
@@ -48,6 +48,7 @@ A good VM's row is `name  mode  RAMMc  cpus` followed by either a dim `-` (stopp
 | `p` | Provision | Runs the same guard chain as the detail screen's `p`, see [Provisioning](#provisioning-progress). |
 | `/` | Search | Opens the filter input; typing filters the list by VM name. |
 | `n` | New VM | Opens the new-VM form. If a download is still in flight from a previous visit to the form, that same form (and its download) is reused instead of being reset. |
+| `r` | Edit recipes | Opens the recipes directory in `$EDITOR` (or `vi` when `$EDITOR` is unset). A recipe added there appears the next time the new-VM form opens. |
 | `d` | Delete | On a stopped VM or a broken entry, arms a `delete <name>? y/N` prompt. On a running VM, refuses with "stop `<name>` first". |
 | `j`/`↓`, `k`/`↑`, `pgup`, `pgdown`, `home`, `end`, `g`, `G` | Move / page | Forwarded to the underlying list component. |
 | `esc` | Clear search, or cancel a pending prompt | See ordering note below. |
@@ -112,7 +113,9 @@ The image picker offers every catalog entry (Alpine, etc.) plus any file already
 
 **Validation on `enter`:** name is required, must contain no spaces or slashes, and must not already exist; an image must be selected and already downloaded; RAM must be a number ≥ 256 (MB); CPUs must be ≥ 1. The ssh port is picked automatically from the first free port.
 
-Recipes offered are filtered to those matching the selected image's OS/backend, and the selection resets whenever the image changes.
+Recipes offered are filtered to those matching the selected image's guest OS
+and manifest requirements. The compatibility `--backend` filter is not used
+for manifest applicability. The selection resets whenever the image changes.
 
 While a download is running, a progress block appears under the fields, see [Download progress](#download-progress).
 
@@ -151,7 +154,7 @@ The in-TUI editor for a VM that already exists: everything the raw `$EDITOR` rou
 |---|---|---|
 | `tab` / `↓` | Next field | |
 | `shift+tab` / `↑` | Previous field | |
-| `←` / `→` | Change the focused field | Mode row: cycle `live` / `disk` / `cloud` (also resyncs the recipe list, since recipes are per-backend). Recipes row: move the sub-cursor. |
+| `←` / `→` | Change the focused field | Mode row: cycle `live` / `disk` / `cloud` (also resyncs the recipe list for the selected guest). Recipes row: move the sub-cursor. |
 | `space` | Toggle a recipe | Recipes row only. |
 | `enter` | Save | Runs the guard chain below; on success writes `vm.toml` and returns to the detail screen. |
 | `esc` | Cancel | Back to the detail screen without saving. |

@@ -1,4 +1,4 @@
-# stoat
+# stoat documentation
 
 stoat is a terminal UI for running local QEMU virtual machines. It is
 Alpine-first, and it manages each VM through a small `vm.toml` file instead of
@@ -10,15 +10,21 @@ stoat needs no libvirt, no background daemon, and no database, just a single
 Go binary that shells out to `qemu-system-x86_64`, `qemu-img`, and `ssh`, and
 a data root of plain files under `~/.stoat` (or `$STOAT_HOME`).
 
-New here? Start with [Installation](getting-started/installation.md), then
-[Your first VM](getting-started/first-vm.md).
+Use the [installation guide](getting-started/installation.md) to prepare the
+host, then follow [Your first VM](getting-started/first-vm.md). Alpine live is
+the shortest path to a working shell. Alpine disk VMs install unattended and
+retain their disk; cloud VMs use a first-boot cloud-init seed.
 
-## Status
+For repeatable development environments, commit a `stoat.toml` and its
+`stoat.lock`, then use the [project workflow](guides/project-workflow.md).
+For an agent client, use the [MCP workflow](guides/mcp-workflow.md).
 
-stoat is pre-1.0 and single-user: it assumes it's the only thing managing its
-data root, and there's no remote access or multi-tenant story. The Alpine
-live-boot path (`apkovl` provisioning, no install to disk) is the most
-exercised mode, so that's what to reach for first. Cloud-image provisioning
-(`cloud-init` seeds) and installed disk VMs work but have seen less mileage.
-Expect rough edges, and check [Troubleshooting](troubleshooting.md) if
-something doesn't behave as documented.
+The [concepts](SUMMARY.md#concepts) explain storage, access, modes,
+networking, project shares, and provisioning. The [reference](SUMMARY.md)
+contains the CLI, JSON, TUI, guest, project, and recipe details.
+
+stoat is pre-1.0 and single-user: it assumes it is the only process managing
+its data root and does not manage remote VMs or provide multi-tenant
+isolation. Cloud-image and installed-disk paths are implemented, but Alpine
+live has received the most exercise. Start with
+[Troubleshooting](troubleshooting.md) when a command reports an error.

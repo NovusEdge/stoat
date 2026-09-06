@@ -1,8 +1,10 @@
 # JSON Output Reference
 
-`--json` turns any subcommand into a machine interface, so everything a
+`--json` turns a named VM command into a machine interface, so everything a
 caller would otherwise regex, guess at, or reconstruct is defined here
-instead.
+instead. Project fan-out currently has one exception: no-name `up`, `down`,
+and `apply` can write progress prose before their terminal JSON result. Use a
+named VM invocation when the complete stdout stream must be JSON.
 
 This document is the contract. The human-facing CLI is documented in
 [cli.md](cli.md).
@@ -18,7 +20,7 @@ stoat --json ls
 {"v":3,"type":"result","cmd":"ls","ok":true,"data":{"vms":[...]}}
 ```
 
-## The consumer contract, in one page
+## The consumer contract for a named VM command
 
 ```python
 proc = subprocess.run(argv, stdout=PIPE, stderr=DEVNULL)
@@ -37,7 +39,7 @@ return result["data"]
 Note what this does **not** do: branch on the exit code for anything except
 "was there a result at all". That is the intended shape.
 
-Four rules make it work:
+Four rules make it work for a named VM command:
 
 1. **Every line of stdout is one JSON object.** Nothing else is ever written
    to stdout in `--json` mode, including a recipe's own output, which is
@@ -49,6 +51,15 @@ Four rules make it work:
    output from `qemu-img` or `ssh` that escaped capture. Do not parse stderr.
 4. **Either you get a result line, or the process died.** The second case is
    detectable as "exit code is nonzero and no result line was seen".
+
+Project fan-out is a current limitation. With a project `stoat.toml` and no
+VM name, `up`, `down`, and `apply` force their internal fan-out path and may
+write human progress lines before the final `ProjectRun` result. A parser that
+must use fan-out should capture the final result line only after handling this
+known defect; prefer `stoat <command> <key> --json` for a clean stream. A
+single-VM `down` result can also report `state: "running"` while QEMU is still
+exiting; follow it with `stoat wait <key> --until stopped --json` when
+termination must be confirmed.
 
 Rule 3 is not a preference. A consumer that must merge two pipes to
 reconstruct one result will eventually interleave them wrong, and a naive
@@ -195,7 +206,7 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "share":"/home/u/src","recipes":["xfce"],
              "ssh_port":2200,"ssh_user":"stoat","installed":false,
              "forwards":[{"host_port":8080,"guest_port":80}],
-             "allow_exec":true,"agent_access":"manage","display":"vnc",
+             "allow_exec":false,"agent_access":"manage","display":"vnc",
              "error":"only on a broken VM",
              "project":"/home/u/myrepo","key":"dev","project_missing":false}
 
@@ -243,7 +254,7 @@ RecipeRemoved {"name":"tailscale","scope":"global"}
 IndexEntry  {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
              "description":"join a tailnet on boot","os":["alpine"]}
 
-RecipeIssue {"name":"docker","reason":"docker is not offered to debian/cloudinit"}
+RecipeIssue {"name":"xfce","reason":"xfce is not offered to fedora/cloudinit"}
 
 ApplyPlan   {"name":"xfce","action":"run","reason":"never applied",
              "version":"1.2"}
@@ -594,9 +605,10 @@ The same version also adds `agent_access` to `VM`, additive alongside
 neither bumped the version on its own; they are noted here only because they
 landed in the same branch as the `recipe list` change.
 
-The project-file plan adds `init` and `status` commands, `--project` on `ls`,
-and a no-argument fan-out on `up`, `down`, `apply`, `wait` and `rm` at project
-scope, plus `project`, `key` and `project_missing` on `VM`, and five new MCP
-tools (`project_status`, `project_up`, `project_down`, `project_apply`,
-`project_wait`) alongside `start`, `stop`, `apply_recipes` and `wait`, which
-keep their existing inputs and outputs. All additions; the contract stays 3.
+The project-file release added `init` and `status` commands, `--project` on
+`ls`, and a no-argument fan-out on `up`, `down`, `apply`, `wait` and `rm` at
+project scope. It also added `project`, `key` and `project_missing` on `VM`,
+and five MCP tools (`project_status`, `project_up`, `project_down`,
+`project_apply`, `project_wait`) alongside `start`, `stop`, `apply_recipes`
+and `wait`, which keep their existing inputs and outputs. All additions; the
+contract stays 3.

@@ -1,27 +1,29 @@
 # Spec: authoring recipes in stoat
 
-Status: **proposal, not built.** Written 2026-07-31 in response to "a selector
-or some kinda recipe creator if that's something we can spec out".
+Status: **historical proposal.** Written 2026-07-31. The authoring workflow
+described here predates the shipped directory manifests and
+`stoat recipe new`; keep it as design history, not as a current interface.
+For current behavior, see [Recipes](recipes/overview.md) and [Writing your
+own recipe](recipes/writing-your-own.md).
 
-## What a recipe is today
+## What a recipe was in this proposal's context
 
-A file in `~/.stoat/recipes/`, named `<name>.<os>.sh` or `<name>.cloud.yaml`.
-Shell recipes are piped into `sh -s` over ssh; cloud fragments are merged into
-the cloud-init seed. `recipes.List(os, backend)` filters by the suffix, so the
-picker only ever offers files that can run on the selected image.
+The proposal assumed a file in `~/.stoat/recipes/`, named `<name>.<os>.sh` or
+`<name>.cloud.yaml`. That description is historical. Current recipes are
+directories containing `recipe.toml` and scripts; the manifest declares target
+guests, requirements, runtime, parameters, outputs, and health checks.
 
-There are 7 files and 441 lines today. `Install()` copies the bundled ones into
-the data root and **never overwrites**, so editing one in place already works
-and survives upgrades.
+## Historical motivation
 
-## The thing worth noticing first
+The proposal explored how to make authoring discoverable and how to avoid
+duplicating per-OS shell files. Its options and estimates below are retained
+for design history. They are not a list of missing current features.
 
-**Authoring a recipe is already supported.** Drop a file in `~/.stoat/recipes/`
-named `mything.alpine.sh` and it appears in the picker for Alpine VMs. No code
-required. Any "creator" competes with `$EDITOR` on a path that already works.
+The shipped path is `stoat recipe new <name>`, followed by editing the
+generated manifest and scripts. See the current authoring guide for the exact
+command and validation rules.
 
-The question is what a creator does that `vim ~/.stoat/recipes/x.alpine.sh`
-doesn't. Candidates below, smallest first.
+The alternatives below describe the proposal, smallest first.
 
 ---
 
@@ -91,7 +93,7 @@ A pane that lists recipes, with new/edit/delete and a text area.
 
 ---
 
-## Recommendation
+## Recommendation in the historical proposal
 
 **Option A, plus two things worth more than any of them:**
 
@@ -105,7 +107,7 @@ A pane that lists recipes, with new/edit/delete and a text area.
 Option B only becomes worth it past roughly a dozen recipes across four OSes.
 At 7 files it would be more machinery than the thing it manages.
 
-## What this does NOT propose
+## What this historical proposal did not cover
 
 - A DSL. Phase 4 already rejected one: "per-OS templates = per-OS files, no DSL".
 - Fetching recipes from a registry. That is a supply-chain question, not an

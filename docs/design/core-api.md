@@ -1,6 +1,10 @@
 # Core API: Operation Surface
 
-**Status:** proposal for review. Branch `core-api`. Written 2026-08-02.
+**Status:** original API proposal, written 2026-08-02, with later decisions
+and implementation conventions appended. The proposed types and build order
+below are historical. Sections 9 and 12 contain the error and CLI conventions
+used by [Contributing](../../CONTRIBUTING.md). For the current public interface,
+see the [CLI reference](../reference/cli.md) and [JSON contract](../reference/json.md).
 
 **Companion to:** [`guest-subsystem.md`](guest-subsystem.md) (§9 defines why this layer exists and where it sits). This document defines *what it does*.
 
@@ -165,7 +169,7 @@ These are the "quick VM-based testing" features that make stoat pleasant to use.
 | **Snapshot** | `Snapshot(ctx, name, label) error` | `qemu-img snapshot -c` on a stopped VM; QMP `savevm` for live. "Set it up, snapshot, break it, restore" is the core testing loop, and it is the single feature that makes stoat *better* than re-creating a VM rather than merely faster. |
 | **Restore** | `Restore(ctx, name, label) error` | Reset to a known state without a rebuild. For an agent, this is how you get a clean environment per task without paying a full create. |
 | **Snapshots** | `Snapshots(ctx, name) ([]Snapshot, error)` | List with labels, sizes, timestamps. |
-| **Forward** | `Forward(ctx, name, []PortForward) error` | Today only :22 is forwarded. Testing a web service in a VM means reaching :8080, currently impossible without hand-editing QEMU args. Applies at next start. |
+| **Forward** | `Forward(ctx, name, []PortForward) error` | At the time of this proposal, only :22 was forwarded. Testing a web service in a VM meant reaching :8080 was impossible without hand-editing QEMU args. Applies at next start. |
 | **Images** | `Images(ctx) ([]Image, error)` | Catalog plus local, with download state and size. |
 | **DownloadImage** | `DownloadImage(ctx, id, progress chan<- Progress) error` | Cancellable: today `esc` leaves the goroutine running, a known open item. |
 | **Doctor** | `Doctor(ctx) ([]Check, error)` | Structured dependency/environment checks, not printed text. |

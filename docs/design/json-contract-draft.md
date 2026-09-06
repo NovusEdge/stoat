@@ -1,16 +1,20 @@
 # stoat CLI structured output: the MCP API boundary
 
-**Status:** proposal. Written 2026-08-04. No code changed.
+**Status:** historical proposal, written 2026-08-04. The Python MCP wrapper
+described below has been replaced by the Go server in the Stoat binary.
+Use the current [JSON contract](../reference/json.md) and
+[MCP reference](../reference/mcp.md) when building integrations.
 
-**Premise (settled, not relitigated):** the MCP server is Python + fastmcp in a
-separate process. It reaches `internal/core` only by executing the `stoat`
-binary and reading its output. Therefore this document specifies an **API**,
-not a display format. Anything a Python caller has to regex, guess at, or
-reconstruct from two streams is a defect in the API, not a rough edge.
+**Historical premise (for the 2026-08-04 proposal):** the MCP server was Python
+with fastmcp in a separate process. It reached `internal/core` only by executing
+the `stoat` binary and reading its output. Therefore this document specifies an
+**API**, not a display format. Anything a Python caller had to regex, guess at,
+or reconstruct from two streams was a defect in the API, not a rough edge.
 
-Read against: `internal/cli/cli.go` (18 subcommands today),
-`internal/core/*.go` (14 typed errors, 9 return types),
-`docs/design/core-api.md` §9/§10, `docs/reference/cli.md` (**stale, see §8.6**).
+The proposal was read against the 2026-08-04 tree: `internal/cli/cli.go` (18
+subcommands), `internal/core/*.go` (14 typed errors, 9 return types),
+`docs/design/core-api.md` §9/§10, and the then-stale `docs/reference/cli.md`
+(see §8.6).
 
 ---
 

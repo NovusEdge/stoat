@@ -134,8 +134,9 @@ over on its own.
 ## A binary on `/mnt/host` won't run: confusing "not found"
 
 You built a binary on the host, it shows up fine on the shared
-`/mnt/host` (backed by `-virtfs local,...,security_model=none`,
-`internal/qemu/args.go`), but running it inside the guest fails with something
+`/mnt/host` (backed by QEMU's read-only `-virtfs` export with
+`security_model=mapped-xattr`, `internal/qemu/args.go`), but running it inside
+the guest fails with something
 like:
 
 ```
@@ -194,6 +195,13 @@ is gone the moment the VM restarts: only the apkovl itself (rebuilt fresh on
 every `Start`, per `internal/qemu/run.go`) survives, and it can't carry
 installed packages.
 
+The host still keeps the VM's applied recipe records. A matching recipe with
+`run = "once"` can therefore be skipped after a live restart even though its
+package or files disappeared with the guest. For work that must run on every
+boot, copy the recipe into a project or local scope, set `run = "always"` in
+its manifest, and select that copy for the VM. Existing bundled once recipes
+may report a successful no-op after a restart.
+
 **If you want state to survive a reboot, live mode is the wrong mode.** Create
 a **disk** VM instead (install the OS once, then it persists like a normal
 machine) or a **cloud** VM (a prebuilt image where cloud-init's `packages:`/
@@ -229,3 +237,106 @@ delete a VM out from under a live QEMU process.
 
 **Fix:** stop the VM first (`stoat down <name>`, or `d` in the TUI once it's
 stopped), then `rm` it.
+
+## `stoat up` says the project declaration is immutable
+
+Project scope reconciles an existing VM with `stoat.toml`. CPU, memory,
+recipes, parameters, shares, and `agent_access` are mutable. The image and
+disk size identify the VM's backing storage and cannot be changed in place.
+
+**Fix:** if the image or disk declaration changed intentionally, stop and
+remove that VM, then run `stoat up <key>` to create it again. Removing a VM
+deletes its directory and persistent disk. A project command without a VM
+name uses declaration order; use the key or global name when repairing one
+entry.
+
+## `stoat up` says `no VM ... in stoat.toml or ~/.stoat/vms`
+
+Project scope is active only when `stoat.toml` exists in the current
+directory. Stoat does not walk up to a parent directory. A bare VM argument
+must be a declaration key, a declared `name`, or a global VM that exists in
+the data root.
+
+**Fix:** change to the directory containing the intended `stoat.toml`, use the
+declaration key, or create a global VM with `stoat create --global ...`.
+
+## `stoat recipe lock` says the lock is out of date
+
+`stoat.toml` declares project recipe refs. `stoat.lock` records the commit to
+use, and `.stoat/recipes/` is the local checkout. Editing `[recipes]` without
+locking leaves the declaration unpinned.
+
+**Fix:** run the following from the project directory:
+
+```sh
+stoat recipe lock
+stoat recipe sync
+```
+
+Commit `stoat.toml` and `stoat.lock`. Keep `.stoat/` ignored. `recipe lock`
+resolves refs but does not populate the cache; `recipe sync` makes the cache
+match the lock. If the configured index has no matching name, pass a Git URL
+for a repository containing `recipe.toml` or configure an index that publishes
+the recipe.
+
+## `stoat apply` says `not running` or `recipe not applicable`
+
+`apply` sends the VM's selected recipe scripts over SSH. The VM must be
+running, and the recipe must be in that VM's own recipe list and applicable to
+its guest OS and backend. `apply --dry-run` computes the plan without SSH and
+does not require a running VM.
+
+**Fix:** start the VM, then inspect the plan:
+
+```sh
+stoat up <name> --no-apply
+stoat apply <name> --dry-run
+stoat apply <name>
+```
+
+Use `--only <recipe>` only for a recipe already listed on the VM. A recipe can
+run again when its script changed or its manifest declares `run = "always"`;
+`run = "once"` skips a matching applied version, and `run = "manual"` needs
+an explicit `--only` selection.
+
+## `stoat wait --healthy` times out
+
+`wait --healthy` first waits for SSH, then checks every applied recipe that
+declares a health command. A recipe without a health command contributes no
+verdict. A failed check includes the recipe name and its last diagnostic line
+when available.
+
+**Fix:** inspect the apply log and VM state:
+
+```sh
+stoat logs <name> --which apply -n 200
+stoat get <name>
+stoat wait <name> --until reachable
+```
+
+Run the failing health command yourself with `stoat exec` only when the VM's
+agent access policy and your workflow permit it. The CLI timeout is a Go
+duration and defaults to two minutes; the MCP `wait` tool uses
+`timeout_seconds` and caps it at 600 seconds.
+
+## An MCP client cannot find `stoat` or project VMs
+
+MCP clients launch the binary recorded by their configuration entry. The
+entry also records its working directory, which determines project scope.
+
+**Fix:** reinstall the entry from the intended directory and inspect it:
+
+```sh
+stoat mcp install claude-code
+stoat mcp doctor
+```
+
+Use `stoat mcp install claude-code --project` when Claude Code should read a
+project-local `.mcp.json`. The server uses stdio by default. For HTTP, use
+`stoat mcp serve --http 127.0.0.1:7777`; non-loopback addresses are refused
+because the server has no authentication.
+
+If a tool reports an access refusal, raise `agent_access` with the CLI or TUI.
+The MCP `update` tool can lower a VM's level but cannot raise it. `observe` is
+needed for guest reads, `manage` for writes and recipe application, and `exec`
+for command and job tools.
