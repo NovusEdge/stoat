@@ -181,7 +181,7 @@ func preflightReport(checks []core.HostCheck) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) Init() tea.Cmd { return loadVMs }
+func (m model) Init() tea.Cmd { return tea.Batch(loadVMs, tea.RequestBackgroundColor) }
 
 // Update feeds the open byo screen without consuming the message, then runs
 // the normal update.
@@ -253,6 +253,13 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		// The fixed palette reads as low contrast on a light terminal: every
+		// colour measured below 4.5:1 against #F7F7F7 before internal/theme
+		// grew a light set.
+		applyPalette(msg.IsDark())
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		// A taller terminal shows more VMs before paginating; the width stays
