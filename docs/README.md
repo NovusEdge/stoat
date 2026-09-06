@@ -1,30 +1,49 @@
-# stoat documentation
+# Stoat
 
-stoat is a terminal UI for running local QEMU virtual machines. It is
-Alpine-first, and it manages each VM through a small `vm.toml` file instead of
-a system daemon or a virtualization stack like libvirt.
+Run Linux virtual machines on your computer, from a terminal or an AI agent.
 
-stoat is for developers who want a disposable Linux VM (or a handful of
-persistent ones) on their own machine, driven entirely from the terminal.
-stoat needs no libvirt, no background daemon, and no database, just a single
-Go binary that shells out to `qemu-system-x86_64`, `qemu-img`, and `ssh`, and
-a data root of plain files under `~/.stoat` (or `$STOAT_HOME`).
+A virtual machine (VM) runs its own operating system inside your computer.
+Use one to try Linux, test software, or give an agent an environment to work
+in. Stoat manages local QEMU VMs through a command-line interface (CLI), an
+interactive terminal interface (TUI), and the Model Context Protocol (MCP).
 
-Use the [installation guide](getting-started/installation.md) to prepare the
-host, then follow [Your first VM](getting-started/first-vm.md). Alpine live is
-the shortest path to a working shell. Alpine disk VMs install unattended and
-retain their disk; cloud VMs use a first-boot cloud-init seed.
+![Stoat's terminal interface lists two running VMs and one stopped VM.](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/tui-list.png)
 
-For repeatable development environments, commit a `stoat.toml` and its
-`stoat.lock`, then use the [project workflow](guides/project-workflow.md).
-For an agent client, use the [MCP workflow](guides/mcp-workflow.md).
+[Watch the 23-second demo](https://github.com/NovusEdge/stoat/blob/main/assets/demo.mp4)
+to see the terminal interface and an Alpine XFCE desktop running in QEMU.
 
-The [concepts](SUMMARY.md#concepts) explain storage, access, modes,
-networking, project shares, and provisioning. The [reference](SUMMARY.md)
-contains the CLI, JSON, TUI, guest, project, and recipe details.
+## Start here
 
-stoat is pre-1.0 and single-user: it assumes it is the only process managing
-its data root and does not manage remote VMs or provide multi-tenant
-isolation. Cloud-image and installed-disk paths are implemented, but Alpine
-live has received the most exercise. Start with
-[Troubleshooting](troubleshooting.md) when a command reports an error.
+Choose a guide for your task:
+
+| I want to… | Guide |
+|---|---|
+| Install Stoat on my Linux computer | [Installation](getting-started/installation.md) |
+| Create a VM and open a shell | [Your first VM](getting-started/first-vm.md) |
+| Connect an AI agent | [MCP workflow](guides/mcp-workflow.md) |
+| Use Stoat from scripts or a shell-based agent | [CLI reference](reference/cli.md) and [JSON output](reference/json.md) |
+| Keep a repeatable environment in a repository | [Project workflow](guides/project-workflow.md) |
+
+## Choose an environment
+
+Alpine live VMs provide disposable sessions. Changes inside the guest are
+lost when it stops. Installed disk VMs and cloud-image VMs retain their
+disks between runs. See [Modes and backends](concepts/modes-and-backends.md)
+before choosing where to keep work you need to save.
+
+[Recipes](recipes/overview.md) install software and configure a guest. They
+can set up a desktop, development tools, or other software after the VM starts.
+
+## Requirements and limits
+
+Stoat runs on Linux with KVM, QEMU, and OpenSSH. Cloud images also require
+`xorriso`. The [installation guide](getting-started/installation.md) covers
+host packages and permissions; `stoat doctor` checks your setup.
+
+Stoat is pre-1.0 and single-user. It manages VMs on the local machine and
+assumes it is the only process managing its data root. It does not provide
+multi-tenant isolation. Read [Access and auth](concepts/access-and-auth.md)
+before granting an agent guest access or sharing host files.
+
+If a command fails, start with [Troubleshooting](troubleshooting.md).
+The source and releases are on [GitHub](https://github.com/NovusEdge/stoat).

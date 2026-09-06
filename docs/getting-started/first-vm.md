@@ -18,7 +18,7 @@ shows the list screen's keys: `↵ start/stop`, `→/l details`, `s ssh`,
 
 The example below shows the list after creating three VMs:
 
-![The VM list with two running guests and one stopped guest](../../assets/tui-list.png)
+![The VM list with two running guests and one stopped guest](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/tui-list.png)
 
 ## 2. Press `n` for a new VM
 
@@ -29,7 +29,7 @@ entry and the only OS whose live mode works without an install step.
 Use `work` as the name for this walkthrough. `tab`/`↓` and `shift+tab`/`↑`
 move between fields; `←`/`→` changes a picker's value.
 
-![The new VM form](../../assets/tui-create.png)
+![The new VM form](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/tui-create.png)
 
 ## 3. Download the image
 
@@ -59,14 +59,14 @@ With the VM selected, press `enter`. stoat rebuilds the VM's Alpine overlay
 reports that it started. Press `l` to see its state, forwarded SSH port,
 and apply log. This capture uses the example VM `alpine-desktop`:
 
-![VM detail screen](../../assets/tui-details.png)
+![VM detail screen](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/tui-details.png)
 
 When the `xfce` recipe finishes on a graphical host, its desktop appears in a
 QEMU window:
 
-![Alpine XFCE in a QEMU window](../../assets/qemu-xfce.png)
+![Alpine XFCE in a QEMU window](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/qemu-xfce.png)
 
-The [23-second walkthrough video](../../assets/demo.mp4) shows the TUI list,
+The [23-second walkthrough video](https://github.com/NovusEdge/stoat/blob/main/assets/demo.mp4) shows the TUI list,
 details, and the resulting XFCE window.
 
 **If you selected any recipes** in step 4, stoat watches for sshd in the background (you can keep using the TUI while it waits), and once the guest answers, it asks:
