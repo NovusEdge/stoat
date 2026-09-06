@@ -80,9 +80,9 @@ opportunistic recipe IDs. It currently contains these eight recipes:
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 
-`devtools` and `python-dev` are the two common developer recipes. The
-remaining bundled recipes are existing capabilities and are not part of that
-developer pair.
+`devtools` and `python-dev` are developer recipes. `build-deps`,
+`service-tools`, and `pkg-tools` are also common recipes. All run on every
+guest; `docker`, `tailscale`, and `xfce` are selective.
 
 `python-dev` requires the configured guest account. For example, a cloud guest
 whose SSH account is `stoat` must use `python-dev.user=stoat`; an Alpine guest
