@@ -109,6 +109,33 @@ func TestCloneLiveModeCopiesConfigWithNoDisk(t *testing.T) {
 	}
 }
 
+func TestClonePreservesCPUContract(t *testing.T) {
+	root(t)
+	src := &config.VM{
+		Name: "web1", Mode: "cloud", OS: "ubuntu", Backend: "cloudinit",
+		Base: "/images/ubuntu.qcow2", RAM: 2048, CPUs: 2, SSHPort: 2200,
+		CPUModel: "host", RequiredCPU: "x86-64-v2",
+	}
+	if err := src.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := Clone(src.Name, "web2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clone.CPUModel != "host" || clone.RequiredCPU != "x86-64-v2" {
+		t.Errorf("clone CPU contract = (%q, %q), want (host, x86-64-v2)", clone.CPUModel, clone.RequiredCPU)
+	}
+	got, err := config.Load("web2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CPUModel != "host" || got.RequiredCPU != "x86-64-v2" {
+		t.Errorf("persisted clone CPU contract = (%q, %q), want (host, x86-64-v2)", got.CPUModel, got.RequiredCPU)
+	}
+}
+
 // Port forwards are user-declared host listeners; inheriting them means the
 // clone fights the source over the same host port the moment both run. They
 // must not survive a clone.

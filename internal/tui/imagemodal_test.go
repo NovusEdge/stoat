@@ -455,7 +455,7 @@ func TestCatalogRowsAlignTheirSizeColumn(t *testing.T) {
 		o := imageOption{entry: &e, backend: e.Backend, osName: e.OS, bytes: e.Size}
 		// Everything before the size is fixed-width, so its width is where the
 		// size column starts.
-		prefix := lipgloss.Width(fmt.Sprintf("%-8s %-*s", e.OS, imageMetaWidth, e.Variant))
+		prefix := lipgloss.Width(fmt.Sprintf("%-9s %-*s", e.OS, imageMetaWidth, e.Variant))
 		if i == 0 {
 			want = prefix
 			continue
