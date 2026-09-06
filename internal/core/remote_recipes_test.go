@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/filelock"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/testutil"
 )
@@ -370,10 +370,10 @@ func TestPlanApplyBlocksAcrossAnIntermediateProjectRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = coord.Close() }()
-	if err := syscall.Flock(int(coord.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(coord, filelock.Exclusive, false); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = syscall.Flock(int(coord.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = filelock.Unlock(coord) }()
 	lockBackup := filepath.Join(t.TempDir(), "old.lock")
 	if err := os.Rename(scope.LockPath, lockBackup); err != nil {
 		t.Fatal(err)
@@ -403,7 +403,7 @@ func TestPlanApplyBlocksAcrossAnIntermediateProjectRemoval(t *testing.T) {
 	if err := os.Remove(lockBackup); err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Flock(int(coord.Fd()), syscall.LOCK_UN); err != nil {
+	if err := filelock.Unlock(coord); err != nil {
 		t.Fatal(err)
 	}
 	var got planResult
