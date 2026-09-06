@@ -24,12 +24,10 @@
 * [TUI](reference/tui.md)
 * [CLI](reference/cli.md)
 * [JSON output](reference/json.md)
+* [MCP tools](reference/mcp.md)
 * [Guest definitions](reference/guest.md)
 * [The project file](reference/project-file.md)
-* [Recipe sample](reference/samples/recipe.toml)
-* [VM sample](reference/samples/vm.toml)
-* [Guest sample](reference/samples/guest.toml)
-* [Project sample](reference/samples/stoat.toml)
+* [Configuration examples](reference/configuration-examples.md)
 
 ## Recipes
 

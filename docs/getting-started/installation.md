@@ -1,6 +1,80 @@
 # Installation
 
-stoat is a single Go binary that shells out to `qemu-system-x86_64`, `qemu-img`, and `ssh`: there is no daemon, no libvirt, and nothing to configure before you build it. This page covers what your host needs, the ways to get the binary onto it, and how to confirm it's ready.
+Stoat runs on Linux and uses QEMU and OpenSSH to manage local VMs. Use the
+[guided setup](#guided-setup-with-just) to build and install it, or choose a
+[release tarball](#install-from-a-release-tarball) or the
+[Nix flake](#install-via-the-nix-flake).
+
+## Guided setup with Just
+
+Install Git, Go 1.26 or newer, and [Just](https://just.systems/man/en/).
+Then run the installer:
+
+1. Clone the repository:
+
+   ```sh
+   git clone https://github.com/NovusEdge/stoat.git
+   ```
+
+2. Open the repository directory:
+
+   ```sh
+   cd stoat
+   ```
+
+3. Start guided setup:
+
+   ```sh
+   just setup
+   ```
+
+Setup checks host dependencies, builds Stoat, and lets you choose the install
+directory. The default is `~/.local/bin`. It creates the data directories
+under `~/.stoat` and offers to add the install directory to your shell's
+`PATH`. The Just target also enables this clone's Git hooks.
+
+Setup reports missing host packages and suggests commands to install them.
+Run those commands yourself; setup does not install system packages or change
+KVM permissions. See [Prerequisites](#prerequisites).
+
+If setup changes your shell configuration, open a new terminal. Then check
+that your host is ready:
+
+```sh
+stoat doctor
+```
+
+### Setup without an interactive terminal
+
+- From the repository root, run:
+
+  ```sh
+  just setup-headless
+  ```
+
+This installs to `~/.local/bin` without prompts. To choose a different
+binary directory, set `PREFIX`:
+
+```sh
+PREFIX="$HOME/bin" just setup-headless
+```
+
+Headless setup reports a missing `PATH` entry but does not edit your shell
+configuration. Host-check warnings do not stop installation, so run
+`stoat doctor` afterward to confirm VM prerequisites.
+
+### Run the installer without Just
+
+The installer is a Go program in the repository.
+
+- From the clone's root, run:
+
+  ```sh
+  go run ./cmd/installer
+  ```
+
+For headless setup, add `--no-tty`. Running it directly does not enable Git
+hooks; that step belongs to the Just targets.
 
 ## Prerequisites
 
@@ -78,7 +152,7 @@ Requires Go 1.26.
 The repository has a `justfile` and a smaller `Makefile`. They share `build`,
 `install`, `hooks`, and `test`; the `justfile` also provides `setup`, `check`,
 `lint`, `e2e`, and other development targets. Use the `justfile` for the
-installer and host checks:
+[guided setup](#guided-setup-with-just), or build and install directly:
 
 ```sh
 just build
