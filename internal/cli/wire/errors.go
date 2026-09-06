@@ -18,10 +18,10 @@ import (
 type Code string
 
 // Stable snake_case error codes (§2), one per typed error in internal/core
-// plus the three the CLI layer owns (usage, confirmation_required,
-// internal). Codes are only ever ADDED: never renamed, never repurposed,
-// never removed (§2's compatibility promise). A consumer MUST treat an
-// unrecognized code as a generic failure, never crash on it.
+// plus codes owned by the CLI and MCP server. Codes are only ever ADDED:
+// never renamed, never repurposed, never removed (§2's compatibility
+// promise). A consumer MUST treat an unrecognized code as a generic failure,
+// never crash on it.
 const (
 	CodeNotFound             Code = "not_found"
 	CodeBroken               Code = "broken"
@@ -124,7 +124,7 @@ func WithSentinel(err, sentinel error) error {
 
 // codeTable is the ordered errors.Is chain (§2): first match wins, checked
 // by MapError. It holds one row per typed error in internal/core, plus this
-// package's own ErrConfirmationRequired.
+// package's own CLI and MCP sentinels.
 //
 // Order does not currently break a tie: no core error wraps two of these
 // sentinels at once. update.go's disk-grow-while-running path wraps

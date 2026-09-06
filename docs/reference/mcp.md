@@ -143,8 +143,10 @@ same human-readable message as the CLI. The server also adds the complete
 `wire.ErrorInfo` under `_meta["io.github.novusedge.stoat/error"]` and appends a
 second text block containing JSON in the form `{"error":{...}}`. Callers
 should inspect `isError`, then branch on `error.code` from metadata or the
-second text block. They must not branch on `structuredContent`: the SDK owns
-that field and keeps the schema-valid typed output, including on an error.
+second text block. They must not branch on `structuredContent`: for typed
+handler errors, the SDK owns that field and keeps the schema-valid typed
+output. Receiving-middleware errors, such as rate-limit refusals, can leave
+that field unset.
 
 Successful results keep their existing DTO, `structuredContent`, content
 fallback, and output schema. SDK argument validation and MCP protocol errors
