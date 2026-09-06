@@ -306,6 +306,46 @@ func TestBundledPythonDevRefusesInvalidTargets(t *testing.T) {
 			t.Errorf("occupied directory data changed from %q to %q", before, after)
 		}
 	})
+
+	t.Run("pip-less environment", func(t *testing.T) {
+		venvDir := filepath.Join(root, "pip-less")
+		if output, err := exec.Command("python3", "-m", "venv", "--without-pip", venvDir).CombinedOutput(); err != nil {
+			t.Fatalf("create pip-less venv: %v\n%s", err, output)
+		}
+		sentinel := filepath.Join(venvDir, "user-data")
+		beforeSentinel := []byte("do not replace\n")
+		if err := os.WriteFile(sentinel, beforeSentinel, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		configPath := filepath.Join(venvDir, "pyvenv.cfg")
+		beforeConfig, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		output, err := runBundledPython(t, body, account.Username, venvDir, filepath.Join(root, "pip-less-output"), filepath.Join(root, "pip-less-calls"))
+		if err == nil {
+			t.Fatalf("script succeeded, want incompatible-environment error; output=%s", output)
+		}
+		want := fmt.Sprintf("python-dev: venv_dir %q: existing path is not a compatible Python virtual environment", venvDir)
+		if !strings.Contains(string(output), want) {
+			t.Errorf("error = %q, want exact actionable message %q", output, want)
+		}
+		afterSentinel, readErr := os.ReadFile(sentinel)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(afterSentinel) != string(beforeSentinel) {
+			t.Errorf("pip-less sentinel changed from %q to %q", beforeSentinel, afterSentinel)
+		}
+		afterConfig, readErr := os.ReadFile(configPath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(afterConfig) != string(beforeConfig) {
+			t.Errorf("pip-less pyvenv.cfg changed from %q to %q", beforeConfig, afterConfig)
+		}
+	})
 }
 
 func TestBundledPythonDevOutputsAndQuotesParameters(t *testing.T) {
