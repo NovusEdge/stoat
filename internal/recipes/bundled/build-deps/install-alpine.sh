@@ -3,7 +3,18 @@
 # booted Alpine VM.
 set -e
 
-stoat_pkg_setup
+# -c enables community (alpine-sdk lives there, outside the base set); -1
+# picks a mirror and refreshes indexes, so no separate `apk update`.
+# setup-apkrepos runs apk update with no lock-wait, so another apk that holds
+# the database lock fails it with exit 99. Retry until the lock frees, up to
+# ~60s.
+n=0
+until setup-apkrepos -c -1; do
+    n=$((n + 1))
+    [ "$n" -ge 30 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
+    sleep 2
+done
+
 stoat_pkg_install alpine-sdk build-base
 
 compiler=$(command -v cc 2>/dev/null || command -v gcc 2>/dev/null || true)

@@ -219,7 +219,17 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 			root := t.TempDir()
 			outputPath := filepath.Join(root, "output")
 			callsPath := filepath.Join(root, "calls")
-			if output, err := runBundledBuildDeps(t, body, outputPath, callsPath); err != nil {
+			var bin string
+			if tc.os == "alpine" {
+				bin = filepath.Join(root, "bin")
+				if err := os.MkdirAll(bin, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if output, err := runBundledBuildDeps(t, body, outputPath, callsPath, bin); err != nil {
 				t.Fatalf("%s: %v\n%s", tc.os, err, output)
 			}
 			calls, err := os.ReadFile(callsPath)
@@ -249,13 +259,17 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 	}
 }
 
-func runBundledBuildDeps(t *testing.T, body, outputPath, callsPath string) ([]byte, error) {
+func runBundledBuildDeps(t *testing.T, body, outputPath, callsPath, extraBin string) ([]byte, error) {
 	t.Helper()
 	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
 stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }
 `
 	cmd := exec.Command("sh", "-eu", "-c", prefix+body)
-	cmd.Env = append(os.Environ(),
+	env := os.Environ()
+	if extraBin != "" {
+		env = append(env, "PATH="+extraBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	cmd.Env = append(env,
 		"STOAT_OUTPUT="+outputPath,
 		"STOAT_PKG_CALLS="+callsPath,
 	)
