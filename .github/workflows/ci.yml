@@ -77,4 +77,4 @@ jobs:
       - name: host guards
         run: go test ./internal/hostops ./internal/hostcheck
       - name: refusal boundaries
-        run: go test ./internal/config ./internal/qemu ./internal/cli ./internal/tui -run 'Host|Unsupported|NoMutation'
+        run: go test ./internal/config ./internal/qemu ./internal/cli ./internal/tui -run 'Host|Unsupported|NoMutation|Capabilities'
