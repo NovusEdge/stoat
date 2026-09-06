@@ -618,7 +618,8 @@ contract stays 3.
 stoat capabilities [VM] --json returns a report with schema 1 in the usual
 result envelope. The command reads host checks and one VM's stored metadata.
 It does not start, connect to, or mutate a VM. Omit VM for host and project
-scope; a target adds its stored name, mode, and normalized agent_access values.
+scope; a target adds its directory name, stored mode, and normalized
+agent_access values.
 
 The report has these fields:
 
@@ -635,8 +636,10 @@ The report has these fields:
 
 Each profile or capability has name, status, scope, requirements, limits,
 optional reason, and evidence. Status is supported, limited, unsupported, or
-unknown. limited carries a limit code; unsupported and unknown carry a reason
-code. Every list is [] when empty, never null.
+unknown. supported means the implementation is available and its required
+observations are available. Discovery does not establish VM readiness. limited
+carries a limit code; unsupported and unknown carry a reason code. Every list
+is [] when empty, never null.
 
 The stable reason codes are not_implemented, host_probe_unavailable,
 agent_access_unknown, target_mode_unknown, and project_state_unknown. The
