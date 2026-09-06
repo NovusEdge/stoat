@@ -106,6 +106,9 @@ func Start(v *config.VM) error {
 	if Running(v) {
 		return fmt.Errorf("%w: %s is already running", ErrAlreadyRunning, v.Name)
 	}
+	if err := validateCPU(v); err != nil {
+		return err
+	}
 	_ = os.Remove(v.MonitorPath())
 	// The interactive install happens inside the guest, where stoat can't
 	// watch it finish. Checked here, at the next start, since that's the

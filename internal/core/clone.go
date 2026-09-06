@@ -68,8 +68,8 @@ func Clone(name, newName string) (VM, error) {
 	}
 
 	// config.VM splits into two groups. Copy the configuration: Mode, OS, ISO,
-	// RAM, CPUs, Disk, Installed, Share, Recipes, Backend, Base, SSHUser,
-	// ConsolePassword. Make the identity-bearing fields fresh: SSHPort
+	// RAM, CPUs, CPUModel, RequiredCPU, Disk, Installed, Share, Recipes,
+	// Backend, Base, SSHUser, ConsolePassword. Make the identity-bearing fields fresh: SSHPort
 	// (FreePort), Forwards (dropped), Name (the parameter). Save recomputes
 	// Dir. The cloud-init instance ID is not a config.VM field; see cloneCloud.
 	clone := &config.VM{
@@ -93,6 +93,8 @@ func Clone(name, newName string) (VM, error) {
 		Base:            src.Base,
 		SSHUser:         src.SSHUser,
 		ConsolePassword: src.ConsolePassword,
+		CPUModel:        src.CPUModel,
+		RequiredCPU:     src.RequiredCPU,
 	}
 
 	if err := clone.Save(); err != nil {

@@ -135,6 +135,8 @@ type VM struct {
 
 	RAM          int
 	CPUs         int
+	CPUModel     string
+	RequiredCPU  string
 	Disk         string
 	Share        string
 	Recipes      []string
@@ -275,6 +277,8 @@ func fromConfigUnchecked(v *config.VM) VM {
 		StartedAt:       qemu.StartedAt(v),
 		RAM:             v.RAM,
 		CPUs:            v.CPUs,
+		CPUModel:        v.CPUModel,
+		RequiredCPU:     v.RequiredCPU,
 		Disk:            v.Disk,
 		Share:           v.Share,
 		Recipes:         v.Recipes,

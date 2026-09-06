@@ -97,11 +97,15 @@ const osUnknown = "unknown"
 // pins the width.
 const imageMetaWidth = 11
 
+// imageOSWidth is the first column of an image row. AlmaLinux is nine cells
+// wide, so eight would shift the size column for that catalog entry.
+const imageOSWidth = 9
+
 // label renders the image picker row for one option.
 //
 // Padding runs on the plain strings first. Styling is applied to whole
 // segments afterward, never inside the format string. A styled substring
-// carries ANSI bytes, and %-8s counts those bytes as width, which once
+// carries ANSI bytes, and %-*s counts those bytes as width, which once
 // skewed this repo's `ls` output visibly.
 func (o imageOption) label() string {
 	// size shares the picker's column width with the modal, and is
@@ -113,7 +117,7 @@ func (o imageOption) label() string {
 		if o.file != "" {
 			status = "downloaded"
 		}
-		return fmt.Sprintf("%-8s %-*s", o.entry.OS, imageMetaWidth, o.entry.Variant) +
+		return fmt.Sprintf("%-*s %-*s", imageOSWidth, o.entry.OS, imageMetaWidth, o.entry.Variant) +
 			size + "  " + status
 	}
 	osLabel := o.osName
@@ -121,7 +125,7 @@ func (o imageOption) label() string {
 		osLabel = osUnknown
 	}
 	file := ansi.Truncate(o.file, byoFileWidth, "…")
-	return fmt.Sprintf("%-8s %-*s %-*s", osLabel, imageMetaWidth, o.backend, byoFileWidth, file) +
+	return fmt.Sprintf("%-*s %-*s %-*s", imageOSWidth, osLabel, imageMetaWidth, o.backend, byoFileWidth, file) +
 		size + "  " + dimStyle.Render("byo")
 }
 

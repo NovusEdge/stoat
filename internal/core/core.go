@@ -227,7 +227,10 @@ func plan(s Spec) (*config.VM, error) {
 	//
 	// Live mode has no qcow2: it boots the ISO into a tmpfs root.
 	if disk == "" && mode != "live" {
-		disk = DefaultDisk
+		disk = img.defaultDisk
+		if disk == "" {
+			disk = DefaultDisk
+		}
 	}
 	if disk != "" {
 		if _, err := ParseSize(disk); err != nil {
@@ -273,6 +276,8 @@ func plan(s Spec) (*config.VM, error) {
 		RAM:         ram,
 		CPUs:        cpus,
 		Disk:        disk,
+		CPUModel:    img.cpuModel,
+		RequiredCPU: img.requiredCPU,
 		Share:       strings.TrimSpace(s.Share),
 		SSHPort:     port,
 		Recipes:     s.Recipes,

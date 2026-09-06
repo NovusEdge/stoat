@@ -100,6 +100,9 @@ func Args(v *config.VM, graphical bool) []string {
 		"-netdev", netdev,
 		"-device", "virtio-net,netdev=n0",
 	}
+	if v.CPUModel != "" {
+		a = append(a, "-cpu", v.CPUModel)
+	}
 
 	if NeedsWindow(v, graphical) {
 		a = append(a, "-vga", "virtio", "-display", "gtk,gl=on")
