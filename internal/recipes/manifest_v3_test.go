@@ -117,7 +117,7 @@ func TestParseManifestV3Errors(t *testing.T) {
 		{
 			name: "no default and not required",
 			body: "schema = 3\nname = \"x\"\nscript = \"i.sh\"\n[params.a]\ntype = \"string\"\n",
-			want: `x.a: needs a default or required = true`,
+			want: `x.a: needs a default, default_from, or required = true`,
 		},
 		{
 			name: "bad type",
@@ -143,6 +143,16 @@ func TestParseManifestV3Errors(t *testing.T) {
 			name: "unsupported schema",
 			body: "schema = 4\nname = \"x\"\nscript = \"i.sh\"\n",
 			want: `schema 4 is newer than this stoat (3)`,
+		},
+		{
+			name: "unknown default_from",
+			body: "schema = 3\nname = \"x\"\nscript = \"i.sh\"\n[params.a]\ntype = \"string\"\ndefault_from = \"env_user\"\n",
+			want: `x.a: default_from "env_user" is not one of ssh_user`,
+		},
+		{
+			name: "default and default_from together",
+			body: "schema = 3\nname = \"x\"\nscript = \"i.sh\"\n[params.a]\ntype = \"string\"\ndefault = \"dev\"\ndefault_from = \"ssh_user\"\n",
+			want: `x.a: set default or default_from, not both`,
 		},
 	}
 	for _, tt := range tests {

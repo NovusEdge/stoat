@@ -30,8 +30,7 @@ var ErrNoDisk = fmt.Errorf("no disk to snapshot")
 // TakeSnapshot saves VM name's current state under tag.
 //
 // Go cannot have both a type and a function named Snapshot in one package,
-// so the function is TakeSnapshot; the type above keeps the plain name
-// (docs/design/core-api.md §8, decision 2).
+// so the function is TakeSnapshot; the type above keeps the plain name.
 //
 // The mechanism depends on VM state. A stopped VM uses `qemu-img snapshot
 // -c`: no process holds the image open. A running VM uses QMP savevm, which

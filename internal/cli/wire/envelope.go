@@ -1,11 +1,10 @@
-// Package wire is the JSON contract stoat's --json mode speaks (see
-// docs/design/json-contract-draft.md). internal/mcpsrv reuses these same
-// DTOs as MCP tool output, so the --json contract and the MCP schema are one
-// set of types and cannot drift apart.
+// Package wire is the JSON contract stoat's --json mode speaks.
+// internal/mcpsrv reuses these same DTOs as MCP tool output, so the --json
+// contract and the MCP schema are one set of types and cannot drift apart.
 //
-// This package holds the envelope (§2), the error code table (§2), the DTOs
-// (§3) and the argv scan (§1). It does not touch internal/cli/cli.go: wiring
-// --json into Parse and the run* bodies is a later phase.
+// This package holds the envelope, the error code table, the DTOs and the
+// argv scan. It does not touch internal/cli/cli.go: wiring --json into
+// Parse and the run* bodies is a later phase.
 package wire
 
 import (

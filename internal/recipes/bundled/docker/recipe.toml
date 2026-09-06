@@ -14,7 +14,7 @@ arch = "install-arch.sh"
 
 [params.user]
 type = "string"
-default = "dev"
+default_from = "ssh_user"
 help = "account to add to the docker group"
 
 [outputs]

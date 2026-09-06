@@ -475,9 +475,9 @@ func TestDetailShowsRecipeStatus(t *testing.T) {
 // TestDetailForwardsDistinguishRunningFromStopped proves the rendering never
 // collapses "in effect" and "applies at next start" into the same text. A
 // running VM's forwards must read differently from a stopped VM's: qemu
-// cannot hot-add a hostfwd rule to a live process (docs/design/core-
-// api.md §8 decision 5). Running is set directly on core.VM.State, not
-// faked via a pidfile. core.Get already resolves that question, via
+// cannot hot-add a hostfwd rule to a live process. Running is set directly
+// on core.VM.State, not faked via a pidfile. core.Get already resolves
+// that question, via
 // qemu.Running, by the time a caller has a core.VM. viewDetail reads that
 // resolved State instead of re-deriving it from the filesystem.
 func TestDetailForwardsDistinguishRunningFromStopped(t *testing.T) {

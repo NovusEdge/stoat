@@ -1,8 +1,7 @@
 package mcpsrv
 
 // toolTable is the source of truth for the tool set: every tool, its
-// annotation class, and the agent_access level it needs. docs/design/
-// mcp-server.md links here rather than repeating it.
+// annotation class, and the agent_access level it needs.
 var toolTable = []toolSpec{
 	// Read-only (Task 5).
 	{"list_vms", classRead, LevelNone},

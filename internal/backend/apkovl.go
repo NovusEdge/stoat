@@ -27,8 +27,8 @@ func applies(v *config.VM) bool {
 // Unlike the cloudinit backend, there is no staleness check: a live or
 // installer VM is disposable. Always rebuilding is simpler than tracking
 // whether the previous build is still good, and costs nothing a live boot
-// doesn't already pay for. See docs/design/guest-subsystem.md §10 ("Risks")
-// for why this asymmetry with cloudinit's once-ever Prepare is intentional.
+// doesn't already pay for. This asymmetry with cloudinit's once-ever Prepare
+// is intentional.
 func (apkovlBackend) Prepare(v *config.VM) error {
 	if !applies(v) {
 		return nil

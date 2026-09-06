@@ -92,6 +92,68 @@ func TestResolveRequiredSecretUnsetSatisfiesErrParamUnset(t *testing.T) {
 	}
 }
 
+// remoteUserManifest mirrors a third-party recipe that happens to declare a
+// required "user" param with no default_from. WithVMDefaults must leave it
+// alone: the param could mean a service account or database role, not the
+// VM's SSH login.
+const remoteUserManifest = `schema = 3
+name = "remote-svc"
+script = "install.sh"
+
+[params.user]
+type     = "string"
+required = true
+`
+
+func TestWithVMDefaultsLeavesParamWithoutDefaultFromAlone(t *testing.T) {
+	m, err := ParseManifest(writeManifestFile(t, t.TempDir(), remoteUserManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := WithVMDefaults(m, map[string]string{}, "stoat")
+	if _, err := Resolve(m, got, nil); !errors.Is(err, ErrParamUnset) {
+		t.Fatalf("Resolve() err = %v, want ErrParamUnset: a param without default_from must stay required", err)
+	}
+}
+
+const sshUserDefaultManifest = `schema = 3
+name = "python-dev"
+script = "install.sh"
+
+[params.user]
+type         = "string"
+required     = true
+default_from = "ssh_user"
+`
+
+func TestWithVMDefaultsFillsDeclaredParam(t *testing.T) {
+	m, err := ParseManifest(writeManifestFile(t, t.TempDir(), sshUserDefaultManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Resolve(m, WithVMDefaults(m, map[string]string{}, "stoat"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["user"] != "stoat" {
+		t.Errorf("user = %q, want %q", got["user"], "stoat")
+	}
+}
+
+func TestWithVMDefaultsExplicitSetWins(t *testing.T) {
+	m, err := ParseManifest(writeManifestFile(t, t.TempDir(), sshUserDefaultManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Resolve(m, WithVMDefaults(m, map[string]string{"user": "alice"}, "stoat"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["user"] != "alice" {
+		t.Errorf("user = %q, want explicit %q to win over the VM account", got["user"], "alice")
+	}
+}
+
 func TestEnvIsSortedAndUpperCased(t *testing.T) {
 	got := Env("docker", map[string]string{"user": "dev", "channel": "stable"})
 	want := []string{"STOAT_RECIPE=docker", "STOAT_PARAM_CHANNEL=stable", "STOAT_PARAM_USER=dev"}

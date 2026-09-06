@@ -453,10 +453,9 @@ func writeEditTestRecipe(t *testing.T, dir, name string, depends []string) {
 	}
 }
 
-// TestEditRecipeToggleAutoAddsDependency pins the auto-add rule from
-// docs/specs/2026-08-10-recipe-system-fixes-design.md §2 "TUI Behavior":
-// checking a recipe that depends on one not yet selected pulls the
-// dependency in and reports it as a toast.
+// TestEditRecipeToggleAutoAddsDependency pins the auto-add rule: checking a
+// recipe that depends on one not yet selected pulls the dependency in and
+// reports it as a toast.
 func TestEditRecipeToggleAutoAddsDependency(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("STOAT_HOME", dir)

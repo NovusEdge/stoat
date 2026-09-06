@@ -10,8 +10,7 @@ import (
 	"github.com/novusedge/stoat/internal/guest"
 )
 
-// scriptDir is where WrapScripts places each script inside the guest,
-// matching docs/recipe-spec-v2.md's cloudinit execution model.
+// scriptDir is where WrapScripts places each script inside the guest.
 const scriptDir = "/var/lib/stoat/recipes"
 
 // MarkerDir holds one empty file per recipe that ran successfully at first
@@ -38,7 +37,7 @@ type Script struct {
 // content becomes a write_files entry at scriptDir/<name>.sh with executable
 // permissions, and a runcmd entry that executes it. Order is preserved in
 // both write_files and runcmd: provision-stage scripts must run in
-// selection order (docs/recipe-spec-v2.md, "For cloudinit backend").
+// selection order.
 //
 // The returned fragment is a plain string, not yet merge_how-tagged. It is
 // meant to be handed to Seed alongside other recipe bodies, like any other

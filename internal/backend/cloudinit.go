@@ -30,8 +30,7 @@ func (cloudinitBackend) Name() string { return "cloudinit" }
 //
 // Once created, the overlay holds real guest state: installed packages,
 // home directories. Prepare never rebuilds it the way apkovlBackend rebuilds
-// its overlay on every start. See docs/design/guest-subsystem.md §10
-// ("Risks") for why that asymmetry is intentional.
+// its overlay on every start. That asymmetry is intentional.
 func (cloudinitBackend) Prepare(v *config.VM) error {
 	if v.Mode != "cloud" {
 		return nil
@@ -115,7 +114,7 @@ func recipeScripts(v *config.VM) ([]cloudinit.Script, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading recipe %s: %w", name, err)
 		}
-		resolved, err := recipes.Resolve(m, v.Params[name], stored[name])
+		resolved, err := recipes.Resolve(m, recipes.WithVMDefaults(m, v.Params[name], v.SSHUser), stored[name])
 		if err != nil {
 			return nil, fmt.Errorf("resolving recipe %s: %w", name, err)
 		}

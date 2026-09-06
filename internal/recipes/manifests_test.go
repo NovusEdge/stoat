@@ -9,7 +9,7 @@ import (
 
 // writeV2Recipe writes a minimal valid recipe.toml (plus its script) under
 // dir()/<name>, exactly the layout ListManifests and install's directory
-// path expect (docs/recipe-spec-v2.md).
+// path expect.
 func writeV2Recipe(t *testing.T, name, description string) {
 	t.Helper()
 	recipeDir := filepath.Join(dir(), name)
@@ -109,8 +109,8 @@ func TestListManifestsNoDirYet(t *testing.T) {
 
 // TestInstallCopiesBundledV2RecipeDirectories exercises install(fs.FS)
 // directly against a fake bundled tree, standing in for
-// internal/recipes/bundled/<name>/recipe.toml (docs/recipe-spec-v2.md)
-// before any real recipe has been migrated to it. It pins that a bundled
+// internal/recipes/bundled/<name>/recipe.toml before any real recipe has
+// been migrated to it. It pins that a bundled
 // directory entry is walked and mirrored into dir(), keyed by its path
 // ("xfce/recipe.toml"), with scripts landing executable.
 func TestInstallCopiesBundledV2RecipeDirectories(t *testing.T) {

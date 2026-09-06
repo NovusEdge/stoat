@@ -26,8 +26,8 @@ func loadManifests(names []string) (map[string]recipes.Manifest, error) {
 // CheckDependencies validates the dependency edges among names: every recipe's
 // declared dependency must be present in names, and the set must have no cycle.
 // It is the create-time and CLI check. Neither Create nor the CLI auto-adds a
-// missing dependency; the caller lists it explicitly (docs/specs
-// recipe-system-fixes §2). The TUI uses ResolveDependencies instead.
+// missing dependency; the caller lists it explicitly. The TUI uses
+// ResolveDependencies instead.
 func CheckDependencies(names []string) error {
 	manifests, err := loadManifests(names)
 	if err != nil {

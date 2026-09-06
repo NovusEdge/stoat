@@ -14,9 +14,8 @@ import (
 	"github.com/novusedge/stoat/internal/project"
 )
 
-// class is a tool's annotation class. The four classes are the taxonomy in
-// docs/design/mcp-server.md; toolTable in table_test.go assigns one per tool
-// and TestAnnotationsMatchTable asserts the mapping.
+// class is a tool's annotation class. toolTable in table_test.go assigns
+// one per tool and TestAnnotationsMatchTable asserts the mapping.
 type class int
 
 const (

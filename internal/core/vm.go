@@ -18,11 +18,11 @@ import (
 // State is List/Get's answer at call time. It is never cached; it comes
 // fresh from the process table and the filesystem each time.
 //
-// The design doc (docs/design/core-api.md §1) lists six states. Only three
-// are knowable today. StateStopped and StateRunning come from qemu.Running,
-// which checks pid liveness and matches /proc/<pid>/cmdline, so a reused pid
-// never reads as running. StateBroken comes from a vm.toml that exists but
-// fails to parse (config.ListBroken's concept).
+// The state model has six states. Only three are knowable today. StateStopped
+// and StateRunning come from qemu.Running, which checks pid liveness and
+// matches /proc/<pid>/cmdline, so a reused pid never reads as running.
+// StateBroken comes from a vm.toml that exists but fails to parse
+// (config.ListBroken's concept).
 //
 // StateStarting, StateApplying and StateFailed are not declared here. No
 // code path yet distinguishes "qemu process is up" from "guest is

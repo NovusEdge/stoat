@@ -491,6 +491,85 @@ func TestFilterByRunModeSkipsOnceWithMatchingHash(t *testing.T) {
 	}
 }
 
+// TestFilterByRunModeDefaultsUserParamFromVMAccount reproduces the reported
+// failure: applying a recipe with a required, default-less "user" param
+// should not force --set when the VM already has an SSH account configured.
+func TestFilterByRunModeDefaultsUserParamFromVMAccount(t *testing.T) {
+	dir := root(t)
+	recipeDir := filepath.Join(dir, "recipes", "python-dev")
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"python-dev\"\n" +
+		"script = \"install.sh\"\n" +
+		"run = \"once\"\n" +
+		"schema = 3\n" +
+		"[params.user]\n" +
+		"type = \"string\"\n" +
+		"required = true\n" +
+		"default_from = \"ssh_user\"\n"
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\necho python-dev\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	v := &config.VM{
+		OS:      "alpine",
+		SSHUser: "stoat",
+		Applied: map[string]config.AppliedRecipe{"python-dev": {Hash: "stale"}},
+	}
+	kept, _, err := filterByRunMode(v, []string{"python-dev"}, nil)
+	if err != nil {
+		t.Fatalf("filterByRunMode() err = %v, want nil: user should default from v.SSHUser", err)
+	}
+	if len(kept) != 1 || kept[0] != "python-dev" {
+		t.Errorf("kept = %v, want [python-dev]", kept)
+	}
+}
+
+// TestRecipeHashForResolvesDockerUserFromVMAccount pins the fix for the
+// second, silent instance of the same defect: docker.user must resolve to
+// the VM's actual login account, not a fixed "dev" guess nothing logs into.
+func TestRecipeHashForResolvesDockerUserFromVMAccount(t *testing.T) {
+	dir := root(t)
+	recipeDir := filepath.Join(dir, "recipes", "docker")
+	if err := os.MkdirAll(recipeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "name = \"docker\"\n" +
+		"script = \"install.sh\"\n" +
+		"run = \"once\"\n" +
+		"schema = 3\n" +
+		"[params.user]\n" +
+		"type = \"string\"\n" +
+		"default_from = \"ssh_user\"\n"
+	if err := os.WriteFile(filepath.Join(recipeDir, "recipe.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipeDir, "install.sh"), []byte("#!/bin/sh\necho docker\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok, err := recipes.ManifestFor("docker")
+	if err != nil || !ok {
+		t.Fatalf("ManifestFor() = %v, %v, %v", m, ok, err)
+	}
+
+	stoatHash, err := recipeHashFor(&config.VM{OS: "alpine", SSHUser: "stoat"}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootHash, err := recipeHashFor(&config.VM{OS: "alpine", SSHUser: "root"}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stoatHash == rootHash {
+		t.Error("hash unchanged across VM accounts: docker.user did not pick up v.SSHUser")
+	}
+}
+
 // TestFilterByRunModeRerunsOnChangedScript is the behavior this feature
 // adds: a fixed script at the SAME version must re-run, since a version
 // bump is no longer the only signal filterByRunMode trusts.

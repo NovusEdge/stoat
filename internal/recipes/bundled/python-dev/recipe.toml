@@ -18,6 +18,7 @@ arch = "install-arch.sh"
 [params.user]
 type = "string"
 required = true
+default_from = "ssh_user"
 help = "configured SSH account that owns the development environment"
 
 [params.venv_dir]

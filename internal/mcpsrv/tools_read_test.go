@@ -55,21 +55,18 @@ func TestRecipeSchemaListsParams(t *testing.T) {
 	raw, _ := json.Marshal(res.StructuredContent)
 	var out struct {
 		Params []struct {
-			Name    string `json:"name"`
-			Default string `json:"default"`
+			Name string `json:"name"`
 		} `json:"params"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatal(err)
 	}
-	var got *string
+	var found bool
 	for _, p := range out.Params {
-		if p.Name == "user" {
-			got = &p.Default
-		}
+		found = found || p.Name == "user"
 	}
-	if got == nil || *got != "dev" {
-		t.Fatalf("recipe_schema(docker) params missing user default dev: %s", raw)
+	if !found {
+		t.Fatalf("recipe_schema(docker) params missing user: %s", raw)
 	}
 }
 

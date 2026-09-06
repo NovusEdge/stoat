@@ -16,6 +16,37 @@ const OutputDir = "/tmp/.stoat-out"
 // ErrInvalidTree.
 var ErrParamUnset = errors.New("required parameter is unset")
 
+// WithVMDefaults fills every param whose manifest declares
+// default_from = "ssh_user" with the VM's SSH account, unless the caller has
+// already set it. --set continues to win: it is checked first. A remote
+// recipe's "user" param with no default_from never receives this value,
+// only the recipe author's explicit opt-in does.
+func WithVMDefaults(m Manifest, set map[string]string, sshUser string) map[string]string {
+	if sshUser == "" {
+		return set
+	}
+	var merged map[string]string
+	for name, p := range m.Params {
+		if p.DefaultFrom != "ssh_user" {
+			continue
+		}
+		if v, present := set[name]; present && v != "" {
+			continue
+		}
+		if merged == nil {
+			merged = make(map[string]string, len(set)+1)
+			for k, v := range set {
+				merged[k] = v
+			}
+		}
+		merged[name] = sshUser
+	}
+	if merged == nil {
+		return set
+	}
+	return merged
+}
+
 // Resolve merges manifest defaults with values stored for one recipe. Secret
 // values come from the separate secrets map and never become VM parameters.
 func Resolve(m Manifest, set map[string]string, secrets map[string]string) (map[string]string, error) {

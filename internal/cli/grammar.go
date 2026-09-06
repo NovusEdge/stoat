@@ -198,9 +198,9 @@ type execCmd struct {
 }
 
 // cpCmd carries two mutually exclusive spellings: the positional scp/docker
-// cp form for humans, and an explicit-flag form for a machine caller (§1.1 of
-// docs/design/mcp-server.md). The flag form exists because a caller cannot
-// always tell a host path with a colon in it from a "<vm>:<path>" compound.
+// cp form for humans, and an explicit-flag form for a machine caller. The
+// flag form exists because a caller cannot always tell a host path with a
+// colon in it from a "<vm>:<path>" compound.
 // Both positionals are `optional:""` so kong accepts either form; toArgs
 // enforces "both or neither, not a mix".
 //
@@ -495,7 +495,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		// and runCopy (run_access.go) never has to know the difference. This
 		// is also what the JSON contract's "local" field echoes back: a
 		// caller that authorised a relative or ~-prefixed path can verify
-		// what actually ran, not what it typed (docs/design/mcp-server.md §1.1).
+		// what actually ran, not what it typed.
 		abs, err := resolveLocal(local)
 		if err != nil {
 			return nil, usageError("cp: local path: " + err.Error())

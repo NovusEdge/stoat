@@ -41,10 +41,9 @@ type ExecResult struct {
 // while Exec runs an arbitrary command in a guest with no other way to
 // stop one that never returns.
 //
-// Exec does not gate on what the command is (docs/design/core-api.md §8,
-// decision 1). It is a library call; the TUI and CLI already let a user
-// run anything. Enforcement belongs in the MCP server, the boundary an
-// agent actually crosses.
+// Exec does not gate on what the command is. It is a library call; the TUI
+// and CLI already let a user run anything. Enforcement belongs in the MCP
+// server, the boundary an agent actually crosses.
 func Exec(ctx context.Context, name string, cmd []string) (ExecResult, error) {
 	if len(cmd) == 0 {
 		return ExecResult{}, fmt.Errorf("%w: no command given", ErrInvalidSpec)

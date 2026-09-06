@@ -9,8 +9,7 @@
 // ~/.stoat/guests/. validate rejects a file missing a required field: a
 // missing field otherwise fails silently, as an unselectable catalog entry,
 // an OS that hands cloud-init a shell the image lacks, or a VM offered zero
-// recipes. See docs/design/guest-subsystem.md for the incident that made
-// this the rule.
+// recipes.
 package guest
 
 // InitSystem identifies which init system a guest OS boots. It exists

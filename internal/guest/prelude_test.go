@@ -42,8 +42,7 @@ func TestPreludeGolden(t *testing.T) {
 }
 
 // The python3 runtime gets a parallel prelude over subprocess.run instead of
-// sh functions, per docs/specs/2026-09-04-guest-definitions-design.md's
-// "Verbs in recipes" section. No module ships to the guest.
+// sh functions. No module ships to the guest.
 func TestPreludePython(t *testing.T) {
 	o, ok := Lookup("arch")
 	if !ok {
