@@ -241,6 +241,23 @@ func TestBundledPythonDevCreatesAndPreservesVenv(t *testing.T) {
 	if got := fileUID(t, createdDir); got != account.Uid {
 		t.Errorf("created environment uid = %q, want configured account uid %q", got, account.Uid)
 	}
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installRequests := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+		if !strings.HasPrefix(line, "install ") {
+			continue
+		}
+		installRequests++
+		if line != "install python3 py3-pip" {
+			t.Errorf("Alpine package request = %q, want exactly python3 py3-pip", strings.TrimPrefix(line, "install "))
+		}
+	}
+	if installRequests == 0 {
+		t.Error("Alpine recipe made no captured package installation request")
+	}
 }
 
 func TestBundledPythonDevRefusesInvalidTargets(t *testing.T) {
