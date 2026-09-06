@@ -221,17 +221,21 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 			root := t.TempDir()
 			outputPath := filepath.Join(root, "output")
 			callsPath := filepath.Join(root, "calls")
-			var bin string
-			if tc.os == "alpine" {
-				bin = filepath.Join(root, "bin")
-				if err := os.MkdirAll(bin, 0o755); err != nil {
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"cc", "make", "pkg-config"} {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if tc.os == "alpine" {
 				if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if output, err := runBundledBuildDeps(t, body, outputPath, callsPath, bin); err != nil {
+			if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
 				t.Fatalf("%s: %v\n%s", tc.os, err, output)
 			}
 			calls, err := os.ReadFile(callsPath)
@@ -252,12 +256,39 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 				t.Errorf("%s: no captured package installation request", tc.os)
 			}
 			outputs := parseOutputs(t, outputPath)
-			for _, name := range []string{"compiler", "make", "pkg_config"} {
-				if outputs[name] == "" {
-					t.Errorf("%s: output %q is empty; outputs = %#v", tc.os, name, outputs)
+			want := map[string]string{"compiler": "cc", "make": "make", "pkg_config": "pkg-config"}
+			for name, wantBase := range want {
+				if got := filepath.Base(outputs[name]); got != wantBase {
+					t.Errorf("%s: output %q = %q, want basename %q", tc.os, name, outputs[name], wantBase)
 				}
 			}
 		})
+	}
+}
+
+// opensuse and the rpm family (fedora, almalinux, rocky) fall back to pkgconf
+// when pkg-config is absent; every other family only ships pkg-config, so
+// this is the only path that exercises the fallback.
+func TestBundledBuildDepsPkgConfigFallsBackToPkgconf(t *testing.T) {
+	body := bundledScript(t, "build-deps", "fedora")
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cc", "make", "pkgconf"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
+		t.Fatalf("%v\n%s", err, output)
+	}
+	outputs := parseOutputs(t, outputPath)
+	if got := filepath.Base(outputs["pkg_config"]); got != "pkgconf" {
+		t.Errorf("pkg_config = %q, want basename %q", outputs["pkg_config"], "pkgconf")
 	}
 }
 
@@ -304,7 +335,7 @@ func TestBundledServiceToolsInstallsPerFamily(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin)
+				output, err := runBundledScript(t, body, outputPath, callsPath, bin)
 				if err != nil {
 					t.Fatalf("%s/%s: %v\n%s", tc.os, manager, err, output)
 				}
@@ -356,7 +387,7 @@ func TestBundledServiceToolsFailsWithoutKnownServiceManager(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "strace"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin)
+	output, err := runBundledScript(t, body, outputPath, callsPath, bin)
 	if err == nil {
 		t.Fatalf("script succeeded without a service manager; output=%s", output)
 	}
@@ -369,7 +400,7 @@ func TestBundledServiceToolsFailsWithoutKnownServiceManager(t *testing.T) {
 // PATH is set to exactly the fake bin dir the caller built, not extended with
 // the host's real PATH: the test host may itself have a systemd, apt-get, dnf,
 // or other real binary the recipe would find first and use instead of a fake.
-func runBundledServiceTools(t *testing.T, body, outputPath, callsPath, bin string) ([]byte, error) {
+func runBundledScript(t *testing.T, body, outputPath, callsPath, bin string) ([]byte, error) {
 	t.Helper()
 	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
 stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }
@@ -419,7 +450,7 @@ func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin); err != nil {
+			if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
 				t.Fatalf("%s: %v\n%s", tc.os, err, output)
 			}
 			calls, err := os.ReadFile(callsPath)
@@ -481,7 +512,7 @@ func TestBundledPkgToolsManagerResolutionOrder(t *testing.T) {
 			}
 			outputPath := filepath.Join(root, "output")
 			callsPath := filepath.Join(root, "calls")
-			if output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin); err != nil {
+			if output, err := runBundledScript(t, body, outputPath, callsPath, bin); err != nil {
 				t.Fatalf("%v\n%s", err, output)
 			}
 			outputs := parseOutputs(t, outputPath)
@@ -490,23 +521,6 @@ func TestBundledPkgToolsManagerResolutionOrder(t *testing.T) {
 			}
 		})
 	}
-}
-
-func runBundledBuildDeps(t *testing.T, body, outputPath, callsPath, extraBin string) ([]byte, error) {
-	t.Helper()
-	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
-stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }
-`
-	cmd := exec.Command("sh", "-eu", "-c", prefix+body)
-	env := os.Environ()
-	if extraBin != "" {
-		env = append(env, "PATH="+extraBin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	}
-	cmd.Env = append(env,
-		"STOAT_OUTPUT="+outputPath,
-		"STOAT_PKG_CALLS="+callsPath,
-	)
-	return cmd.CombinedOutput()
 }
 
 func TestBundledPythonDevCreatesAndPreservesVenv(t *testing.T) {
