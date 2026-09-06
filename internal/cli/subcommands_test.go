@@ -237,13 +237,13 @@ func TestRecipesListsAndFilters(t *testing.T) {
 		t.Fatal("recipes returned nothing with no filter")
 	}
 
-	// debian satisfies xfce, devtools, docker, python-dev, build-deps, and tailscale OS lists.
+	// debian satisfies xfce, devtools, docker, python-dev, build-deps, service-tools, and tailscale OS lists.
 	_, only := runJSON(t, "recipes", "--os", "debian", "--backend", "cloudinit")
 	debian, _ := dataOf(t, only)["recipes"].([]any)
 	if len(debian) == 0 {
 		t.Fatal("recipes --os debian --backend cloudinit returned nothing")
 	}
-	want := map[string]bool{"xfce": true, "devtools": true, "docker": true, "python-dev": true, "tailscale": true, "build-deps": true}
+	want := map[string]bool{"xfce": true, "devtools": true, "docker": true, "python-dev": true, "tailscale": true, "build-deps": true, "service-tools": true}
 	for _, r := range debian {
 		m, _ := r.(map[string]any)
 		name, _ := m["name"].(string)

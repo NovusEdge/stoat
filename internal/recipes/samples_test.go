@@ -148,6 +148,7 @@ func TestBundledCommonDeveloperRecipeContracts(t *testing.T) {
 		{name: "devtools", outputs: []string{"compiler", "editor", "git"}},
 		{name: "python-dev", outputs: []string{"pip", "python", "python_version", "venv", "venv_python"}},
 		{name: "build-deps", outputs: []string{"compiler", "make", "pkg_config"}},
+		{name: "service-tools", outputs: []string{"lsof", "service_manager", "strace"}},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -257,6 +258,128 @@ func TestBundledBuildDepsInstallsPerFamily(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBundledServiceToolsInstallsPerFamily(t *testing.T) {
+	cases := []struct {
+		os      string
+		request string
+	}{
+		{os: "ubuntu", request: "lsof strace procps"},
+		{os: "debian", request: "lsof strace procps"},
+		{os: "fedora", request: "lsof strace procps-ng"},
+		{os: "almalinux", request: "lsof strace procps-ng"},
+		{os: "rocky", request: "lsof strace procps-ng"},
+		{os: "opensuse", request: "lsof strace procps"},
+		{os: "arch", request: "lsof strace procps-ng"},
+		{os: "alpine", request: "lsof strace procps openrc"},
+	}
+	for _, tc := range cases {
+		for _, manager := range []string{"systemd", "openrc"} {
+			t.Run(tc.os+"/"+manager, func(t *testing.T) {
+				body := bundledScript(t, "service-tools", tc.os)
+				root := t.TempDir()
+				outputPath := filepath.Join(root, "output")
+				callsPath := filepath.Join(root, "calls")
+				bin := filepath.Join(root, "bin")
+				if err := os.MkdirAll(bin, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				fakeBin := "systemctl"
+				if manager == "openrc" {
+					fakeBin = "rc-status"
+				}
+				if err := os.WriteFile(filepath.Join(bin, fakeBin), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(bin, "lsof"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(bin, "strace"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if tc.os == "alpine" {
+					if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin)
+				if err != nil {
+					t.Fatalf("%s/%s: %v\n%s", tc.os, manager, err, output)
+				}
+				calls, err := os.ReadFile(callsPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				installRequests := 0
+				for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+					if !strings.HasPrefix(line, "install ") {
+						continue
+					}
+					installRequests++
+					if got := strings.TrimPrefix(line, "install "); got != tc.request {
+						t.Errorf("%s package request = %q, want %q", tc.os, got, tc.request)
+					}
+				}
+				if installRequests == 0 {
+					t.Errorf("%s: no captured package installation request", tc.os)
+				}
+				outputs := parseOutputs(t, outputPath)
+				if outputs["service_manager"] != manager {
+					t.Errorf("%s/%s: service_manager = %q, want %q", tc.os, manager, outputs["service_manager"], manager)
+				}
+				for _, name := range []string{"lsof", "strace"} {
+					if outputs[name] == "" {
+						t.Errorf("%s/%s: output %q is empty; outputs = %#v", tc.os, manager, name, outputs)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Neither systemctl nor rc-status on PATH is a provisioning failure, not a
+// silently empty service_manager output.
+func TestBundledServiceToolsFailsWithoutKnownServiceManager(t *testing.T) {
+	body := bundledScript(t, "service-tools", "debian")
+	root := t.TempDir()
+	outputPath := filepath.Join(root, "output")
+	callsPath := filepath.Join(root, "calls")
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "lsof"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "strace"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin)
+	if err == nil {
+		t.Fatalf("script succeeded without a service manager; output=%s", output)
+	}
+	want := "service-tools: no known service manager (systemd or openrc) was found"
+	if !strings.Contains(string(output), want) {
+		t.Errorf("error = %q, want it to contain %q", output, want)
+	}
+}
+
+// PATH is set to exactly the fake bin dir the caller built, not extended with
+// the host's real PATH: the host running this test may itself run systemd,
+// and a real systemctl or rc-status on PATH would mask the fakes above.
+func runBundledServiceTools(t *testing.T, body, outputPath, callsPath, bin string) ([]byte, error) {
+	t.Helper()
+	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
+stoat_pkg_install() { printf 'install %s\n' "$*" >> "$STOAT_PKG_CALLS"; }
+`
+	cmd := exec.Command("sh", "-eu", "-c", prefix+body)
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin,
+		"STOAT_OUTPUT="+outputPath,
+		"STOAT_PKG_CALLS="+callsPath,
+	)
+	return cmd.CombinedOutput()
 }
 
 func runBundledBuildDeps(t *testing.T, body, outputPath, callsPath, extraBin string) ([]byte, error) {

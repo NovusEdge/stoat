@@ -1,0 +1,24 @@
+name = "service-tools"
+description = "tools for inspecting services and the processes behind them"
+os = ["alpine", "ubuntu", "debian", "fedora", "arch", "almalinux", "rocky", "opensuse"]
+stage = "provision"
+script = "install-debian.sh"
+schema = 3
+
+[scripts]
+alpine = "install-alpine.sh"
+ubuntu = "install-debian.sh"
+debian = "install-debian.sh"
+fedora = "install-rpm.sh"
+almalinux = "install-rpm.sh"
+rocky = "install-rpm.sh"
+opensuse = "install-zypper.sh"
+arch = "install-arch.sh"
+
+[outputs]
+service_manager = "systemd or openrc, whichever runs this guest"
+lsof = "path to lsof"
+strace = "path to strace"
+
+[health]
+check = "command -v lsof >/dev/null 2>&1 && lsof -v >/dev/null 2>&1"
