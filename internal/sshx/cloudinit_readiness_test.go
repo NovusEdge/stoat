@@ -62,8 +62,8 @@ func TestCloudInitWaitUsesUnprivilegedSSHThenEscalatesSetup(t *testing.T) {
 			if strings.Contains(waitCall, "sudo") {
 				t.Errorf("cloud-init wait escalated before the seeded user had sudo: %q", waitCall)
 			}
-			if !strings.Contains(waitCall, "cloud-init status --wait --format json") {
-				t.Errorf("cloud-init wait argv = %q, want direct JSON status --wait", waitCall)
+			if !strings.Contains(waitCall, "cloud-init status --format json") {
+				t.Errorf("cloud-init wait argv = %q, want a direct JSON status probe", waitCall)
 			}
 			if !strings.Contains(calls[1], "sudo -n") {
 				t.Errorf("package setup did not escalate after cloud-init completed: %q", calls[1])
@@ -89,11 +89,6 @@ func TestCloudInitReadinessRefusesBeforeFurtherProvisioning(t *testing.T) {
 			name:     "hard error",
 			status:   `{"status":"error","extended_status":"error","errors":["write_files failed"]}`,
 			exitCode: 1,
-		},
-		{
-			name:     "non terminal status",
-			status:   `{"status":"running","extended_status":"running","errors":[]}`,
-			exitCode: 0,
 		},
 		{
 			name:     "ssh transport failure",
@@ -142,6 +137,104 @@ func TestCloudInitReadinessRefusesBeforeFurtherProvisioning(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A running cloud-init is not a failure. Stoat waits for it and reports the
+// last status it saw when its own deadline runs out.
+func TestCloudInitRunningStatusWaitsUntilTheDeadline(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	writeCloudReadinessRecipe(t, root)
+	capture := installCloudInitSSH(t, `{"status":"running","extended_status":"running","errors":[]}`, 0)
+	port := acceptOnly(t, "SSH-2.0-OpenSSH_9.6\r\n")
+	vmDir := filepath.Join(root, "work")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{
+		Name: "work", Dir: vmDir, OS: "alpine", Backend: "cloudinit",
+		SSHUser: "stoat", SSHPort: port, Recipes: []string{"probe"},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Provision(ctx, v)
+	if err == nil {
+		t.Fatal("Provision() succeeded while cloud-init was still running")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Provision() = %v, want the caller's deadline", err)
+	}
+	if calls := readCloudInitSSHCalls(t, capture); len(calls) == 0 {
+		t.Error("cloud-init was never probed")
+	}
+	log, err := os.ReadFile(v.ProvisionLogPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(log), RecipeMarker("probe")) {
+		t.Errorf("recipe ran while cloud-init was still running:\n%s", log)
+	}
+}
+
+// cloud-init 25.3 keeps /run/cloud-init root-only, so the unprivileged probe
+// returns a traceback and no JSON. Stoat retries that guest with escalation
+// instead of waiting for an answer that never comes.
+func TestCloudInitReadinessEscalatesWhenTheUnprivilegedProbeCannotRead(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	capture := installEscalationOnlyCloudInitSSH(t,
+		`{"status":"done","extended_status":"done","errors":[],"recoverable_errors":{}}`)
+	port := acceptOnly(t, "SSH-2.0-OpenSSH_9.6\r\n")
+	vmDir := filepath.Join(root, "work")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{
+		Name: "work", Dir: vmDir, OS: "alpine", Backend: "cloudinit",
+		SSHUser: "stoat", SSHPort: port,
+	}
+
+	if err := Provision(context.Background(), v); err != nil {
+		t.Fatalf("Provision() = %v, want the escalated probe to satisfy readiness", err)
+	}
+	calls := readCloudInitSSHCalls(t, capture)
+	if len(calls) < 2 {
+		t.Fatalf("ssh calls = %v, want an unprivileged probe followed by an escalated one", calls)
+	}
+	if strings.Contains(calls[0], "sudo") {
+		t.Errorf("the first probe escalated: %q", calls[0])
+	}
+	if !strings.Contains(calls[1], "sudo -n") || !strings.Contains(calls[1], "cloud-init status --format json") {
+		t.Errorf("the second probe = %q, want the same status command under sudo", calls[1])
+	}
+}
+
+// installEscalationOnlyCloudInitSSH answers the status probe with JSON only
+// when the call escalates, and reproduces cloud-init's own failure otherwise:
+// a traceback on stderr, nothing on stdout, exit 1.
+func installEscalationOnlyCloudInitSSH(t *testing.T, status string) string {
+	t.Helper()
+	bin := t.TempDir()
+	capture := filepath.Join(bin, "calls.log")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + cloudShellQuote(capture) + "\n" +
+		"case \"$*\" in\n" +
+		"  *\"sudo -n cloud-init status\"*)\n" +
+		"    printf '%s' " + cloudShellQuote(status) + "\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  *\"cloud-init status\"*)\n" +
+		"    echo \"PermissionError: [Errno 13] Permission denied: '/run/cloud-init/cloud.cfg'\" >&2\n" +
+		"    exit 1\n" +
+		"    ;;\n" +
+		"esac\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return capture
 }
 
 func TestCloudInitWaitCancellationKeepsContextErrorAndStopsChild(t *testing.T) {
