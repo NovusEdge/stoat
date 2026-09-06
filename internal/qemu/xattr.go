@@ -1,3 +1,5 @@
+//go:build !windows
+
 package qemu
 
 import (
@@ -6,11 +8,6 @@ import (
 
 	"golang.org/x/sys/unix"
 )
-
-// ErrNoXattr means a 9p export's backing directory sits on a filesystem that
-// cannot store the user.* extended attributes security_model=mapped-xattr
-// needs.
-var ErrNoXattr = errors.New("filesystem does not support extended attributes")
 
 // xattrOK reports whether dir's filesystem supports the user.* extended
 // attributes mapped-xattr stores its metadata in.
