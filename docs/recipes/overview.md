@@ -71,9 +71,9 @@ opportunistic recipe IDs. It currently contains these five recipes:
 
 | Recipe | Supported guests | Purpose |
 |---|---|---|
-| `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch | Git, compiler tools, editor and basic fetch tools |
+| `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Git, compiler tools, editor and basic fetch tools |
 | `docker` | Alpine, Ubuntu, Debian, Fedora, Arch | Docker engine and compose plugin; schema 3 parameter `user`, output `socket`, health check `docker info` |
-| `python-dev` | Alpine, Ubuntu, Debian, Fedora, Arch | Python 3, pip, and an isolated development environment; schema 3 parameters `user` and optional `venv_dir`, with smoke-only mode when `venv_dir` is empty |
+| `python-dev` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Python 3, pip, and an isolated development environment; schema 3 parameters `user` and optional `venv_dir`, with smoke-only mode when `venv_dir` is empty |
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 

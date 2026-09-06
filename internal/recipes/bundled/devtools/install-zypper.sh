@@ -1,6 +1,7 @@
 #!/bin/sh
-# git, a compiler, an editor and basic fetch tools. Runs as root over ssh on a
-# booted Fedora VM.
+# git, a compiler, an editor and basic fetch tools. Runs as root on a booted
+# openSUSE VM. curl, ca-certificates, less and bash ship in the Leap 16 cloud
+# image already; naming them keeps the recipe honest about what it needs.
 set -e
 
 stoat_pkg_setup

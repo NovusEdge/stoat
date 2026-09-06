@@ -1,6 +1,6 @@
 name = "python-dev"
 description = "Python 3 with pip and an isolated development environment"
-os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
+os = ["alpine", "ubuntu", "debian", "fedora", "arch", "almalinux", "rocky", "opensuse"]
 stage = "provision"
 script = "install-debian.sh"
 schema = 3
@@ -10,6 +10,9 @@ alpine = "install-alpine.sh"
 ubuntu = "install-debian.sh"
 debian = "install-debian.sh"
 fedora = "install-rpm.sh"
+almalinux = "install-rpm.sh"
+rocky = "install-rpm.sh"
+opensuse = "install-zypper.sh"
 arch = "install-arch.sh"
 
 [params.user]
