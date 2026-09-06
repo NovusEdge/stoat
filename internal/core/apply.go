@@ -643,12 +643,13 @@ type Recipe struct {
 
 // RecipeParam is one declared recipe parameter.
 type RecipeParam struct {
-	Name     string
-	Type     string
-	Default  string
-	Help     string
-	Required bool
-	Values   []string
+	Name        string
+	Type        string
+	Default     string
+	DefaultFrom string
+	Help        string
+	Required    bool
+	Values      []string
 }
 
 // RecipeOutput is one declared recipe output.
@@ -695,8 +696,8 @@ func fromManifest(m recipes.Manifest) Recipe {
 	}
 	for _, p := range m.SortedParams() {
 		r.Params = append(r.Params, RecipeParam{
-			Name: p.Name, Type: p.Type, Default: p.Default, Help: p.Help,
-			Required: p.Required, Values: append([]string{}, p.Values...),
+			Name: p.Name, Type: p.Type, Default: p.Default, DefaultFrom: p.DefaultFrom,
+			Help: p.Help, Required: p.Required, Values: append([]string{}, p.Values...),
 		})
 	}
 	for _, o := range m.SortedOutputs() {

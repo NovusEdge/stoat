@@ -436,12 +436,13 @@ type Recipe struct {
 
 // RecipeParam is one named recipe parameter in a machine-readable schema.
 type RecipeParam struct {
-	Name     string   `json:"name"`
-	Type     string   `json:"type"`
-	Required bool     `json:"required"`
-	Default  string   `json:"default"`
-	Values   []string `json:"values"`
-	Help     string   `json:"help"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Required    bool     `json:"required"`
+	Default     string   `json:"default"`
+	DefaultFrom string   `json:"default_from,omitempty"`
+	Values      []string `json:"values"`
+	Help        string   `json:"help"`
 }
 
 // RecipeOutput is one named recipe output in a machine-readable schema.
@@ -485,7 +486,8 @@ func FromRecipeSchema(r core.Recipe) RecipeSchema {
 	for _, p := range r.Params {
 		s.Params = append(s.Params, RecipeParam{
 			Name: p.Name, Type: p.Type, Required: p.Required,
-			Default: p.Default, Values: nonNil(p.Values), Help: p.Help,
+			Default: p.Default, DefaultFrom: p.DefaultFrom,
+			Values: nonNil(p.Values), Help: p.Help,
 		})
 	}
 	for _, o := range r.Outputs {
@@ -518,7 +520,8 @@ func fromRecipeParams(params []core.RecipeParam) []RecipeParam {
 	for _, p := range params {
 		out = append(out, RecipeParam{
 			Name: p.Name, Type: p.Type, Required: p.Required,
-			Default: p.Default, Values: nonNil(p.Values), Help: p.Help,
+			Default: p.Default, DefaultFrom: p.DefaultFrom,
+			Values: nonNil(p.Values), Help: p.Help,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
