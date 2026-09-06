@@ -15,34 +15,59 @@ type themeColors struct {
 	accent, up, down, warn, err, dim color.Color
 }
 
-var th = themeColors{
-	accent: theme.Accent,
-	up:     theme.Up,
-	down:   theme.Down,
-	warn:   theme.Warn,
-	err:    theme.Err,
-	dim:    theme.Dim,
-}
+var th themeColors
 
 var (
-	accentStyle = lipgloss.NewStyle().Foreground(th.accent)
-	dimStyle    = lipgloss.NewStyle().Foreground(th.dim)
-	errStyle    = lipgloss.NewStyle().Foreground(th.err)
-	warnStyle   = lipgloss.NewStyle().Foreground(th.warn)
-	upStyle     = lipgloss.NewStyle().Foreground(th.up)
-	downStyle   = lipgloss.NewStyle().Foreground(th.down)
-	selStyle    = lipgloss.NewStyle().Foreground(th.accent).Bold(true)
+	accentStyle lipgloss.Style
+	dimStyle    lipgloss.Style
+	errStyle    lipgloss.Style
+	warnStyle   lipgloss.Style
+	upStyle     lipgloss.Style
+	downStyle   lipgloss.Style
+	selStyle    lipgloss.Style
 
 	// paneStyle is the one border every screen draws with: a rounded box
 	// in the theme accent, with breathing room inside. No screen builds its
 	// own lipgloss.NewStyle().Border(...); they all go through pane().
-	paneStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(th.accent).
-			Padding(1, 2)
+	paneStyle lipgloss.Style
 
-	paneTitleStyle = accentStyle.Bold(true)
+	paneTitleStyle lipgloss.Style
 )
+
+// applyPalette points every style in this package at the palette for the
+// terminal background the caller reports. Update calls it once, when Bubble
+// Tea answers the background query started in Init.
+//
+// The styles stay package-level values because 150-odd call sites read them
+// by name. One program draws with them at a time, and the switch happens
+// before the first render that follows the query.
+func applyPalette(isDark bool) {
+	p := theme.For(isDark)
+	th = themeColors{
+		accent: p.Accent,
+		up:     p.Up,
+		down:   p.Down,
+		warn:   p.Warn,
+		err:    p.Err,
+		dim:    p.Dim,
+	}
+	accentStyle = lipgloss.NewStyle().Foreground(th.accent)
+	dimStyle = lipgloss.NewStyle().Foreground(th.dim)
+	errStyle = lipgloss.NewStyle().Foreground(th.err)
+	warnStyle = lipgloss.NewStyle().Foreground(th.warn)
+	upStyle = lipgloss.NewStyle().Foreground(th.up)
+	downStyle = lipgloss.NewStyle().Foreground(th.down)
+	selStyle = lipgloss.NewStyle().Foreground(th.accent).Bold(true)
+	paneStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(th.accent).
+		Padding(1, 2)
+	paneTitleStyle = accentStyle.Bold(true)
+}
+
+// A terminal that never answers the background query keeps the dark palette,
+// which is what the unsuffixed constants in internal/theme are.
+func init() { applyPalette(true) }
 
 // paneFrame is the total width a pane() call adds on top of its content:
 // border on both sides plus the horizontal padding baked into paneStyle. A
