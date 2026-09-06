@@ -92,6 +92,11 @@ that run guest code are marked by their required level.
 
 ### Host and recipe tools
 
+The read-only capabilities tool reads host checks and stored VM metadata. Its
+optional vm argument selects one VM; omit it for host and project scope. It
+does not start or connect to a VM, and it reports MCP access limits plus
+unavailable fork and continuation proposals. Discovery does not mutate a VM.
+
 | Tool | Purpose |
 |---|---|
 | `list_vms`, `vm_status` | List VMs or inspect one VM, including recipe state and health. |
@@ -101,6 +106,7 @@ that run guest code are marked by their required level.
 | `add_recipe`, `update_recipe`, `remove_recipe` | Add, repin, or remove remote recipes. `add_recipe` accepts curated index names only; it refuses Git URLs. `remove_recipe` has no force option. |
 | `list_guests`, `guest_info` | Inspect loaded guest definitions and their package/service commands. |
 | `doctor`, `logs` | Check host prerequisites or tail a VM's console/apply log. |
+| `capabilities` | Read host checks and optional stored VM metadata; report current capabilities and limits. |
 | `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM and its disk. |
 | `snapshot`, `restore`, `forward`, `wait`, `prune` | Manage disk snapshots, port forwards, state waits, and stale files. `prune` is dry-run unless `apply=true`. |
 | `project_status`, `project_up`, `project_down`, `project_apply`, `project_wait` | Inspect or operate on every VM declared by the server working directory's `stoat.toml`, in declaration order. A failure stops the run and later VMs are marked skipped. |

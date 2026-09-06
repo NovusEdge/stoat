@@ -63,12 +63,26 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
+| [`capabilities`](#stoat-capabilities-vm) | Report current agent capabilities | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`mcp`](mcp.md) | Serve MCP, or configure and inspect a client entry | 0, 1, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
 Anything not on this list, a missing VM name, or extra arguments is a **usage error** (exit 2), printed to stderr together with the full usage text. The `mcp` subcommands and their client-specific flags are documented in [the MCP reference](mcp.md).
+
+## stoat capabilities [VM]
+
+Reports the host checks, implemented Stoat surfaces, target access limits, and
+unavailable runtime proposals. It reads stored VM metadata only and does not
+start or connect to a VM.
+
+Omit the VM name for host and project scope. In a project, a bare name first
+resolves against the current stoat.toml and then against a global VM name.
+Without --json, Stoat prints a NAME, STATUS, SCOPE table. Add --json for the
+standard result envelope with the schema 1 capability report.
+
+MCP enforces agent_access. Direct CLI stoat exec and stoat cp do not enforce it.
 
 ## `stoat ls`
 

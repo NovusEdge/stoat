@@ -61,12 +61,13 @@ type grammar struct {
 	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
 	Guest        recipeGuestCmd  `cmd:"" help:"list or show guest OS definitions"`
 
-	Logs       logsCmd       `cmd:"" help:"tail a VM's log, or stoat's own"`
-	Screenshot screenshotCmd `cmd:"" help:"write the VM's screen to a PNG"`
-	Doctor     doctorCmd     `cmd:"" help:"check host prerequisites"`
-	MCP        mcpCmd        `cmd:"" name:"mcp" help:"serve MCP, or configure a client to launch it"`
-	Version    versionCmd    `cmd:"" help:"print the stoat version"`
-	Help       helpCmd       `cmd:"" help:"show this message"`
+	Logs         logsCmd         `cmd:"" help:"tail a VM's log, or stoat's own"`
+	Screenshot   screenshotCmd   `cmd:"" help:"write the VM's screen to a PNG"`
+	Doctor       doctorCmd       `cmd:"" help:"check host prerequisites"`
+	Capabilities capabilitiesCmd `cmd:"" help:"report current agent capabilities"`
+	MCP          mcpCmd          `cmd:"" name:"mcp" help:"serve MCP, or configure a client to launch it"`
+	Version      versionCmd      `cmd:"" help:"print the stoat version"`
+	Help         helpCmd         `cmd:"" help:"show this message"`
 }
 
 // mcpCmd defaults to serve, because every MCP client launches the server as
@@ -106,6 +107,9 @@ type initCmd struct {
 }
 type imagesCmd struct{}
 type doctorCmd struct{}
+type capabilitiesCmd struct {
+	VM string `arg:"" optional:"" help:"vm name; omit for host scope"`
+}
 type versionCmd struct{}
 
 type getCmd struct {
@@ -354,6 +358,9 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.Clear = g.LS.Project
 
 	case "images", "doctor", "version", "status":
+
+	case "capabilities":
+		a.VM = g.Capabilities.VM
 
 	case "help":
 		// The `help` COMMAND has to render the text itself; only the -h/--help
