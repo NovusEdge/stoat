@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.4.0
+
+A bundled recipe catalog with a rule, three new common recipes on every guest,
+and a cloud path that needs no external tool. The JSON contract version stays
+**3**.
 
 ### Features
 
@@ -23,6 +27,16 @@
   directory root-only. Stoat polls `cloud-init status` on its own deadline and
   retries an unreadable probe under the guest's escalation. Fedora 44 ships the
   cloud-init version that caused the hang.
+- `pacman` skips a package the Arch guest already has. A VM that selects both
+  `devtools` and `build-deps` reinstalled the whole `base-devel` group.
+- The terminal UI follows the terminal's own background colour.
+
+### Known limitations
+
+- `docs/specs` describes VM forks and runtime continuation. Neither is
+  implemented.
+- Native VM operations run on Linux only. macOS and Windows report an
+  unqualified host. See #82 and #83.
 
 ## v0.3.0
 
