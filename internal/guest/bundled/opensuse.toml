@@ -1,0 +1,33 @@
+schema = 1
+name = "opensuse"
+init = "systemd"
+shell = "/bin/bash"
+installer = ""
+default_backend = "cloudinit"
+default_ssh_user = "stoat"
+escalate = ["sudo", "-n"]
+capabilities = ["zypper"]
+aliases = ["rpm-family"]
+filename_hints = ["opensuse", "leap-"]
+seed_packages = []
+
+[pkg]
+setup = "zypper --non-interactive refresh"
+install = ["zypper", "--non-interactive", "install"]
+scaffold_setup = "zypper --non-interactive refresh"
+scaffold_install = "zypper --non-interactive install "
+runtime_packages = { python3 = "python313" }
+
+[svc]
+enable = "systemctl enable {name}"
+start = "systemctl start {name}"
+stop = "systemctl stop {name}"
+restart = "systemctl restart {name}"
+status = "systemctl status {name}"
+
+[cmd]
+download = "curl -fsSL -o"
+useradd = "useradd -m -s /bin/bash {name}"
+
+[backend.cloudinit]
+skip_9p = true

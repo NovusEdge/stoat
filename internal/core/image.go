@@ -89,12 +89,15 @@ func MatchLocal(e iso.Entry, files []string) string {
 
 // image is everything Create needs to know about the file a Spec named.
 type image struct {
-	abs     string
-	rel     string     // bare name under isos/; "" when abs lives elsewhere
-	entry   *iso.Entry // nil for BYO
-	osName  string
-	backend string
-	sshUser string
+	abs         string
+	rel         string     // bare name under isos/; "" when abs lives elsewhere
+	entry       *iso.Entry // nil for BYO
+	osName      string
+	backend     string
+	sshUser     string
+	cpuModel    string
+	requiredCPU string
+	defaultDisk string
 }
 
 // isoField is what vm.toml records. A bare name stays relative to the data
@@ -156,7 +159,17 @@ func resolveImage(spec string) (image, error) {
 		if err != nil {
 			return image{}, err
 		}
-		return image{abs: abs, rel: f, entry: &e, osName: e.OS, backend: e.Backend, sshUser: e.SSHUser}, nil
+		return image{
+			abs:         abs,
+			rel:         f,
+			entry:       &e,
+			osName:      e.OS,
+			backend:     e.Backend,
+			sshUser:     e.SSHUser,
+			cpuModel:    e.CPUModel,
+			requiredCPU: e.RequiredCPU,
+			defaultDisk: e.DefaultDisk,
+		}, nil
 	}
 
 	for _, f := range files {

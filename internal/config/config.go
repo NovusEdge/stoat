@@ -102,6 +102,12 @@ type VM struct {
 	// package writing "root" into every vm.toml.
 	SSHUser string `toml:"sshuser"`
 
+	// CPUModel and RequiredCPU describe the CPU contract selected by a
+	// catalog image. Empty values preserve the argument vector of a legacy
+	// VM; catalog-backed creation owns nonempty values.
+	CPUModel    string `toml:"cpu_model,omitempty"`
+	RequiredCPU string `toml:"required_cpu,omitempty"`
+
 	// ConsolePassword is the password for SSHUser at the VM's graphical
 	// console (VNC), not over ssh. Only the cloudinit backend writes it:
 	// cloud images lock every account by default, and stoat's seed sets

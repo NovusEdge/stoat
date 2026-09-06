@@ -227,6 +227,48 @@ func TestBuildDisplayDefaultsToAutoAndCyclesRight(t *testing.T) {
 	}
 }
 
+// A catalog image owns the safe default for its cloud overlay. The form's
+// global 8G placeholder must not survive selecting an image whose catalog
+// entry requires a larger disk.
+func TestSelectingEnterpriseCatalogImageSubmitsCatalogDiskDefault(t *testing.T) {
+	for _, tc := range []struct {
+		id string
+	}{
+		{id: "almalinux-9"},
+		{id: "rocky-9"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			t.Setenv("STOAT_HOME", t.TempDir())
+			var entry *iso.Entry
+			for _, candidate := range iso.Catalog() {
+				if candidate.ID == tc.id {
+					selected := candidate
+					entry = &selected
+					break
+				}
+			}
+			if entry == nil {
+				t.Fatalf("catalog has no %q entry", tc.id)
+			}
+			f := newForm()
+			f.images = []imageOption{
+				{entry: &iso.Entry{ID: "alpine-virt", OS: "alpine", Backend: "apkovl"}, file: "alpine.iso"},
+				{entry: entry, file: "enterprise.qcow2"},
+			}
+			f.inputs[fName].SetValue("enterprise")
+			f.selectImage(1)
+
+			s, err := f.spec()
+			if err != nil {
+				t.Fatalf("spec: %v", err)
+			}
+			if s.Disk != "12G" {
+				t.Errorf("spec disk = %q, want catalog default 12G", s.Disk)
+			}
+		})
+	}
+}
+
 // TestBuildRejectsRelativeDiskSize checks that build() refuses a relative
 // disk size like "+8G". qemu-img's resize reads a leading "+" as "grow by",
 // not "resize to", which would silently double a fresh overlay if the value

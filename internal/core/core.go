@@ -211,7 +211,7 @@ func plan(s Spec) (*config.VM, error) {
 	// to". `qemu-img create -f qcow2 disk.qcow2 +8G` then silently allocates
 	// twice the requested size. ParseSize refuses a relative size; the edit
 	// path calls the same function and gets the same refusal.
-	disk := strings.TrimSpace(s.Disk)
+	disk := effectiveDisk(img, mode, s.Disk)
 	// Disk mode and cloud mode both get a default size; live mode does not.
 	//
 	// A cloud VM's qcow2 is a CoW overlay. The overlay inherits the base
@@ -221,14 +221,10 @@ func plan(s Spec) (*config.VM, error) {
 	// and cloud-init reports a bare "error" that reads as a broken recipe,
 	// not a full disk.
 	//
-	// The TUI's form pre-fills 8G for every mode, so a cloud VM built there
-	// always carried a size. Defaulting only disk mode here made the CLI
-	// produce a different VM from the TUI for the same request.
+	// Every caller uses this same image-aware defaulting path, so a cloud VM
+	// built by the CLI, TUI or project reconciler carries the same size.
 	//
 	// Live mode has no qcow2: it boots the ISO into a tmpfs root.
-	if disk == "" && mode != "live" {
-		disk = DefaultDisk
-	}
 	if disk != "" {
 		if _, err := ParseSize(disk); err != nil {
 			return nil, fmt.Errorf("%w: disk size: %v", ErrInvalidSpec, err)
@@ -273,6 +269,8 @@ func plan(s Spec) (*config.VM, error) {
 		RAM:         ram,
 		CPUs:        cpus,
 		Disk:        disk,
+		CPUModel:    img.cpuModel,
+		RequiredCPU: img.requiredCPU,
 		Share:       strings.TrimSpace(s.Share),
 		SSHPort:     port,
 		Recipes:     s.Recipes,
@@ -306,6 +304,19 @@ func plan(s Spec) (*config.VM, error) {
 		v.ISO = img.isoField()
 	}
 	return v, nil
+}
+
+// effectiveDisk keeps an explicitly supplied size and derives an omitted size
+// from the selected catalog image, falling back to the legacy default.
+func effectiveDisk(img image, mode, declared string) string {
+	disk := strings.TrimSpace(declared)
+	if disk == "" && mode != "live" {
+		disk = img.defaultDisk
+		if disk == "" {
+			disk = DefaultDisk
+		}
+	}
+	return disk
 }
 
 // modeFor decides boot media. cloudinit is always "cloud": a cloud image

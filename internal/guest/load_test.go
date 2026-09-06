@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// The five bundled files must parse, pass validation, and (via normalize)
+// The bundled files must parse, pass validation, and (via normalize)
 // carry their own init system in capabilities.
 func TestBundledFilesParseAndValidate(t *testing.T) {
 	got := loadBundled()
-	for _, name := range []string{"alpine", "ubuntu", "debian", "fedora", "arch"} {
+	for _, name := range []string{"alpine", "ubuntu", "debian", "fedora", "arch", "almalinux", "rocky", "opensuse"} {
 		o, ok := got[name]
 		if !ok {
 			t.Fatalf("no bundled %s", name)
@@ -28,6 +28,81 @@ func TestBundledFilesParseAndValidate(t *testing.T) {
 	if last != "openrc" {
 		t.Errorf("alpine capabilities = %v, want openrc last", alpine.Capabilities)
 	}
+}
+
+func TestEnterpriseGuestFacts(t *testing.T) {
+	for _, tc := range []struct {
+		name, capability, setup, runtime, install, hint string
+		aliases                                         []string
+	}{
+		{name: "almalinux", capability: "dnf", runtime: "python3", install: "dnf install -y", hint: "almalinux", aliases: []string{"rpm-family"}},
+		{name: "rocky", capability: "dnf", runtime: "python3", install: "dnf install -y", hint: "rocky", aliases: []string{"rpm-family"}},
+		{name: "opensuse", capability: "zypper", setup: "zypper --non-interactive refresh", runtime: "python313", install: "zypper --non-interactive install", hint: "opensuse", aliases: []string{"rpm-family"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, ok := Lookup(tc.name)
+			if !ok {
+				t.Fatalf("guest %q is not bundled", tc.name)
+			}
+			if o.Init != InitSystemd || o.Shell != "/bin/bash" || o.DefaultBackend != "cloudinit" || o.DefaultSSHUser != "stoat" {
+				t.Errorf("base facts = init=%q shell=%q backend=%q user=%q", o.Init, o.Shell, o.DefaultBackend, o.DefaultSSHUser)
+			}
+			if got, want := o.Escalate, []string{"sudo", "-n"}; !equalStrings(got, want) {
+				t.Errorf("escalate = %v, want %v", got, want)
+			}
+			if !containsString(o.Capabilities, tc.capability) || !containsString(o.Capabilities, "systemd") {
+				t.Errorf("capabilities = %v, want %q and systemd", o.Capabilities, tc.capability)
+			}
+			if !equalStrings(o.Aliases, tc.aliases) {
+				t.Errorf("aliases = %v, want %v", o.Aliases, tc.aliases)
+			}
+			if !containsString(o.FilenameHints, tc.hint) {
+				t.Errorf("filename hints = %v, want %q", o.FilenameHints, tc.hint)
+			}
+			if o.Pkg.Setup != tc.setup || strings.Join(o.Pkg.Install, " ") != tc.install || o.Pkg.RuntimePackages["python3"] != tc.runtime {
+				t.Errorf("package facts = setup=%q install=%v runtime=%v", o.Pkg.Setup, o.Pkg.Install, o.Pkg.RuntimePackages)
+			}
+			if o.Pkg.ScaffoldInstall != tc.install+" " || o.Pkg.ScaffoldSetup != tc.setup {
+				t.Errorf("scaffolds = setup=%q install=%q", o.Pkg.ScaffoldSetup, o.Pkg.ScaffoldInstall)
+			}
+			for action, want := range map[string]string{
+				"enable": "systemctl enable {name}", "start": "systemctl start {name}",
+				"stop": "systemctl stop {name}", "restart": "systemctl restart {name}", "status": "systemctl status {name}",
+			} {
+				if got := o.Svc.Get(action); got != want {
+					t.Errorf("svc.%s = %q, want %q", action, got, want)
+				}
+			}
+			if o.Cmd["download"] != "curl -fsSL -o" || o.Cmd["useradd"] != "useradd -m -s /bin/bash {name}" {
+				t.Errorf("commands = %v", o.Cmd)
+			}
+			backend, ok := o.Backends["cloudinit"]["skip_9p"].(bool)
+			if !ok || !backend {
+				t.Errorf("cloudinit.skip_9p = %#v, want true", o.Backends["cloudinit"]["skip_9p"])
+			}
+		})
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidateMissingField(t *testing.T) {
