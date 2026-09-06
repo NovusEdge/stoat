@@ -9,9 +9,8 @@ if [ -z "$user" ] || ! id -u "$user" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Alpine's venv support is packaged separately from Python and pip.
 stoat_pkg_setup
-stoat_pkg_install python3 py3-pip py3-virtualenv
+stoat_pkg_install python3 py3-pip
 
 as_user() {
     if command -v runuser >/dev/null 2>&1; then
@@ -59,7 +58,10 @@ else
             exit 1
         fi
         venv_python="$venv_dir/bin/python"
-        if [ ! -x "$venv_python" ] || ! as_user "$venv_python" -c 'import sys; raise SystemExit(sys.prefix == sys.base_prefix)'; then
+        if [ ! -x "$venv_python" ] ||
+            ! as_user "$venv_python" -c 'import sys; raise SystemExit(sys.prefix == sys.base_prefix)' ||
+            ! as_user "$venv_python" -m pip --version >/dev/null 2>&1
+        then
             printf 'python-dev: venv_dir "%s": existing path is not a compatible Python virtual environment\n' "$venv_dir" >&2
             exit 1
         fi

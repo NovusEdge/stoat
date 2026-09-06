@@ -86,9 +86,10 @@ whose SSH account is `stoat` must use `python-dev.user=stoat`; an Alpine guest
 using `root` must use `python-dev.user=root`.
 
 The scripts are in `internal/recipes/bundled/` in the source tree. Each
-recipe has a manifest. Docker, devtools and Tailscale use OS-specific script
-overrides because package names and repository setup differ. XFCE uses one
-script with guest prelude verbs and therefore has no `[scripts]` table.
+recipe has a manifest. Docker, devtools, python-dev, and Tailscale use
+OS-specific script overrides because package names and repository setup differ.
+XFCE uses one script with guest prelude verbs and therefore has no `[scripts]`
+table.
 
 Cloud images use their own package manager and a cloud-init seed. Cloud-init
 currently wraps recipe bodies in shell commands; it does not perform the SSH
