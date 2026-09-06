@@ -3,10 +3,12 @@
 # Alpine VM.
 set -e
 
-# -c enables community; -1 picks a mirror and refreshes indexes, so no
-# separate stoat_pkg_setup call is needed here. setup-apkrepos runs apk
-# update with no lock-wait, so another apk that holds the database lock fails
-# it with exit 99. Retry until the lock frees, up to ~60s.
+# -1 picks a mirror and refreshes indexes, so no separate stoat_pkg_setup call
+# is needed here. -c is kept even though apk-tools lives in Alpine's main
+# repository, so the script does not depend on which repo a package happens
+# to live in today. setup-apkrepos runs apk update with no lock-wait, so
+# another apk that holds the database lock fails it with exit 99. Retry until
+# the lock frees, up to ~60s.
 n=0
 until setup-apkrepos -c -1; do
     n=$((n + 1))

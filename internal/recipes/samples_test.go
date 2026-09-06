@@ -367,8 +367,8 @@ func TestBundledServiceToolsFailsWithoutKnownServiceManager(t *testing.T) {
 }
 
 // PATH is set to exactly the fake bin dir the caller built, not extended with
-// the host's real PATH: the host running this test may itself run systemd,
-// and a real systemctl or rc-status on PATH would mask the fakes above.
+// the host's real PATH: the test host may itself have a systemd, apt-get, dnf,
+// or other real binary the recipe would find first and use instead of a fake.
 func runBundledServiceTools(t *testing.T, body, outputPath, callsPath, bin string) ([]byte, error) {
 	t.Helper()
 	prefix := `stoat_pkg_setup() { printf 'setup\n' >> "$STOAT_PKG_CALLS"; }
@@ -387,16 +387,17 @@ func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
 	cases := []struct {
 		os        string
 		request   string
+		manager   string
 		queryTool string
 	}{
-		{os: "ubuntu", request: "apt-file dpkg-dev", queryTool: "apt-file"},
-		{os: "debian", request: "apt-file dpkg-dev", queryTool: "apt-file"},
-		{os: "fedora", request: "dnf-utils", queryTool: "repoquery"},
-		{os: "almalinux", request: "dnf-utils", queryTool: "repoquery"},
-		{os: "rocky", request: "dnf-utils", queryTool: "repoquery"},
-		{os: "opensuse", request: "zypper libzypp", queryTool: "zypper"},
-		{os: "arch", request: "pacman-contrib", queryTool: "pacman"},
-		{os: "alpine", request: "apk-tools", queryTool: "apk"},
+		{os: "ubuntu", request: "apt-file dpkg-dev", manager: "apt-get", queryTool: "apt-file"},
+		{os: "debian", request: "apt-file dpkg-dev", manager: "apt-get", queryTool: "apt-file"},
+		{os: "fedora", request: "dnf-utils", manager: "dnf", queryTool: "repoquery"},
+		{os: "almalinux", request: "dnf-utils", manager: "dnf", queryTool: "repoquery"},
+		{os: "rocky", request: "dnf-utils", manager: "dnf", queryTool: "repoquery"},
+		{os: "opensuse", request: "zypper libzypp", manager: "zypper", queryTool: "zypper"},
+		{os: "arch", request: "pacman-contrib", manager: "pacman", queryTool: "pacman"},
+		{os: "alpine", request: "apk-tools", manager: "apk", queryTool: "apk"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.os, func(t *testing.T) {
@@ -408,18 +409,17 @@ func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
 			if err := os.MkdirAll(bin, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			// The query tool must resolve via a real executable; the manager
-			// check is left to whatever the test host actually has, same as
-			// build-deps trusts the host for cc/make/pkg-config.
-			if err := os.WriteFile(filepath.Join(bin, tc.queryTool), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-				t.Fatal(err)
+			for _, name := range []string{tc.manager, tc.queryTool} {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if tc.os == "alpine" {
 				if err := os.WriteFile(filepath.Join(bin, "setup-apkrepos"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if output, err := runBundledBuildDeps(t, body, outputPath, callsPath, bin); err != nil {
+			if output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin); err != nil {
 				t.Fatalf("%s: %v\n%s", tc.os, err, output)
 			}
 			calls, err := os.ReadFile(callsPath)
@@ -440,8 +440,8 @@ func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
 				t.Errorf("%s: no captured package installation request", tc.os)
 			}
 			outputs := parseOutputs(t, outputPath)
-			if outputs["manager"] == "" {
-				t.Errorf("%s: output %q is empty; outputs = %#v", tc.os, "manager", outputs)
+			if got := filepath.Base(outputs["manager"]); got != tc.manager {
+				t.Errorf("%s: manager = %q, want basename %q", tc.os, outputs["manager"], tc.manager)
 			}
 			if got := filepath.Base(outputs["query_tool"]); got != tc.queryTool {
 				t.Errorf("%s: query_tool = %q, want basename %q", tc.os, outputs["query_tool"], tc.queryTool)
@@ -452,26 +452,43 @@ func TestBundledPkgToolsInstallsPerFamily(t *testing.T) {
 
 // manager must resolve to the first of apt-get, dnf, zypper, pacman, apk
 // found on PATH, in that order, regardless of which family script runs it.
+// A hermetic PATH lets this also prove the negative: a manager earlier in
+// the order is absent, so the next one wins.
 func TestBundledPkgToolsManagerResolutionOrder(t *testing.T) {
-	body := bundledScript(t, "pkg-tools", "fedora")
-	root := t.TempDir()
-	bin := filepath.Join(root, "bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name    string
+		present []string
+		want    string
+	}{
+		{name: "apt-get over dnf", present: []string{"apt-get", "dnf"}, want: "apt-get"},
+		{name: "dnf when apt-get absent", present: []string{"dnf"}, want: "dnf"},
+		{name: "zypper when apt-get and dnf absent", present: []string{"zypper"}, want: "zypper"},
+		{name: "pacman when zypper absent", present: []string{"pacman"}, want: "pacman"},
+		{name: "apk when pacman absent", present: []string{"apk"}, want: "apk"},
 	}
-	for _, name := range []string{"apt-get", "dnf", "repoquery"} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	outputPath := filepath.Join(root, "output")
-	callsPath := filepath.Join(root, "calls")
-	if output, err := runBundledBuildDeps(t, body, outputPath, callsPath, bin); err != nil {
-		t.Fatalf("%v\n%s", err, output)
-	}
-	outputs := parseOutputs(t, outputPath)
-	if got := filepath.Base(outputs["manager"]); got != "apt-get" {
-		t.Errorf("manager = %q, want apt-get to win over dnf", outputs["manager"])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := bundledScript(t, "pkg-tools", "fedora")
+			root := t.TempDir()
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range append(append([]string{}, tc.present...), "repoquery") {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outputPath := filepath.Join(root, "output")
+			callsPath := filepath.Join(root, "calls")
+			if output, err := runBundledServiceTools(t, body, outputPath, callsPath, bin); err != nil {
+				t.Fatalf("%v\n%s", err, output)
+			}
+			outputs := parseOutputs(t, outputPath)
+			if got := filepath.Base(outputs["manager"]); got != tc.want {
+				t.Errorf("manager = %q, want %q", outputs["manager"], tc.want)
+			}
+		})
 	}
 }
 
