@@ -78,9 +78,9 @@ hooks; that step belongs to the Just targets.
 
 ## Prerequisites
 
-| Requirement | Why stoat needs it |
+| Requirement | Why Stoat needs it |
 |---|---|
-| Linux with KVM | stoat opens `/dev/kvm` directly and runs QEMU with hardware acceleration |
+| Linux with KVM | Stoat opens `/dev/kvm` directly and runs QEMU with hardware acceleration |
 | `qemu-system-x86_64` and `qemu-img` | run and create VMs |
 | `ssh` (an OpenSSH client) | connect into a running VM, and provision it |
 | `xorriso` | used when you create Ubuntu/Debian/Fedora/Arch/Alpine cloud VMs: it builds the cloud-init seed image |
@@ -131,7 +131,10 @@ Stoat passes `-display gtk,gl=on`, so the QEMU binary on your `PATH` must have
 GTK and OpenGL support. Set `display = "vnc"` in `vm.toml` to keep a VM
 headless with its screen on a VNC socket.
 
-**On a host with no graphical session** (a server, an ssh session with no forwarding) stoat does not ask for a window at all: every VM's screen goes to a VNC socket and stoat prints how to attach, so a disk VM can still be installed from another machine. It detects this from `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0`.
+**On a host with no graphical session** (a server or an SSH session without
+forwarding), Stoat sends each VM's screen to a VNC socket and prints connection
+instructions. It detects the session from `DISPLAY`, `WAYLAND_DISPLAY`, and
+`$XDG_RUNTIME_DIR/wayland-0`.
 
 If a VM still fails to start with a display or GL error, your host has a session QEMU cannot draw on. Set `STOAT_GRAPHICAL=0` to take the window out of play; see [troubleshooting](../troubleshooting.md). No source edit and no rebuild.
 
@@ -177,7 +180,9 @@ points Git at `.githooks` to enable it.
 
 ## Install from a release tarball
 
-Download the tarball for your architecture from the releases page (e.g. `stoat_vX.Y.Z_linux_amd64.tar.gz`), verify it against the accompanying `checksums.txt`, then extract and move the binary onto your `PATH`:
+Download the tarball for your architecture from the releases page. For
+example, the AMD64 archive is named `stoat_vX.Y.Z_linux_amd64.tar.gz`.
+Download the accompanying `checksums.txt`, then verify and install the binary:
 
 ```sh
 sha256sum -c --ignore-missing checksums.txt
@@ -187,7 +192,8 @@ install -Dm755 stoat ~/.local/bin/stoat
 
 ## Install via the Nix flake
 
-The repo ships a `flake.nix` with a `packages.default` (built with `buildGoModule`, `subPackages = [ "cmd/stoat" ]`) and a `devShells.default` that provides `go`, `just`, `qemu`, and `openssh`, the same binaries `just doctor` checks for.
+The repository includes a `flake.nix` with a default package and development
+shell:
 
 ```sh
 nix build          # ./result/bin/stoat
@@ -195,40 +201,49 @@ nix run            # build and run in one step
 nix develop        # a dev shell with go, just, qemu and openssh
 ```
 
-The development shell provides the build tools and QEMU/OpenSSH packages. Add
-`xorriso` to the shell or host `PATH` when you use cloud VMs. The flake includes
-a pinned `vendorHash` for the current `go.mod` and
-`go.sum`. A dependency change requires updating that hash from the value Nix
-prints in its mismatch error.
+The development shell provides Go, Just, QEMU, and OpenSSH. Cloud VMs also
+require `xorriso` on `PATH`. The flake pins the Go dependencies with
+`vendorHash`.
 
-### If `nix build` fails before it starts building
+### Enable flakes
 
-Two things trip people up, and neither is stoat-specific. Both produced a confusing error for us:
-
-**`error: experimental Nix feature 'nix-command' is disabled`**: flakes are still gated. Either pass the features per invocation:
+If Nix reports `experimental Nix feature 'nix-command' is disabled`, enable
+`nix-command` and `flakes` for that invocation:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' build
 ```
 
-or enable them once, for your user only (no root needed):
+To enable them for your user account, add the setting to
+`~/.config/nix/nix.conf`:
 
 ```sh
 mkdir -p ~/.config/nix
 echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
 ```
 
-**`error: creating directory "/nix/store": Permission denied`**: Nix is installed but its daemon has never run, so the store was never created. On a distro package (e.g. Arch's `nix`), finish the setup with:
+### Start the Nix daemon
+
+If Nix reports `creating directory "/nix/store": Permission denied`, the Nix
+daemon or store may not be initialized. On a systemd-based multi-user
+installation, start the daemon socket:
 
 ```sh
 sudo systemctl enable --now nix-daemon.socket
 ```
 
-That is normally the only command needing root: the package already creates `/nix`, the `nixbld` build users and `build-users-group = nixbld` in `/etc/nix/nix.conf`, and the daemon socket has no group restriction, so you do not need to join a group. Check it took with `nix store info`: it should report `Store URL: daemon`.
+Verify the connection with:
 
-### When the hash goes stale
+```sh
+nix store info
+```
 
-`vendorHash` is derived from `go.mod` and `go.sum`, so **any** dependency change invalidates it, including a bare `go mod tidy` that only drops an unused indirect requirement. When that happens the build fails with a mismatch that prints the correct value:
+For a daemon installation, the output should include `Store URL: daemon`.
+
+### Update `vendorHash`
+
+A change to `go.mod` or `go.sum` can invalidate `vendorHash`. When this occurs,
+Nix reports a hash mismatch and prints the required value:
 
 ```
 error: hash mismatch in fixed-output derivation ...
@@ -236,15 +251,19 @@ error: hash mismatch in fixed-output derivation ...
         got:    sha256-hyDEjT73s7rOJ/zRxYBF2ZUOADSqLmKCM1eJJJRF8Y4=
 ```
 
-Paste the `got:` value into `vendorHash` in `flake.nix`. Do not guess at it.
+Copy the exact `got:` value into `vendorHash` in `flake.nix`.
 
-Note also that Nix builds from **git-tracked** content: untracked files are invisible to the build, and a dirty tree builds your uncommitted changes (with a "Git tree is dirty" warning). To build exactly what a clone would get, build the committed state explicitly:
+Nix builds from Git-tracked content. It ignores untracked files and includes
+tracked, uncommitted changes. To build the committed state explicitly, run:
 
 ```sh
 nix build "git+file://$PWD"
 ```
 
-Also note: the flake deliberately does **not** wrap the `stoat` binary to force nixpkgs' `qemu`/`openssh` onto its `PATH`. stoat shells out to whatever `qemu-system-x86_64`/`ssh` it finds, so you still need a QEMU build with GTK+OpenGL support on your `PATH` regardless of how you installed stoat itself. `nix develop` gives you a shell with matching versions for development.
+The flake does not wrap the `stoat` binary with QEMU or OpenSSH. Stoat uses
+the `qemu-system-x86_64` and `ssh` commands on `PATH`. Graphical use therefore
+requires a QEMU build with GTK and OpenGL support. Run `nix develop` to use the
+development-shell versions.
 
 ## Verify with `stoat doctor`
 
@@ -272,8 +291,8 @@ The first time you run `stoat` (either the TUI with no arguments, or any CLI sub
 ~/.stoat/
   isos/                    empty, downloaded/BYO images land here
   recipes/                 bundled provisioning recipes, copied in (local edits survive future upgrades)
-  id_stoat, id_stoat.pub   the SSH keypair stoat uses to reach your VMs
-  logs/stoat.log           stoat's own log
+  id_stoat, id_stoat.pub   the SSH keypair Stoat uses to reach your VMs
+  logs/stoat.log           Stoat's own log
 ```
 
 Nothing else is created until you add a VM: each one gets its own directory under `~/.stoat` once you create it.

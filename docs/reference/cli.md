@@ -1,19 +1,34 @@
-# CLI Reference
+# CLI reference
 
-`stoat` with a subcommand runs non-interactively (`internal/cli`); with none, it launches the [TUI](tui.md) instead. No subcommand contains logic of its own: each is a thin wrapper over the same internal packages the TUI uses, so the two interfaces can't drift apart.
+Run `stoat` with a subcommand for non-interactive use. Run it without a
+subcommand to open the [TUI](tui.md). Both interfaces call the same core VM
+operations.
 
 ```
 usage: stoat <command> [flags]
 ```
 
-**Single-dash long flags do not work.** `--image` is required on `create`; `-image` is parsed as a shorthand cluster (`-i -m -a -g -e`) and rejected as an unknown flag. Always use two dashes for a named flag; a single dash is only for the one-letter forms (`-q`, `-y`, `-n`, `-h`).
+Use two dashes for long flags, such as `--image`. A single dash is valid only
+for the documented one-letter forms: `-q`, `-y`, `-n`, and `-h`. For example,
+`-image` is invalid.
 
 ## Global flags
 
-- **`--json`** turns on machine output for a named VM operation: one JSON object per line on stdout, errors included, never prose. It implies `--quiet` and never prompts (so `rm` without `-y` fails instead of asking). Project fan-out commands currently have a known limitation: no-name `up`, `down`, and `apply` can print progress prose before their terminal JSON result. Use a named VM command when a clean stream is required. The flag is recognized anywhere in argv before kong ever parses flags, with one exception: for `exec`, only before the VM name, so `stoat exec work ls --json` still sends `--json` to the guest. This file only covers the human-facing CLI; the JSON shapes themselves are in [json.md](json.md).
-- **`-q`, `--quiet`, `--no-interactive`** are three names for one flag, present on every subcommand. Where it has an effect, it suppresses "in-progress" chatter (`starting work...`, `provisioning work...`, ...); final results and all errors print regardless.
+- **`--json`** selects machine output for a named VM operation. Stdout contains
+  one JSON object per line, including errors, and contains no prose. The flag
+  implies `--quiet` and disables prompts. Project fan-out has a known
+  exception: no-name `up`, `down`, and `apply` can print progress prose before
+  the final JSON result. Use a named VM command when stdout must contain only
+  JSON. For `exec`, place `--json` before the VM name; a later occurrence is
+  passed to the guest command. See [JSON output](json.md) for the payloads.
+- **`-q`, `--quiet`, `--no-interactive`** name the same flag. When supported by
+  a command, it suppresses progress messages. Final results and errors are
+  still printed.
 - **`-h`, `--help`** prints the command's usage and flags and exits 0. `stoat help` (the subcommand) prints the same top-level text `stoat --help` does.
-- **`-v`, `--version`** prints `stoat <version>` and exits 0. It is matched as the **first argument only**, before any parsing (`cmd/stoat/main.go`), which has two consequences worth knowing: `stoat -v --json` prints plain text and ignores `--json`, and `stoat --json --version` is a usage error because `-v` is no longer first. **Scripts and machine consumers should use the `version` subcommand**, which behaves normally under `--json`.
+- **`-v`, `--version`** prints `stoat <version>` and exits 0 only when it is the
+  first argument. `stoat -v --json` therefore prints plain text, while
+  `stoat --json --version` is a usage error. Scripts should use the `version`
+  subcommand, which supports `--json` normally.
 
 ## Project scope
 
@@ -64,10 +79,13 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
+| [`mcp`](mcp.md) | Serve MCP, or configure and inspect a client entry | 0, 1, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
-Anything not on this list, a missing VM name, or extra arguments is a **usage error** (exit 2), printed to stderr together with the full usage text.
+An unknown command, missing VM name, or extra argument is a **usage error**
+(exit 2). Stoat prints the error and full usage text to stderr. The
+client-specific `mcp` flags are documented in [the MCP reference](mcp.md).
 
 ## `stoat ls`
 
@@ -161,7 +179,9 @@ Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--
 
 ## `stoat update <name>`
 
-Changes a stopped VM. **Only the flags you actually pass are changed**; an omitted flag leaves that field alone, and an explicitly empty one clears it. This is the single most consequential behaviour in the command:
+Changes a VM configuration. **Only the supplied flags change fields.** An
+omitted flag leaves its field unchanged, and an explicitly empty value clears
+the field.
 
 ```
 $ stoat update work --ram 8192
@@ -295,7 +315,9 @@ Without `-y`, confirmation is required: interactively it prompts on stdout and r
 
 At project scope, `<name>` is optional: with no name, every declared VM is asked for (or refused without `-y`) and deleted in declaration order.
 
-**Exit codes:** 0 if deleted; 1 if the VM can't be loaded, is running, the confirmation is declined or aborted, `-y` was needed but not given, or the delete itself fails. Note that declining the confirmation prompt is exit 1, not 0: a script checking `$?` sees "delete didn't happen" as a failure either way, whether the VM was running or the user just said no.
+**Exit codes:** 0 if deleted; 1 if the VM cannot be loaded, is running, the
+confirmation is declined or aborted, `-y` was required but not supplied, or
+the deletion fails. Declining the confirmation returns exit status 1.
 
 ## `stoat clone <source> <name>`
 
@@ -330,7 +352,8 @@ Because the guest's status and stoat's own share one exit-code range, a guest co
 
 ## `stoat ssh <name>`
 
-Looks up `ssh` on `$PATH` and **replaces the current process** with it via `syscall.Exec` (the same as running `ssh` directly): signals and the terminal behave exactly as a bare `ssh` invocation, and stoat leaves no supervisor process behind.
+Looks up `ssh` on `$PATH` and **replaces the current process** with it. Signals
+and terminal behavior therefore match a direct `ssh` invocation.
 
 ```
 $ stoat ssh work
@@ -467,7 +490,10 @@ broken vm: /home/user/.stoat/vms/oldvm
 partial download: /home/user/.stoat/isos/ubuntu-24.04.iso.part
 ```
 
-`--broken` also considers VMs whose `vm.toml` won't parse for removal; `--images` also considers downloaded images no VM refers to. Without either, `prune` only reports partial downloads by default (broken VMs and orphaned images need to be asked for explicitly). Printing an identical list for the dry run and the real run is deliberate: the two are meant to be readable as the same thing, one with the deletions actually applied.
+`--broken` includes VMs whose `vm.toml` file cannot be parsed. `--images`
+includes downloaded images that no VM references. Without either flag, `prune`
+reports only partial downloads. The dry run and the applied run print the same
+candidate list.
 
 **Exit codes:** 0 on success, including "nothing to prune"; 1 if pruning fails.
 
@@ -628,10 +654,13 @@ confirmation on a terminal; use `-y` for a non-interactive call. `--global`
 selects the global lock and cache from a project. `--force` allows a remote
 recipe to replace an existing bundled, local, or remote name.
 
-In project scope, the declaration is written to `stoat.toml` and the lock is
-updated by `recipe lock`; `recipe sync` then populates `.stoat/recipes/`.
+In project scope, `recipe add` writes the declaration to `stoat.toml`, records
+the resolved commit in `stoat.lock`, and populates `.stoat/recipes/` as one
+transaction. Run `recipe lock` after you edit `[recipes]` manually, then run
+`recipe sync` to update the cache from the lock.
+
 Without a project file, global scope records the source in
-`~/.stoat/stoat.lock` and checks out under `~/.stoat/recipes/`.
+`~/.stoat/stoat.lock` and checks it out under `~/.stoat/recipes/`.
 
 ## `stoat recipe lock [--global]`
 
@@ -661,7 +690,8 @@ reads stdin.
 
 ## `stoat guest ls`
 
-Lists every loaded guest OS: bundled definitions from `internal/guest/bundled/*.toml`, plus any `~/.stoat/guests/*.toml` merged over them.
+Lists every loaded guest OS. User definitions in `~/.stoat/guests/*.toml`
+override bundled definitions with the same name.
 
 ```
 $ stoat guest ls
@@ -724,7 +754,9 @@ $ stoat screenshot work
 /home/u/.stoat/work/screenshots/2026-09-05T140302Z.png (1280x800, 48213 bytes)
 ```
 
-Without `-o`, the file lands in `<vm dir>/screenshots/`, named for the second it was taken: RFC3339 with the colons stripped, since a colon in a filename breaks scp's `host:path` split. A second shot inside the same second gets `-2`, then `-3`, so a caller polling a boot never overwrites the frame it just took.
+Without `-o`, the file is written to `<vm dir>/screenshots/`. Its name uses an
+RFC3339 timestamp without colons. Additional screenshots in the same second
+receive `-2`, `-3`, and later numeric suffixes.
 
 `-o` names the file instead. qemu writes it as its own user, so a relative path resolves against the caller's working directory before qemu sees it.
 
@@ -732,7 +764,8 @@ Without `-o`, the file lands in `<vm dir>/screenshots/`, named for the second it
 
 ## `stoat doctor`
 
-Checks host prerequisites: qemu/KVM, `qemu-img`, `ssh`, `xorriso` and `/dev/kvm`, the same set the installer's own checklist runs, so `stoat doctor` and `just setup` can't disagree about whether the host is ready.
+Checks the same host prerequisites as the installer: QEMU/KVM, `qemu-img`,
+`ssh`, `xorriso`, and `/dev/kvm` access.
 
 ```
 $ stoat doctor
@@ -750,7 +783,9 @@ FAIL: ssh not found in PATH
 
 A failed check that has a known fix prints a `try:` line under it.
 
-**Exit codes:** without `--json`, 0 if every check passes, 1 if any fails. With `--json`, always 0: `doctor` succeeded at checking, and an unhealthy host is the answer it was asked for, not a failure to produce one; the JSON `healthy` field carries the result instead.
+**Exit codes:** without `--json`, 0 if every check passes and 1 if any check
+fails. With `--json`, always 0 after a completed check; use the JSON `healthy`
+field for host readiness.
 
 ## `stoat version`
 
@@ -772,7 +807,10 @@ Prints the full usage message (subcommands, global flags, exit codes) to stdout.
 | `1` | Runtime failure | Unknown VM name, VM already stopped for `down`, VM running for `rm`, ssh unreachable during provision, `doctor` found an issue, `rm` confirmation declined |
 | `2` | Usage error | Unknown subcommand, missing/extra arguments, an unparseable flag, `update` given no flags, `check-recipes` given no names |
 
-A usage error (2) always prints both the specific complaint and the full usage text to stderr; a runtime failure (1) prints only `stoat: <command>: <error>` to stderr. `exec` is the one command whose exit code, without `--json`, is neither: it is the guest's own status, 0-255 (see [`stoat exec`](#stoat-exec-name-command)).
+A usage error (2) prints the complaint and full usage text to stderr. A runtime
+failure (1) prints `stoat: <command>: <error>` to stderr. Without `--json`,
+`exec` instead returns the guest command's status from 0 through 255. See
+[`stoat exec`](#stoat-exec-name-command).
 
 ## Scripting
 

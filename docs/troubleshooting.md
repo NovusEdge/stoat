@@ -1,15 +1,15 @@
 # Troubleshooting
 
-Symptom-first. Find the error text you're seeing and jump to it.
+Find the reported symptom or error text below, then follow its recovery steps.
 
 ## No QEMU window appears
 
 A VM with `display = "vnc"` in its `vm.toml`, or one started on a host with no
 graphical session, puts its screen on a VNC socket instead of a window. Every
-other VM opens a real QEMU window by default (`internal/qemu/args.go`), whether
-it is live, cloud, or an installed or uninstalled disk VM.
+other VM opens a QEMU window by default. This behavior applies to live, cloud,
+and disk VMs.
 
-**Fix:** ask stoat where the screen went. Both `stoat up` and `stoat get` print
+**Fix:** ask Stoat where the screen went. Both `stoat up` and `stoat get` print
 it, with a command for a VNC viewer that is actually installed on your machine:
 
 ```
@@ -20,7 +20,7 @@ display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
 ```
 
 The TUI's detail screen shows the same socket and command. If no viewer is
-installed, stoat names what to install rather than printing a command that
+installed, Stoat names what to install rather than printing a command that
 would fail. With only `socat`, the command bridges the socket to loopback and
 any VNC client connects to `127.0.0.1:5900`.
 
@@ -34,15 +34,11 @@ window, which stays reachable even if the guest locks up or loses its network.
 stoat: up: qemu failed to start: qemu-system-x86_64: OpenGL is not supported by display backend 'gtk'
 ```
 
-`gl=on` is the first option QEMU rejects when it can't open a window at all;
-mesa and GPU drivers aren't involved. stoat starts a VM with
-`-display gtk,gl=on` by default.
-With the same window and no `gl=on`, the same host says `gtk initialization
-failed` instead.
+Stoat starts a graphical VM with `-display gtk,gl=on`. This error means that
+QEMU cannot use the requested GTK and OpenGL display.
 
-If stoat prints this, it found a graphical session on the host and QEMU still
-could not use it: usually a QEMU or GTK build without working GL. The message
-now says so, and names the way past it:
+Use the VNC display when the host session or QEMU build does not support this
+configuration:
 
 ```
 run with STOAT_GRAPHICAL=0 to put the screen on this VM's VNC socket instead
@@ -50,14 +46,12 @@ run with STOAT_GRAPHICAL=0 to put the screen on this VM's VNC socket instead
 
 ## Installing a disk VM on a machine with no screen
 
-The install runs unattended, so a headless host needs no interaction: stoat
-bakes a `setup-alpine` answerfile into the boot overlay, the guest installs
-itself on first boot and reboots, and stoat notices the install. You wait, you
-do not drive anything.
+The Alpine disk installation is unattended. Stoat adds a `setup-alpine`
+answer file to the boot overlay. The guest installs itself on first boot and
+then restarts from the disk.
 
-On a host with no graphical session there is no window, and QEMU does not fall
-back: `-display gtk` exits 1. So stoat puts the console on the VM's VNC socket
-instead, for watching the install if you want to:
+On a host without a graphical session, Stoat places the console on the VM's
+VNC socket. You can use this socket to monitor the installation:
 
 ```
 $ stoat up alpinedisk
@@ -69,23 +63,30 @@ display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
   attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
 ```
 
-That socket is a unix socket on the server, so reaching it from your laptop is
-three steps: run stoat's own `socat` bridge on the server to republish it on
-`127.0.0.1:5900`, forward that port over ssh (`ssh -L 5900:127.0.0.1:5900
-server`), and point any VNC client at `127.0.0.1:5900` on the laptop.
+The VNC socket is a Unix socket on the server. To access it from another
+machine:
+
+1. Run the `socat` bridge printed by Stoat on the server. This publishes the
+   socket on `127.0.0.1:5900`.
+2. Forward that port over SSH:
+
+   ```sh
+   ssh -L 5900:127.0.0.1:5900 server
+   ```
+
+3. Connect a local VNC client to `127.0.0.1:5900`.
 
 ### Overriding the detection
 
-stoat looks at `DISPLAY`, at `WAYLAND_DISPLAY`, and at
+Stoat checks `DISPLAY`, `WAYLAND_DISPLAY`, and
 `$XDG_RUNTIME_DIR/wayland-0`, which is where GTK finds a Wayland session when
-`WAYLAND_DISPLAY` is not set. Guessing about display servers goes wrong on
-setups nobody anticipated, so `STOAT_GRAPHICAL` overrides the answer in both
-directions, for every command and for the TUI:
+`WAYLAND_DISPLAY` is not set. `STOAT_GRAPHICAL` overrides this detection for
+every command and for the TUI:
 
 | value | effect |
 | --- | --- |
 | `STOAT_GRAPHICAL=0` | never open a window; every VM's screen goes to VNC |
-| `STOAT_GRAPHICAL=1` | open the window; use this if stoat did not recognize your session |
+| `STOAT_GRAPHICAL=1` | open the window; use this if Stoat did not recognize your session |
 | unset | detect (the default) |
 
 `STOAT_GRAPHICAL=0` is also the answer to the OpenGL error above, where a
@@ -96,8 +97,6 @@ session exists but QEMU cannot draw on it.
 ```
 <name>: ssh not reachable on port <N> after 1m30s
 ```
-
-(`internal/sshx/sshx.go`'s `Wait`, with `WaitTimeout` set to 90 seconds.)
 
 **If this happens while applying recipes to a disk VM:** the VM is still
 installing itself off the ISO. Its guest OS is not on the disk yet, so there
@@ -113,45 +112,39 @@ you wait out the full timeout to find out:
 <name>: installing itself; wait for it to finish and reboot, then stoat notices the install and offers to apply recipes
 ```
 
-`i` on the detail screen still toggles `installed` by hand, for when that
-guess goes wrong in either direction: an install that died halfway leaves
-enough bytes on the disk to look finished (the threshold is `installedBytes`
-in `internal/qemu/run.go`), and `i` is how you get the ISO back.
+Press `i` on the detail screen if automatic installation detection is wrong.
+This changes the `installed` state and controls whether the installer ISO is
+used on the next start.
 
 ## Applying recipes to a disk VM fails with `Permission denied (publickey,...)`
 
-An Alpine disk VM gets the same apkovl a live one does
-(`internal/apkovl/apkovl.go`) while it is still uninstalled, precisely so
-`setup-alpine`'s `setup-disk -m sys` (which copies the *running* system onto
-the target) carries `/root/.ssh/authorized_keys` across to the installed
-system. A VM installed before that behaviour existed has no such key.
+Before installation, an Alpine disk VM receives an apkovl containing Stoat's
+SSH key. `setup-alpine` copies the running system to the target disk, including
+`/root/.ssh/authorized_keys`. A VM installed before this behavior was added
+does not contain that key.
 
-**Fix:** at the guest console, paste your stoat public key
+**Fix:** at the guest console, paste your Stoat public key
 (`~/.stoat/id_stoat.pub`) into the installed system's
 `/root/.ssh/authorized_keys`. Or reinstall: the install now carries the key
 over on its own.
 
-## A binary on `/mnt/host` won't run: confusing "not found"
+## A binary on `/mnt/host` reports `not found`
 
-You built a binary on the host, it shows up fine on the shared
-`/mnt/host` (backed by QEMU's read-only `-virtfs` export with
-`security_model=mapped-xattr`, `internal/qemu/args.go`), but running it inside
-the guest fails with something
-like:
+A host binary is visible on the read-only `/mnt/host` share, but running it in
+the guest fails with an error such as:
 
 ```
 sh: ./mybinary: not found
 ```
 
-even though the file is right there and executable. This is almost always a
-libc mismatch, not a missing file: your host binary is dynamically linked
-against **glibc**, and stock Alpine is a **musl** system with no
+The file exists and is executable. The likely cause is a C library mismatch:
+the host binary is dynamically linked against **glibc**, and stock Alpine is a
+**musl** system without
 `/lib64/ld-linux-x86-64.so.2`, the ELF interpreter path baked into a
-glibc-linked binary. The kernel can't find that interpreter to load the
-binary, and the resulting error reads exactly like "file not found" even
-though the file is there.
+glibc-linked binary. The kernel cannot load the missing interpreter and reports
+the binary as not found.
 
-**Fixes**, in order of how little they touch:
+Use one of these fixes:
 
 - Build statically instead: `CGO_ENABLED=0 go build` (for Go binaries) removes
   the dynamic libc dependency entirely.
@@ -161,9 +154,8 @@ though the file is there.
 
 ## `xorriso is required for cloud-init provisioning; install libisoburn`
 
-Exact string, from `internal/cloudinit/cloudinit.go`'s `Seed` (via
-`haveXorriso`, which just checks `exec.LookPath("xorriso")`). Building the
-cloud-init seed ISO shells out to `xorriso`, and stoat doesn't vendor it.
+Stoat uses `xorriso` to build the cloud-init seed ISO. The binary is an
+external dependency and must be available on `PATH`.
 
 **Fix:** install the package that provides `xorriso`, on most distros that's
 `libisoburn` (the message names it directly), e.g. `apk add xorriso` on
@@ -175,10 +167,8 @@ Alpine or your distro's equivalent of `libisoburn`/`xorriso`.
 /dev/kvm not usable: <err> (are you in the kvm group?)
 ```
 
-(`internal/qemu/run.go`, from an `os.OpenFile("/dev/kvm", os.O_RDWR, 0)`
-probe.) stoat always passes `-enable-kvm` (there's no software-emulation
-fallback), so it needs read/write access to `/dev/kvm` before it will start
-anything.
+Stoat requires KVM and does not fall back to software emulation. The current
+user must have read and write access to `/dev/kvm`.
 
 **Fix:** add yourself to the group that owns `/dev/kvm` (commonly `kvm`) and
 start a new login session (`newgrp kvm`, or log out and back in) so the group
@@ -186,14 +176,10 @@ membership actually takes effect. Confirm with `ls -l /dev/kvm` and `groups`.
 
 ## A live VM lost everything after a reboot
 
-Live mode works this way by design. A live VM's root filesystem is a
-`tmpfs`/`overlay` mount that only exists in RAM for that boot
-(`internal/apkovl/apkovl.go`'s doc comment, and the same detection every
-bundled recipe uses: `awk '$2 == "/" { print $3 }' /proc/mounts` reporting
-`tmpfs` or `overlay`). Every package you installed, every file you edited,
-is gone the moment the VM restarts: only the apkovl itself (rebuilt fresh on
-every `Start`, per `internal/qemu/run.go`) survives, and it can't carry
-installed packages.
+Live mode stores the root filesystem in a temporary `tmpfs` or `overlay`
+mount. Packages and file changes disappear when the VM stops or restarts.
+Stoat rebuilds the apkovl at each start; the apkovl does not preserve installed
+packages.
 
 The host still keeps the VM's applied recipe records. A matching recipe with
 `run = "once"` can therefore be skipped after a live restart even though its
@@ -202,10 +188,9 @@ boot, copy the recipe into a project or local scope, set `run = "always"` in
 its manifest, and select that copy for the VM. Existing bundled once recipes
 may report a successful no-op after a restart.
 
-**If you want state to survive a reboot, live mode is the wrong mode.** Create
-a **disk** VM instead (install the OS once, then it persists like a normal
-machine) or a **cloud** VM (a prebuilt image where cloud-init's `packages:`/
-`runcmd:` apply once at first boot and then stick).
+Use a **disk** or **cloud** VM when guest state must survive a restart. A disk
+VM installs the OS on persistent storage. A cloud VM starts from a persistent
+image and applies its cloud-init configuration during first boot.
 
 ## A VM shows as `broken` in the list
 
@@ -213,14 +198,10 @@ machine) or a **cloud** VM (a prebuilt image where cloud-init's `packages:`/
 <name>: broken vm.toml, cannot start (d to delete)
 ```
 
-A VM's directory exists under the data root but its `vm.toml` doesn't parse
-(`internal/config/config.go`'s `ListBroken`). stoat still shows it, rather
-than hiding a directory it can't fully understand, so you know it's there and
-can act on it, but it can't be started, edited, or have recipes applied in
-that state.
-Its reserved ssh port stays held (`FreePort` checks broken VMs' raw `vm.toml`
-port fields too), so a broken VM won't silently let a new VM reuse its port
-out from under it.
+A broken VM has a directory under the data root, but its `vm.toml` file cannot
+be parsed. Stoat shows the VM in the list, but cannot start, edit, or apply
+recipes to it. Stoat also attempts to reserve the SSH port recorded in the
+broken file so that a new VM does not reuse it.
 
 **Fix:** either hand-edit the `vm.toml` in that VM's directory to fix whatever
 made it unparseable, or delete the directory: press `d` on it in the list and
@@ -232,8 +213,7 @@ confirm.
 stoat: rm: <name> is running; stop it first
 ```
 
-(`internal/cli/cli.go`'s `runRM`, gated on `qemu.Running(v)`.) `rm` won't
-delete a VM out from under a live QEMU process.
+`stoat rm` does not delete a VM while its QEMU process is running.
 
 **Fix:** stop the VM first (`stoat down <name>`, or `d` in the TUI once it's
 stopped), then `rm` it.

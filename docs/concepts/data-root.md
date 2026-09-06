@@ -1,29 +1,29 @@
-# The Data Root
+# The data root
 
-stoat keeps everything (VM configs, disks, keys, downloaded images, recipes,
-logs) as plain files under one directory: the **data root**. There is no
-database and no daemon; `vm.toml` is authoritative for a VM's state, and
-stoat re-reads it from disk every time it needs to know anything.
+Stoat stores VM configuration, disks, keys, downloaded images, recipes, and
+logs as plain files under one directory: the **data root**. Stoat has no
+database or daemon. Each VM's `vm.toml` file is authoritative, and Stoat reads
+it from disk when needed.
 
 ## Where it lives
 
-The data root is `$STOAT_HOME` if that environment variable is set,
-otherwise `~/.stoat`. Every subcommand and the TUI itself calls an
-`EnsureRoot` step on startup, which creates the root and its two fixed
-subdirectories (`isos/`, `recipes/`) if they don't already exist, so a
-completely fresh install ends up with a minimal, predictable layout rather
-than an error.
+The data root is `$STOAT_HOME` when that environment variable is set. The
+default is `~/.stoat`. On startup, Stoat creates the root and the fixed
+`isos/` and `recipes/` directories if they do not exist. Other directories
+and files are created when their features first use them.
 
 ## Layout
 
 ```
 ~/.stoat/
-├── id_stoat                  # stoat's client SSH private key (ed25519)
+├── id_stoat                  # Stoat's client SSH private key (ed25519)
 ├── id_stoat.pub               #   ...and its public half
 ├── guest_host_ed25519_key     # stable sshd host key baked into live VMs
 ├── guest_host_ed25519_key.pub
 ├── isos/                      # downloaded ISOs and cloud images
 ├── recipes/                   # global and bundled recipe scripts/fragments
+├── shared/
+│   └── <vm-name>/             # writable per-VM 9p work share, mounted at /mnt/work
 ├── stoat.lock                 # global recipe pins, when used outside a project
 ├── logs/
 │   └── stoat.log              # one shared log for the whole tool
@@ -32,6 +32,9 @@ than an error.
     ├── disk.qcow2             # disk/cloud modes only
     ├── qemu.pid                # written by QEMU's -pidfile while running
     ├── monitor.sock            # QEMU monitor, unix socket, for Stop()
+    ├── qmp.sock                # QMP socket, used for VM snapshots
+    ├── vnc.sock                # VNC socket when the VM uses VNC display
+    ├── console.log             # QEMU serial console log
     ├── last-provision.log      # output of the most recent `p` run, truncated each time
     └── ovl/
         ├── stoat.apkovl.tar.gz # live mode: rebuilt on every start
@@ -47,7 +50,12 @@ project recipe cache. `.stoat/secrets.toml` contains project recipe secrets and
 must remain mode `0600`. `stoat init` adds `.stoat/` to `.gitignore` in a Git
 checkout. A project cache and its secrets are separate from the global cache.
 
-Two facts about that tree:
+Creation is lazy for several paths shown above. Logging creates `logs/` and
+`stoat.log`. Starting a VM creates `shared/<vm-name>/` before QEMU exports it.
+Runtime sockets, logs, disks, and overlay files appear only when the related
+operation needs them.
+
+Important details:
 
 - `isos/` holds both plain ISOs (Alpine) and downloaded cloud images
   (Ubuntu/Debian/Fedora/Arch `.qcow2`/`.img` files). A `cloud` VM's
@@ -60,7 +68,7 @@ Two facts about that tree:
 - `qemu.pid` and `monitor.sock` only exist while (or after) a VM has run at
   least once; they're not created at `vm.toml` save time.
 - The SSH keypair and the guest host key are **not** per-VM: they live at
-  the root of the data root and are shared by every VM stoat manages. See
+  the root of the data root and are shared by every VM Stoat manages. See
   [Networking and sharing](networking-and-sharing.md) for how they're used.
 
 ## `vm.toml`
@@ -89,55 +97,48 @@ Each VM directory holds one `vm.toml`. Every field:
 | `console_password` | string | Graphical console password, primarily for cloud VMs; `random` is resolved when created |
 | `allow_exec` | bool | Legacy per-VM permission for guest command and copy operations; new files use `agent_access` |
 | `agent_access` | string | MCP access level: `none`, `observe`, `manage`, or `exec`; defaults to `manage` |
-| `applied` | table | Recipe versions and health values written by stoat; do not edit |
+| `applied` | table | Recipe versions and health values written by Stoat; do not edit |
 | `project` | string | Absolute directory of the declaring `stoat.toml`; empty for a global VM |
-| `shares` | array | Project directories exported under `/work`; stoat writes resolved paths and mount tags |
+| `shares` | array | Project directories exported under `/work`; Stoat writes resolved paths and mount tags |
 
 ## What's safe to hand-edit
 
 `vm.toml` is a plain TOML file and nothing stops you from editing it directly
-while the VM is stopped: stoat re-reads it fresh every time, there's no
+while the VM is stopped: Stoat re-reads it fresh every time; there is no
 cache to invalidate. Some fields are safer to edit than others:
 
-- **Safe-ish**: `ram`, `cpus`, `share`, `recipes` (as long as the names still
+- **Usually safe**: `ram`, `cpus`, `share`, `recipes` (as long as the names still
   resolve in the active recipe scope), `sshuser`.
 - **Edit with care**: `sshport` (if you pick one another VM already has, both
-  will try to bind it), `disk` (shrinking it doesn't shrink the underlying
+  will try to bind it), `disk` (shrinking it does not shrink the underlying
   qcow2; you'd need a manual `qemu-img resize` and it can destroy data),
   `installed` (flipping it back to `false` on a VM whose disk already has an
   OS just means the ISO gets forced again on next boot, usually not what
   you want).
-- **Don't hand-edit**: `iso`, `base`, and `mode`/`backend` together. These
+- **Do not hand-edit**: `iso`, `base`, and `mode`/`backend` together. These
   describe a specific boot/provisioning setup that other fields and files
   (the overlay, the cloud-init seed, the disk itself) were built to match;
-  changing one without the others is how you end up with a VM that won't
-  boot or a `vm.toml` that no longer describes reality. Use the TUI's edit
-  form for these: it has guards against exactly this kind of mistake.
+  changing one without the others can create a VM that does not
+  boot or a `vm.toml` that no longer describes reality. Create a replacement
+  VM when you need to change its image, mode, or backend.
 
 ## Broken VMs
 
-If a `vm.toml` exists but fails to parse (a stray edit with unbalanced
-quotes, for instance), stoat does not silently drop that VM from the list.
-A directory with a `vm.toml` that fails to parse shows up as a **broken**
-row instead of vanishing, so you get a chance to notice and fix it rather
-than wondering where a VM went. (A directory with no `vm.toml` at all,
-by contrast, was never a VM as far as stoat is concerned, and is ignored
-entirely.)
+If a `vm.toml` file cannot be parsed, Stoat shows that VM as **broken** instead
+of omitting it from the list. A directory without a `vm.toml` file is not a VM
+and is ignored.
 
-This matters for port allocation, too: a broken VM's `sshport` line is
-still read out with a best-effort regex and reserved, even though the rest
-of the file won't parse. Without that, creating a new VM could hand out the
-same port a broken-but-still-real VM's disk image is already configured
-for, a collision that's exactly how this safeguard came to exist.
+Stoat still attempts to read and reserve the `sshport` value from a broken
+file. This prevents a new VM from receiving the same host port.
 
 ## `isos/` and `recipes/`
 
 `isos/` is never touched by VM deletion: removing a VM only removes its own
 directory, never a shared ISO or cloud image other VMs might still be using.
 
-`recipes/` starts out populated with stoat's bundled recipes the first time
+`recipes/` starts out populated with Stoat's bundled recipes the first time
 it runs, but that install step never overwrites a file that's already there,
-so local edits to a recipe survive a stoat upgrade. A project cache under
+so local edits to a recipe survive a Stoat upgrade. A project cache under
 `.stoat/recipes/` takes precedence over a global remote recipe with the same
 name; project, global, local, and bundled entries follow recipe scope
 resolution.

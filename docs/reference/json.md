@@ -1,19 +1,20 @@
-# JSON Output Reference
+# JSON output reference
 
-`--json` turns a named VM command into a machine interface, so everything a
-caller would otherwise regex, guess at, or reconstruct is defined here
-instead. Project fan-out currently has one exception: no-name `up`, `down`,
-and `apply` can write progress prose before their terminal JSON result. Use a
-named VM invocation when the complete stdout stream must be JSON.
+`--json` provides machine-readable output for named VM commands. This document
+defines the output contract. Project fan-out currently has one exception:
+no-name `up`, `down`, and `apply` can write progress prose before their terminal
+JSON result. Use a named VM invocation when the complete stdout stream must be
+JSON.
 
 This document is the contract. The human-facing CLI is documented in
 [cli.md](cli.md).
 
-`stoat mcp` serves the same contract over MCP from inside the same binary.
-Every tool's output type in `internal/mcpsrv` is a `wire` struct, the same Go
-type the matching `--json` command emits, so the two cannot drift: the MCP
-schema is generated from these types, not maintained separately. See
-`internal/mcpsrv/table_test.go` for the tool table.
+`stoat mcp` exposes the same operations from inside the same binary and reuses
+the `wire` DTO package for tool results. MCP does not use the CLI's JSON-lines
+envelope, and some tool result DTOs differ from the corresponding CLI payload
+(for example, MCP `wait` returns `healthy`, while CLI `wait --json` returns
+`reached` and `waited_ms`). See the [MCP reference](mcp.md) for the tool
+behavior and schemas.
 
 ```
 stoat --json ls
@@ -36,8 +37,7 @@ if not result["ok"]:
 return result["data"]
 ```
 
-Note what this does **not** do: branch on the exit code for anything except
-"was there a result at all". That is the intended shape.
+The parser uses the process exit code only when no result line was received.
 
 Four rules make it work for a named VM command:
 
@@ -61,10 +61,9 @@ single-VM `down` result can also report `state: "running"` while QEMU is still
 exiting; follow it with `stoat wait <key> --until stopped --json` when
 termination must be confirmed.
 
-Rule 3 is not a preference. A consumer that must merge two pipes to
-reconstruct one result will eventually interleave them wrong, and a naive
-`subprocess` read of two pipes in sequence deadlocks when either buffer fills.
-The error envelope answers the question that was asked.
+Rule 3 prevents consumers from merging stdout and stderr to reconstruct a
+result. Sequential reads from both pipes can deadlock when either buffer
+fills. The result envelope carries the command error on stdout.
 
 ## The envelope
 
@@ -130,7 +129,6 @@ bump the contract version. Do not write code that requires them.
 | `immutable_field` | `update` was asked to change a field that cannot change |
 | `disk_shrink` | a disk can only grow |
 | `cannot_reach` | `wait` was asked for a state this VM can never reach |
-| `applied_at_boot` | reserved; no command emits it. A cloud VM whose recipes ran at boot answers `ok:true` with `applied: []` |
 | `unknown_log` | bad `--which` |
 | `qemu_missing` | `qemu-system-x86_64` is not on `PATH` |
 | `kvm_unusable` | `/dev/kvm` cannot be opened; the user is usually not in the `kvm` group |
@@ -331,11 +329,12 @@ enforced one: `stoat exec`/`cp` do not check it, so a consumer that must
 refuse exec on a VM with `allow_exec:false` (the MCP server) has to check it
 itself before calling.
 
-`agent_access` supersedes `allow_exec` with four levels (`none`, `observe`,
-`manage`, `exec`) instead of a boolean; each level includes every tool the
-ones below it allow. `allow_exec:true` loads as `exec`, `false` as `manage`,
-so an old VM keeps its meaning under the new field. `stoat mcp`'s
-`requireAccess` is what enforces it; `stoat exec`/`cp` still do not.
+`agent_access` supersedes `allow_exec` with four levels: `none`, `observe`,
+`manage`, and `exec`. Each level includes the operations allowed by the levels
+below it. An explicitly stored `allow_exec = true` maps to `exec`. An explicit
+`false` value or an absent key maps to `manage`. For compatibility, an absent
+key still appears as `allow_exec:true` in the VM DTO. MCP permissions must use
+`agent_access`; direct `stoat exec` and `stoat cp` commands do not enforce it.
 
 `Snapshot.size_display` and `created_display` are named that way because they
 are qemu's own formatted table output. They are opaque. Do not parse them.
@@ -353,38 +352,24 @@ absent when the recipe never ran.
 `Image.file` is a bare filename under the data root's `isos/`, never an
 absolute path. That is a guarantee, not an accident.
 
-`Image.byo` is emitted explicitly rather than left to be derived from an empty
-`id`, because a structural rule a consumer has to re-derive is one a consumer
-will eventually re-derive wrong.
+`Image.byo` is explicit. Consumers must not derive it from an empty `id`.
 
-`VM.display` is `"window"` or `"vnc"`, and `""` on a broken VM. It says which
-surface the VM's screen appears on: `"window"` for a real QEMU window, and
-`"vnc"` for every other VM, whose screen goes to a VNC server bound on a unix
-socket. It is emitted for the same reason as `Image.byo`: it is exactly the
-kind of rule a consumer re-derives and then keeps applying after stoat changes
-it.
+`VM.display` is `"window"` or `"vnc"`, and `""` on a broken VM. `"window"`
+means that the VM uses a QEMU window. `"vnc"` means that its screen is provided
+by a VNC server on a Unix socket.
 
-That has now happened once. `display` is **not** derivable from `mode` and
-`installed`: it also depends on the host stoat is running on. A window needs a
-graphical session, QEMU exits 1 rather than degrading when there is none, so on
-a host with no session an uninstalled disk VM gets `"vnc"` too, and its OS
-installer is driven over the socket. A consumer that computed `display` from
-`mode` and `installed` would tell its human to look at a window that will never
-open, on a machine with no screen to open it on.
+Consumers must not derive `display` from `mode` and `installed`. The value also
+depends on the host. Without a graphical session, an uninstalled disk VM uses
+VNC so that its installer remains accessible.
 
-The host answer comes from `DISPLAY`, `WAYLAND_DISPLAY` and
-`$XDG_RUNTIME_DIR/wayland-0`, and `STOAT_GRAPHICAL=0`/`=1` in stoat's
-environment overrides it. It is a property of the machine running the CLI, not
-of the VM, so it is not carried as a field of its own: a consumer that wants to
-know why a VM is on VNC is asking about the host it is talking to, and every VM
-in one response answers the same way.
+Stoat detects the host display from `DISPLAY`, `WAYLAND_DISPLAY`, and
+`$XDG_RUNTIME_DIR/wayland-0`. `STOAT_GRAPHICAL=0` or `STOAT_GRAPHICAL=1`
+overrides that detection. Host display availability is not a separate VM
+field.
 
-`display` names the surface and never its location. The socket path is not on
-the wire and neither is a rendered command for opening it; a command would
-just embed the same absolute host path behind a friendlier field name. An
-agent cannot run a GUI viewer anyway. A consumer that needs to tell a human
-where to look runs `stoat get <name>` without `--json`, which prints the
-socket and an attach command for a viewer installed on that machine.
+`display` identifies the surface, not its location. The payload does not
+include the VNC socket path or an attach command. Run `stoat get <name>`
+without `--json` to print the socket and a suitable viewer command.
 
 `Guest.source` is `"bundled"`, `"user"`, or `"bundled+user"` for a user file
 merged over a bundled one. `Guest.svc` and `Guest.cmd` are template strings,
@@ -458,6 +443,13 @@ so a leak fails the build rather than shipping.
 | `help` | `{"usage":"..."}` |
 | `ssh` | **refused**, see below |
 
+The table above is for the CLI's `--json` results. MCP uses the same DTO
+package but has tool-specific payloads: for example, MCP `copy_to` and
+`copy_from` return `CopyResult` (`vm`, `local`, `remote`, `to_remote`), MCP
+`forward` returns `ForwardList` (`forwards`), and MCP `apply_recipes` returns
+`ApplyResult` (`vm`, `recipes_detail`). Consult the MCP tool schema for those
+fields rather than assuming the CLI row applies.
+
 `get` returns `{"vm":VMStatus}`: `VMStatus` embeds the VM fields directly;
 only the outer get result has the `vm` member. `recipes` remains the compatible
 string list, while `recipes_detail` adds stored per-recipe state. `health` is the stored aggregate
@@ -489,13 +481,11 @@ Fields worth knowing about:
   (`ssh_port`, not `SSHPort`). A flag you did not pass does not appear, and
   the field it names is untouched.
 - **`applies_at`** is `now` or `next_start`, and appears on `update` and on a
-  `forward` that CHANGED something. It is the field that must exist: a forward
-  saved on a running VM is not live yet, and "saved but not live" must never
-  be readable as "refused". A `forward` that only shows reports `active`
-  without `applies_at`, since it changed nothing to apply.
+  `forward` that changed the configuration. A forward saved on a running VM is
+  not active until the next start. A `forward` that only displays the current
+  configuration reports `active` without `applies_at`.
 - **`check-recipes.applicable`** is emitted explicitly even though it equals
-  `issues == []`, because a consumer reading an empty list and guessing is a
-  consumer that will one day guess wrong.
+  `issues == []`. Consumers must use this field instead of deriving the value.
 - **`apply.skipped_reason`** distinguishes "recipes ran" from "there was
   nothing to run" without reading English. It is `""` when the apply ran. A
   cloud VM's recipes ran at first boot, and a second run already holding the
@@ -503,14 +493,14 @@ Fields worth knowing about:
   `applied` is always a list, never a bool.
 - **`provision`** is a hidden alias of `apply` and reports `"cmd":"apply"`.
   It has no `data` shape of its own.
-- **`doctor.healthy`**, not `ok`: the envelope already owns `ok`, and two
-  differently-scoped `ok` fields one level apart is a trap.
+- **`doctor.healthy`** reports host readiness. The enclosing result envelope
+  uses `ok` for command success.
 
 ### `exec` and non-UTF-8 output
 
-A guest's stdout is arbitrary bytes. Go's JSON encoder silently replaces
-invalid UTF-8 with U+FFFD, which is lossy and silent, the bad combination. So
-when a stream is not valid UTF-8 it is carried as base64 instead:
+A guest's stdout can contain arbitrary bytes. Go's JSON encoder replaces
+invalid UTF-8 with U+FFFD and loses the original bytes. Stoat therefore uses
+base64 for a stream that is not valid UTF-8:
 
 ```json
 {"stdout_base64":"...","stdout_encoding":"base64","exit_code":0}
@@ -573,11 +563,9 @@ recipe names are now bare (`xfce`, not `xfce.alpine.sh`), so every name a
 consumer passes to `create --recipes`, `apply --only` or `check-recipes`
 changed shape too.
 
-**There is no v1 compatibility path, deliberately.** Nothing in stoat reads
-the old format, and nothing here serves it. A consumer built for v1 refuses to
-start against a v2 binary and the reverse also holds, which is what the
-startup version check is for: the failure is a clear refusal naming both
-versions rather than a field quietly missing three calls later.
+**There is no v1 compatibility path.** Stoat does not read or serve the old
+format. A v1 consumer refuses a v2 binary, and a v2 consumer refuses a v1
+binary. The startup version check reports both contract versions.
 
 A data root still holding v1 recipe files is not migrated. The v2 installer
 writes its directories alongside them and ignores the rest, so the stale files

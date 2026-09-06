@@ -30,8 +30,9 @@ stoat mcp doctor
 ```
 
 The report includes contract version, transport, and client-entry status. The
-server advertises the same contract used by `stoat --json`; see [JSON output](../reference/json.md)
-for the shared data types and error rules.
+server shares a contract version and DTO package with the JSON CLI.
+Tool schemas and results are MCP-specific; see
+[JSON output](../reference/json.md) for the differences.
 
 ## Choose a transport
 
@@ -71,8 +72,9 @@ commands plus job management. New VMs default to `manage`.
 
 An MCP `update` can lower a VM's level but cannot raise it. Raise a level with
 the CLI or TUI so a person grants that capability explicitly. The older
-`allow_exec` field is still read for existing files; `true` maps to `exec` and
-`false` maps to `manage`.
+`allow_exec` field is still read for existing files. An explicitly stored
+`true` maps to `exec`. A stored `false` value or an absent key maps to
+`manage`.
 
 ## Use project tools
 

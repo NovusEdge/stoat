@@ -25,11 +25,13 @@ reachable over SSH. `--only` restricts the run to names already present in the
 VM's recipe list. `stoat apply --dry-run` reports the run or skip decision for
 each selected recipe without contacting the guest.
 
-The TUI offers provisioning after SSH becomes reachable. A live VM is offered
-again after every reboot because its root filesystem is temporary. A disk VM
-is offered while it needs provisioning. Cloud-init recipes run from the seed
-at first boot; stoat discovers their marker files if a later `apply` needs to
-reconcile state.
+For a live or installed disk VM, the TUI waits for SSH after start and begins
+an apply operation when the VM needs one. It checks a live VM on each start
+because its root filesystem is temporary. A `run = "once"` recipe can still be
+skipped from its host-side record after a live restart; see
+[Troubleshooting](../troubleshooting.md#a-live-vm-lost-everything-after-a-reboot).
+Cloud-init recipes run from the seed at first boot. Stoat discovers their
+marker files if a later `apply` needs to reconcile state.
 
 ## Targeting and execution
 
@@ -75,10 +77,10 @@ The bundled set is closed and currently contains these four recipes:
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 
-The scripts are in `internal/recipes/bundled/` in the source tree. Each
-recipe has a manifest. Docker, devtools and Tailscale use OS-specific script
-overrides because package names and repository setup differ. XFCE uses one
-script with guest prelude verbs and therefore has no `[scripts]` table.
+Each bundled recipe has a manifest. Docker, devtools, and Tailscale use
+OS-specific script overrides because package names and repository setup
+differ. XFCE uses one script with guest prelude verbs and therefore has no
+`[scripts]` table.
 
 Cloud images use their own package manager and a cloud-init seed. Cloud-init
 currently wraps recipe bodies in shell commands; it does not perform the SSH

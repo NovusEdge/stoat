@@ -1,10 +1,11 @@
-# Your First VM
+# Your first VM
 
 Create an Alpine **live** VM, apply a recipe, and connect over SSH. Live mode
 needs no OS installation and discards the guest session when it stops. Disk
 and cloud VMs are covered at the end of this page.
 
-Before you start, make sure `stoat doctor` reports `ok`, see [Installation](installation.md).
+Before you start, run `stoat doctor`. Continue when it reports `ok`. See
+[Installation](installation.md) if a check fails.
 
 ## 1. Launch the TUI
 
@@ -12,8 +13,8 @@ Before you start, make sure `stoat doctor` reports `ok`, see [Installation](inst
 stoat
 ```
 
-On a fresh install you'll see stoat's banner over an empty list. The footer
-shows the list screen's keys: `↵ start/stop`, `→/l details`, `s ssh`,
+On first use, the TUI shows an empty VM list. The footer lists the available
+keys: `↵ start/stop`, `→/l details`, `s ssh`,
 `p apply`, `/ search`, `n new`, `d delete`, `q quit`, `? help`.
 
 The example below shows the list after creating three VMs:
@@ -22,18 +23,21 @@ The example below shows the list after creating three VMs:
 
 ## 2. Press `n` for a new VM
 
-This opens the "new vm" form. It starts you on the **name** field, and
-Alpine is preselected in the **image** row. Alpine is the default catalog
-entry and the only OS whose live mode works without an install step.
+This opens the **new vm** form with the **name** field selected. The **image**
+row defaults to Alpine, which is the only supported live-mode guest that does
+not require an installation step.
 
-Use `work` as the name for this walkthrough. `tab`/`↓` and `shift+tab`/`↑`
-move between fields; `←`/`→` changes a picker's value.
+Enter `work` as the VM name. Use `tab` or `↓` to move to the next field.
+Use `shift+tab` or `↑` to move to the previous field. Use `←` and `→` to
+change a selected value.
 
 ![The new VM form](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/tui-create.png)
 
 ## 3. Download the image
 
-Tab down to **image** and press `space`: the `⤓ download` marker means it isn't local yet. stoat fetches the latest Alpine ISO and checksum-verifies it against Alpine's published index:
+Move to **image** and press `space`. The `⤓ download` marker means that the
+image is not available locally. Stoat downloads the current Alpine ISO and
+verifies its checksum against Alpine's published index:
 
 ```
   download alpine…
@@ -41,23 +45,36 @@ Tab down to **image** and press `space`: the `⤓ download` marker means it isn'
            238 MiB / 467 MiB · 9.4 MiB/s · 24s left
 ```
 
-When it finishes, the status line reports `downloaded isos/alpine-standard-....iso` and the image row switches to `downloaded`. (Pressing space again later just re-verifies the file and only re-downloads it if it no longer matches.)
+When the download finishes, the status line reports
+`downloaded isos/alpine-standard-....iso`, and the image row changes to
+`downloaded`. Pressing `space` again verifies the local file and downloads it
+again only when the checksum does not match.
 
 ## 4. Leave the rest at their defaults and create it
 
-`mode` is already `live` (the radio toggle only matters for Alpine: every other image's mode is fixed by its backend). RAM (4096 MB), CPUs (4), and share (`~/vms`, exposed inside the guest as `/mnt/host`) are all fine to leave as-is for a first VM. If you want a desktop or a couple of tools installed automatically, move to **recipes** and press `space` on `xfce`, `docker`, `devtools`, or `tailscale` to check them.
+Leave **mode** set to `live`. Other guest images use the mode selected by their
+backend. For this walkthrough, keep the default RAM, CPU, and share settings:
 
-Press `enter` (from anywhere in the form) to create the VM. If the image hasn't finished downloading yet, stoat tells you instead of creating a broken VM (`press space to download alpine first`).
+- RAM: 4096 MB
+- CPUs: 4
+- Share: `~/vms`, mounted read-only in the guest at `/mnt/host`
+
+To install optional software, move to **recipes** and press `space` on one or
+more recipes. Available examples include `xfce`, `docker`, `devtools`, and
+`tailscale`.
+
+Press `enter` from any field to create the VM. If the image is not available,
+Stoat stops and reports `press space to download alpine first`.
 
 You're back on the list screen with a `created <name>` status message and your
 new VM listed as stopped.
 
 ## 5. Start it
 
-With the VM selected, press `enter`. stoat rebuilds the VM's Alpine overlay
-(this wires in the SSH key and networking) and launches QEMU. The status line
-reports that it started. Press `l` to see its state, forwarded SSH port,
-and apply log. This capture uses the example VM `alpine-desktop`:
+With the VM selected, press `enter`. Stoat rebuilds the Alpine overlay with
+the SSH and network configuration, then starts QEMU. The status line confirms
+that the VM started. Press `l` to view its state, forwarded SSH port, and apply
+log. This capture uses the example VM `alpine-desktop`:
 
 ![VM detail screen](https://raw.githubusercontent.com/NovusEdge/stoat/main/assets/tui-details.png)
 
@@ -69,23 +86,22 @@ QEMU window:
 The [23-second walkthrough video](https://github.com/NovusEdge/stoat/blob/main/assets/demo.mp4) shows the TUI list,
 details, and the resulting XFCE window.
 
-**If you selected any recipes** in step 4, stoat watches for sshd in the background (you can keep using the TUI while it waits), and once the guest answers, it asks:
+If you selected recipes in step 4, Stoat waits for SSH in the background and
+then applies the recipes automatically. You can continue to use the TUI while
+it waits. The **last apply** pane on the detail screen shows the output. Press
+`p` to start another apply operation later.
 
-```
-work is up, run xfce now? y/N
-```
-
-Press `y` to apply the selected recipes. The detail screen's **last apply**
-pane shows their output. Press another key to skip; `p` starts an apply later.
 On later boots, the host's recipe records can cause a `run = "once"` recipe
 to be skipped after its guest files have disappeared. See the
 [live restart limitation](../troubleshooting.md#a-live-vm-lost-everything-after-a-reboot).
 
-If you didn't select any recipes, there's nothing to offer, and you go straight to step 6.
+If you did not select a recipe, continue to step 6.
 
 ## 6. SSH in
 
-Press `s`. stoat suspends the TUI and hands the terminal to a real `ssh` process (using the keypair it generated at `~/.stoat/id_stoat`, connecting as `root`), dropping you at a root shell inside the guest. `exit` that shell and you're back in the TUI.
+Press `s`. Stoat suspends the TUI and starts `ssh` with the private key at
+`~/.stoat/id_stoat`. The live Alpine guest opens a root shell. Run `exit` to
+close the SSH session and return to the TUI.
 
 The same connection is available from a plain shell without the TUI at all:
 
@@ -95,20 +111,43 @@ stoat ssh work
 
 ## Checkpoint
 
-You should now have:
+Confirm these results:
 
 - [ ] `stoat doctor` reporting `ok`
 - [ ] an Alpine **live** VM created, downloaded, and started
-- [ ] (optionally) its recipes provisioned, either via the automatic offer or `p`
-- [ ] an ssh session into it, from the TUI (`s`) or the CLI (`stoat ssh <name>`)
+- [ ] optional recipes applied automatically or with the `p` key
+- [ ] an SSH session opened from the TUI or with `stoat ssh <name>`
 
-Stop it with `enter` again (or `stoat down <name>`) whenever you're done: as a live VM, everything inside it is gone the moment it stops.
+To stop the VM, press `enter` or run `stoat down <name>`. Live mode discards
+all guest changes when the VM stops.
 
 ## Disk and cloud VMs
 
-Live isn't the only mode: the other two keep guest state.
+Disk and cloud modes retain guest state across restarts.
 
-- **Disk** VMs boot from the same kind of ISO and keep a qcow2 disk that survives restarts. An Alpine disk VM installs itself on its first start with a generated `setup-alpine` answer file. `stoat up` waits for the installer to power off, starts the VM from the new disk, and then offers or runs its recipes. The unattended install can take up to 15 minutes. The generated overlay carries stoat's SSH key into the installed system. For a non-Alpine BYO ISO, run that guest's installer at the console, add stoat's public key to the configured SSH account, then stop and start the VM. `i` on the detail screen still flips `installed` by hand when automatic detection is wrong.
-- **Cloud** VMs (Ubuntu, Debian, Fedora, Arch, or Alpine cloud) use a prebuilt cloud image instead of an ISO. stoat writes a cloud-init seed on first start that creates a `stoat` user, installs stoat's key for it, and applies the selected recipe content during that first boot. After SSH becomes available, the normal apply pass can record the results and apply pending or changed recipe work over SSH. Pressing `p` runs that normal apply path; it does not rebuild the first-boot seed. SSH in as `stoat@127.0.0.1:<port>` rather than `root`. Building that seed needs `xorriso` on your `PATH` (see [Installation](installation.md)).
+### Disk VMs
+
+A disk VM boots from an ISO and stores guest state in a qcow2 disk. An Alpine
+disk VM installs itself on first start with a generated `setup-alpine` answer
+file. The unattended installation can take up to 15 minutes. `stoat up` waits
+for the installer to stop, starts the VM from its disk, and then offers or
+applies its recipes.
+
+For a non-Alpine bring-your-own ISO, complete the guest installer at the
+console. Add Stoat's public key to the configured SSH account, then stop and
+start the VM. If automatic installation detection is incorrect, press `i` on
+the detail screen to change the `installed` state.
+
+### Cloud VMs
+
+Cloud VMs use a prepared image for Ubuntu, Debian, Fedora, Arch, or Alpine.
+On first start, Stoat creates a cloud-init seed that adds the `stoat` user,
+installs Stoat's public key, and includes the selected recipe content. Creating
+the seed requires `xorriso`; see [Installation](installation.md).
+
+After SSH becomes available, the normal apply operation records results and
+runs pending or changed recipe work over SSH. Pressing `p` runs this operation;
+it does not rebuild the first-boot seed. Connect as
+`stoat@127.0.0.1:<port>` instead of `root`.
 
 For a repository with multiple VMs, use the [project workflow](../guides/project-workflow.md) instead of recreating each VM in the TUI.

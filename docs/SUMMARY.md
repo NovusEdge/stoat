@@ -38,7 +38,3 @@
 ## Troubleshooting
 
 * [Troubleshooting](troubleshooting.md)
-
-## Design notes
-
-* [Recipe authoring spec (proposal)](recipe-authoring-spec.md)

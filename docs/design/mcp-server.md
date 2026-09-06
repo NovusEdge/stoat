@@ -1,15 +1,18 @@
 # The MCP server
 
-Decisions are settled here. This document is the source of truth for the
-implementation; `core-api.md` §10 and `json-contract-draft.md` §7 hold the
-original reasoning and should be read first, not re-argued.
+**Status:** historical implementation design. The Go MCP server described here
+has shipped, and some validation notes below record its pre-merge state. Use
+the current source and reference documentation for supported behavior.
+
+`core-api.md` §10 and `json-contract-draft.md` §7 contain the original
+reasoning behind this design.
 
 For setup, access levels, and available tools, use the
 [MCP reference](../reference/mcp.md). The [JSON contract](../reference/json.md)
-defines the shared result types. This document records implementation decisions
-and the original validation plan.
+defines the CLI output and identifies the DTOs shared with MCP. This document
+records implementation decisions and the original validation plan.
 
-## 0. Settled, do not relitigate
+## 0. Historical decisions
 
 | | |
 |---|---|
@@ -252,17 +255,16 @@ session tool and a guest agent binary over vsock are candidates for their
 own design after this one; the agent would also cover guests without sshd
 (Windows) and streaming output.
 
-## 9. Live gate
+## 9. Historical live gate
 
-The Go server has not been booted against a real VM yet. It changes
-`internal/sshx` and `internal/core/exec.go`, so a live boot exercising
-`exec`, `write_file` and `exec_bg` gates the merge.
+This section records the live-validation state before the Go server merged.
+It is retained as design history, not as a current release gate.
 
-The findings below came from real VMs booted through the MCP tools, not from
-mocks, against the Python build this package replaced (2026-08-04). A
+The findings below came from real VMs booted through the MCP tools against the
+Python build that this package replaced on 2026-08-04. A
 throwaway `mcpgate` (alpine-cloud) and `mcplocked` were created, exercised
-and destroyed; the data root was left exactly as found. They are facts about
-the design, and the live boot above is what confirms the Go port keeps them.
+and destroyed. These results explain the design decisions but do not verify
+the current Go implementation.
 
 - **create, start, wait**: reachable in 13.4s.
 - **exec** returns real guest output, running as `uid=1001(stoat)`, the
