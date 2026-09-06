@@ -6,8 +6,7 @@
 // had no create command for that reason. core replaces both call sites; the
 // TUI, the CLI and an MCP server all sit on top of it.
 //
-// See docs/design/core-api.md for the full intended surface. Only what has a
-// caller is built.
+// Only what has a caller is built.
 package core
 
 import (
@@ -427,6 +426,5 @@ func checkRecipes(osName, backend string, names []string) error {
 
 // installStageUnsupported is the reason install-stage recipes are refused at
 // add time. The stage field parses and validates, but no backend runs an
-// install-stage body yet; BYO ISO support will add the hooks (docs/specs
-// recipe-system-fixes §6).
+// install-stage body yet; BYO ISO support will add the hooks.
 const installStageUnsupported = "install-stage recipes are not yet supported"

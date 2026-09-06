@@ -24,5 +24,4 @@ comes first.
 - A guest escaping QEMU. That is QEMU's boundary.
 - An agent destroying a VM it was given access to. Snapshots are the
   mitigation.
-- Prompt injection of an agent that drives stoat. See
-  `docs/design/core-api.md` §10.4.
+- Prompt injection of an agent that drives stoat.

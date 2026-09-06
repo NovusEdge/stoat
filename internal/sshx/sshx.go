@@ -562,7 +562,7 @@ func recipeInput(v *config.VM, name string, m recipes.Manifest, haveManifest boo
 		if err != nil {
 			return "", nil, err
 		}
-		resolved, err := recipes.Resolve(m, v.Params[name], stored[name])
+		resolved, err := recipes.Resolve(m, recipes.WithVMDefaults(m, v.Params[name], v.SSHUser), stored[name])
 		if err != nil {
 			return "", nil, err
 		}

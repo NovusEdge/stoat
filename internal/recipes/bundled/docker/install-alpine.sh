@@ -40,7 +40,7 @@ docker version --format '{{.Server.Version}}' 2>/dev/null |
 	sed 's/^/docker daemon running, version /' ||
 	echo "docker installed, but the daemon did not come up: check 'rc-service docker status'"
 
-user="${STOAT_PARAM_USER:-dev}"
+user="${STOAT_PARAM_USER:?docker.user is unset; run this recipe through stoat apply, not the script directly}"
 if ! id "$user" >/dev/null 2>&1; then
 	adduser -D "$user"
 fi

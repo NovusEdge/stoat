@@ -15,9 +15,9 @@ import (
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
-// Manifest is a recipe.toml, the v2 recipe format
-// (docs/recipe-spec-v2.md): a directory holding one manifest and one or
-// more shell scripts, replacing the old flat "<name>.<os>.sh" files.
+// Manifest is a recipe.toml, the v2 recipe format: a directory holding one
+// manifest and one or more shell scripts, replacing the old flat
+// "<name>.<os>.sh" files.
 type Manifest struct {
 	Schema      int                 `toml:"schema"`
 	Name        string              `toml:"name"`
@@ -45,23 +45,31 @@ type Manifest struct {
 // Param is one declared input of a schema-3 recipe. Default is the spelling
 // the recipe receives in STOAT_PARAM_<NAME>, regardless of its type.
 type Param struct {
-	Name     string
-	Type     string
-	Default  string
-	Help     string
-	Required bool
-	Values   []string
+	Name    string
+	Type    string
+	Default string
+	// DefaultFrom names a VM-derived source Resolve falls back to when the
+	// caller sets no value and Default is empty. "ssh_user" is the only
+	// accepted value today.
+	DefaultFrom string
+	Help        string
+	Required    bool
+	Values      []string
 }
 
 // rawParam is the TOML representation of a parameter. TOML preserves the
 // literal type of default, so ParseManifest renders it after decoding.
 type rawParam struct {
-	Type     string   `toml:"type"`
-	Default  any      `toml:"default"`
-	Help     string   `toml:"help"`
-	Required bool     `toml:"required"`
-	Values   []string `toml:"values"`
+	Type        string   `toml:"type"`
+	Default     any      `toml:"default"`
+	DefaultFrom string   `toml:"default_from"`
+	Help        string   `toml:"help"`
+	Required    bool     `toml:"required"`
+	Values      []string `toml:"values"`
 }
+
+// validDefaultFrom lists the accepted default_from values.
+var validDefaultFrom = []string{"ssh_user"}
 
 // Output is one declared result of a recipe.
 type Output struct {
@@ -159,8 +167,8 @@ var validParamTypes = []string{"string", "int", "bool", "enum", "secret"}
 
 // ParseManifest reads and validates a recipe.toml at path. Defaults are
 // applied before validation: Stage defaults to "provision" (the common
-// case, docs/recipe-spec-v2.md's Stages section), Run defaults to "once",
-// Runtime to "sh", and Schema to 2 for older manifests.
+// case), Run defaults to "once", Runtime to "sh", and Schema to 2 for
+// older manifests.
 func ParseManifest(path string) (Manifest, error) {
 	var m Manifest
 	if err := tomlx.Decode(path, &m, tomlx.Reject); err != nil {
@@ -285,6 +293,15 @@ func (m *Manifest) buildParams() error {
 		if raw.Type == "secret" && raw.Default != nil {
 			return fmt.Errorf("%s.%s: a secret has no default", m.Name, name)
 		}
+		if raw.Type == "secret" && raw.DefaultFrom != "" {
+			return fmt.Errorf("%s.%s: a secret has no default_from", m.Name, name)
+		}
+		if raw.Default != nil && raw.DefaultFrom != "" {
+			return fmt.Errorf("%s.%s: set default or default_from, not both", m.Name, name)
+		}
+		if raw.DefaultFrom != "" && !containsString(validDefaultFrom, raw.DefaultFrom) {
+			return fmt.Errorf("%s.%s: default_from %q is not one of %s", m.Name, name, raw.DefaultFrom, strings.Join(validDefaultFrom, ", "))
+		}
 		if raw.Type == "enum" {
 			if len(raw.Values) == 0 {
 				return fmt.Errorf("%s.%s: an enum needs values", m.Name, name)
@@ -293,11 +310,11 @@ func (m *Manifest) buildParams() error {
 				return fmt.Errorf("%s.%s: %q is not one of %s", m.Name, name, def, strings.Join(raw.Values, ", "))
 			}
 		}
-		if raw.Default == nil && !raw.Required {
-			return fmt.Errorf("%s.%s: needs a default or required = true", m.Name, name)
+		if raw.Default == nil && raw.DefaultFrom == "" && !raw.Required {
+			return fmt.Errorf("%s.%s: needs a default, default_from, or required = true", m.Name, name)
 		}
 		m.Params[name] = Param{
-			Name: name, Type: raw.Type, Default: def, Help: raw.Help,
+			Name: name, Type: raw.Type, Default: def, DefaultFrom: raw.DefaultFrom, Help: raw.Help,
 			Required: raw.Required, Values: raw.Values,
 		}
 	}

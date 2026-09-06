@@ -7,7 +7,7 @@
 // here needs apkovl, cloudinit, recipes and keys, and importing those from
 // guest would close an import cycle. guest stays a pure data leaf: OS facts
 // only, zero imports. backend sits above it and pulls in what an
-// implementation needs. See docs/design/guest-subsystem.md §3.2.
+// implementation needs.
 package backend
 
 import (
@@ -20,7 +20,7 @@ import (
 // requires. Only Prepare and Args are implemented here. Ready (today:
 // sshx.Wait plus cloud-init polling) and Provision (today:
 // internal/tui/provstep.go) are entangled with TUI code, and belong with the
-// core-API work instead (docs/design/guest-subsystem.md §9).
+// core-API work instead.
 type Backend interface {
 	Name() string
 

@@ -80,12 +80,12 @@ review.
 
 A change to a subsystem or an interface another package depends on
 starts as an issue that states the design, discussed before the
-implementation PR. Settled decisions go in `docs/design/`.
+implementation PR.
 
-`docs/design/core-api.md` §12 holds the conventions a new CLI command
-follows: the `wire` struct behind `--json`, `fail` against `failMsg`, the
-shared `confirm` helper, kong aliases, and `tomlx` for a TOML file. A
-reviewer rejects a PR that ignores them.
+A new CLI command follows a fixed set of conventions: the `wire` struct
+behind `--json`, `fail` against `failMsg`, the shared `confirm` helper,
+kong aliases, and `tomlx` for a TOML file. A reviewer rejects a PR that
+ignores them.
 
 ## Recipes
 

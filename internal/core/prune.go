@@ -42,8 +42,8 @@ var (
 // PruneItem is one thing Prune removed, or would remove under DryRun.
 //
 // Class is snake_case: it is also the wire value for the JSON contract's
-// "prune" command (docs/design/json-contract-draft.md §3.3). A caller that
-// wants prose renders Class itself, instead of parsing a formatted string.
+// "prune" command. A caller that wants prose renders Class itself, instead
+// of parsing a formatted string.
 type PruneItem struct {
 	// Class is one of "broken_vm", "partial_download" or "orphaned_image",
 	// matching pruneBroken, prunePartialDownloads and pruneImages respectively.
@@ -90,8 +90,7 @@ type PruneOpts struct {
 // Each helper only touches one scoped directory: Root()/<broken-vm-dir>,
 // Root()/isos/*.part, or Root()/isos/*. Prune never reaches id_stoat,
 // guest_host_ed25519_key, recipes/, .manifest, or a VM directory outside
-// Root(); config.VM.Delete's own guard enforces the last one. See
-// docs/design/core-api.md §7 and §7.1 item 8.
+// Root(); config.VM.Delete's own guard enforces the last one.
 func Prune(opts PruneOpts) ([]PruneItem, error) {
 	// The same data-root lock Create, Clone and Destroy take. Prune decides
 	// what is unreferenced by reading every vm.toml. Without the lock, an

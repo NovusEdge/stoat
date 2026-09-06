@@ -3,7 +3,7 @@
 A recipe is a directory with a `recipe.toml` manifest and one or more shell
 scripts. Stoat runs the selected script over SSH or places it in a cloud-init
 seed, depending on the VM backend. This is the shipped directory-manifest
-format; the [v2 spec](recipe-spec-v2.md) is historical design context.
+format.
 
 ## Directory structure
 

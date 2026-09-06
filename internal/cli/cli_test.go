@@ -545,8 +545,8 @@ func TestParseCPInfersDirection(t *testing.T) {
 	}
 }
 
-// TestParseCPFlagForm pins the explicit-flag spelling docs/design/mcp-server.md
-// §1.1 adds alongside the positional one: --direction picks the way, --local
+// TestParseCPFlagForm pins the explicit-flag spelling added alongside the
+// positional one: --direction picks the way, --local
 // and --remote are unambiguous regardless of what characters either path
 // contains, unlike the positional form's "<vm>:<path>" compound.
 func TestParseCPFlagForm(t *testing.T) {
@@ -603,10 +603,9 @@ func TestParseCPDirectionEnumRejectsGarbage(t *testing.T) {
 }
 
 // TestParseCPResolvesLocalToAbsolutePath pins that a relative path, or one
-// with a leading ~, resolves to the RESOLVED absolute path in a.Local
-// (docs/design/mcp-server.md §1.1): runCopy echoes it back on the wire for
-// the server to post-verify. Both the positional and flag forms resolve the
-// same way.
+// with a leading ~, resolves to the RESOLVED absolute path in a.Local:
+// runCopy echoes it back on the wire for the server to post-verify. Both the
+// positional and flag forms resolve the same way.
 func TestParseCPResolvesLocalToAbsolutePath(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

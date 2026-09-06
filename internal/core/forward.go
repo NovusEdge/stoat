@@ -51,10 +51,9 @@ func ParseForwards(pairs []string) ([]PortForward, error) {
 // next start. err is non-nil only when the forwards were not saved.
 //
 // active is a return value, not a sentinel error, so "saved, not yet live"
-// and "refused" cannot be confused (docs/design/core-api.md §8, decision
-// 5). A caller writing the ordinary `if err != nil { return err }` gets
-// the right answer either way: err means it did not happen, active means
-// when.
+// and "refused" cannot be confused. A caller writing the ordinary
+// `if err != nil { return err }` gets the right answer either way: err
+// means it did not happen, active means when.
 //
 // Validation is strict; see validateForwards. Every failure mode here is a
 // qemu process that refuses to start, or two VMs fighting over one host

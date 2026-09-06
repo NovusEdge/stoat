@@ -35,9 +35,8 @@ type ApplyOpts struct {
 
 // Apply runs VM name's recipes over ssh and blocks until they finish.
 //
-// Apply never runs implicitly (docs/design/core-api.md §6). Recipes run
-// only through this call. Nothing else in this package invokes it as a side
-// effect of Create or Start.
+// Apply never runs implicitly. Recipes run only through this call. Nothing
+// else in this package invokes it as a side effect of Create or Start.
 //
 // The run itself is sshx.Provision, unchanged. Apply only makes the
 // caller-facing decisions Provision cannot: which VM, which backend, which
@@ -90,7 +89,7 @@ type ApplyPlan struct {
 // The plan is host-side: it reads manifests and v.Applied, so the VM does not
 // need to be running. A cloudinit VM whose markers were never discovered still
 // has an empty v.Applied here, so its recipes read as "never applied" until a
-// real Apply populates it (docs/specs recipe-system-fixes §3 fallback).
+// real Apply populates it.
 func PlanApply(name string, opts ApplyOpts) ([]ApplyPlan, error) {
 	v, err := load(name)
 	if err != nil {
@@ -158,12 +157,11 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 		return nil
 	}
 
-	// v2 recipes (docs/recipe-spec-v2.md) declare a run mode in their own
-	// recipe.toml. A v1 flat-file recipe has no manifest and keeps the old
-	// "always run it" behavior. explicit holds the names the caller asked
-	// for BY NAME, a non-empty Only. It tells a "manual"-run recipe apart
-	// from one merely inherited via v.Recipes, the distinction
-	// docs/recipe-spec-v2.md's Decisions §4 draws between "stoat apply" and
+	// v2 recipes declare a run mode in their own recipe.toml. A v1 flat-file
+	// recipe has no manifest and keeps the old "always run it" behavior.
+	// explicit holds the names the caller asked for BY NAME, a non-empty
+	// Only. It tells a "manual"-run recipe apart from one merely inherited
+	// via v.Recipes, the distinction between "stoat apply" and
 	// "stoat apply --recipe <name>".
 	explicit := make(map[string]bool, len(opts.Only))
 	for _, o := range opts.Only {
@@ -458,7 +456,7 @@ func redactCloudSecrets(value string, secrets map[string]string) string {
 // Targets run in dependency order, not v.Recipes order: a recipe with
 // depends = ["docker"] runs after docker regardless of array position. A
 // dependency cycle among the targets errors here, since a manifest edited on
-// disk after add-time can introduce one (docs/specs recipe-system-fixes §2).
+// disk after add-time can introduce one.
 // A kept recipe's dependency must be satisfied: it ran earlier in this run,
 // or is already recorded in v.Applied. An unsatisfiable dependency errors
 // rather than run the dependent against an unmet one.
@@ -575,7 +573,7 @@ func recipeHashFor(v *config.VM, m recipes.Manifest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	params, err := recipes.Resolve(m, v.Params[m.Name], secrets[m.Name])
+	params, err := recipes.Resolve(m, recipes.WithVMDefaults(m, v.Params[m.Name], v.SSHUser), secrets[m.Name])
 	if err != nil {
 		return "", err
 	}

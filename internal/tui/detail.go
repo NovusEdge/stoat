@@ -380,8 +380,8 @@ func (m model) viewDetail() string {
 		// hot-add a hostfwd rule to a running process. A forward declared
 		// while the VM is running saves to vm.toml and applies later, but
 		// has no effect on the qemu process already up.
-		// docs/design/core-api.md §8 decision 5 requires this distinction to
-		// stay visible: "applied later" must never read like "already true".
+		// This distinction stays visible: "applied later" must never read
+		// like "already true".
 		// This renders as its own line, in its own color, so it cannot be
 		// mistaken for a caption on the rows above it.
 		effect := upStyle.Render("in effect")

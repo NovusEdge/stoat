@@ -11,10 +11,14 @@
 # kill mid-copy can orphan one. Only lands here if $PREFIX points into the repo.
 .stoat-*
 
-# agent / planning cruft — local only. Task plans are throwaway; durable
-# architecture decisions belong in docs/design/, which IS tracked.
+# agent / planning cruft and internal notes — local only. Design docs, specs,
+# and QA scripts stay out of the published site and off GitHub.
 docs/superpowers/
 docs/specs/
+docs/qa/
+docs/recipe-authoring-spec.md
+docs/recipe-spec-v2.md
+docs/design/
 context/
 CLAUDE.md
 CLAUDE.local.md
@@ -27,6 +31,7 @@ GEMINI.md
 
 # session resume state, local only
 /CHECKPOINT.md
+/HANDOFF.md
 
 # local cloud-init hardware-gate test
 /.cloudinit-test/

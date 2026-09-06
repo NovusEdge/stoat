@@ -82,9 +82,9 @@ opportunistic recipe IDs. It currently contains these eight recipes:
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 
-`python-dev` takes the configured guest account. A cloud guest whose SSH
-account is `stoat` needs `python-dev.user=stoat`; an Alpine guest using `root`
-needs `python-dev.user=root`.
+`python-dev.user` defaults to the VM's configured SSH account. Set
+`python-dev.user` explicitly only to build the environment for a different
+account.
 
 The scripts are in `internal/recipes/bundled/` in the source tree. Each recipe
 has a manifest. Every recipe except XFCE uses OS-specific script overrides

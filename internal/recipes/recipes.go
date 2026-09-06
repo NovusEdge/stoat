@@ -299,8 +299,7 @@ func List(osName, _ string) ([]string, error) {
 }
 
 // ListManifests scans every root for v2 recipes: subdirectories holding a
-// recipe.toml (docs/recipe-spec-v2.md). Unlike List, it does not filter by OS
-// or backend. A caller that needs that filters against the parsed Manifest's
+// recipe.toml. Unlike List, it does not filter by OS or backend. A caller that needs that filters against the parsed Manifest's
 // OS/Requires fields (see MatchesVM).
 //
 // A subdirectory with no recipe.toml, a stray directory or leftover .bak
