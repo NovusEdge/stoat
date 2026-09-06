@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,6 +319,64 @@ func TestDiffOmittedDiskMatchesTheDefault(t *testing.T) {
 		if d.Field == "disk" {
 			t.Errorf("disk reported as drift for an omitted field: %+v", d)
 		}
+	}
+}
+
+// AlmaLinux and Rocky require the catalog's 12G overlay when disk is omitted.
+// The project path must carry that same default through planning and creation,
+// then treat the omitted declaration as unchanged during diff and reconcile.
+func TestEnterpriseCatalogDefaultDiskSurvivesProjectLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		file string
+	}{
+		{id: "almalinux-9", file: "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"},
+		{id: "rocky-9", file: "Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			body := fmt.Sprintf("schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"%s\"\n", tc.id)
+			p := projectDir(t, body)
+			haveImage(t, os.Getenv("STOAT_HOME"), tc.file)
+
+			s, err := SpecFor(p, "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.Disk != "" {
+				t.Fatalf("omitted declaration produced Spec.Disk = %q", s.Disk)
+			}
+			planned, err := Plan(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if planned.Disk != "12G" {
+				t.Fatalf("Plan(%s) disk = %q, want catalog default 12G", tc.id, planned.Disk)
+			}
+
+			created, err := Create(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if created.Disk != "12G" {
+				t.Fatalf("Create(%s) disk = %q, want catalog default 12G", tc.id, created.Disk)
+			}
+
+			drift, err := Diff(p, "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(drift) != 0 {
+				t.Fatalf("Diff(%s) = %+v, want no drift after creation", tc.id, drift)
+			}
+
+			r, err := Reconcile(p, "dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Created || len(r.Drift) != 0 {
+				t.Fatalf("Reconcile(%s) = %+v, want existing VM with no drift", tc.id, r)
+			}
+		})
 	}
 }
 
