@@ -649,7 +649,7 @@ agent_access; direct CLI exec and cp do not. A live target limits vm.snapshot
 with disk_required. runtime.fork and runtime.continuation always appear under
 unavailable with unsupported/not_implemented.
 
-~~~json
+```json
 {
   "schema": 1,
   "stoat_version": "dev",
@@ -666,7 +666,7 @@ unavailable with unsupported/not_implemented.
     {"name": "runtime.continuation", "status": "unsupported", "scope": "runtime", "requirements": [], "limits": [], "reason": {"code": "not_implemented"}, "evidence": [{"kind": "implementation", "source": "runtime.continuation", "result": "not_implemented"}]}
   ]
 }
-~~~
+```
 
 The example abbreviates profiles and capabilities; a real report always
 contains the implemented entries. The proposal evidence identifies the report
