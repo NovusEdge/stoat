@@ -24,15 +24,6 @@ const (
 	defaultHeight = 24
 )
 
-var (
-	lightAccent = lipgloss.Color("#7A3E12")
-	lightUp     = lipgloss.Color("#386A20")
-	lightWarn   = lipgloss.Color("#7A4E00")
-	lightErr    = lipgloss.Color("#A12D2D")
-	lightDim    = lipgloss.Color("#59636E")
-	darkDim     = lipgloss.Color("#8B949E")
-)
-
 // keys use key.Binding, not raw string comparison. This is the Bubbles idiom.
 // It also survives the v2 migration: v2 renamed space from " " to "space".
 // key.Matches keeps working; a `case " ":` would silently break.
@@ -149,28 +140,31 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.spin.Tick, runChecksCmd(), tea.RequestBackgroundColor)
 }
 
-func adaptiveStyle(isDark bool, light, dark color.Color) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.LightDark(isDark)(light, dark))
+// The palette lives in internal/theme so the installer and the main TUI name
+// one set of colours. Each style is built per render from the background the
+// terminal reported.
+func (m Model) styleFor(pick func(theme.Palette) color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(pick(theme.For(m.darkBackground)))
 }
 
 func (m Model) accentStyle() lipgloss.Style {
-	return adaptiveStyle(m.darkBackground, lightAccent, theme.Accent)
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Accent })
 }
 
 func (m Model) okStyle() lipgloss.Style {
-	return adaptiveStyle(m.darkBackground, lightUp, theme.Up)
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Up })
 }
 
 func (m Model) warnStyle() lipgloss.Style {
-	return adaptiveStyle(m.darkBackground, lightWarn, theme.Warn)
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Warn })
 }
 
 func (m Model) errStyle() lipgloss.Style {
-	return adaptiveStyle(m.darkBackground, lightErr, theme.Err)
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Err })
 }
 
 func (m Model) dimStyle() lipgloss.Style {
-	return adaptiveStyle(m.darkBackground, lightDim, darkDim)
+	return m.styleFor(func(p theme.Palette) color.Color { return p.Dim })
 }
 
 // helpModel uses Bubbles' width-aware help renderer with the installer's
