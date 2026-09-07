@@ -918,14 +918,24 @@ func (f formModel) spec() (core.Spec, error) {
 		if f.paramForm != nil && f.paramForm.recipe == name {
 			values = f.paramForm.valuesSnapshot()
 		}
+		sshUser := f.resolvedSSHUser()
 		for _, param := range recipe.Params {
-			value := param.Default
+			effectiveDefault := param.Default
+			if param.DefaultFrom == "ssh_user" && sshUser != "" {
+				effectiveDefault = sshUser
+			}
+			value := effectiveDefault
 			if values != nil {
 				if given, ok := values[param.Name]; ok {
 					value = given
 				}
 			}
-			if value == "" || param.Type != "secret" && value == param.Default {
+			// A value the field only inherited from the VM's SSH account, never
+			// typed over, is omitted the same way an untouched static default
+			// is: a later change to the VM's SSH account then re-derives it at
+			// resolve time instead of applying with a stale, explicitly stored
+			// account.
+			if value == "" || param.Type != "secret" && value == effectiveDefault {
 				continue
 			}
 			if param.Type == "secret" {

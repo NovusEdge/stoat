@@ -257,6 +257,105 @@ func TestParameterizedRecipeSubmitAndDeselectCleansSelection(t *testing.T) {
 	}
 }
 
+func writeSSHUserDefaultRecipe(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(config.Root(), "recipes", "param-ssh-default")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `schema = 3
+name = "param-ssh-default"
+description = "recipe with a default_from param"
+os = ["alpine"]
+script = "install.sh"
+
+[params.user]
+type = "string"
+required = true
+default_from = "ssh_user"
+help = "account that owns the result"
+`
+	if err := os.WriteFile(filepath.Join(dir, "recipe.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "install.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// sshUserDefaultForm builds a wizard on an image with a known SSH account so
+// resolvedSSHUser() has something to seed the param form with.
+func sshUserDefaultForm(t *testing.T) model {
+	t.Helper()
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeSSHUserDefaultRecipe(t)
+	f := newForm()
+	image := stubImage(t, "alpine-standard-3.20.0-x86_64.iso")
+	image.backend = "ssh"
+	image.sshUser = "devops"
+	f.images = []imageOption{image}
+	f.imgIdx = 0
+	f.refreshRecipes()
+	for i, name := range f.recipeNames {
+		if name == "param-ssh-default" {
+			f.recipeIdx = i
+			break
+		}
+	}
+	f.focus = fRecipes
+	f.inputs[fName].SetValue("ssh-default-vm")
+	return model{screen: screenForm, width: 100, height: 40, form: f}
+}
+
+// A required default_from param must arrive prefilled with the VM's resolved
+// SSH account, and that prefill must already satisfy required validation:
+// this is the friction the CLI fix removed that the TUI never learned about.
+// An untouched prefill is omitted from spec.Params the same way an untouched
+// static default is, so a later change to the VM's SSH account re-derives it
+// at resolve time.
+func TestParameterizedRecipeDefaultFromPrefillsSSHUserAndSubmits(t *testing.T) {
+	m := sshUserDefaultForm(t)
+	m = sendParamKeys(m, keySpace)
+	rendered := ansi.Strip(m.View().Content)
+	if !strings.Contains(rendered, "devops") {
+		t.Fatalf("param form did not prefill the resolved SSH account:\n%s", rendered)
+	}
+	out, _ := m.Update(keyMsg("enter"))
+	m = out.(model)
+	if m.screen != screenForm {
+		t.Fatalf("prefilled default_from value blocked confirm, screen = %v", m.screen)
+	}
+	spec, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("form spec after default_from submission: %v", err)
+	}
+	if _, ok := spec.Params["param-ssh-default"]["user"]; ok {
+		t.Errorf("untouched default_from prefill was stored in Params: %#v", spec.Params["param-ssh-default"])
+	}
+}
+
+// The operator can still type over a default_from prefill; the typed value
+// must win.
+func TestParameterizedRecipeDefaultFromAcceptsOperatorOverride(t *testing.T) {
+	m := sshUserDefaultForm(t)
+	m = sendParamKeys(m, keySpace)
+	for range "devops" {
+		m = sendParamKeys(m, "backspace")
+	}
+	m = typeParamText(m, "alice")
+	m = sendParamKeys(m, "enter")
+	if m.screen != screenForm {
+		t.Fatalf("operator override left screen %v", m.screen)
+	}
+	spec, err := m.form.spec()
+	if err != nil {
+		t.Fatalf("form spec after operator override: %v", err)
+	}
+	if got := spec.Params["param-ssh-default"]["user"]; got != "alice" {
+		t.Errorf("submitted user = %q, want operator override %q", got, "alice")
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
