@@ -271,15 +271,16 @@ type checkRecipesCmd struct {
 }
 
 type recipeCmd struct {
-	List   recipeListCmd   `cmd:"" aliases:"ls" help:"list recipes with their scope and pinned commit"`
-	New    recipeNewCmd    `cmd:"" help:"scaffold a recipe in the recipes directory"`
-	Show   recipeShowCmd   `cmd:"" help:"print one recipe's params, outputs and health check"`
-	Add    recipeAddCmd    `cmd:"" help:"install a recipe from the index or a git URL"`
-	Lock   recipeLockCmd   `cmd:"" help:"resolve every declaration to a commit"`
-	Sync   recipeSyncCmd   `cmd:"" help:"make the recipe cache match the lock"`
-	Update recipeUpdateCmd `cmd:"" help:"fetch a recipe's ref again and repin it"`
-	RM     recipeRmCmd     `cmd:"" name:"rm" help:"remove a remote recipe"`
-	Search recipeSearchCmd `cmd:"" help:"search the recipe index"`
+	List    recipeListCmd    `cmd:"" aliases:"ls" help:"list recipes with their scope and pinned commit"`
+	New     recipeNewCmd     `cmd:"" help:"scaffold a recipe in the recipes directory"`
+	Show    recipeShowCmd    `cmd:"" help:"print one recipe's params, outputs and health check"`
+	Add     recipeAddCmd     `cmd:"" help:"install a recipe from the index or a git URL"`
+	Lock    recipeLockCmd    `cmd:"" help:"resolve every declaration to a commit"`
+	Sync    recipeSyncCmd    `cmd:"" help:"make the recipe cache match the lock"`
+	Update  recipeUpdateCmd  `cmd:"" help:"fetch a recipe's ref again and repin it"`
+	RM      recipeRmCmd      `cmd:"" name:"rm" help:"remove a remote recipe"`
+	Search  recipeSearchCmd  `cmd:"" help:"search the recipe index"`
+	Refresh recipeRefreshCmd `cmd:"" help:"rewrite bundled recipe files from the embedded copies"`
 }
 
 type recipeListCmd struct{}
@@ -324,6 +325,10 @@ type recipeRmCmd struct {
 type recipeSearchCmd struct {
 	Term    []string `arg:"" optional:"" passthrough:"all" help:"match against name and description"`
 	Refresh bool     `help:"fetch the index even when it is fresh"`
+}
+
+type recipeRefreshCmd struct {
+	Names []string `arg:"" optional:"" help:"bundled recipe names; omit for every bundled recipe"`
 }
 
 type recipeGuestCmd struct {
@@ -599,6 +604,10 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			term = term[1:]
 		}
 		a.Ref, a.Refresh = strings.Join(term, " "), g.Recipe.Search.Refresh
+
+	case "recipe refresh":
+		a.Cmd, a.Sub = "recipe", "refresh"
+		a.Names = trimList(g.Recipe.Refresh.Names)
 
 	case "guest ls":
 		a.Cmd, a.Sub = "guest", "ls"

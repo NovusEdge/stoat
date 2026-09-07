@@ -161,6 +161,194 @@ func TestInstallRefreshesUnmodifiedCopies(t *testing.T) {
 	}
 }
 
+// A manifest entry can go missing while the file on disk is stoat's own,
+// just from an older release (a bundled script updated since, a checksum
+// that never made it into .manifest). installFile then reads the missing
+// entry as a genuine edit and leaves the stale copy in place forever;
+// Refresh is the explicit recovery.
+func TestRefreshRecordsAFileMissingFromManifest(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptPath := filepath.Join(dir(), "xfce", "install.sh")
+	stale := "#!/bin/sh\necho old release\n"
+	if err := os.WriteFile(scriptPath, []byte(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := readManifest()
+	delete(m, "xfce/install.sh")
+	if err := writeManifest(m); err != nil {
+		t.Fatal(err)
+	}
+
+	// Install must not recover it: it reads the dropped entry as a genuine edit.
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(scriptPath); string(got) != stale {
+		t.Fatal("Install refreshed the stale copy; test setup is wrong")
+	}
+
+	results, err := Refresh(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := resultStatus(t, results, "xfce/install.sh")
+	if status != RefreshBackedUp {
+		t.Errorf("status = %s, want %s", status, RefreshBackedUp)
+	}
+	backup, err := os.ReadFile(scriptPath + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != stale {
+		t.Error(".bak does not hold the stale release")
+	}
+	if got, _ := os.ReadFile(scriptPath); string(got) == stale {
+		t.Error("Refresh left the stale release in place")
+	}
+	if sum, ok := readManifest()["xfce/install.sh"]; !ok || sum == "" {
+		t.Error("Refresh did not re-record xfce/install.sh in the manifest")
+	}
+}
+
+func TestRefreshBacksUpAGenuineEdit(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptPath := filepath.Join(dir(), "xfce", "install.sh")
+	edited := "#!/bin/sh\necho mine\n"
+	if err := os.WriteFile(scriptPath, []byte(edited), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := Refresh(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := resultStatus(t, results, "xfce/install.sh"); status != RefreshBackedUp {
+		t.Errorf("status = %s, want %s", status, RefreshBackedUp)
+	}
+
+	backup, err := os.ReadFile(scriptPath + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != edited {
+		t.Error(".bak does not hold the edit")
+	}
+	fresh, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(fresh) == edited {
+		t.Error("Refresh left the edit in place instead of overwriting it")
+	}
+}
+
+func TestRefreshLeavesAnAlreadyCurrentFileAlone(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := Refresh(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := resultStatus(t, results, "xfce/install.sh"); status != RefreshCurrent {
+		t.Errorf("status = %s, want %s", status, RefreshCurrent)
+	}
+}
+
+func TestRefreshOneNameDoesNotTouchAnother(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	m := readManifest()
+	delete(m, "xfce/install.sh")
+	delete(m, "docker/install.sh")
+	if err := writeManifest(m); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := Refresh([]string{"xfce"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if strings.HasPrefix(r.Path, "docker/") {
+			t.Errorf("Refresh([\"xfce\"]) touched %s", r.Path)
+		}
+	}
+	if _, ok := readManifest()["docker/install.sh"]; ok {
+		t.Error("Refresh([\"xfce\"]) re-recorded docker/install.sh")
+	}
+	if _, ok := readManifest()["xfce/install.sh"]; !ok {
+		t.Error("Refresh([\"xfce\"]) did not re-record xfce/install.sh")
+	}
+}
+
+func TestRefreshRejectsAnUnknownName(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Refresh([]string{"not-a-recipe"}); err == nil {
+		t.Error("Refresh with an unknown name did not error")
+	}
+}
+
+// An orphan is a file left behind by a rename: no embedded counterpart, no
+// manifest entry. Refresh backs it up and removes it rather than leaving it
+// to shadow the renamed script forever.
+func TestRefreshRemovesAnOrphanAfterARename(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := Install(); err != nil {
+		t.Fatal(err)
+	}
+
+	orphan := filepath.Join(dir(), "xfce", "install-old.sh")
+	if err := os.WriteFile(orphan, []byte("#!/bin/sh\necho old\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := Refresh([]string{"xfce"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := resultStatus(t, results, "xfce/install-old.sh"); status != RefreshOrphan {
+		t.Errorf("status = %s, want %s", status, RefreshOrphan)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Error("the orphan survived on disk")
+	}
+	backup, err := os.ReadFile(orphan + ".bak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != "#!/bin/sh\necho old\n" {
+		t.Error(".bak does not hold the orphan's content")
+	}
+}
+
+func resultStatus(t *testing.T, results []RefreshResult, path string) RefreshStatus {
+	t.Helper()
+	for _, r := range results {
+		if r.Path == path {
+			return r.Status
+		}
+	}
+	t.Fatalf("no result for %s", path)
+	return ""
+}
+
 func TestEmbedContainsBundledDirectory(t *testing.T) {
 	entries, err := bundled.ReadDir(".")
 	if err != nil {
