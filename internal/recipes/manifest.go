@@ -49,8 +49,9 @@ type Param struct {
 	Type    string
 	Default string
 	// DefaultFrom names a VM-derived source Resolve falls back to when the
-	// caller sets no value and Default is empty. "ssh_user" is the only
-	// accepted value today.
+	// caller sets no value and Default is empty. "ssh_user" fills the VM's
+	// SSH account; "ssh_venv_dir" fills a persistent virtualenv path under
+	// that account's home directory.
 	DefaultFrom string
 	Help        string
 	Required    bool
@@ -69,7 +70,7 @@ type rawParam struct {
 }
 
 // validDefaultFrom lists the accepted default_from values.
-var validDefaultFrom = []string{"ssh_user"}
+var validDefaultFrom = []string{"ssh_user", "ssh_venv_dir"}
 
 // Output is one declared result of a recipe.
 type Output struct {

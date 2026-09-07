@@ -381,8 +381,8 @@ func recipeStates(v *config.VM) ([]RecipeState, error) {
 			}
 			if value, given := v.Params[name][param.Name]; given {
 				state.Params[param.Name] = value
-			} else if param.DefaultFrom == "ssh_user" && v.SSHUser != "" {
-				state.Params[param.Name] = v.SSHUser
+			} else if derived := recipes.WithVMDefaults(manifest, nil, v.SSHUser)[param.Name]; derived != "" {
+				state.Params[param.Name] = derived
 			} else {
 				state.Params[param.Name] = param.Default
 			}

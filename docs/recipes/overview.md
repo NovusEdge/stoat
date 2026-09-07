@@ -74,7 +74,7 @@ opportunistic recipe IDs. It currently contains these eight recipes:
 | Recipe | Supported guests | Purpose |
 |---|---|---|
 | `devtools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Git, compiler tools, editor and basic fetch tools |
-| `python-dev` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Python 3, pip, and an isolated development environment; schema 3 parameters `user` and optional `venv_dir`, with smoke-only mode when `venv_dir` is empty |
+| `python-dev` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Python 3, pip, and an isolated development environment; schema 3 parameters `user` and `venv_dir`, both derived from the VM by default; `venv_dir=""` opts into a smoke check instead |
 | `build-deps` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | What building someone else's source tree needs; schema 3 outputs `compiler`, `make`, `pkg_config`, health check each responds to `--version` |
 | `service-tools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Inspecting a running service and the processes behind it; schema 3 outputs `service_manager` (`systemd` or `openrc`), `lsof`, `strace`, health check service manager answers status query and `lsof -v` runs |
 | `pkg-tools` | Alpine, Ubuntu, Debian, Fedora, Arch, AlmaLinux, Rocky, openSUSE | Querying the package manager beyond install and remove; schema 3 outputs `query_tool`, `manager`, health check query tool runs |
@@ -82,9 +82,10 @@ opportunistic recipe IDs. It currently contains these eight recipes:
 | `tailscale` | Alpine, Ubuntu, Debian, Fedora, Arch | Install and start `tailscaled`; schema 3 required secret `authkey`, health check `tailscale version` |
 | `xfce` | Alpine, Ubuntu, Debian, Arch | XFCE desktop with autologin startx on tty1; requests a disk-VM reboot |
 
-`python-dev.user` defaults to the VM's configured SSH account. Set
-`python-dev.user` explicitly only to build the environment for a different
-account.
+`python-dev.user` defaults to the VM's configured SSH account, and
+`python-dev.venv_dir` defaults to `.venv` under that account's home
+directory. Set either explicitly only to change the account or the
+environment's location.
 
 The scripts are in `internal/recipes/bundled/` in the source tree. Each recipe
 has a manifest. Every recipe except XFCE uses OS-specific script overrides

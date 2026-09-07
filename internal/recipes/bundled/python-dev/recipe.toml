@@ -23,8 +23,8 @@ help = "configured SSH account that owns the development environment"
 
 [params.venv_dir]
 type = "string"
-default = ""
-help = "absolute path for a persistent virtual environment; empty runs a smoke check only"
+default_from = "ssh_venv_dir"
+help = "absolute path for the persistent virtual environment; defaults to .venv under the SSH account's home"
 
 [outputs]
 python = "path to the Python interpreter"
