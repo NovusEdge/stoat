@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.4.2
+
+Release archives for macOS and Windows. The JSON contract version stays **3**.
 
 ### Changes
 
