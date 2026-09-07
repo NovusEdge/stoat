@@ -17,17 +17,31 @@ jobs:
       - name: Build
         env:
           CGO_ENABLED: '0'
-          GOOS: linux
         run: |
-          for arch in amd64 arm64; do
-            GOARCH=$arch go build \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o stoat ./cmd/stoat
-            tar czf stoat_${GITHUB_REF_NAME}_linux_$arch.tar.gz stoat
+          # darwin and windows binaries run doctor and capabilities only.
+          # hostops refuses every other command there until #82 and #83 land.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}
+            arch=${target#*/}
+            bin=stoat
+            if [ "$os" = windows ]; then
+              bin=stoat.exe
+            fi
+            GOOS=$os GOARCH=$arch go build \
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "$bin" ./cmd/stoat
+            name=stoat_${GITHUB_REF_NAME}_${os}_${arch}
+            if [ "$os" = windows ]; then
+              zip -q "$name.zip" "$bin"
+            else
+              tar czf "$name.tar.gz" "$bin"
+            fi
+            rm -f "$bin"
           done
-          sha256sum stoat_*.tar.gz > checksums.txt
+          sha256sum stoat_*.tar.gz stoat_*.zip > checksums.txt
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
             *.tar.gz
+            *.zip
             checksums.txt
