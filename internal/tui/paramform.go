@@ -25,8 +25,8 @@ type paramForm struct {
 }
 
 // newParamForm builds the field list for one recipe's params. sshUser is the
-// account WithVMDefaults would fill a default_from = "ssh_user" param with;
-// an empty sshUser leaves such a param blank instead of guessing.
+// account WithVMDefaults derives a default_from param from; an empty sshUser
+// leaves such a param blank instead of guessing.
 func newParamForm(recipe core.Recipe, sshUser string) *paramForm {
 	p := &paramForm{
 		recipe:   recipe.Name,
@@ -39,9 +39,9 @@ func newParamForm(recipe core.Recipe, sshUser string) *paramForm {
 	for _, param := range recipe.Params {
 		seed := param.Default
 		description := param.Help
-		if param.DefaultFrom == "ssh_user" && sshUser != "" {
-			seed = sshUser
-			description = strings.TrimSpace(description + " Defaults to the VM's SSH account, " + sshUser + ".")
+		if derived, ok := recipes.DefaultFromValue(param.DefaultFrom, sshUser); ok && sshUser != "" {
+			seed = derived
+			description = strings.TrimSpace(description + " Defaults to " + derived + ", derived from the VM's SSH account.")
 		}
 		p.defaults[param.Name] = seed
 		switch param.Type {

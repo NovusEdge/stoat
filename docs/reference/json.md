@@ -299,10 +299,10 @@ ProjectRun   {"project":"myrepo","vms":[ProjectRunVM,...]}
 binary than the running one, which is the stale entry `mcp doctor` reports.
 
 `RecipeParam.default_from` is present only on a param that declares it.
-`"ssh_user"` is the only value: Stoat fills that param from the VM's
-configured SSH account at apply time when the caller sets no value. A value
-the caller sets still wins. A param declares `default` or `default_from`,
-never both.
+`"ssh_user"` fills that param from the VM's configured SSH account at apply
+time when the caller sets no value. `"ssh_venv_dir"` fills it with `.venv`
+under that account's home directory. A value the caller sets still wins. A
+param declares `default` or `default_from`, never both.
 
 `VM.project` is the absolute directory of the `stoat.toml` that declared this
 VM, and `VM.key` is the declaration key, both empty for a VM `stoat create`

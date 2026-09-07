@@ -16,8 +16,8 @@ const OutputDir = "/tmp/.stoat-out"
 // ErrInvalidTree.
 var ErrParamUnset = errors.New("required parameter is unset")
 
-// WithVMDefaults fills every param whose manifest declares
-// default_from = "ssh_user" with the VM's SSH account, unless the caller has
+// WithVMDefaults fills every param whose manifest declares a default_from
+// with a value derived from the VM's SSH account, unless the caller has
 // already set it. --set continues to win: it is checked first. A remote
 // recipe's "user" param with no default_from never receives this value,
 // only the recipe author's explicit opt-in does.
@@ -27,7 +27,8 @@ func WithVMDefaults(m Manifest, set map[string]string, sshUser string) map[strin
 	}
 	var merged map[string]string
 	for name, p := range m.Params {
-		if p.DefaultFrom != "ssh_user" {
+		value, ok := DefaultFromValue(p.DefaultFrom, sshUser)
+		if !ok {
 			continue
 		}
 		if v, present := set[name]; present && v != "" {
@@ -39,12 +40,37 @@ func WithVMDefaults(m Manifest, set map[string]string, sshUser string) map[strin
 				merged[k] = v
 			}
 		}
-		merged[name] = sshUser
+		merged[name] = value
 	}
 	if merged == nil {
 		return set
 	}
 	return merged
+}
+
+// DefaultFromValue resolves a default_from source against the VM's SSH
+// account. ok is false for an unrecognized or empty source. The TUI's param
+// form seeds its fields through this, so the value an operator sees is the
+// one an apply would compute.
+func DefaultFromValue(source, sshUser string) (value string, ok bool) {
+	switch source {
+	case "ssh_user":
+		return sshUser, true
+	case "ssh_venv_dir":
+		return sshHome(sshUser) + "/.venv", true
+	default:
+		return "", false
+	}
+}
+
+// sshHome guesses the SSH account's home directory from its name. Every
+// bundled guest OS creates accounts under /home except root, which stays at
+// /root; there is no VM-reported home path to read instead.
+func sshHome(sshUser string) string {
+	if sshUser == "root" {
+		return "/root"
+	}
+	return "/home/" + sshUser
 }
 
 // Resolve merges manifest defaults with values stored for one recipe. Secret

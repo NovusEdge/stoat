@@ -79,7 +79,7 @@ func TestRecipeSchemaListsParams(t *testing.T) {
 
 func TestRecipeSchemaOmitsDefaultFromWhenUndeclared(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
-	res := callTool(t, "recipe_schema", map[string]any{"name": "python-dev"})
+	res := callTool(t, "recipe_schema", map[string]any{"name": "tailscale"})
 	if res.IsError {
 		t.Fatalf("recipe_schema failed: %+v", res.Content)
 	}
@@ -92,16 +92,16 @@ func TestRecipeSchemaOmitsDefaultFromWhenUndeclared(t *testing.T) {
 	}
 	var found bool
 	for _, p := range out.Params {
-		if p["name"] != "venv_dir" {
+		if p["name"] != "authkey" {
 			continue
 		}
 		found = true
 		if _, ok := p["default_from"]; ok {
-			t.Fatalf("recipe_schema(python-dev) venv_dir carries default_from unset by the manifest: %s", raw)
+			t.Fatalf("recipe_schema(tailscale) authkey carries default_from unset by the manifest: %s", raw)
 		}
 	}
 	if !found {
-		t.Fatalf("recipe_schema(python-dev) params missing venv_dir: %s", raw)
+		t.Fatalf("recipe_schema(tailscale) params missing authkey: %s", raw)
 	}
 }
 

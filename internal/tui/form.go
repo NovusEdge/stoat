@@ -921,8 +921,8 @@ func (f formModel) spec() (core.Spec, error) {
 		sshUser := f.resolvedSSHUser()
 		for _, param := range recipe.Params {
 			effectiveDefault := param.Default
-			if param.DefaultFrom == "ssh_user" && sshUser != "" {
-				effectiveDefault = sshUser
+			if derived, ok := recipes.DefaultFromValue(param.DefaultFrom, sshUser); ok && sshUser != "" {
+				effectiveDefault = derived
 			}
 			value := effectiveDefault
 			if values != nil {
