@@ -172,6 +172,118 @@ func TestWithPreludeKeepsShebangFirst(t *testing.T) {
 	}
 }
 
+// Alpine's stoat_pkg_setup retries setup-apkrepos when the apk database is
+// locked. A stub on PATH fails twice then succeeds; the real setup value
+// sleeps 2s between attempts, so this exercises the retry without waiting on
+// the full 30-attempt bound.
+func TestAlpinePkgSetupRetriesOnLockedDatabase(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is required")
+	}
+	o, ok := Lookup("alpine")
+	if !ok {
+		t.Fatal("bundled alpine missing")
+	}
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "attempts")
+	stub := filepath.Join(dir, "setup-apkrepos")
+	script := "#!/bin/sh\n" +
+		"n=$(cat " + counter + " 2>/dev/null || echo 0)\n" +
+		"n=$((n + 1))\n" +
+		"echo $n > " + counter + "\n" +
+		"[ $n -gt 2 ] || exit 99\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := Prelude(o, "sh") + "stoat_pkg_setup\n"
+	cmd := exec.Command("sh", "-c", body)
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stoat_pkg_setup did not recover from a locked database: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(counter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "3" {
+		t.Errorf("attempts = %s, want 3 (two failures then success)", got)
+	}
+}
+
+// The python3 rendering runs stoat_pkg_setup through sh -c too (prelude.go's
+// _run("sh", "-c", ...)), so the same retry loop must survive %q-escaping and
+// python turning the escaped newlines back into real ones.
+func TestAlpinePkgSetupRetriesOnLockedDatabasePython(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is required")
+	}
+	o, ok := Lookup("alpine")
+	if !ok {
+		t.Fatal("bundled alpine missing")
+	}
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "attempts")
+	stub := filepath.Join(dir, "setup-apkrepos")
+	script := "#!/bin/sh\n" +
+		"n=$(cat " + counter + " 2>/dev/null || echo 0)\n" +
+		"n=$((n + 1))\n" +
+		"echo $n > " + counter + "\n" +
+		"[ $n -gt 2 ] || exit 99\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := Prelude(o, "python3") + "\nstoat_pkg_setup()\n"
+	cmd := exec.Command("python3", "-c", body)
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("python stoat_pkg_setup did not recover from a locked database: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(counter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "3" {
+		t.Errorf("attempts = %s, want 3 (two failures then success)", got)
+	}
+}
+
+// The give-up branch exits non-zero instead of looping forever. The real
+// alpine setup bounds at 30 attempts with a 2s sleep (~60s), too slow for a
+// test; this uses a synthetic OS with the same loop shape and a bound of 2 to
+// exercise the give-up branch in well under a second.
+func TestAlpinePkgSetupGivesUpWhenDatabaseStaysLocked(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is required")
+	}
+	o := OS{
+		Name: "alpine", Init: "openrc", Shell: "/bin/ash",
+		Pkg: Pkg{
+			Setup: `n=0
+until setup-apkrepos -c -1; do
+    n=$((n + 1))
+    [ "$n" -ge 2 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
+    sleep 0
+done`,
+			Install: []string{"apk", "add"},
+		},
+	}
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "setup-apkrepos")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 99\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := Prelude(o, "sh") + "stoat_pkg_setup\n"
+	cmd := exec.Command("sh", "-c", body)
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("stoat_pkg_setup succeeded against a stub that always fails:\n%s", out)
+	}
+	if !strings.Contains(string(out), "giving up") {
+		t.Errorf("output = %q, want a give-up message", out)
+	}
+}
+
 // pacman reinstalls a package it already has unless --needed is passed.
 // devtools and build-deps both install base-devel on Arch, so a VM that
 // selects both would download the whole group twice.

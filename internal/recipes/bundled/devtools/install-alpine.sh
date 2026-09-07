@@ -4,17 +4,7 @@
 # a booted Alpine VM.
 set -e
 
-# -c enables community (where most of these live outside the base set); -1
-# picks a mirror and refreshes indexes, so no separate `apk update`.
-# setup-apkrepos runs apk update with no lock-wait, so another apk that holds
-# the database lock fails it with exit 99. Retry until the lock frees, up to
-# ~60s.
-n=0
-until setup-apkrepos -c -1; do
-    n=$((n + 1))
-    [ "$n" -ge 30 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
-    sleep 2
-done
+stoat_pkg_setup
 
 # build-base is Alpine's meta-package for gcc/make/libc-dev: the equivalent of
 # Debian's build-essential. Alpine has no package called "build-essential".

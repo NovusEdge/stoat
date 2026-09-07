@@ -15,14 +15,19 @@ seed_packages = ["sudo"]
 log_path = "/var/log/messages"
 
 [pkg]
-setup = "apk update"
+# -c enables the community repository; -1 picks a mirror and refreshes the
+# indexes, so a separate `apk update` is redundant. setup-apkrepos runs apk
+# update with no lock-wait, so a concurrent apk holding the database lock
+# fails it with exit 99; retry until the lock frees.
+setup = """
+n=0
+until setup-apkrepos -c -1; do
+    n=$((n + 1))
+    [ "$n" -ge 30 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
+    sleep 2
+done"""
 install = ["apk", "--wait", "60", "add"]
-scaffold_setup = """
-# -c enables the community repository (docker, tailscale and most of what
-# you would want live there, not in main); -1 picks a mirror and refreshes
-# the indexes, so a separate `apk update` is redundant.
-setup-apkrepos -c -1
-"""
+scaffold_setup = "stoat_pkg_setup\n"
 scaffold_install = "apk add "
 runtime_packages = { python3 = "python3" }
 

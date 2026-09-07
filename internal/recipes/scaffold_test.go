@@ -60,9 +60,9 @@ func TestNewShellScaffoldCarriesTheHonestyBlock(t *testing.T) {
 			t.Errorf("scaffold is missing %q", want)
 		}
 	}
-	// Alpine's community repo is off by default
-	if !strings.Contains(body, "setup-apkrepos -c") {
-		t.Error("alpine scaffold does not enable the community repo")
+	// stoat_pkg_setup enables Alpine's community repo, which is off by default.
+	if !strings.Contains(body, "stoat_pkg_setup") {
+		t.Error("alpine scaffold does not call stoat_pkg_setup")
 	}
 
 	fi, err := os.Stat(filepath.Join(path, "install.sh"))

@@ -3,16 +3,7 @@
 # over ssh on a booted Alpine VM.
 set -e
 
-# -1 picks a mirror and refreshes indexes, so no separate `apk update` and no
-# stoat_pkg_setup call after this loop. -c is kept even though every package
-# here lives in Alpine's main repository, so the script does not depend on
-# which repo a package happens to live in today.
-n=0
-until setup-apkrepos -c -1; do
-    n=$((n + 1))
-    [ "$n" -ge 30 ] && { echo "apk database stayed locked; giving up" >&2; exit 1; }
-    sleep 2
-done
+stoat_pkg_setup
 
 stoat_pkg_install lsof strace procps openrc
 
