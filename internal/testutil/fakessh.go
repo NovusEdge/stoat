@@ -19,15 +19,22 @@ type SSHCall struct {
 // end.
 type SSHCalls struct{ path string }
 
+// callSep ends one logged invocation. ASCII RS never appears in a command the
+// tools build, so it separates records that newline cannot.
+const callSep = "\036"
+
 func (c *SSHCalls) Calls() []SSHCall {
 	raw, err := os.ReadFile(c.path)
 	if err != nil {
 		return nil
 	}
 	var out []SSHCall
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if line != "" {
-			out = append(out, SSHCall{Argv: strings.Fields(line), Remote: line})
+	// Records are separated by RS, not newline: a remote command can itself
+	// span lines (alpine's stoat_pkg_setup is a retry loop), and splitting on
+	// newline counted one invocation as several.
+	for _, rec := range strings.Split(string(raw), callSep) {
+		if strings.TrimSpace(rec) != "" {
+			out = append(out, SSHCall{Argv: strings.Fields(rec), Remote: rec})
 		}
 	}
 	return out
@@ -42,7 +49,7 @@ func FakeSSH(t *testing.T, script string) *SSHCalls {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "calls.log")
 	body := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
+		"printf '%s\\036' \"$*\" >> " + logPath + "\n" +
 		// "${@: -1}" is bash-only; dash (Ubuntu's /bin/sh) rejects it with
 		// "Bad substitution". This loop is the POSIX way to read the last
 		// positional argument.
