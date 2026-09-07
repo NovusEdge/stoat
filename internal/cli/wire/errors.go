@@ -7,6 +7,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/gitx"
+	"github.com/novusedge/stoat/internal/hostops"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
@@ -63,6 +64,9 @@ const (
 	CodeScreenshotFailed Code = "screenshot_failed"
 	// CodeLockOutOfDate identifies a repairable project-lock condition.
 	CodeLockOutOfDate Code = "lock_out_of_date"
+	// CodeHostUnsupported identifies hostops.ErrUnsupported: a native host
+	// without a qualified VM runtime (see internal/hostops.Message).
+	CodeHostUnsupported Code = "host_unsupported"
 )
 
 // Codes returns every declared code, sorted. Built from the same string
@@ -83,6 +87,7 @@ func Codes() []Code {
 		CodeNoSuchImage,
 		CodeScreenshotFailed,
 		CodeLockOutOfDate,
+		CodeHostUnsupported,
 	}
 	slices.Sort(out)
 	return out
@@ -172,6 +177,7 @@ var codeTable = []struct {
 	{CodeScreenshotFailed, qemu.ErrScreenshotFailed},
 	{CodeNotRunning, qemu.ErrNotRunning},
 	{CodeLockOutOfDate, core.ErrLockOutOfDate},
+	{CodeHostUnsupported, hostops.ErrUnsupported},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking
