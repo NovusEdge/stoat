@@ -2,6 +2,7 @@ package cli
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -488,7 +489,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 				return nil, usageError("cp: needs a source and a destination")
 			}
 			var err error
-			vm, remote, local, toRemote, err = splitCopyArgs(c.Source, c.Dest)
+			vm, remote, local, toRemote, err = splitCopyArgs(c.Source, c.Dest, runtime.GOOS)
 			if err != nil {
 				return nil, err
 			}
@@ -666,11 +667,26 @@ func trimList(in []string) []string {
 }
 
 // splitCopyArgs resolves `cp <src> <dst>` into a VM, a remote path, a local
-// path and a direction, from which side carried the "<vm>:" prefix. The
-// scp/docker cp spelling, so there is no --to/--from flag to get backwards.
-func splitCopyArgs(src, dst string) (vm, remote, local string, toRemote bool, err error) {
+// path and a direction, from which side carried the "<vm>:" prefix. This is
+// the scp/docker cp spelling; the explicit --vm/--direction/--local/--remote
+// form handles a host path this one cannot express.
+//
+// goos gates the drive-letter carve-out below. A Linux path may legally be
+// named "C:something" (colon is not a path separator there), so treating a
+// single letter before ":" as a drive would break a real Linux user's cp for
+// the sake of a platform that was never running. Windows has the opposite
+// problem: every absolute local path starts with a drive letter, so without
+// the carve-out `stoat cp C:\Users\me\file.txt dev:/tmp/x` reads both sides
+// as remote and always fails. The carve-out only fires for goos == "windows",
+// so a Linux invocation parses identically before and after this change, and
+// a VM named with one letter still works everywhere except Windows.
+func splitCopyArgs(src, dst, goos string) (vm, remote, local string, toRemote bool, err error) {
 	srcVM, srcPath, srcRemote := strings.Cut(src, ":")
 	dstVM, dstPath, dstRemote := strings.Cut(dst, ":")
+	if goos == "windows" {
+		srcRemote = srcRemote && !isWindowsDrive(srcVM, srcPath)
+		dstRemote = dstRemote && !isWindowsDrive(dstVM, dstPath)
+	}
 	switch {
 	case srcRemote == dstRemote:
 		// Both or neither: guest-to-guest is not something one scp invocation
@@ -681,6 +697,23 @@ func splitCopyArgs(src, dst string) (vm, remote, local string, toRemote bool, er
 	default:
 		return dstVM, dstPath, src, true, nil
 	}
+}
+
+// isWindowsDrive reports whether a "<prefix>:<rest>" split off of strings.Cut
+// is actually a Windows drive-letter path (C:\foo, C:/foo) rather than a
+// "<vm>:<path>" compound. A drive letter is exactly one ASCII letter, and a
+// real drive path always continues with a separator; "C:foo" (drive-relative,
+// no separator) is left alone since it is indistinguishable from a one-letter
+// VM name and is rare in practice.
+func isWindowsDrive(prefix, rest string) bool {
+	if len(prefix) != 1 {
+		return false
+	}
+	c := prefix[0]
+	if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		return false
+	}
+	return strings.HasPrefix(rest, `\`) || strings.HasPrefix(rest, "/")
 }
 
 // resolveLocal turns a cp local path into an absolute one, expanding a

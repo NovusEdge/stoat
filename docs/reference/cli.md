@@ -389,6 +389,8 @@ copied work:/var/log/app.log to ./app.log
 
 There is also an explicit-flag form, `--vm`, `--direction` (`to` or `from`), `--local` and `--remote`, alongside the positional one rather than replacing it: a host path that legitimately contains a colon is ambiguous in the `<vm>:<path>` spelling, and a machine caller (the MCP server) needs an unambiguous one. The two forms are mutually exclusive; giving both, or giving some but not all of the flag form's four flags, is a usage error.
 
+On Windows, a single letter before `:\` or `:/` (`C:\Users\me\file.txt`) is always read as a drive, never a VM name; use the flag form for a one-letter VM name there.
+
 ```
 $ stoat cp --vm work --direction to --local ./build.sh --remote /root/build.sh
 ```
