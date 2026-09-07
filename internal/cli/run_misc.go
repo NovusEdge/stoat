@@ -173,6 +173,8 @@ func runRecipe(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runRecipeRM(a, stdin, stdout, stderr)
 	case "search":
 		return runRecipeSearch(a, stdout, stderr)
+	case "refresh":
+		return runRecipeRefresh(a, stdout, stderr)
 
 	case "new":
 		path, err := recipes.New(a.VM, a.OS, a.Backend)

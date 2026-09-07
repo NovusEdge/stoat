@@ -396,6 +396,19 @@ type RecipeSearch struct {
 	Recipes []IndexEntry `json:"recipes"`
 }
 
+// RecipeRefreshed is one file recipe refresh touched: its manifest key and
+// what happened to it (recipes.RefreshStatus, e.g. "refreshed", "backed_up",
+// "current", "orphan").
+type RecipeRefreshed struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+// RecipeRefresh is the data returned by recipe refresh.
+type RecipeRefresh struct {
+	Files []RecipeRefreshed `json:"files"`
+}
+
 // PruneItem is core.PruneItem for the wire. Class is already the wire value
 // on core.PruneItem itself, so this constructor translates nothing; it
 // exists so a field added to core.PruneItem does not silently reach the

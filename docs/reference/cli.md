@@ -74,6 +74,7 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`recipe sync`](#stoat-recipe-sync---global) | Synchronize a recipe cache to its lock | 0, 1 |
 | [`recipe update`](#stoat-recipe-update-names---global) | Repin remote recipes to current refs | 0, 1 |
 | [`recipe rm`](#stoat-recipe-rm-name--y) | Remove a remote recipe | 0, 1 |
+| [`recipe refresh`](#stoat-recipe-refresh-names) | Rewrite bundled recipe files from the embedded copies | 0, 1 |
 | [`guest ls`](#stoat-guest-ls) | List loaded guest OS definitions | 0 |
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
 | [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
@@ -696,6 +697,32 @@ Removes a remote recipe's declaration, lock entry, and checkout. It refuses a
 recipe still selected by a VM unless `--force` is supplied. Confirmation is
 required unless `-y` is supplied; `--json` also requires `-y` because it never
 reads stdin.
+
+## `stoat recipe refresh [names...]`
+
+Rewrites bundled recipe files from the copies embedded in the stoat binary
+and re-records every one of them in `~/.stoat/recipes/.manifest`, regardless
+of what the manifest currently says. Use it when a bundled script stays
+stale even though `apply`/`up` keep running: its manifest entry has fallen
+out of `.manifest` by some means other than an intentional edit, so `recipe
+add`/`up`/`apply`'s automatic install treats it as hand-edited and never
+refreshes it again.
+
+A file whose disk contents already match the embedded copy is left alone. A
+file whose contents differ is backed up to `<name>.bak` first, so a genuine
+hand edit is preserved, then overwritten. A file that belongs to a bundled
+recipe directory but has no counterpart in the current embedded copy, and no
+manifest entry, is treated as an orphan left by a rename: it is backed up
+and removed.
+
+With no names, every bundled recipe is refreshed. Naming one or more recipes
+limits the refresh to those.
+
+```
+$ stoat recipe refresh python-dev
+backed_up  python-dev/install-alpine.sh
+current    python-dev/recipe.toml
+```
 
 ## `stoat guest ls`
 

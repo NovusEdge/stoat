@@ -253,6 +253,8 @@ RecipeAdded {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
 
 RecipeRemoved {"name":"tailscale","scope":"global"}
 
+RecipeRefreshed {"path":"python-dev/install-alpine.sh","status":"backed_up"}
+
 IndexEntry  {"name":"tailscale","source":"https://github.com/x/stoat-tailscale",
              "description":"join a tailnet on boot","os":["alpine"]}
 
@@ -322,7 +324,9 @@ caller can see what did not run as plainly as what did.
 commit prefix. `RecipeRoot` identifies each search root with `path` and
 `scope`. `RecipeAdded` uses the same remote pin fields for add, lock, sync, and
 update results, with the full resolved commit. `RecipeRemoved` contains only
-the name and scope.
+the name and scope. `RecipeRefreshed.status` is `current`, `refreshed`,
+`backed_up`, or `orphan`; a `.bak` file is written before overwrite for every
+status except `current` and `refreshed`.
 
 `state` is one of `stopped`, `running`, `broken`. `error` appears only on a
 broken VM.
@@ -442,6 +446,7 @@ so a leak fails the build rather than shipping.
 | `recipe sync` | `{"recipes":[RecipeAdded,...]}` |
 | `recipe update` | `{"recipes":[RecipeAdded,...]}` |
 | `recipe rm` | `{"name":"tailscale","scope":"global"}` |
+| `recipe refresh` | `{"files":[RecipeRefreshed,...]}` |
 | `recipe search` | `{"recipes":[IndexEntry,...]}` |
 | `screenshot` | `{"vm":"work","path":"/home/u/.stoat/work/screenshots/2026-09-05T140302Z.png","bytes":48213,"width":1280,"height":800}` |
 | `logs` (no VM) | `{"lines":[...]}` (stoat's own log) |

@@ -278,6 +278,206 @@ func installFile(src fs.FS, key string, mode os.FileMode, man, next map[string]s
 	return nil
 }
 
+// RefreshStatus reports what Refresh did to one file.
+type RefreshStatus string
+
+const (
+	RefreshCurrent   RefreshStatus = "current"   // disk already matched the embedded copy
+	RefreshRefreshed RefreshStatus = "refreshed" // overwritten with no prior content to protect
+	RefreshBackedUp  RefreshStatus = "backed_up" // differing content saved to ".bak" before overwrite
+	RefreshOrphan    RefreshStatus = "orphan"    // no embedded counterpart and no manifest entry; backed up and removed
+)
+
+// RefreshResult is one file Refresh touched, keyed the same way installFile
+// keys the manifest ("xfce/recipe.toml").
+type RefreshResult struct {
+	Path   string
+	Status RefreshStatus
+}
+
+// Refresh rewrites bundled recipe files from the embedded copies and
+// re-records every one of them in ManifestName, regardless of what the
+// existing manifest says. It is the explicit-opt-in counterpart to Install's
+// automatic refresh-vs-preserve-edits rule: Install treats a manifest entry
+// that went missing (a hand-edited .manifest, a checksum that never made it
+// in) as a real edit and leaves the file alone forever after, since deciding
+// otherwise there risks reverting a genuine one. Refresh is the recovery for
+// when that entry going missing is itself the bug.
+//
+// With names empty, Refresh covers every bundled recipe. Named recipes not
+// present in the embedded tree are an error.
+//
+// A file whose disk contents already match the embedded copy is untouched
+// and reported RefreshCurrent. Anything else is backed up first, reusing
+// Install's ".bak" convention, so a genuine hand edit survives, then
+// overwritten and re-recorded.
+func Refresh(names []string) ([]RefreshResult, error) {
+	sub, err := fs.Sub(bundled, "bundled")
+	if err != nil {
+		return nil, err
+	}
+	return refresh(sub, names)
+}
+
+func refresh(src fs.FS, names []string) ([]RefreshResult, error) {
+	if err := os.MkdirAll(dir(), 0o755); err != nil {
+		return nil, err
+	}
+	items, err := fs.ReadDir(src, ".")
+	if err != nil {
+		return nil, err
+	}
+	bundledNames := map[string]bool{}
+	for _, it := range items {
+		if it.IsDir() {
+			bundledNames[it.Name()] = true
+		}
+	}
+
+	sel := names
+	if len(sel) == 0 {
+		sel = make([]string, 0, len(bundledNames))
+		for n := range bundledNames {
+			sel = append(sel, n)
+		}
+		sort.Strings(sel)
+	} else {
+		for _, n := range sel {
+			if !bundledNames[n] {
+				return nil, fmt.Errorf("no such bundled recipe %q", n)
+			}
+		}
+	}
+
+	man := readManifest()
+	next := map[string]string{}
+	for k, v := range man {
+		next[k] = v
+	}
+
+	var out []RefreshResult
+	for _, name := range sel {
+		res, err := refreshDir(src, name, next)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res...)
+	}
+	if err := writeManifest(next); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
+}
+
+// refreshDir refreshes every embedded file under recipe directory name, then
+// looks for orphans: files on disk under the same directory that Refresh did
+// not just write and that carry no manifest entry.
+func refreshDir(src fs.FS, name string, next map[string]string) ([]RefreshResult, error) {
+	var out []RefreshResult
+	written := map[string]bool{}
+	err := fs.WalkDir(src, name, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dir(), filepath.FromSlash(p)), 0o755)
+		}
+		written[p] = true
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(p, ".sh") {
+			mode = 0o755
+		}
+		res, err := refreshFile(src, p, mode, next)
+		if err != nil {
+			return err
+		}
+		out = append(out, res)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	orphans, err := refreshOrphans(name, written, next)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, orphans...), nil
+}
+
+func refreshFile(src fs.FS, key string, mode os.FileMode, next map[string]string) (RefreshResult, error) {
+	want, err := fs.ReadFile(src, key)
+	if err != nil {
+		return RefreshResult{}, err
+	}
+	wantSum := sum(want)
+	dst := filepath.Join(dir(), filepath.FromSlash(key))
+	have, err := os.ReadFile(dst)
+	status := RefreshRefreshed
+	switch {
+	case os.IsNotExist(err):
+		// nothing on disk to protect
+	case err != nil:
+		return RefreshResult{}, err
+	case sum(have) == wantSum:
+		next[key] = wantSum
+		return RefreshResult{Path: key, Status: RefreshCurrent}, nil
+	default:
+		if err := os.WriteFile(dst+".bak", have, 0o644); err != nil {
+			return RefreshResult{}, err
+		}
+		status = RefreshBackedUp
+	}
+	if err := os.WriteFile(dst, want, mode); err != nil {
+		return RefreshResult{}, err
+	}
+	next[key] = wantSum
+	return RefreshResult{Path: key, Status: status}, nil
+}
+
+// refreshOrphans finds files inside the on-disk recipe directory name that
+// Refresh did not just write (written) and that no manifest entry claims
+// (next, seeded from the manifest before this call touched it). That combination
+// only happens when a bundled file was renamed and the old name never got
+// cleaned up (install-opensuse.sh after the script became install-zypper.sh).
+// A ".bak" file is Refresh's or Install's own bookkeeping, not an orphan, and
+// is skipped so a backup never becomes the next call's cleanup target.
+func refreshOrphans(name string, written map[string]bool, next map[string]string) ([]RefreshResult, error) {
+	root := filepath.Join(dir(), name)
+	var out []RefreshResult
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || strings.HasSuffix(d.Name(), ".bak") {
+			return nil
+		}
+		key := filepath.ToSlash(strings.TrimPrefix(p, dir()+string(filepath.Separator)))
+		if written[key] {
+			return nil
+		}
+		if _, recorded := next[key]; recorded {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(p+".bak", b, 0o644); err != nil {
+			return err
+		}
+		if err := os.Remove(p); err != nil {
+			return err
+		}
+		out = append(out, RefreshResult{Path: key, Status: RefreshOrphan})
+		return nil
+	})
+	return out, err
+}
+
 // List returns installed recipe names offered for osName. Backend is ignored
 // in v2: every recipe is a shell script, and the backend (apkovl, ssh,
 // cloudinit) determines HOW it runs, not WHETHER it applies.
