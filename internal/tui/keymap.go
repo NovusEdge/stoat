@@ -140,6 +140,7 @@ func (h detailHelp) ShortHelp() []key.Binding {
 		h.ssh(),
 		plainKey([]string{"p"}, "p", "apply"),
 		plainKey([]string{"S"}, "S", "snapshots"),
+		plainKey([]string{"x"}, "x", "screenshot"),
 	}
 	if h.consolePassword {
 		keys = append(keys,
@@ -159,7 +160,7 @@ func (h detailHelp) FullHelp() [][]key.Binding {
 		{plainKey([]string{"i"}, "i", "installed"), plainKey([]string{"d"}, "d", "cycle display: auto/window/vnc")},
 		{h.ssh()},
 		{plainKey([]string{"p"}, "p", "apply"), plainKey([]string{"L"}, "L", "console log")},
-		{plainKey([]string{"S"}, "S", "snapshots")},
+		{plainKey([]string{"S"}, "S", "snapshots"), plainKey([]string{"x"}, "x", "screenshot")},
 	}
 	if h.consolePassword {
 		rows = append(rows, []key.Binding{

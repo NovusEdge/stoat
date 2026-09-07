@@ -234,6 +234,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmd := m.showToast("not running", true)
 			return m, cmd
+		case "x":
+			v := m.detail.vm
+			if v.State != core.StateRunning {
+				cmd := m.showToast("not running", true)
+				return m, cmd
+			}
+			return m, takeScreenshot(v.Name)
 		case "p":
 			v, err := m.detail.coreVM()
 			if err != nil {
@@ -303,6 +310,19 @@ func typeConsolePassword(v core.VM) tea.Cmd {
 			return errMsg(err.Error())
 		}
 		return statusMsg(v.Name + ": typed console password into the guest")
+	}
+}
+
+// takeScreenshot writes name's screen to its default path (<vm dir>/screenshots/<timestamp>.png).
+// It runs off the UI goroutine like typeConsolePassword: it is the same qemu
+// monitor round trip, plus a PNG write and re-read for the dimensions.
+func takeScreenshot(name string) tea.Cmd {
+	return func() tea.Msg {
+		shot, err := core.Screenshot(name, "")
+		if err != nil {
+			return errMsg(err.Error())
+		}
+		return statusMsg(fmt.Sprintf("%s: wrote %s (%dx%d)", name, shot.Path, shot.Width, shot.Height))
 	}
 }
 

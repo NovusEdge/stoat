@@ -79,6 +79,25 @@ func TestParseUpdateChangedNamesAreWireNames(t *testing.T) {
 	}
 }
 
+// The TUI's detail screen can already set both fields (keys "d" and "i");
+// the CLI grammar lacked flags for them until now.
+func TestParseUpdateDisplayAndInstalled(t *testing.T) {
+	a, err := Parse([]string{"update", "work", "--display", "vnc", "--installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Patch.Display == nil || *a.Patch.Display != "vnc" {
+		t.Errorf("Display = %v, want vnc", a.Patch.Display)
+	}
+	if a.Patch.Installed == nil || !*a.Patch.Installed {
+		t.Errorf("Installed = %v, want true", a.Patch.Installed)
+	}
+	joined := strings.Join(a.Changed, ",")
+	if joined != "display,installed" {
+		t.Errorf("Changed = %q, want %q", joined, "display,installed")
+	}
+}
+
 func TestParseUpdateNeedsAtLeastOneFlag(t *testing.T) {
 	if _, err := Parse([]string{"update", "work"}); err == nil {
 		t.Error("update with no flags was accepted; it would be a no-op write")

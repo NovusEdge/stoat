@@ -199,7 +199,7 @@ updated work: [share]
 
 `work`'s share is now unset. Compare to `stoat update work` with no flags at all, which is a usage error (there is nothing to change), not a no-op.
 
-Flags: `--ram`, `--cpus`, `--ssh-port`, `--disk` (grow-only), `--share` (empty clears it), `--recipes` (empty clears it; replaces the whole list, it does not add to it), `--set recipe.param=value`, `--unset recipe.param` (remove a non-secret override and restore its manifest default), and `--secret recipe.param` (set a secret without writing its value to `vm.toml`). Use `recipe show` to inspect declared types, defaults, enum values, and required parameters.
+Flags: `--ram`, `--cpus`, `--ssh-port`, `--disk` (grow-only), `--share` (empty clears it), `--recipes` (empty clears it; replaces the whole list, it does not add to it), `--set recipe.param=value`, `--unset recipe.param` (remove a non-secret override and restore its manifest default), `--secret recipe.param` (set a secret without writing its value to `vm.toml`), `--agent-access` (`none`, `observe`, `manage`, or `exec`), `--display` (`auto`, `window`, or `vnc`; applies at next start), and `--installed` (mark a disk-mode VM as having had its OS installed at the console). Use `recipe show` to inspect declared types, defaults, enum values, and required parameters.
 
 Most fields are read by qemu only at start, so a change to a *running* VM is saved to `vm.toml` but doesn't take effect until the VM is next started; `update` says so:
 

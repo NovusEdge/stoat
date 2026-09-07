@@ -89,6 +89,7 @@ Shows one VM's facts in a titled pane: mode + running/stopped state, a one-line 
 | `p` | Provision | Same guard chain as the list screen. |
 | `L` | Open console log | Opens a scrollable view of the end of `console.log`. |
 | `S` | Manage snapshots | Opens the snapshot list for a disk or cloud VM. |
+| `x` | Screenshot | Running only, else "not running". Writes to `<vm dir>/screenshots/<timestamp>.png`, the same default `stoat screenshot` uses. |
 | `t` | Type console password | Available for a running VM that has a console password. |
 | `c` | Copy console password | Copies the password through the terminal clipboard protocol. |
 | `esc` / `←` / `h` / `q` | Back to list | |
@@ -244,6 +245,49 @@ While the new-VM form is downloading a catalog image, a block appears under the 
 
 If the server omits `Content-Length`, Stoat omits the bar and percentage and
 shows only the downloaded byte count.
+
+## CLI/TUI parity
+
+Both interfaces call the same core VM operations, but each reaches a
+different subset. This table checks every CLI subcommand (see
+[cli.md](cli.md)) and every TUI screen and key binding against the code in
+`internal/cli/grammar.go` and `internal/tui/`.
+
+| Operation | CLI | TUI | Notes |
+|---|---|---|---|
+| create VM | `stoat create` | `n` (new-VM form) | |
+| update: ram/cpus/disk/share/ssh-port/recipes | `stoat update --ram` etc. | `e` (edit form) | |
+| update: recipe param `--set`/`--unset` | `stoat update --set/--unset` | new-VM form only, via the param sub-form a recipe with params opens | The edit form toggles a recipe but never opens its param form; changing a param on an existing VM needs the CLI. |
+| update: secret recipe param `--secret` | `stoat update --secret` | new-VM form only, same param sub-form (masked input) | Same gap as above: no secret entry once a VM exists. |
+| update: `--agent-access` | `stoat create`/`stoat update --agent-access` | none | No TUI screen shows or changes a VM's agent_access level. |
+| update: display preference | `stoat update --display` | `d` on the detail screen | Both sides now cover this; the CLI flag was added in this change. |
+| update: installed flag | `stoat update --installed` | `i` on the detail screen (disk mode only) | Both sides now cover this; the CLI flag was added in this change. |
+| up / down | `stoat up`, `stoat down` | `enter` on the list or detail screen | |
+| rm | `stoat rm` | `d` on the list screen | TUI refuses on a running VM the same way the CLI does. |
+| clone | `stoat clone` | none | No TUI affordance creates a VM as a copy of another. |
+| exec | `stoat exec` | none | The TUI has no non-interactive command runner. |
+| ssh | `stoat ssh` | `s` on the list or detail screen | |
+| ssh-command | `stoat ssh-command` | none | Prints argv only; no TUI equivalent, and none is useful outside a script. |
+| cp | `stoat cp` | none | |
+| forward: view | `stoat forward <vm>` | shown as a read-only row on the detail screen | |
+| forward: set/clear | `stoat forward <vm> HOST:GUEST`, `--clear` | none | Editing forwards was deliberately left out of the TUI edit form; see the comment at `internal/tui/detail.go:369`. |
+| snapshot: list/save/restore/delete | `stoat snapshot` | `S` on the detail screen | |
+| prune | `stoat prune` | none | The TUI deletes one VM at a time; nothing reports or removes stale files project-wide. |
+| apply / recipes (run) | `stoat apply` | `p` on the list or detail screen | |
+| recipe list/new/show/add/lock/sync/update/rm/search/refresh | `stoat recipe ...` | `r` on the list screen opens the recipes directory in `$EDITOR` | The editor shortcut is not a structured equivalent of any `recipe` subcommand. |
+| check-recipes | `stoat check-recipes` | none | |
+| guest ls/show | `stoat guest` | none | |
+| logs (apply log) | `stoat logs` | detail screen tails the last 10 lines automatically; `L` opens the console log | No TUI view of the full apply log or of stoat's own log. |
+| screenshot | `stoat screenshot` | `x` on the detail screen | Added in this change; writes to the VM's default screenshot path. |
+| doctor | `stoat doctor` | none directly; a failing host check blocks the whole TUI at startup instead of listing results | |
+| capabilities | `stoat capabilities` | none | |
+| mcp serve/install/doctor | `stoat mcp ...` | none | |
+| init / status / ls (as data) / prune reports | `stoat init`, `stoat status`, `stoat ls` | the list screen is the closest equivalent for `ls`; `init`, `status`, and scripted output have no TUI form | |
+| install state toggle (`i`) | none | `i` on the detail screen | TUI-only; `stoat update --installed` (added in this change) is the CLI equivalent. |
+| display cycle (`d`) | none | `d` on the detail screen | TUI-only; `stoat update --display` (added in this change) is the CLI equivalent. |
+| console password type/copy (`t`/`c`) | none | `t`/`c` on the detail screen | TUI-only: keystroke injection and OSC 52 clipboard copy have no scriptable CLI form. |
+| search/filter the VM list (`/`) | none | `/` on the list screen | TUI-only convenience; `stoat ls` plus a shell filter covers the scripted case. |
+| version / help | `stoat version`, `stoat help` | none | The TUI has its own `?` help panel instead. |
 
 ## Terminal size and layout
 
