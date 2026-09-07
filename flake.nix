@@ -28,7 +28,7 @@
           # `git describe` isn't available in the nix build sandbox, so pin a
           # version string here; bump on release the same way release.yml's
           # ${GITHUB_REF_NAME} does for the tarball builds.
-          version = "0.4.1";
+          version = "0.4.2";
         in
         {
           default = pkgs.buildGoModule {
