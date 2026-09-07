@@ -15,36 +15,31 @@ import (
 // exists on project's own structs, so the file decodes in Reject mode;
 // TestInitOutputLoads is what holds that true.
 func initTemplate(name string) string {
-	return fmt.Sprintf(`# stoat.toml: this repository's VMs. Commit it.
-# Run stoat up to build and start every VM declared here.
+	return fmt.Sprintf(`# VMs for this repo. Commit this file. Then run: stoat up
 schema = 1
 
 [project]
-# The prefix for a VM's global name. "dev" below becomes "%s-dev".
+# VM name prefix. "dev" below becomes "%s-dev".
 name = %q
 
-# Remote recipes, by index name or by source. stoat recipe lock pins each one
-# to a commit in stoat.lock, which you also commit.
+# Recipes to download. Then run: stoat recipe lock
 [recipes]
 
 [vms.dev]
-# image is the only required field: a catalog id from stoat images, or a path
-# to your own image, relative to this file.
+# Required. An id from "stoat images", or a path to your own image.
 image = "ubuntu-24.04"
-# Every field below takes stoat new's default when you delete it.
+# Delete a line below to get the default.
 cpus = 4
 ram = 4096
 disk = "20G"
-# Recipe names, applied in dependency order on every stoat up.
+# Recipe names. Applied on every "stoat up".
 recipes = []
-# Directories from this project, mounted under /work in the guest. "." is the
-# project root and mounts at /work. Every entry must stay inside the project.
+# Dirs to share with the VM, under /work. "." is this repo.
 shares = ["."]
-# What an MCP agent may do: none, observe, manage, exec.
+# What an agent can do: none, observe, manage, exec.
 agent_access = "manage"
 
-# Non-secret recipe params. Secrets go in .stoat/secrets.toml, which stoat
-# writes 0600 and never commits.
+# Recipe settings. Put secrets in .stoat/secrets.toml, and do not commit it.
 # [vms.dev.params.docker]
 # user = "dev"
 `, name, name)
@@ -81,11 +76,10 @@ func runInit(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, wire.InitResult{Path: path, Project: name, GitignoreUpdated: ignored})
 	}
 	if !a.Quiet {
-		fmt.Fprintf(stdout, "wrote %s\n", project.FileName)
+		fmt.Fprintf(stdout, "%s created in %s\n", project.FileName, dir)
 		if ignored {
 			fmt.Fprintf(stdout, "added %s/ to .gitignore\n", project.CacheDir)
 		}
-		fmt.Fprintln(stdout, "edit it, then run: stoat up")
 	}
 	return ExitOK
 }

@@ -152,7 +152,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 				}
 				return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 			}
-			fmt.Fprintf(stdout, "install did not finish; inspect: stoat logs %s\n", a.VM)
+			fmt.Fprintf(stdout, "install did not finish. see: stoat logs %s\n", a.VM)
 			return ExitOK
 		}
 		if started, err := core.Get(a.VM); err == nil {
@@ -302,12 +302,11 @@ func printDisplay(w io.Writer, d core.Display) {
 			// "no usable session" rather than "no session": the same line
 			// prints when the user set STOAT_GRAPHICAL=0 on a host that plainly
 			// has one, because its GTK cannot draw on it.
-			fmt.Fprintln(w, "display: no usable graphical session on this host, so the screen")
-			fmt.Fprintln(w, "  is on VNC instead; attach to watch it")
+			fmt.Fprintln(w, "display: no usable graphical session on this host. using VNC.")
 		}
-		fmt.Fprintf(w, "display: no qemu window; the screen is on %s\n", d.Socket)
+		fmt.Fprintf(w, "display: no qemu window. the screen is on %s\n", d.Socket)
 		if d.Attach.Command == "" {
-			fmt.Fprintf(w, "  no VNC viewer found; install one of: %s\n", strings.Join(d.Attach.Missing, ", "))
+			fmt.Fprintf(w, "  no VNC viewer found. install one of: %s\n", strings.Join(d.Attach.Missing, ", "))
 			return
 		}
 		fmt.Fprintf(w, "  attach with: %s\n", d.Attach.Command)
@@ -450,7 +449,7 @@ func runClone(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "cloned %s to %s (ssh :%d)\n", a.VM, v.Name, v.SSHPort)
-		fmt.Fprintf(stdout, "port forwards were not copied; set them with: stoat forward %s ...\n", v.Name)
+		fmt.Fprintf(stdout, "port forwards not copied. set them: stoat forward %s ...\n", v.Name)
 	}
 	return ExitOK
 }
