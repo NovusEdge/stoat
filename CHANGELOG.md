@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Release archives cover darwin (amd64, arm64) and windows (amd64, arm64)
+  next to the linux tarballs. Windows ships a zip. Those binaries run `doctor`
+  and `capabilities` only until #82 and #83 qualify the hosts.
+
 ## v0.4.1
 
 Plainer CLI output and a shorter `stoat.toml` sample, plus the fixes that
