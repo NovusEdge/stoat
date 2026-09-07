@@ -24,7 +24,10 @@ type paramForm struct {
 	params   []core.RecipeParam
 }
 
-func newParamForm(recipe core.Recipe) *paramForm {
+// newParamForm builds the field list for one recipe's params. sshUser is the
+// account WithVMDefaults would fill a default_from = "ssh_user" param with;
+// an empty sshUser leaves such a param blank instead of guessing.
+func newParamForm(recipe core.Recipe, sshUser string) *paramForm {
 	p := &paramForm{
 		recipe:   recipe.Name,
 		values:   map[string]*string{},
@@ -34,23 +37,29 @@ func newParamForm(recipe core.Recipe) *paramForm {
 	}
 	fields := make([]huh.Field, 0, len(recipe.Params))
 	for _, param := range recipe.Params {
-		p.defaults[param.Name] = param.Default
+		seed := param.Default
+		description := param.Help
+		if param.DefaultFrom == "ssh_user" && sshUser != "" {
+			seed = sshUser
+			description = strings.TrimSpace(description + " Defaults to the VM's SSH account, " + sshUser + ".")
+		}
+		p.defaults[param.Name] = seed
 		switch param.Type {
 		case "bool":
 			value := new(bool)
-			*value = param.Default == "true"
+			*value = seed == "true"
 			p.bools[param.Name] = value
-			fields = append(fields, huh.NewConfirm().Title(param.Name).Description(param.Help).Value(value).Affirmative("true").Negative("false"))
+			fields = append(fields, huh.NewConfirm().Title(param.Name).Description(description).Value(value).Affirmative("true").Negative("false"))
 		case "enum":
 			value := new(string)
-			*value = param.Default
+			*value = seed
 			p.values[param.Name] = value
-			fields = append(fields, huh.NewSelect[string]().Title(param.Name).Description(param.Help).Options(huh.NewOptions(param.Values...)...).Value(value))
+			fields = append(fields, huh.NewSelect[string]().Title(param.Name).Description(description).Options(huh.NewOptions(param.Values...)...).Value(value))
 		default:
 			value := new(string)
-			*value = param.Default
+			*value = seed
 			p.values[param.Name] = value
-			input := huh.NewInput().Title(param.Name).Description(param.Help).Value(value).Validate(paramValidator(param))
+			input := huh.NewInput().Title(param.Name).Description(description).Value(value).Validate(paramValidator(param))
 			if param.Type == "secret" {
 				input.EchoMode(huh.EchoModePassword)
 			}
@@ -151,7 +160,7 @@ func (f *formModel) parameterForms(root string, added []core.DepAddition) ([]*pa
 			recipe.Params = ordered
 		}
 		if len(recipe.Params) > 0 {
-			forms = append(forms, newParamForm(recipe))
+			forms = append(forms, newParamForm(recipe, f.resolvedSSHUser()))
 		}
 	}
 	return forms, nil

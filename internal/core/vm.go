@@ -381,6 +381,8 @@ func recipeStates(v *config.VM) ([]RecipeState, error) {
 			}
 			if value, given := v.Params[name][param.Name]; given {
 				state.Params[param.Name] = value
+			} else if param.DefaultFrom == "ssh_user" && v.SSHUser != "" {
+				state.Params[param.Name] = v.SSHUser
 			} else {
 				state.Params[param.Name] = param.Default
 			}
