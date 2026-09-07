@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.4.1
+
+Plainer CLI output and a shorter `stoat.toml` sample, plus the fixes that
+landed after v0.4.0. The JSON contract version stays **3**.
+
+### Changes
+
+- `stoat init` reports `stoat.toml created in <dir>` and stops. It no longer
+  tells you to edit the file and run `stoat up`.
+- The `stoat.toml` sample `init` writes carries short comments. The full
+  field-by-field reference stays in `docs/reference/samples/stoat.toml`.
+- CLI messages use short sentences in place of semicolon clauses. This covers
+  the display lines, `prune --dry-run`, `clone`, `update`, `forward`, and a
+  failed disk install.
+- `stoat recipe new` prints the manifest path alone.
+
+### Fixes
+
+- `python-dev` derives `venv_dir` from the SSH account. (#116)
+- Recipe params with `default_from` prefill from the VM's SSH account in the
+  TUI, and `default_from` appears in the JSON contract. (#107, #108, #110)
+- `stoat recipe refresh` reports a manifest entry that disappeared. (#109)
+- A Windows drive letter in a path argument reads as a local path, not a VM
+  name. (#113)
+- The unsupported-host refusal names what to do next. (#112)
+- Alpine repository setup moved into `stoat_pkg_setup`. (#111)
+
 ## v0.4.0
 
 A bundled recipe catalog with a rule, three new common recipes on every guest,

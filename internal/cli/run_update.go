@@ -34,7 +34,7 @@ func runUpdate(a *Args, stdout, stderr io.Writer) int {
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "updated %s: %v\n", v.Name, a.Changed)
 		if appliesAt(v) == "next_start" {
-			fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", v.Name)
+			fmt.Fprintf(stdout, "%s is running. this takes effect at next start\n", v.Name)
 		}
 	}
 	return ExitOK

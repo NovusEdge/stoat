@@ -69,7 +69,7 @@ func runForward(a *Args, stdout, stderr io.Writer) int {
 		}
 	}
 	if !active {
-		fmt.Fprintf(stdout, "%s is running; this takes effect at next start\n", a.VM)
+		fmt.Fprintf(stdout, "%s is running. this takes effect at next start\n", a.VM)
 	}
 	return ExitOK
 }
@@ -96,7 +96,7 @@ func runPrune(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, prunePrefix(r.Class)+r.Path)
 	}
 	if a.Prune.DryRun {
-		fmt.Fprintln(stdout, "\n(dry run: nothing was deleted; re-run with --apply)")
+		fmt.Fprintln(stdout, "\ndry run. nothing was deleted. re-run with --apply")
 	}
 	return ExitOK
 }

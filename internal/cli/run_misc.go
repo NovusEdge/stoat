@@ -185,9 +185,6 @@ func runRecipe(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 			return a.ok(stdout, map[string]any{"path": path})
 		}
 		fmt.Fprintln(stdout, path)
-		if !a.Quiet {
-			fmt.Fprintln(stdout, "edit it, then pick it in the new-vm form for a matching vm")
-		}
 		return ExitOK
 
 	case "show":

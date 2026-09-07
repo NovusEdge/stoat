@@ -35,7 +35,7 @@ it, with a command for a VNC viewer that is actually installed on your machine:
 ```
 $ stoat get alpinedisk
 ...
-display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
+display: no qemu window. the screen is on /home/user/.stoat/alpinedisk/vnc.sock
   attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
 ```
 
@@ -77,9 +77,8 @@ VNC socket. You can use this socket to monitor the installation:
 $ stoat up alpinedisk
 starting alpinedisk...
 alpinedisk started (ssh :2200)
-display: no usable graphical session on this host, so the install console is
-  on VNC instead; attach to watch it
-display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
+display: no usable graphical session on this host. using VNC.
+display: no qemu window. the screen is on /home/user/.stoat/alpinedisk/vnc.sock
   attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
 ```
 

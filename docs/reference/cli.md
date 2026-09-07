@@ -113,9 +113,8 @@ Writes `stoat.toml` for this directory: one `[vms.dev]` declaration, annotated w
 
 ```
 $ stoat init
-wrote stoat.toml
+stoat.toml created in /home/you/myrepo
 added .stoat/ to .gitignore
-edit it, then run: stoat up
 ```
 
 `--name` sets `project.name`, the prefix for a VM's global name; it defaults to the current directory's name, lowercased. In a git checkout, `init` also appends `.stoat/` to `.gitignore` if it is not already there.
@@ -206,7 +205,7 @@ Most fields are read by qemu only at start, so a change to a *running* VM is sav
 ```
 $ stoat update work --cpus 8
 updated work: [cpus]
-work is running; this takes effect at next start
+work is running. this takes effect at next start
 ```
 
 **Exit codes:** 0 on success; 1 if the VM can't be loaded or the update itself fails; 2 if no flags were given.
@@ -219,7 +218,7 @@ Starts a VM.
 $ stoat up work
 starting work...
 work started (ssh :2222)
-display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
+display: no qemu window. the screen is on /home/user/.stoat/work/vnc.sock
   attach with: gvncviewer /home/user/.stoat/work/vnc.sock
 ```
 
@@ -237,7 +236,7 @@ A VM gets a real QEMU window by default, on a host with a graphical session. Set
 $ stoat up work
 starting work...
 work started (ssh :2222)
-display: no qemu window; the screen is on /home/user/.stoat/work/vnc.sock
+display: no qemu window. the screen is on /home/user/.stoat/work/vnc.sock
   attach with: gvncviewer /home/user/.stoat/work/vnc.sock
 ```
 
@@ -255,9 +254,8 @@ The attach command names a viewer that is actually installed on your machine:
 $ stoat up alpinedisk
 starting alpinedisk...
 alpinedisk started (ssh :2200)
-display: no usable graphical session on this host, so the screen
-  is on VNC instead; attach to watch it
-display: no qemu window; the screen is on /home/user/.stoat/alpinedisk/vnc.sock
+display: no usable graphical session on this host. using VNC.
+display: no qemu window. the screen is on /home/user/.stoat/alpinedisk/vnc.sock
   attach with: gvncviewer /home/user/.stoat/alpinedisk/vnc.sock
 ```
 
@@ -328,7 +326,7 @@ Copies a VM: a fresh overlay disk, a fresh ssh port, but **not** the source's po
 ```
 $ stoat clone work work-2
 cloned work to work-2 (ssh :2223)
-port forwards were not copied; set them with: stoat forward work-2 ...
+port forwards not copied. set them: stoat forward work-2 ...
 ```
 
 Refuses a running source.
@@ -485,7 +483,7 @@ $ stoat prune
 broken vm: /home/user/.stoat/vms/oldvm
 partial download: /home/user/.stoat/isos/ubuntu-24.04.iso.part
 
-(dry run: nothing was deleted; re-run with --apply)
+dry run. nothing was deleted. re-run with --apply
 ```
 
 ```

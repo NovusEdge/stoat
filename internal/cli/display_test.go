@@ -126,7 +126,7 @@ func TestGetNamesWhatToInstallWhenNoViewerExists(t *testing.T) {
 	if strings.Contains(out, "attach with:") {
 		t.Errorf("no viewer is installed, so no command may be printed:\n%s", out)
 	}
-	if !strings.Contains(out, "no VNC viewer found; install one of: gvncviewer, socat") {
+	if !strings.Contains(out, "no VNC viewer found. install one of: gvncviewer, socat") {
 		t.Errorf("output does not say what to install:\n%s", out)
 	}
 }
