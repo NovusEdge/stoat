@@ -2,6 +2,26 @@
 
 Find the reported symptom or error text below, then follow its recovery steps.
 
+## `native VM operations are not qualified on ...`
+
+```
+stoat: up: native VM operations are not qualified on darwin/arm64.
+darwin/arm64 needs a qualified runtime with the QEMU HVF accelerator (tracked in stoat#82).
+doctor and capabilities still work here; every other command needs a qualified host.
+Linux with KVM is the supported configuration today.
+```
+
+Stoat's VM lifecycle (create, start, stop, ssh, recipes, and every other
+command except `doctor` and `capabilities`) is qualified on Linux with KVM
+only. macOS arm64 and Windows amd64 builds exist and compile, but their
+native runtimes are not qualified yet; see
+[stoat#82](https://github.com/novusedge/stoat/issues/82) and
+[stoat#83](https://github.com/novusedge/stoat/issues/83). `--json` and MCP
+report this as the `host_unsupported` error code.
+
+**Fix:** run Stoat on Linux with KVM, or track the issue above for your
+platform. `stoat doctor` and `stoat capabilities` still run on any host.
+
 ## No QEMU window appears
 
 A VM with `display = "vnc"` in its `vm.toml`, or one started on a host with no
