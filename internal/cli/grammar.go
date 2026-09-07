@@ -184,6 +184,8 @@ type updateCmd struct {
 	// AgentAccess is unrestricted here: only the MCP update tool may lower,
 	// never raise, a VM's level. The CLI and TUI may do either.
 	AgentAccess *string `name:"agent-access" enum:"none,observe,manage,exec" help:"change what an MCP agent may do in this VM"`
+	Display     *string `enum:"auto,window,vnc" help:"screen preference; applies at next start"`
+	Installed   *bool   `help:"mark a disk-mode VM as having had its OS installed"`
 }
 
 type cloneCmd struct {
@@ -426,6 +428,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.Patch = core.Patch{
 			RAM: u.RAM, CPUs: u.CPUs, SSHPort: u.SSHPort,
 			Disk: u.Disk, Share: u.Share, AgentAccess: u.AgentAccess,
+			Display: u.Display, Installed: u.Installed,
 		}
 		if u.Recipes != nil {
 			// The POINTER carries "was it given"; the slice it points at
@@ -441,7 +444,8 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			name string
 			set  bool
 		}{
-			{"agent_access", u.AgentAccess != nil}, {"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"ram", u.RAM != nil},
+			{"agent_access", u.AgentAccess != nil}, {"cpus", u.CPUs != nil}, {"disk", u.Disk != nil}, {"display", u.Display != nil},
+			{"installed", u.Installed != nil}, {"ram", u.RAM != nil},
 			{"recipes", u.Recipes != nil}, {"share", u.Share != nil}, {"ssh_port", u.SSHPort != nil},
 		} {
 			if f.set {
@@ -457,7 +461,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			a.Changed = append(a.Changed, "params")
 		}
 		if len(a.Changed) == 0 {
-			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes --set --unset --secret")
+			return nil, usageError("update: nothing to change; pass at least one of --ram --cpus --disk --share --ssh-port --recipes --set --unset --secret --agent-access --display --installed")
 		}
 
 	case "clone":

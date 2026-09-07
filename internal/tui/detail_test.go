@@ -235,6 +235,21 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 // The TUI detail pane is a sink in its own right. It must render stored
 // recipe state through the redacted core projection, even when a lower layer
 // accidentally hands it a raw value.
+// TestScreenshotKeyRefusesWhenStopped proves "x" reports a toast instead of
+// calling core.Screenshot on a stopped VM, which would fail with a monitor
+// error the user cannot act on differently than "not running".
+func TestScreenshotKeyRefusesWhenStopped(t *testing.T) {
+	v := core.VM{Name: "stopped-vm", State: core.StateStopped}
+	m := model{screen: screenDetail, detail: detailModel{vm: v}}
+
+	newM, cmd := m.updateDetail(keyMsg("x"))
+	got := newM.(model)
+
+	if got.toast.text != "not running" || !got.toast.err {
+		t.Fatalf("expected a 'not running' error toast, got %+v (cmd nil=%v)", got.toast, cmd == nil)
+	}
+}
+
 func TestDetailRendersRecipeSecretsAsMarkers(t *testing.T) {
 	const sentinel = "synthetic-secret-sentinel"
 	m := model{
