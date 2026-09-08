@@ -18,6 +18,9 @@ func runMCP(a *Args, version string, stdout, stderr io.Writer) int {
 		opts := mcpsrv.Options{Version: version, Limits: a.Limits}
 		var err error
 		if a.HTTP != "" {
+			if !a.Quiet && !a.JSON {
+				opts.Notify = stderr
+			}
 			err = mcpsrv.ServeHTTP(context.Background(), a.HTTP, opts)
 		} else {
 			err = mcpsrv.ServeStdio(context.Background(), opts)

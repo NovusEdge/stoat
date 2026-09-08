@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"reflect"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,6 +40,9 @@ type toolSpec struct {
 type Options struct {
 	Version string
 	Limits  Limits
+	// Notify receives the HTTP server's startup line. A stdio server leaves
+	// it nil: stdout carries the protocol and stderr belongs to the client.
+	Notify io.Writer
 }
 
 const (
@@ -227,12 +232,27 @@ func ServeHTTP(ctx context.Context, addr string, opts Options) error {
 	}
 	server := New(opts)
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-	hs := &http.Server{Addr: addr, Handler: handler}
+	hs := &http.Server{Handler: handler}
+	// Bind before serving so a busy port fails here, and so the startup line
+	// carries the resolved port when addr asks for port 0.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	if opts.Notify != nil {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(opts.Notify, "stoat mcp: streamable HTTP on http://%s\n", ln.Addr())
+		fmt.Fprintf(opts.Notify, "stoat mcp: project scope %s\n", cwd)
+		fmt.Fprintln(opts.Notify, "stoat mcp: no authentication; loopback only")
+	}
 	go func() {
 		<-ctx.Done()
 		_ = hs.Close()
 	}()
-	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
