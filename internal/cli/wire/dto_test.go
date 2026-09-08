@@ -51,6 +51,21 @@ func TestVMBrokenHasNoDisplay(t *testing.T) {
 	}
 }
 
+// TestVMProviderNamesTheNonQEMUSurface pins provider omitted (not "qemu")
+// for the default surface and present for anything else, per the plan's
+// "Interface calls made" WHERE column: JSON and text must agree.
+func TestVMProviderNamesTheNonQEMUSurface(t *testing.T) {
+	local := marshal(t, FromVM(core.VM{Name: "work"}, true))
+	if strings.Contains(local, `"provider"`) {
+		t.Errorf("a qemu VM's provider reached the wire: %s", local)
+	}
+
+	cloud := marshal(t, FromVM(core.VM{Name: "cloudy", Provider: "gce"}, true))
+	if !strings.Contains(cloud, `"provider":"gce"`) {
+		t.Errorf("provider not carried to the wire: %s", cloud)
+	}
+}
+
 func TestVMBrokenCarriesError(t *testing.T) {
 	v := core.VM{Name: "oldvm", State: core.StateBroken, Error: "broken vm.toml: oldvm: toml: line 4: ..."}
 	got := marshal(t, FromVM(v, true))

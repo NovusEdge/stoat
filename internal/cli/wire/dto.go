@@ -115,6 +115,10 @@ type VM struct {
 	Project        string `json:"project"`
 	Key            string `json:"key"`
 	ProjectMissing bool   `json:"project_missing"`
+
+	// Provider is the execution surface: absent for qemu (the empty
+	// core.VM.Provider), named otherwise ("gce").
+	Provider string `json:"provider,omitempty"`
 }
 
 // RecipeState is one recipe's redacted per-VM state.
@@ -213,6 +217,7 @@ func FromVM(v core.VM, graphical bool) VM {
 		Project:        v.Project,
 		Key:            v.Key,
 		ProjectMissing: v.ProjectMissing,
+		Provider:       v.Provider,
 	}
 }
 

@@ -36,7 +36,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, wire.VMList{VMs: wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
-	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
+	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "WHERE", "CPUS", "RAM", "SSH", "PROJECT")
 	// core.List() sorts every VM, broken ones included, together by name,
 	// so a broken VM can interleave alphabetically with good ones. The
 	// original two calls (config.List then config.ListBroken) printed every
@@ -52,8 +52,8 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State == core.StateRunning {
 			state = "running"
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %-6d %s\n",
-			v.Name, v.Mode, a.prose(stdout).State(state, 8), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-5d %-6d %-6d %s\n",
+			v.Name, v.Mode, a.prose(stdout).State(state, 8), whereCell(v), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
@@ -62,10 +62,20 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State != core.StateBroken {
 			continue
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %-6s %s\n",
-			v.Name, "-", a.prose(stdout).State("broken", 8), "-", "-", "-", "-", oneLine(v.Error))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-5s %-6s %-4s %-6s %s\n",
+			v.Name, "-", a.prose(stdout).State("broken", 8), "-", "-", "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
+}
+
+// whereCell renders the WHERE column: "local" for qemu (the empty Provider
+// field, matching provider.For's own default) and the provider's own name
+// otherwise.
+func whereCell(v core.VM) string {
+	if v.Provider == "" {
+		return "local"
+	}
+	return v.Provider
 }
 
 // projectCell renders the PROJECT column: the declaring directory, marked

@@ -215,6 +215,10 @@ type VM struct {
 	// from the active project. It is not in vm.toml: only a loaded stoat.toml
 	// knows it, and two projects could name the same VM differently.
 	Key string
+
+	// Provider is the execution surface, empty meaning qemu; see
+	// config.VM.Provider and provider.For.
+	Provider string
 }
 
 // A VM's IDENTITY is its DIRECTORY under the data root. It is never the
@@ -311,6 +315,7 @@ func fromConfigUnchecked(v *config.VM) VM {
 		AgentAccess:     v.AgentAccess,
 		Project:         v.Project,
 		ProjectMissing:  v.Project != "" && !dirExists(v.Project),
+		Provider:        v.Provider,
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),
