@@ -1,13 +1,13 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // PortForward is an alias, not a copy, of config.PortForward. This package
@@ -71,7 +71,11 @@ func Forward(name string, fwds []PortForward) (active bool, err error) {
 	if err := v.Save(); err != nil {
 		return false, err
 	}
-	return !qemu.Running(v), nil
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return false, err
+	}
+	return state != StateRunning, nil
 }
 
 // validateForwards checks a proposed forward list against everything that

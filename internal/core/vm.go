@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,9 +10,11 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/coreerr"
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/iso"
-	"github.com/novusedge/stoat/internal/qemu"
+	"github.com/novusedge/stoat/internal/provider"
+	_ "github.com/novusedge/stoat/internal/provider/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -19,10 +22,11 @@ import (
 // fresh from the process table and the filesystem each time.
 //
 // The state model has six states. Only three are knowable today. StateStopped
-// and StateRunning come from qemu.Running, which checks pid liveness and
-// matches /proc/<pid>/cmdline, so a reused pid never reads as running.
-// StateBroken comes from a vm.toml that exists but fails to parse
-// (config.ListBroken's concept).
+// and StateRunning come from the VM's provider (StateOf); qemu's own check
+// matches pid liveness against /proc/<pid>/cmdline, so a reused pid never
+// reads as running. StateBroken has two sources: a vm.toml that exists but
+// fails to parse (config.ListBroken's concept), and a vm.toml that parsed
+// whose provider cannot be resolved or cannot answer (fromConfigUnchecked).
 //
 // StateStarting, StateApplying and StateFailed are not declared here. No
 // code path yet distinguishes "qemu process is up" from "guest is
@@ -57,7 +61,10 @@ var ErrAlreadyRunning = errors.New("already running")
 // destroyed) rather than looking deleted. Start/Stop/Destroy have no VM view
 // to attach a state to, so a typed error is the only way to say "broken" to
 // those callers.
-var ErrBroken = errors.New("broken vm.toml")
+//
+// It is coreerr's value: capabilities.LoadTarget wraps the same sentinel,
+// and errors.Is matches by identity.
+var ErrBroken = coreerr.ErrBroken
 
 // Paths are the on-disk locations for one VM, resolved once here so a caller
 // (an MCP server describing a VM, a TUI detail screen) does not have to
@@ -109,7 +116,7 @@ type RecipeState struct {
 // VM answers "what is this VM doing right now". It is not the on-disk
 // record. config.VM is vm.toml: what was asked for, valid the instant it was
 // last saved. It says nothing about "is it running" on its own; that needs
-// qemu.Running too. core.VM combines both, computed together, so a caller
+// StateOf too. core.VM combines both, computed together, so a caller
 // never has one without the other.
 //
 // The design doc's VM (§1) also lists Progress and Created. Progress is
@@ -192,8 +199,9 @@ type VM struct {
 	Paths Paths
 
 	// Error is populated only when State is StateBroken, and holds
-	// config.Load's parse error so a caller can show the user why, not just
-	// that it's broken.
+	// config.Load's parse error, or providerFor's or Status's error when the
+	// config parsed but its provider could not be resolved, so a caller can
+	// show the user why, not just that it's broken.
 	Error string
 
 	// Project is the absolute directory of the stoat.toml that declared this
@@ -261,8 +269,15 @@ func checkGuest(v *config.VM) error {
 // State and Paths are the two things config.VM cannot answer for itself.
 func fromConfigUnchecked(v *config.VM) VM {
 	state := StateStopped
-	if qemu.Running(v) {
-		state = StateRunning
+	var startedAt time.Time
+	var stateErr string
+	p, err := providerFor(v)
+	if err != nil {
+		state, stateErr = StateBroken, err.Error()
+	} else if s, err := p.Status(context.Background(), v); err != nil {
+		state, stateErr = StateBroken, err.Error()
+	} else if s.Running {
+		state, startedAt = StateRunning, s.StartedAt
 	}
 	osName, backend := inferMissing(v)
 	return VM{
@@ -274,7 +289,8 @@ func fromConfigUnchecked(v *config.VM) VM {
 		Mode:            v.Mode,
 		Backend:         backend,
 		State:           state,
-		StartedAt:       qemu.StartedAt(v),
+		Error:           stateErr,
+		StartedAt:       startedAt,
 		RAM:             v.RAM,
 		CPUs:            v.CPUs,
 		CPUModel:        v.CPUModel,
@@ -511,48 +527,92 @@ func Get(name string) (VM, error) {
 	return fromConfigChecked(v)
 }
 
-// Start launches VM name. It wraps qemu.Start; the actual work (pidfile,
-// backend Prepare, marking a disk VM installed) lives there.
+// providerFor resolves v's execution surface. Every core call site goes
+// through here rather than provider.For, so a per-provider check added
+// later has one place to land.
+func providerFor(v *config.VM) (provider.Provider, error) { return provider.For(v) }
+
+// StateOf asks v's provider what the machine is doing. A provider this
+// binary does not implement is an error, never a fallback to qemu: a VM
+// created by a newer stoat must not be operated as a local one.
+func StateOf(ctx context.Context, v *config.VM) (State, error) {
+	p, err := providerFor(v)
+	if err != nil {
+		return StateBroken, err
+	}
+	s, err := p.Status(ctx, v)
+	if err != nil {
+		return StateBroken, err
+	}
+	if s.Running {
+		return StateRunning, nil
+	}
+	return StateStopped, nil
+}
+
+// Start launches VM name through its provider. The actual work (pidfile,
+// backend Prepare, marking a disk VM installed) lives in the qemu provider
+// for a local VM.
 //
-// qemu.Start already refuses to run twice, but with an untyped error
-// ("%s is already running") that a caller can only detect by string
-// matching. Start checks qemu.Running first and returns typed
-// ErrAlreadyRunning instead; qemu.Start's own check never fires, because
+// The provider's own Start already refuses to run twice, but with an
+// untyped error ("%s is already running") that a caller can only detect by
+// string matching. Start checks StateOf first and returns typed
+// ErrAlreadyRunning instead; the provider's own check never fires, because
 // this function has already returned.
 func Start(name string) error {
 	v, err := load(name)
 	if err != nil {
 		return err
 	}
-	if qemu.Running(v) {
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return err
+	}
+	if state == StateRunning {
 		return fmt.Errorf("%w: %s", ErrAlreadyRunning, name)
 	}
-	return qemu.Start(v)
+	p, err := providerFor(v)
+	if err != nil {
+		return err
+	}
+	return p.Start(context.Background(), v)
 }
 
 // EnsureRunning refuses with ErrNotRunning when v is not running. It exists
 // so a caller above core, such as mcpsrv, answers the same error Stop and
-// Exec give without importing qemu.Running itself.
+// Exec give without calling StateOf itself.
 func EnsureRunning(v *config.VM) error {
-	if !qemu.Running(v) {
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return err
+	}
+	if state != StateRunning {
 		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
 	}
 	return nil
 }
 
-// Stop powers down VM name. qemu.Stop treats "already stopped" as a
-// successful no-op; Stop does not. The CLI's `down` (internal/cli/cli.go's
-// runDown) already refuses a stopped VM as a failure, and Stop preserves
-// that behavior.
+// Stop powers down VM name through its provider. The provider's own Stop
+// treats "already stopped" as a successful no-op; Stop does not. The CLI's
+// `down` (internal/cli/cli.go's runDown) already refuses a stopped VM as a
+// failure, and Stop preserves that behavior.
 func Stop(name string) error {
 	v, err := load(name)
 	if err != nil {
 		return err
 	}
-	if !qemu.Running(v) {
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return err
+	}
+	if state != StateRunning {
 		return fmt.Errorf("%w: %s", ErrNotRunning, name)
 	}
-	return qemu.Stop(v)
+	p, err := providerFor(v)
+	if err != nil {
+		return err
+	}
+	return p.Stop(context.Background(), v)
 }
 
 // Destroy removes VM name's directory and vm.toml.
@@ -585,14 +645,14 @@ func Destroy(name string) error {
 		// why Get/List surface broken VMs instead of hiding them: they can
 		// be cleared instead of sitting forever unparseable.
 		//
-		// The running check below still applies. qemu.Running only needs
-		// Dir, which is reconstructed here; it does not need a parsed
-		// config.VM. Skipping this check let a vm.toml corrupted after its
-		// VM was started bypass the running-VM refusal, deleting the
-		// directory, pidfile, monitor socket and disk out from under a live
-		// qemu process.
+		// The running check below still applies. StateOf only needs Dir,
+		// which is reconstructed here; it does not need a parsed config.VM.
+		// Skipping this check let a vm.toml corrupted after its VM was
+		// started bypass the running-VM refusal, deleting the directory,
+		// pidfile, monitor socket and disk out from under a live qemu
+		// process.
 		bv := &config.VM{Name: name, Dir: filepath.Join(config.Root(), name)}
-		if qemu.Running(bv) {
+		if state, err := StateOf(context.Background(), bv); err == nil && state == StateRunning {
 			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
 		}
 		return bv.Delete()
@@ -600,7 +660,11 @@ func Destroy(name string) error {
 	if err != nil {
 		return err
 	}
-	if qemu.Running(v) {
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return err
+	}
+	if state == StateRunning {
 		return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
 	}
 	return v.Delete()

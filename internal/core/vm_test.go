@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/provider"
+	"github.com/novusedge/stoat/internal/provider/fake"
+	"github.com/novusedge/stoat/internal/sshx"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -27,16 +31,25 @@ func writeRawVMToml(t *testing.T, name, content string) {
 	}
 }
 
-// fakeRunning marks v as running without a real qemu process. It spawns
-// `sleep` with v.Dir in its argv (qemu.Running's cmdlineMatches only checks
-// that /proc/<pid>/cmdline contains dir+"/", not which binary it is), and
-// points the VM's pidfile at it. The returned func kills the process; the
-// caller must defer it.
-//
-// This makes Start/Stop/Destroy's "is it running" branches testable without
-// qemu-system-x86_64 installed, the same CI constraint existing tests work
-// around for qemu-img.
+// fakeRunning marks v as running in the fake provider installed for this
+// test. The returned func marks it stopped again; the caller must call or
+// defer it.
 func fakeRunning(t *testing.T, v *config.VM) func() {
+	f := fake.Install(t)
+	f.SetRunning(v.Name)
+	return func() { f.SetStopped(v.Name) }
+}
+
+// realQemuProcess spawns a real process and points v's pidfile at it,
+// leaving the real "qemu" provider registered. Use this instead of
+// fakeRunning for a test that exercises code reading qemu.Running directly
+// (clone.go), a provider.Start call that must actually run and fail
+// (autorestart_test.go's ISO-missing case: fake.Install swaps in a Start
+// that always succeeds, which would pass that test for the wrong reason),
+// or a broken-VM path whose running check is fed a hand-reconstructed
+// config.VM (TestDestroyRefusesARunningBrokenVM below), where fakeRunning's
+// name-only match can't tell whether Dir was reconstructed.
+func realQemuProcess(t *testing.T, v *config.VM) func() {
 	return testutil.FakeRunning(t, v.Dir)
 }
 
@@ -235,8 +248,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	v.Dir = filepath.Join(dir, "work")
-	stop := fakeRunning(t, v)
-	defer stop()
+	defer fakeRunning(t, v)()
 
 	if err := Start("work"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("err = %v, want ErrAlreadyRunning", err)
@@ -275,15 +287,12 @@ func TestDestroyRefusesWhileRunning(t *testing.T) {
 	stop := fakeRunning(t, v)
 
 	if err := Destroy("work"); !errors.Is(err, ErrAlreadyRunning) {
-		stop()
 		t.Fatalf("err = %v, want ErrAlreadyRunning", err)
 	}
 	if _, err := os.Stat(v.Dir); err != nil {
-		stop()
 		t.Fatalf("VM directory should still exist after a refused destroy: %v", err)
 	}
 	stop()
-	_ = os.Remove(v.PidPath())
 
 	if err := Destroy("work"); err != nil {
 		t.Fatalf("Destroy after stopping: %v", err)
@@ -471,30 +480,33 @@ func TestGetDoesNotModifyVMTomlOnDisk(t *testing.T) {
 
 // TestStartedAtRunningVsStopped pins that a running VM's StartedAt comes
 // from the pidfile qemu.Running just read, and a stopped one gets the zero
-// time, not some stale value left over from a previous run.
+// time, not some stale value left over from a previous run. It uses
+// realQemuProcess, not fakeRunning, so this still exercises qemu.StartedAt
+// reading the pidfile's mtime rather than a hardcoded fake value.
 func TestStartedAtRunningVsStopped(t *testing.T) {
 	dir := root(t)
-	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
+	v.Dir = filepath.Join(dir, "work")
 
-	v, err := Get("work")
+	got, err := Get("work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !v.StartedAt.IsZero() {
-		t.Errorf("stopped VM: StartedAt = %v, want the zero time", v.StartedAt)
+	if !got.StartedAt.IsZero() {
+		t.Errorf("stopped VM: StartedAt = %v, want the zero time", got.StartedAt)
 	}
 
-	cv := &config.VM{Name: "work", Dir: filepath.Join(dir, "work")}
-	stop := fakeRunning(t, cv)
+	stop := realQemuProcess(t, v)
 	defer stop()
 
-	v, err = Get("work")
+	got, err = Get("work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.StartedAt.IsZero() {
+	if got.StartedAt.IsZero() {
 		t.Error("running VM: StartedAt is the zero time, want the pidfile's mtime")
 	}
 }
@@ -550,7 +562,7 @@ func TestAppliedNilWhenNoRecipesApplied(t *testing.T) {
 }
 
 // TestDestroyRefusesARunningBrokenVM pins a real bug: Destroy's broken-VM
-// branch once skipped the running check. qemu.Running needs only Dir, which
+// branch once skipped the running check. StateOf needs only Dir, which
 // that branch reconstructs. Skipping the check let a vm.toml corrupted
 // after its VM was started bypass the refusal that applies to every
 // healthy VM, deleting the pidfile, monitor socket and disk from under a
@@ -559,13 +571,89 @@ func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
 	root(t)
 	// A directory that is running but whose vm.toml no longer parses.
 	writeRawVMToml(t, "hosed", "name = \"hosed\"\nmode = \"disk\n")
-	stop := fakeRunning(t, &config.VM{Name: "hosed", Dir: filepath.Join(config.Root(), "hosed")})
-	defer stop()
+	defer realQemuProcess(t, &config.VM{Name: "hosed", Dir: filepath.Join(config.Root(), "hosed")})()
 
 	if err := Destroy("hosed"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Destroy on a running broken VM = %v, want ErrAlreadyRunning", err)
 	}
 	if _, err := os.Stat(filepath.Join(config.Root(), "hosed")); err != nil {
 		t.Fatalf("the directory was deleted from under a running qemu: %v", err)
+	}
+}
+
+// The fake is keyed by Name and the real provider by Dir, so this fails if
+// StateOf stops consulting the registry.
+func TestStateOfFollowsTheProvider(t *testing.T) {
+	f := fake.Install(t)
+	v := &config.VM{Name: "dev", Dir: t.TempDir()}
+
+	if got, err := StateOf(context.Background(), v); err != nil || got != StateStopped {
+		t.Fatalf("StateOf() = %q, %v, want %q, nil", got, err, StateStopped)
+	}
+	f.SetRunning("dev")
+	if got, err := StateOf(context.Background(), v); err != nil || got != StateRunning {
+		t.Fatalf("StateOf() = %q, %v, want %q, nil", got, err, StateRunning)
+	}
+	f.SetStopped("dev")
+	if got, err := StateOf(context.Background(), v); err != nil || got != StateStopped {
+		t.Fatalf("StateOf() = %q, %v, want %q, nil", got, err, StateStopped)
+	}
+}
+
+func TestStateRejectsAnUnknownProvider(t *testing.T) {
+	v := &config.VM{Name: "dev", Dir: t.TempDir(), Provider: "nope"}
+	if _, err := StateOf(context.Background(), v); !errors.Is(err, provider.ErrUnknownProvider) {
+		t.Errorf("StateOf() error = %v, want ErrUnknownProvider", err)
+	}
+}
+
+// The point of the endpoint seam is that a VM answering somewhere other than
+// a loopback forward is reached there. A fake endpoint is the only way to
+// prove SSHCommand consults the provider instead of rebuilding
+// sshx.LocalEndpoint for itself.
+func TestSSHCommandUsesTheProvidersEndpoint(t *testing.T) {
+	root(t)
+	f := fake.Install(t)
+	f.Ep = sshx.Endpoint{Name: "work", Host: "203.0.113.7", Port: 2022, User: "stoat"}
+	if err := (&config.VM{Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	argv, err := SSHCommand("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(argv, " ")
+	if !strings.Contains(got, "stoat@203.0.113.7") {
+		t.Errorf("SSHCommand = %q, want the provider's host", got)
+	}
+	if !strings.Contains(got, "-p 2022") {
+		t.Errorf("SSHCommand = %q, want the provider's port", got)
+	}
+	if strings.Contains(got, "127.0.0.1") {
+		t.Errorf("SSHCommand = %q, must not fall back to loopback", got)
+	}
+}
+
+func TestStartAndStopPropagateTheProvidersError(t *testing.T) {
+	root(t)
+	f := fake.Install(t)
+	boom := errors.New("provider refused")
+	f.StartErr = boom
+	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Start("work"); !errors.Is(err, boom) {
+		t.Errorf("Start() = %v, want the provider's error", err)
+	}
+
+	f.StartErr = nil
+	if err := Start("work"); err != nil {
+		t.Fatal(err)
+	}
+	f.StopErr = boom
+	if err := Stop("work"); !errors.Is(err, boom) {
+		t.Errorf("Stop() = %v, want the provider's error", err)
 	}
 }

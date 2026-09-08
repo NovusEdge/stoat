@@ -19,16 +19,20 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/coreerr"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
 // Typed errors, because every caller branches on them and string matching is
 // how that goes wrong. Each wraps with the specific subject.
+//
+// ErrNotFound and ErrInvalidSpec are coreerr's values, not new ones: capabilities.LoadTarget
+// wraps the same sentinels, and errors.Is matches by identity.
 var (
-	ErrNotFound           = errors.New("not found")
+	ErrNotFound           = coreerr.ErrNotFound
 	ErrNameTaken          = errors.New("name already taken")
 	ErrImageNotDownloaded = errors.New("image not downloaded")
-	ErrInvalidSpec        = errors.New("invalid spec")
+	ErrInvalidSpec        = coreerr.ErrInvalidSpec
 	ErrInUse              = errors.New("in use")
 	// ErrRecipeNotApplicable: a recipe was named that this VM's OS and
 	// backend cannot run. Typed because a caller retrying with a corrected

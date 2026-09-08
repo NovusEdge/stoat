@@ -3,7 +3,7 @@ package capabilities
 import (
 	"runtime"
 
-	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/hostcheck"
 )
 
 // Build evaluates the supplied host and metadata observations without I/O.
@@ -131,14 +131,14 @@ func currentEntry(name, status, scope string, requirements []Requirement, limits
 	return Capability{Name: name, Status: status, Scope: scope, Requirements: requirements, Limits: limits, Reason: reason, Evidence: []Evidence{implementationEvidence(name)}}
 }
 
-func qemuProfile(checks []core.HostCheck) Profile {
+func qemuProfile(checks []hostcheck.Check) Profile {
 	requirements := []Requirement{
 		requirement("host_tool", "qemu-system-x86_64", ""),
 		requirement("host_tool", "qemu-img", ""),
 		requirement("host_device", "/dev/kvm", ""),
 	}
 	p := Profile{Name: "qemu-x86_64", Status: StatusUnknown, Scope: ScopeHost, Requirements: requirements, Limits: []Limit{}, Evidence: []Evidence{}}
-	byName := make(map[string]core.HostCheck, len(checks))
+	byName := make(map[string]hostcheck.Check, len(checks))
 	for _, c := range checks {
 		if _, exists := byName[c.Name]; !exists {
 			byName[c.Name] = c

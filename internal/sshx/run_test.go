@@ -84,7 +84,7 @@ func TestRunDoesNotEscalateForRoot(t *testing.T) {
 	// strings end in "'id'". Comparing the whole line against Args with the
 	// bare quoted argv is the only check that catches a prefix Run should
 	// not have added.
-	want := strings.Join(sshx.Args(v, sshx.Quote([]string{"id"})), " ")
+	want := strings.Join(sshx.Args(sshx.LocalEndpoint(v), sshx.Quote([]string{"id"})), " ")
 	if got := calls.Calls()[0].Remote; got != want {
 		t.Fatalf("ssh argv = %q, want %q (root must not escalate)", got, want)
 	}

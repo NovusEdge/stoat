@@ -187,9 +187,10 @@ install -Dm755 stoat ~/.local/bin/stoat
 ```
 
 A release also carries `darwin_amd64` and `darwin_arm64` tarballs, and
-`windows_amd64` and `windows_arm64` zip archives. On those hosts Stoat runs
-`doctor` and `capabilities` only. Every other command reports the host as
-unqualified, because macOS needs the QEMU HVF accelerator
+`windows_amd64` and `windows_arm64` zip archives. On those hosts Stoat cannot
+start or stop a local VM; it reports the host as unqualified. Commands that
+only read or edit VM records still run. This is because macOS needs the
+QEMU HVF accelerator
 ([#82](https://github.com/NovusEdge/stoat/issues/82)) and Windows needs WHPX
 ([#83](https://github.com/NovusEdge/stoat/issues/83)). Linux with KVM is the
 supported host today.

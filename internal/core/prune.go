@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // partStaleAfter is how long a *.part file under isos/ sits with no mtime
@@ -158,12 +158,12 @@ func pruneBroken(dryRun bool) ([]PruneItem, error) {
 		dir := filepath.Join(config.Root(), b.Name)
 		bv := &config.VM{Name: b.Name, Dir: dir}
 
-		// qemu.Running only needs v.Dir and v.PidPath(), both derivable
-		// without a parsed vm.toml, so it works on a broken VM too. The VM
-		// may have started before the edit that broke vm.toml. Destroy
-		// refuses to touch a running VM; Prune must refuse the same way,
-		// even acting in bulk.
-		if qemu.Running(bv) {
+		// StateOf only needs v.Dir and v.PidPath(), both derivable without a
+		// parsed vm.toml, so it works on a broken VM too. The VM may have
+		// started before the edit that broke vm.toml. Destroy refuses to
+		// touch a running VM; Prune must refuse the same way, even acting
+		// in bulk.
+		if state, err := StateOf(context.Background(), bv); err == nil && state == StateRunning {
 			continue
 		}
 

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -52,12 +51,24 @@ func doCopy(ctx context.Context, name, localPath, remotePath string, toRemote bo
 	// A stopped VM is the common cause of an scp failure. Report it as
 	// ErrNotRunning rather than let scp's "connection refused" surface as a
 	// bare non-zero exit. Exec checks the same way.
-	if !qemu.Running(v) {
+	state, err := StateOf(ctx, v)
+	if err != nil {
+		return err
+	}
+	if state != StateRunning {
 		return fmt.Errorf("%w: %s", ErrNotRunning, name)
+	}
+	p, err := providerFor(v)
+	if err != nil {
+		return err
+	}
+	ep, err := p.Endpoint(ctx, v)
+	if err != nil {
+		return err
 	}
 
 	var stderr bytes.Buffer
-	c := exec.CommandContext(ctx, "scp", sshx.CopyArgs(v, localPath, remotePath, toRemote)...)
+	c := exec.CommandContext(ctx, "scp", sshx.CopyArgs(ep, localPath, remotePath, toRemote)...)
 	c.Stderr = &stderr
 
 	err = c.Run()

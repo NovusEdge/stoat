@@ -13,7 +13,6 @@ import (
 	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -142,7 +141,11 @@ func resolveTargets(v *config.VM, only []string) ([]string, error) {
 
 // applyLocked is Apply's body, run while Apply holds name's provision lock.
 func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
-	if !qemu.Running(v) {
+	state, err := StateOf(ctx, v)
+	if err != nil {
+		return err
+	}
+	if state != StateRunning {
 		return fmt.Errorf("%w: %s", ErrNotRunning, v.Name)
 	}
 
@@ -283,10 +286,19 @@ func applyLocked(ctx context.Context, v *config.VM, opts ApplyOpts) error {
 func rebootAndWait(ctx context.Context, v *config.VM, recipe string) error {
 	appendProvisionLog(v, fmt.Sprintf("rebooting %s to finish %s...\n", v.Name, recipe))
 
+	p, err := providerFor(v)
+	if err != nil {
+		return err
+	}
+	ep, err := p.Endpoint(ctx, v)
+	if err != nil {
+		return err
+	}
+
 	// `reboot` tears down the ssh session before the process can report an
 	// exit status back to this host, so cmd.Run() returning an error here is
 	// expected and not a failure signal; only the wait below is.
-	cmd := exec.CommandContext(ctx, "ssh", sshx.Args(v, "reboot")...)
+	cmd := exec.CommandContext(ctx, "ssh", sshx.Args(ep, "reboot")...)
 	_ = cmd.Run()
 
 	// The pre-reboot sshd can keep answering for a moment after the reboot
@@ -328,7 +340,7 @@ func appendProvisionWarnings(v *config.VM, warnings []string) {
 
 // discoverCloudInitApplied rebuilds v.Applied for a cloudinit VM from the
 // marker files cloud-init left after first boot. It runs over ssh, so the VM
-// must be reachable; applyLocked calls it only after the qemu.Running check.
+// must be reachable; applyLocked calls it only after the running check.
 //
 // It no-ops unless the backend is cloudinit and v.Applied is still empty: once
 // a post-boot Apply has recorded state, that state is authoritative and this
@@ -344,7 +356,15 @@ func discoverCloudInitApplied(ctx context.Context, v *config.VM) ([]string, erro
 		return nil, nil
 	}
 	script := fmt.Sprintf("for marker in %s/*; do case \"$marker\" in *.out) continue;; esac; [ -f \"$marker\" ] || continue; name=$(basename \"$marker\"); printf '===%%s\\n' \"$name\"; cat \"$marker.out\" 2>/dev/null; done", cloudinit.MarkerDir)
-	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, script)...).Output()
+	p, err := providerFor(v)
+	if err != nil {
+		return nil, err
+	}
+	ep, err := p.Endpoint(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(ep, script)...).Output()
 	if err != nil {
 		return nil, nil // marker dir missing or a transient ssh error; discover nothing
 	}

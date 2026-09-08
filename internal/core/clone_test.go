@@ -52,17 +52,14 @@ func TestCloneRefusesInvalidName(t *testing.T) {
 
 // A running source must be refused outright: an overlay's backing file must
 // never change after the overlay is made, and a running qemu process is
-// writing to its disk continuously. fakeRunning (vm_test.go) fakes liveness
-// without a real qemu process.
+// writing to its disk continuously.
 func TestCloneRefusesRunningSource(t *testing.T) {
-	dir := root(t)
+	root(t)
 	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	v.Dir = filepath.Join(dir, "work")
-	stop := fakeRunning(t, v)
-	defer stop()
+	defer fakeRunning(t, v)()
 
 	if _, err := Clone("work", "clone1"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("err = %v, want ErrAlreadyRunning", err)

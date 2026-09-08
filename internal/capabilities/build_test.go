@@ -8,11 +8,12 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/coreerr"
+	"github.com/novusedge/stoat/internal/hostcheck"
 )
 
-func passingChecks() []core.HostCheck {
-	return []core.HostCheck{
+func passingChecks() []hostcheck.Check {
+	return []hostcheck.Check{
 		{Name: "qemu-system-x86_64", OK: true},
 		{Name: "qemu-img", OK: true},
 		{Name: "/dev/kvm", OK: true},
@@ -174,7 +175,7 @@ func TestCapabilitiesBoundaries(t *testing.T) {
 	}
 
 	t.Run("partial required host observations are unknown", func(t *testing.T) {
-		report := Build(Input{HostChecks: []core.HostCheck{{Name: "qemu-system-x86_64", OK: true}}})
+		report := Build(Input{HostChecks: []hostcheck.Check{{Name: "qemu-system-x86_64", OK: true}}})
 		profile := profileEntry(t, report.Profiles, "qemu-x86_64")
 		if profile.Status != "unknown" || profile.Reason == nil || profile.Reason.Code != "host_probe_unavailable" {
 			t.Errorf("qemu-x86_64 = %+v, want unknown/host_probe_unavailable", profile)
@@ -182,7 +183,7 @@ func TestCapabilitiesBoundaries(t *testing.T) {
 	})
 
 	t.Run("failed fully observed host requirement is limited", func(t *testing.T) {
-		report := Build(Input{HostChecks: []core.HostCheck{
+		report := Build(Input{HostChecks: []hostcheck.Check{
 			{Name: "qemu-system-x86_64", OK: true},
 			{Name: "qemu-img", OK: false},
 			{Name: "/dev/kvm", OK: true},
@@ -197,7 +198,7 @@ func TestCapabilitiesBoundaries(t *testing.T) {
 	})
 
 	t.Run("empty host observations are unknown", func(t *testing.T) {
-		report := Build(Input{HostChecks: []core.HostCheck{}})
+		report := Build(Input{HostChecks: []hostcheck.Check{}})
 		profile := profileEntry(t, report.Profiles, "qemu-x86_64")
 		if profile.Status != "unknown" || profile.Reason == nil || profile.Reason.Code != "host_probe_unavailable" {
 			t.Errorf("qemu-x86_64 = %+v, want unknown/host_probe_unavailable", profile)
@@ -248,11 +249,11 @@ func TestCapabilitiesBoundaries(t *testing.T) {
 		}
 
 		for _, name := range []string{"", "../escape", "bad/name", "-bad", "_bad", "bad name"} {
-			if _, err := LoadTarget(name); !errors.Is(err, core.ErrInvalidSpec) {
+			if _, err := LoadTarget(name); !errors.Is(err, coreerr.ErrInvalidSpec) {
 				t.Errorf("LoadTarget(%q) error = %v, want ErrInvalidSpec", name, err)
 			}
 		}
-		if _, err := LoadTarget("missing"); !errors.Is(err, core.ErrNotFound) {
+		if _, err := LoadTarget("missing"); !errors.Is(err, coreerr.ErrNotFound) {
 			t.Errorf("LoadTarget(missing) error = %v, want ErrNotFound", err)
 		}
 		brokenDir := filepath.Join(root, "broken")
@@ -262,7 +263,7 @@ func TestCapabilitiesBoundaries(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(brokenDir, "vm.toml"), []byte("name = \"broken\"\nmode = \"cloud\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := LoadTarget("broken"); !errors.Is(err, core.ErrBroken) {
+		if _, err := LoadTarget("broken"); !errors.Is(err, coreerr.ErrBroken) {
 			t.Errorf("LoadTarget(broken) error = %v, want ErrBroken", err)
 		}
 	})

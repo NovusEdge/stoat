@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -559,7 +559,11 @@ func validateDiskGrow(v *config.VM, size string) (string, error) {
 	// because qemu-img resize runs against the live file below. RAM, CPUs and
 	// SSHPort defer to next start instead. ErrAlreadyRunning matches how Destroy
 	// signals the same "needs stopped, isn't" refusal.
-	if qemu.Running(v) {
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return "", err
+	}
+	if state == StateRunning {
 		return "", fmt.Errorf("%w: disk: stop %s before resizing its disk", ErrAlreadyRunning, v.Name)
 	}
 

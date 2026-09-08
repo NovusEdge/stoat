@@ -110,7 +110,7 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
-	argv := append([]string{"ssh"}, sshx.Args(v)...)
+	argv := append([]string{"ssh"}, sshx.Args(sshx.LocalEndpoint(v))...)
 	if err := syscall.Exec(path, argv, os.Environ()); err != nil {
 		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail

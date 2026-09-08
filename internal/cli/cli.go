@@ -495,11 +495,15 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDoctor(a, stdout, stderr)
 	}
 
-	// Every mutating or process-facing command must reject before resolving
-	// secrets, reading project scope, creating the data root, or initializing
-	// logs. The independent capabilities command is dispatched before this
-	// boundary by its owner and remains metadata-only.
-	if err := hostops.RequireVM(); err != nil {
+	// Every command past this point either drives a machine or writes to the
+	// data root, so an unqualified host refuses here, before secrets resolve,
+	// project scope is read, or a log is written.
+	//
+	// hostops.RequireDataRoot exists for the day a provider runs a VM
+	// somewhere other than this host. Moving these call sites onto it needs
+	// that provider first; opening the gate earlier only lets a macOS user
+	// reach a QEMU path that cannot work.
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 	if len(a.Params) > 0 {

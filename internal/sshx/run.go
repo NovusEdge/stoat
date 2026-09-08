@@ -44,7 +44,7 @@ func Run(ctx context.Context, v *config.VM, root bool, argv []string, stdin io.R
 		remote = escalate(v, argv)
 	}
 	var out, errb bytes.Buffer
-	c := exec.CommandContext(ctx, "ssh", Args(v, Quote(remote))...)
+	c := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), Quote(remote))...)
 	c.Stdin = stdin
 	c.Stdout = &out
 	c.Stderr = &errb

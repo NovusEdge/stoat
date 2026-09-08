@@ -1,6 +1,6 @@
 package capabilities
 
-import "github.com/novusedge/stoat/internal/core"
+import "github.com/novusedge/stoat/internal/hostcheck"
 
 const (
 	StatusSupported   = "supported"
@@ -103,6 +103,6 @@ type Evidence struct {
 type Input struct {
 	Version      string
 	ProjectState string
-	HostChecks   []core.HostCheck
+	HostChecks   []hostcheck.Check
 	Target       *Target
 }

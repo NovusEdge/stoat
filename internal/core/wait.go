@@ -14,7 +14,6 @@ import (
 
 	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/config"
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // Until is a state Wait can block for. It is a small, closed set distinct
@@ -32,7 +31,7 @@ const (
 	// UntilApplied is the most recent recipe run having finished
 	// successfully. See waitApplied.
 	UntilApplied Until = "applied"
-	// UntilStopped is qemu.Running turning false.
+	// UntilStopped is the provider's state turning to not-running.
 	UntilStopped Until = "stopped"
 	// UntilHealthy is every applied recipe's health check passing.
 	UntilHealthy Until = "healthy"
@@ -171,22 +170,37 @@ func healthFailure(verdict RecipeHealth) error {
 // polled. Wait never starts a VM itself; that is Start's job. A VM that is
 // already not running can never bring sshd up on its own.
 func waitReachable(ctx context.Context, v *config.VM) error {
-	if !qemu.Running(v) {
+	state, err := StateOf(ctx, v)
+	if err != nil {
+		return err
+	}
+	if state != StateRunning {
 		return fmt.Errorf("%w: %s: not running", ErrCannotReach, v.Name)
 	}
 	return pollUntil(ctx, func() bool { return sshBannerUp(ctx, v) })
 }
 
-// sshBannerUp reports whether v's forwarded port answers as a real sshd, not
+// sshBannerUp reports whether v's ssh endpoint answers as a real sshd, not
 // merely accepting TCP. QEMU/libslirp's user-mode networking accepts the
 // host-side socket before the guest is dialled, so a bare accept() proves
 // nothing. sshBannerUp requires the "SSH-" identification banner, the same
 // check sshx.Wait's bannerReady makes. It is a ctx-aware reimplementation,
 // not a call to bannerReady, because sshx.Wait takes a fixed timeout and
 // cannot give up early when ctx is cancelled mid-dial.
+//
+// The address comes from the provider, so a VM that answers somewhere other
+// than a loopback forward is probed where it actually lives.
 func sshBannerUp(ctx context.Context, v *config.VM) bool {
+	p, err := providerFor(v)
+	if err != nil {
+		return false
+	}
+	e, err := p.Endpoint(ctx, v)
+	if err != nil {
+		return false
+	}
 	d := net.Dialer{Timeout: time.Second}
-	c, err := d.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", v.SSHPort))
+	c, err := d.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", e.Host, e.Port))
 	if err != nil {
 		return false
 	}
@@ -276,12 +290,15 @@ func lastProvisionLineIs(v *config.VM, want string) bool {
 	return false
 }
 
-// waitStopped blocks until qemu.Running(v) turns false. Unlike Reachable and
-// Applied, there is no impossible-by-construction case to refuse up front:
-// a running VM can always, in principle, be stopped by something else before
-// ctx gives up.
+// waitStopped blocks until v's provider reports it not running. Unlike
+// Reachable and Applied, there is no impossible-by-construction case to
+// refuse up front: a running VM can always, in principle, be stopped by
+// something else before ctx gives up.
 func waitStopped(ctx context.Context, v *config.VM) error {
-	return pollUntil(ctx, func() bool { return !qemu.Running(v) })
+	return pollUntil(ctx, func() bool {
+		state, err := StateOf(ctx, v)
+		return err == nil && state != StateRunning
+	})
 }
 
 // pollUntil calls check immediately, so an already-satisfied condition

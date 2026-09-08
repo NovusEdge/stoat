@@ -58,23 +58,29 @@ func User(v *config.VM) string {
 // The port flag is not here. ssh takes "-p" and scp takes "-P" (capital,
 // since scp's lowercase -p means "preserve file times"), so each caller
 // supplies it itself. See CopyArgs.
-func connOptions() []string {
-	return []string{
+func connOptions(e Endpoint) []string {
+	host := []string{
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
+	}
+	if e.KnownHosts != "" {
+		host = []string{
+			"-o", "StrictHostKeyChecking=accept-new",
+			"-o", "UserKnownHostsFile=" + e.KnownHosts,
+		}
+	}
+	return append(host,
 		"-o", "LogLevel=ERROR",
 		"-o", "ConnectTimeout=5",
 		"-o", "BatchMode=yes",
 		"-i", keys.PrivatePath(),
-	}
+	)
 }
 
-// Args returns the argv (excluding argv[0]) for ssh into v. Host key checks
-// are off on purpose: this is a loopback forward to a VM stoat just built,
-// and live VMs are recreated constantly.
-func Args(v *config.VM, extra ...string) []string {
-	a := append([]string{"-p", fmt.Sprint(v.SSHPort)}, connOptions()...)
-	a = append(a, User(v)+"@127.0.0.1")
+// Args returns the argv (excluding argv[0]) for ssh to e.
+func Args(e Endpoint, extra ...string) []string {
+	a := append([]string{"-p", fmt.Sprint(e.Port)}, connOptions(e)...)
+	a = append(a, e.User+"@"+e.Host)
 	return append(a, extra...)
 }
 
@@ -105,21 +111,20 @@ func preludeFor(v *config.VM, runtime string) string {
 }
 
 // CopyArgs returns the argv (excluding argv[0]) for scp between the host and
-// v's guest. It shares every connection setting Args does (see connOptions)
+// e's guest. It shares every connection setting Args does (see connOptions)
 // and differs only in the port flag, since scp's is capital -P.
 //
-// toRemote picks the direction. true puts the guest spec
-// ("user@127.0.0.1:remotePath") on the right, as scp's destination
-// (core.CopyTo). false puts it on the left, as scp's source (core.CopyFrom).
-// localPath is always a bare host path, never quoted or rewritten: it is
-// scp's own argv element, not something a shell re-parses.
+// toRemote picks the direction. true puts the guest spec on the right, as
+// scp's destination (core.CopyTo). false puts it on the left, as scp's source
+// (core.CopyFrom). localPath is always a bare host path, never quoted or
+// rewritten: it is scp's own argv element, not something a shell re-parses.
 //
 // -q suppresses scp's interactive progress meter. This argv is built for
 // exec.CommandContext, never a terminal, so stray meter output would
 // otherwise get captured as if it were an error.
-func CopyArgs(v *config.VM, localPath, remotePath string, toRemote bool) []string {
-	a := append([]string{"-P", fmt.Sprint(v.SSHPort), "-q"}, connOptions()...)
-	remoteSpec := User(v) + "@127.0.0.1:" + remotePath
+func CopyArgs(e Endpoint, localPath, remotePath string, toRemote bool) []string {
+	a := append([]string{"-P", fmt.Sprint(e.Port), "-q"}, connOptions(e)...)
+	remoteSpec := e.User + "@" + e.Host + ":" + remotePath
 	if toRemote {
 		return append(a, localPath, remoteSpec)
 	}
@@ -140,9 +145,9 @@ func CopyArgs(v *config.VM, localPath, remotePath string, toRemote bool) []strin
 // expires elsewhere, sshx.Wait needs a caller-supplied timeout ceiling, and
 // duplicating the ~10-line dial is cheaper than reconciling those two
 // different contracts.
-func Wait(ctx context.Context, v *config.VM, timeout time.Duration) error {
+func Wait(ctx context.Context, e Endpoint, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	addr := fmt.Sprintf("127.0.0.1:%d", v.SSHPort)
+	addr := fmt.Sprintf("%s:%d", e.Host, e.Port)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -179,7 +184,7 @@ func Wait(ctx context.Context, v *config.VM, timeout time.Duration) error {
 		case <-time.After(sleep):
 		}
 	}
-	return fmt.Errorf("%s: ssh not reachable on port %d after %s", v.Name, v.SSHPort, timeout)
+	return fmt.Errorf("%s: ssh not reachable at %s after %s", e.Name, addr, timeout)
 }
 
 // dialCtx dials addr, bounding the attempt by whichever of ctx or
@@ -286,7 +291,7 @@ func cloudInitProbe(ctx context.Context, v *config.VM, log io.Writer) (cloudInit
 		defer cancel()
 
 		var out bytes.Buffer
-		ci := exec.CommandContext(probeCtx, "ssh", Args(v, argv...)...)
+		ci := exec.CommandContext(probeCtx, "ssh", Args(LocalEndpoint(v), argv...)...)
 		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
 		ci.WaitDelay = recipeShutdownGrace
 		ci.Stdout = &out
@@ -383,7 +388,7 @@ func RunCheck(ctx context.Context, v *config.VM, command string, timeout time.Du
 		prelude = guest.Prelude(o, "sh")
 	}
 	body := prelude + "\n" + command + "\n"
-	cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
+	cmd := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = healthShutdownGrace
 	cmd.Stdin = strings.NewReader(body)
@@ -416,7 +421,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	defer func() { _ = log.Close() }()
 
 	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
-	if err := Wait(ctx, v, WaitTimeout); err != nil {
+	if err := Wait(ctx, LocalEndpoint(v), WaitTimeout); err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintf(log, "CANCELLED: %v\n", err)
 		} else {
@@ -446,7 +451,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 
 	if o, ok := guest.Lookup(v.OS); ok && strings.TrimSpace(o.Pkg.Setup) != "" {
 		fmt.Fprintln(log, "refreshing the package index...")
-		st := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
+		st := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
 		st.Cancel = func() error { return st.Process.Signal(syscall.SIGTERM) }
 		st.WaitDelay = recipeShutdownGrace
 		st.Stdin = strings.NewReader(guest.Prelude(o, "sh") + "stoat_pkg_setup\n")
@@ -497,7 +502,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
 			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
-			bs := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, []string{"sh", "-s"})...)...)
+			bs := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
 			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
 			bs.WaitDelay = recipeShutdownGrace
 			bs.Stdin = strings.NewReader(guest.WithPrelude(bootstrap, preludeFor(v, "sh")))
@@ -513,7 +518,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, recipes.InterpreterArgs(runtime))...)...)
+		cmd := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, recipes.InterpreterArgs(runtime))...)...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = recipeShutdownGrace
 		cmd.Stdin = strings.NewReader(input)

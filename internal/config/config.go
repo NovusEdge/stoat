@@ -94,6 +94,10 @@ type VM struct {
 	// Written by the form at creation time; dispatch elsewhere in stoat
 	// keys off Mode, not this field.
 	Backend string `toml:"backend"`
+	// Provider is the execution surface: "qemu" for a local hypervisor VM,
+	// or a cloud provider's name. Empty means "qemu", which is what every
+	// vm.toml written before this field existed says.
+	Provider string `toml:"provider,omitempty"`
 	// Base is the absolute path to the shared base image an overlay is
 	// created from. Cloud mode only.
 	Base string `toml:"base"`
@@ -202,7 +206,7 @@ func Root() string {
 
 // EnsureRoot creates the data root and its fixed subdirectories.
 func EnsureRoot() error {
-	if err := hostops.RequireVM(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	for _, d := range []string{"isos", "recipes"} {
@@ -276,7 +280,7 @@ func (v *VM) ISOPath() string {
 
 // Save writes vm.toml, creating the VM directory if needed.
 func (v *VM) Save() error {
-	if err := hostops.RequireVM(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	if v.Dir == "" {
@@ -381,7 +385,7 @@ var sshPortLine = regexp.MustCompile(`(?m)^\s*sshport\s*=\s*(\d+)\s*$`)
 
 // Delete removes the VM directory. It never touches isos/.
 func (v *VM) Delete() error {
-	if err := hostops.RequireVM(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {

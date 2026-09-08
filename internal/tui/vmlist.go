@@ -107,10 +107,10 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	// next reload.
 	if v.State == core.StateRunning {
 		dot, dotStyle = glyphRunning, upStyle
-		// State and StartedAt come from separate qemu.Running checks in
-		// fromConfig; a pidfile vanishing between them leaves a running row
-		// with a zero StartedAt, which time.Since renders as a nonsense
-		// six-figure uptime. Drop the duration in that window.
+		// fromConfigUnchecked takes State and StartedAt from one provider.Status
+		// call, but the qemu provider reads pid liveness and pidfile mtime
+		// separately: a pidfile vanishing between them leaves a running row with a
+		// zero StartedAt, which time.Since renders as a nonsense six-figure uptime.
 		up := "up ?"
 		if !v.StartedAt.IsZero() {
 			up = "up " + time.Since(v.StartedAt).Truncate(time.Second).String()
