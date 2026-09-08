@@ -27,10 +27,13 @@ const maxMetadataValueBytes = 256 * 1024
 // stops billing on its own.
 const defaultMaxRunDuration = 6 * time.Hour
 
-// operatorEndpoint echoes back the caller's address in a bare-text body. It
-// is Google's own dynamic-DNS update check, chosen so the request stays on
-// a Google-operated host rather than a third party.
-const operatorEndpoint = "https://domains.google.com/checkip"
+// operatorEndpoint echoes back the caller's address in a bare-text body.
+// domains.google.com/checkip filled this role until Google Domains was
+// retired; it now 301s to an HTML page. ipify has no IPv6 records on this
+// hostname, so the response is always v4, matching the instance's v4-only
+// ONE_TO_ONE_NAT access config (api64.ipify.org would resolve v6 first on a
+// dual-stack host and produce a firewall rule the instance can never match).
+const operatorEndpoint = "https://api.ipify.org"
 
 // insertRequest builds the instances.insert request for v. It takes no
 // client and makes no call, so every shape it can produce is covered by a
@@ -131,15 +134,21 @@ func diskSizeGB(s string) (int64, error) {
 	return gb, nil
 }
 
-// operatorRange asks a Google endpoint what address it saw the request come
+// operatorRange asks operatorEndpoint what address it saw the request come
 // from, and returns it as a single-address CIDR the firewall rule can use
-// as its source range.
+// as its source range. The instance always gets a v4-only ONE_TO_ONE_NAT
+// access config, so a v6 answer here would produce a rule the instance can
+// never match; operatorRange rejects one rather than open a mismatched rule.
 func operatorRange(ctx context.Context) (string, error) {
+	return operatorRangeWith(ctx, http.DefaultClient)
+}
+
+func operatorRangeWith(ctx context.Context, client *http.Client) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, operatorEndpoint, nil)
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("looking up the operator's address: %w", err)
 	}
@@ -149,8 +158,12 @@ func operatorRange(ctx context.Context) (string, error) {
 		return "", err
 	}
 	addr := strings.TrimSpace(string(body))
-	if net.ParseIP(addr) == nil {
+	ip := net.ParseIP(addr)
+	if ip == nil {
 		return "", fmt.Errorf("operator address lookup returned %q, not an IP", addr)
+	}
+	if ip.To4() == nil {
+		return "", fmt.Errorf("operator address lookup returned %q, an IPv6 address; the instance is v4-only", addr)
 	}
 	return rangeFor(addr), nil
 }

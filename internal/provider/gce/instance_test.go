@@ -1,12 +1,25 @@
 package gce
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/settings"
 )
+
+func fakeHTTPClient(body string) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"text/plain"}},
+		}, nil
+	})}
+}
 
 func minimalVM() *config.VM {
 	return &config.VM{Name: "cloudy", RAM: 2048, CPUs: 2, Disk: "20G"}
@@ -79,5 +92,32 @@ func TestOperatorRangeUsesTheRightPrefixLength(t *testing.T) {
 	}
 	if got := rangeFor("2001:14ba:788e:b400::19a"); got != "2001:14ba:788e:b400::19a/128" {
 		t.Errorf("rangeFor(v6) = %q; a /32 on an IPv6 address opens a vast range", got)
+	}
+}
+
+func TestOperatorRangeParsesABareV4Address(t *testing.T) {
+	got, err := operatorRangeWith(context.Background(), fakeHTTPClient("89.166.32.165"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "89.166.32.165/32" {
+		t.Errorf("operatorRangeWith() = %q, want 89.166.32.165/32", got)
+	}
+}
+
+// domains.google.com/checkip now 301s to an HTML page instead of answering
+// with a bare address; this is that failure mode reproduced with a fake
+// transport instead of a live request.
+func TestOperatorRangeRejectsANonIPBody(t *testing.T) {
+	_, err := operatorRangeWith(context.Background(), fakeHTTPClient("<!DOCTYPE html><html>...</html>"))
+	if err == nil {
+		t.Error("operatorRangeWith() = nil error for an HTML body")
+	}
+}
+
+func TestOperatorRangeRejectsIPv6(t *testing.T) {
+	_, err := operatorRangeWith(context.Background(), fakeHTTPClient("2001:14ba:788e:b400::19a"))
+	if err == nil {
+		t.Error("operatorRangeWith() = nil error for an IPv6 address; the instance is v4-only")
 	}
 }
