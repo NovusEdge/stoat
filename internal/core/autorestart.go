@@ -28,7 +28,10 @@ func AutoRestartAfterInstall(ctx context.Context, name string) (bool, error) {
 		return false, nil
 	}
 	state, err := StateOf(ctx, v)
-	if err != nil || state != StateRunning {
+	if err != nil {
+		return false, err
+	}
+	if state != StateRunning {
 		return false, nil
 	}
 

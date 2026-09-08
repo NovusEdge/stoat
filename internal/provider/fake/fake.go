@@ -4,6 +4,7 @@ package fake
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,21 +15,48 @@ import (
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
+// Provider answers from a liveness map the test controls. core.waitStopped
+// polls Status from its own goroutine while the test flips a VM, so every
+// read and write of that map takes mu.
 type Provider struct {
-	RunningVMs map[string]bool
-	StartErr   error
-	StopErr    error
-	Ep         sshx.Endpoint
+	StartErr error
+	StopErr  error
+	Ep       sshx.Endpoint
+
+	mu      sync.Mutex
+	running map[string]bool
 }
 
-func (Provider) Name() string                                      { return "qemu" }
-func (Provider) Capabilities(*config.VM) []capabilities.Capability { return nil }
+func (*Provider) Name() string                                      { return "qemu" }
+func (*Provider) Capabilities(*config.VM) []capabilities.Capability { return nil }
+
+// SetRunning marks name live. Tests that need a VM to look started without
+// calling Start use this.
+func (p *Provider) SetRunning(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running[name] = true
+}
+
+// SetStopped marks name dead.
+func (p *Provider) SetStopped(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.running, name)
+}
+
+// IsRunning reports the recorded liveness of name.
+func (p *Provider) IsRunning(name string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.running[name]
+}
 
 func (p *Provider) Start(_ context.Context, v *config.VM) error {
 	if p.StartErr != nil {
 		return p.StartErr
 	}
-	p.RunningVMs[v.Name] = true
+	p.SetRunning(v.Name)
 	return nil
 }
 
@@ -36,12 +64,12 @@ func (p *Provider) Stop(_ context.Context, v *config.VM) error {
 	if p.StopErr != nil {
 		return p.StopErr
 	}
-	delete(p.RunningVMs, v.Name)
+	p.SetStopped(v.Name)
 	return nil
 }
 
 func (p *Provider) Status(_ context.Context, v *config.VM) (provider.Status, error) {
-	if !p.RunningVMs[v.Name] {
+	if !p.IsRunning(v.Name) {
 		return provider.Status{}, nil
 	}
 	return provider.Status{Running: true, StartedAt: time.Unix(1, 0)}, nil
@@ -62,7 +90,7 @@ func Install(t *testing.T) *Provider {
 	if err != nil {
 		t.Fatalf("no provider registered as qemu: %v", err)
 	}
-	f := &Provider{RunningVMs: map[string]bool{}}
+	f := &Provider{running: map[string]bool{}}
 	provider.Register("qemu", f)
 	t.Cleanup(func() { provider.Register("qemu", prev) })
 	return f

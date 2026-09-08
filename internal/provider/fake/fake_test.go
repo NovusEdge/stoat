@@ -10,7 +10,7 @@ import (
 
 func TestInstallReplacesQemuForOneTest(t *testing.T) {
 	f := Install(t)
-	f.RunningVMs["dev"] = true
+	f.SetRunning("dev")
 
 	p, err := provider.For(&config.VM{Name: "dev"})
 	if err != nil {

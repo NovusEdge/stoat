@@ -24,8 +24,9 @@ import (
 // The state model has six states. Only three are knowable today. StateStopped
 // and StateRunning come from the VM's provider (StateOf); qemu's own check
 // matches pid liveness against /proc/<pid>/cmdline, so a reused pid never
-// reads as running. StateBroken comes from a vm.toml that exists but fails to parse
-// (config.ListBroken's concept).
+// reads as running. StateBroken has two sources: a vm.toml that exists but
+// fails to parse (config.ListBroken's concept), and a vm.toml that parsed
+// whose provider cannot be resolved or cannot answer (fromConfigUnchecked).
 //
 // StateStarting, StateApplying and StateFailed are not declared here. No
 // code path yet distinguishes "qemu process is up" from "guest is

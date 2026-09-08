@@ -35,8 +35,8 @@ func writeRawVMToml(t *testing.T, name, content string) {
 // defer it.
 func fakeRunning(t *testing.T, v *config.VM) func() {
 	f := fake.Install(t)
-	f.RunningVMs[v.Name] = true
-	return func() { delete(f.RunningVMs, v.Name) }
+	f.SetRunning(v.Name)
+	return func() { f.SetStopped(v.Name) }
 }
 
 // realQemuProcess spawns a real process and points v's pidfile at it,
