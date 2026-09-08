@@ -470,6 +470,27 @@ func GCEImageFor(id string) (string, error) {
 	return "", fmt.Errorf("%w: %s", ErrNoSuchImage, id)
 }
 
+// GCEImageForOS resolves a guest name (config.VM.OS, e.g. "ubuntu") to that
+// OS's GCE-qualified catalog entry. Guest names and catalog IDs diverge for
+// every multi-word entry ("ubuntu" vs. "ubuntu-24.04"), and the gce provider
+// only ever has the guest name.
+func GCEImageForOS(osName string) (string, error) {
+	seen := false
+	for _, e := range Catalog() {
+		if e.OS != osName {
+			continue
+		}
+		seen = true
+		if e.GCEImage != "" {
+			return e.GCEImage, nil
+		}
+	}
+	if seen {
+		return "", fmt.Errorf("%s: %s: no GCE image for this OS", osName, capabilities.ReasonImageVariantMissing)
+	}
+	return "", fmt.Errorf("%w: %s", ErrNoSuchImage, osName)
+}
+
 // fetchChecksum fetches a published sums file and returns the hex digest
 // for filename. It handles two formats seen across the catalog's mirrors:
 // GNU coreutils ("<hex>  <filename>" or "<hex> *<filename>", used by

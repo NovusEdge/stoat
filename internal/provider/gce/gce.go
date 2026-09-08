@@ -80,7 +80,7 @@ func (Provider) Create(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	image, err := iso.GCEImageFor(v.OS)
+	image, err := iso.GCEImageForOS(v.OS)
 	if err != nil {
 		return err
 	}

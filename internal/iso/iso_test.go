@@ -879,3 +879,35 @@ func TestDownloadReportsAChecksumMismatch(t *testing.T) {
 		t.Errorf("Download() = %v, want ErrChecksumMismatch", err)
 	}
 }
+
+// GCEImageForOS takes a guest name (config.VM.OS, e.g. "ubuntu"), not a
+// catalog entry ID (e.g. "ubuntu-24.04"): those differ for every multi-word
+// catalog entry, and gce.Provider.Create has only the guest name.
+func TestGCEImageForOS_ResolvesGuestNameToCatalogImage(t *testing.T) {
+	got, err := GCEImageForOS("ubuntu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := GCEImageFor("ubuntu-24.04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("GCEImageForOS(%q) = %q, want %q", "ubuntu", got, want)
+	}
+}
+
+func TestGCEImageForOS_UnknownGuestName(t *testing.T) {
+	if _, err := GCEImageForOS("plan9"); !errors.Is(err, ErrNoSuchImage) {
+		t.Errorf("GCEImageForOS(%q) = %v, want ErrNoSuchImage", "plan9", err)
+	}
+}
+
+// debian's official cloud image has no cloud-init (docket d39); GCEImageForOS
+// must report that as a missing image, not silently fall back to another
+// debian catalog entry.
+func TestGCEImageForOS_NoGCEImageForEntry(t *testing.T) {
+	if _, err := GCEImageForOS("debian"); err == nil {
+		t.Error("GCEImageForOS(\"debian\") = nil error, want an error: debian has no GCE-qualified image")
+	}
+}
