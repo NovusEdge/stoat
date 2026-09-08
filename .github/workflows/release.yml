@@ -40,9 +40,8 @@ jobs:
           sha256sum stoat_*.tar.gz stoat_*.zip > checksums.txt
       - uses: softprops/action-gh-release@v3
         with:
-          # A semver pre-release tag carries a hyphen (v0.5.0-alpha.1). Marking
-          # it keeps `gh release view --json isLatest` and the install docs'
-          # latest link pointing at the last stable tag.
+          # A hyphen in the tag means a pre-release (v0.5.0-alpha.1). Marking it
+          # keeps the "latest release" link on the last stable tag.
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |

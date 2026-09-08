@@ -2,25 +2,22 @@
 
 ## v0.5.0-alpha.1
 
-A pre-release. It carries the internal seam that a second execution surface
-needs, and no user-facing feature. The JSON contract version stays **3**.
+A pre-release with no new features. It is groundwork for running VMs somewhere
+other than your own machine.
 
-Every existing `vm.toml` loads unchanged, every command behaves as it did in
-v0.4.2, and QEMU on Linux with KVM remains the only way to run a VM.
+Nothing changes for you in this release. Your VMs work the same way, your
+`vm.toml` files load unchanged, and QEMU on Linux with KVM is still the only
+way to run a VM. The JSON contract version stays **3**.
 
 ### Changes
 
-- `internal/provider` defines the execution surface a VM runs on, with QEMU as
-  its only implementation. `vm.toml` accepts a `provider` key; an absent value
-  means `qemu`, which is what every VM written before this release says.
-- `internal/sshx` takes an explicit endpoint. An endpoint on a routable address
-  pins the host key in its own `known_hosts` file; a loopback forward keeps the
-  settings it had.
-- `hostops` separates the local-hypervisor gate from the data-root gate. Both
-  call sites still require a hypervisor, so an unqualified host refuses exactly
-  what it refused before.
-- `stoat clone` checks whether its source is running through the same path as
-  every other lifecycle check.
+- Stoat now asks a "provider" where a VM runs, instead of talking to QEMU
+  everywhere. QEMU is the only provider today. `vm.toml` accepts a `provider`
+  key, and leaving it out means QEMU.
+- SSH connections carry their address explicitly. A VM reached over the
+  internet will check its host key; a local VM keeps the settings it had.
+- `stoat clone` checks whether the VM it copies is running the same way every
+  other command does.
 
 ## v0.4.2
 
