@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -12,10 +13,18 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/theme"
 )
+
+// vmRunning asks v's provider whether it is running. qemu.Running checks a
+// local pidfile, which a non-qemu VM never has even while its provider
+// reports it live, so this replaces both call sites that used to read it
+// directly for a gce VM's sake.
+func vmRunning(v *config.VM) bool {
+	state, err := core.StateOf(context.Background(), v)
+	return err == nil && state == core.StateRunning
+}
 
 // editModel is the in-TUI editor for an existing VM. It replaces the round
 // trip through $EDITOR for the fields worth changing. "E" still opens the
@@ -419,7 +428,7 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.edit.err = err.Error()
 				return m, nil
 			}
-			saved, errText := saveEdit(m.edit.name(), p, qemu.Running(m.edit.vm))
+			saved, errText := saveEdit(m.edit.name(), p, vmRunning(m.edit.vm))
 			if errText != "" {
 				m.edit.err = errText
 				return m, nil
@@ -520,7 +529,7 @@ func (m model) viewEdit() string {
 	if !e.dirty() {
 		note(dimStyle.Render("no changes"))
 	}
-	if qemu.Running(e.vm) {
+	if vmRunning(e.vm) {
 		note(warnStyle.Render("running: ram/cpus/ssh apply on restart"))
 	}
 	if e.err != "" {
