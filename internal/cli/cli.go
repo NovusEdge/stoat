@@ -499,7 +499,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 	// secrets, reading project scope, creating the data root, or initializing
 	// logs. The independent capabilities command is dispatched before this
 	// boundary by its owner and remains metadata-only.
-	if err := hostops.RequireVM(); err != nil {
+	if err := hostops.RequireDataRoot(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 	if len(a.Params) > 0 {

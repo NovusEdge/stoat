@@ -1,24 +1,26 @@
-//go:build !linux
-
 package hostops
 
 import (
 	"errors"
 	"runtime"
-	"strings"
 	"testing"
 )
 
-func TestRequireVMUnsupportedHost(t *testing.T) {
-	err := RequireVM()
-	if err == nil {
-		t.Fatal("RequireVM() = nil on an unqualified native host")
+func TestRequireDataRootAlwaysAllows(t *testing.T) {
+	if err := RequireDataRoot(); err != nil {
+		t.Errorf("RequireDataRoot() = %v, want nil on every platform", err)
+	}
+}
+
+func TestRequireLocalHypervisorFollowsPlatform(t *testing.T) {
+	err := RequireLocalHypervisor()
+	if runtime.GOOS == "linux" {
+		if err != nil {
+			t.Errorf("RequireLocalHypervisor() = %v, want nil on linux", err)
+		}
+		return
 	}
 	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("RequireVM() = %v, want errors.Is(..., ErrUnsupported)", err)
-	}
-	wantHost := runtime.GOOS + "/" + runtime.GOARCH
-	if !strings.Contains(err.Error(), wantHost) {
-		t.Errorf("RequireVM() = %q, want it to identify %s", err, wantHost)
+		t.Errorf("RequireLocalHypervisor() = %v, want ErrUnsupported", err)
 	}
 }

@@ -46,7 +46,7 @@ func diskWritten(v *config.VM) bool {
 // Start launches QEMU. -daemonize means it detaches itself; stoat supervises
 // nothing and tracks the process by pidfile.
 func Start(v *config.VM) error {
-	if err := hostops.RequireVM(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	if Running(v) {
@@ -147,7 +147,7 @@ func consoleCredential(v *config.VM, user string) string {
 // back to SIGTERM. The fallback is a power cut: fine for live VMs, lossy for
 // disk ones, which is why it is not the first move.
 func Stop(v *config.VM) error {
-	if err := hostops.RequireVM(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	if !Running(v) {
