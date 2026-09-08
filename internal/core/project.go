@@ -45,7 +45,7 @@ func SpecFor(p *project.Project, key string) (Spec, error) {
 		Disk:        d.Disk,
 		Recipes:     d.Recipes,
 		AgentAccess: d.AgentAccess,
-		Provider:    d.Provider,
+		Provider:    normalizeProvider(d.Provider),
 		Project:     p.Dir,
 		Shares:      configShares(shares),
 		Params:      params,
@@ -144,7 +144,7 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		return nil, fmt.Errorf("%w: %s: image changed (%s -> %s); run stoat rm %s and stoat up",
 			ErrImmutableDeclaration, key, imageName(was), img.id(), key)
 	}
-	if v.Provider != spec.Provider {
+	if providerName(v.Provider) != providerName(spec.Provider) {
 		return nil, fmt.Errorf("%w: %s: provider changed (%s -> %s); run stoat rm %s and stoat up",
 			ErrImmutableDeclaration, key, providerName(v.Provider), providerName(spec.Provider), key)
 	}
@@ -177,6 +177,17 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		add("agent_access", v.AgentAccess, spec.AgentAccess, false)
 	}
 	return out, nil
+}
+
+// normalizeProvider folds the explicit default spelling to "", matching
+// config.VM.Provider's empty-means-qemu convention. Save routes on this
+// field: a literal "qemu" here would create $STOAT_HOME/v2/<name>/vm.toml
+// for what provider.For treats as a local hypervisor VM.
+func normalizeProvider(p string) string {
+	if p == "qemu" {
+		return ""
+	}
+	return p
 }
 
 // providerName renders an empty Provider field as "qemu", matching

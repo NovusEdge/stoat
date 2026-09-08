@@ -124,6 +124,20 @@ func TestSpecForWritesTheExpectedVMToml(t *testing.T) {
 	}
 }
 
+// The documented default provider = "qemu" must resolve to the same empty
+// Provider a bare declaration gets, or Save routes the VM to the v2
+// namespace meant for a real cloud provider.
+func TestSpecForNormalizesExplicitQemuProvider(t *testing.T) {
+	p := projectDir(t, "schema = 2\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\nprovider = \"qemu\"\n")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Provider != "" {
+		t.Errorf("provider = %q, want empty", s.Provider)
+	}
+}
+
 func TestDiffReportsEveryMutableField(t *testing.T) {
 	p := projectDir(t, fullDecl)
 	s, err := SpecFor(p, "dev")
@@ -290,6 +304,31 @@ func TestDiffRefusesAProviderChange(t *testing.T) {
 	if !strings.Contains(err.Error(), "dev: provider changed (qemu -> gce)") ||
 		!strings.Contains(err.Error(), "stoat rm dev") {
 		t.Errorf("err = %q, want the provider-changed message with the stoat rm hint", err.Error())
+	}
+}
+
+// A VM created before the declaration named a provider (Provider empty) must
+// stay unchanged when the declaration is bumped to schema 2 with the
+// documented default provider = "qemu": both spellings mean the same VM.
+func TestDiffToleratesTheDefaultProviderSpelling(t *testing.T) {
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\n")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName),
+		[]byte("schema = 2\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\nprovider = \"qemu\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Diff(p2, "dev"); err != nil {
+		t.Fatalf("Diff = %v, want no error", err)
 	}
 }
 
