@@ -19,16 +19,20 @@ import (
 // polls Status from its own goroutine while the test flips a VM, so every
 // read and write of that map takes mu.
 type Provider struct {
-	StartErr error
-	StopErr  error
-	Ep       sshx.Endpoint
+	StartErr   error
+	StopErr    error
+	CreateErr  error
+	DestroyErr error
+	Ep         sshx.Endpoint
+	Caps       []capabilities.Capability
 
 	mu      sync.Mutex
 	running map[string]bool
 }
 
-func (*Provider) Name() string                                      { return "qemu" }
-func (*Provider) Capabilities(*config.VM) []capabilities.Capability { return nil }
+func (*Provider) Name() string { return "qemu" }
+
+func (p *Provider) Capabilities(*config.VM) []capabilities.Capability { return p.Caps }
 
 // SetRunning marks name live. Tests that need a VM to look started without
 // calling Start use this.
@@ -80,6 +84,21 @@ func (p *Provider) Endpoint(_ context.Context, v *config.VM) (sshx.Endpoint, err
 		return p.Ep, nil
 	}
 	return sshx.LocalEndpoint(v), nil
+}
+
+func (p *Provider) Create(_ context.Context, v *config.VM) error {
+	if p.CreateErr != nil {
+		return p.CreateErr
+	}
+	return nil
+}
+
+func (p *Provider) Destroy(_ context.Context, v *config.VM) error {
+	if p.DestroyErr != nil {
+		return p.DestroyErr
+	}
+	p.SetStopped(v.Name)
+	return nil
 }
 
 // Install registers a fresh fake under "qemu" and restores the previous

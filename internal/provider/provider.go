@@ -38,6 +38,15 @@ type Provider interface {
 	Stop(ctx context.Context, v *config.VM) error
 	Status(ctx context.Context, v *config.VM) (Status, error)
 	Endpoint(ctx context.Context, v *config.VM) (sshx.Endpoint, error)
+
+	// Create builds whatever the machine needs before it can start: a disk
+	// image, a cloud instance. It runs before vm.toml is written, so a
+	// failure leaves no record behind.
+	Create(ctx context.Context, v *config.VM) error
+
+	// Destroy removes the machine. core deletes the VM record only after
+	// this returns nil; the reverse order orphans a billing instance.
+	Destroy(ctx context.Context, v *config.VM) error
 }
 
 var registry = map[string]Provider{}

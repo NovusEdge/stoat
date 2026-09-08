@@ -302,6 +302,23 @@ func TestDestroyRefusesWhileRunning(t *testing.T) {
 	}
 }
 
+func TestDestroyKeepsTheRecordWhenTheProviderFails(t *testing.T) {
+	dir := root(t)
+	v := &config.VM{Name: "dev", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	f := fake.Install(t)
+	f.DestroyErr = errors.New("api refused")
+
+	if err := Destroy("dev"); err == nil {
+		t.Fatal("Destroy() error = nil, want the provider's error")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dev", "vm.toml")); err != nil {
+		t.Error("vm.toml was deleted while the machine may still exist")
+	}
+}
+
 func TestDestroyUnknownVM(t *testing.T) {
 	root(t)
 	if err := Destroy("nope"); !errors.Is(err, ErrNotFound) {

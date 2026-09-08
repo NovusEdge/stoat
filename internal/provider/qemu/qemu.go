@@ -4,6 +4,9 @@ package qemu
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/config"
@@ -32,4 +35,23 @@ func (Provider) Status(_ context.Context, v *config.VM) (provider.Status, error)
 
 func (Provider) Endpoint(_ context.Context, v *config.VM) (sshx.Endpoint, error) {
 	return sshx.LocalEndpoint(v), nil
+}
+
+// Create allocates the qcow2 disk for a "disk" mode VM. Live mode boots the
+// ISO into a tmpfs root and has no disk to allocate.
+func (Provider) Create(_ context.Context, v *config.VM) error {
+	if v.Mode != "disk" {
+		return nil
+	}
+	out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// Destroy stops the process. The disk itself lives in v.Dir, which
+// config.VM.Delete removes.
+func (Provider) Destroy(_ context.Context, v *config.VM) error {
+	return qemu.Stop(v)
 }

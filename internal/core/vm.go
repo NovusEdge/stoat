@@ -666,6 +666,13 @@ func Destroy(name string) error {
 		if state == StateRunning {
 			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
 		}
+		p, err := providerFor(bv)
+		if err != nil {
+			return err
+		}
+		if err := p.Destroy(context.Background(), bv); err != nil {
+			return err
+		}
 		return bv.Delete()
 	}
 	if err != nil {
@@ -677,6 +684,13 @@ func Destroy(name string) error {
 	}
 	if state == StateRunning {
 		return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
+	}
+	p, err := providerFor(v)
+	if err != nil {
+		return err
+	}
+	if err := p.Destroy(context.Background(), v); err != nil {
+		return err
 	}
 	return v.Delete()
 }

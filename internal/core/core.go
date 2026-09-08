@@ -10,15 +10,17 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/coreerr"
+	"github.com/novusedge/stoat/internal/provider"
+	_ "github.com/novusedge/stoat/internal/provider/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -151,14 +153,16 @@ func Create(s Spec) (VM, error) {
 			return VM{}, err
 		}
 	}
-	if v.Mode == "disk" {
-		out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
-		if err != nil {
-			// Leave no trace of a failed creation: otherwise the list shows a
-			// VM with no disk.qcow2 that can never boot.
-			_ = os.RemoveAll(v.Dir)
-			return VM{}, fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
-		}
+	p, err := provider.For(v)
+	if err != nil {
+		_ = os.RemoveAll(v.Dir)
+		return VM{}, err
+	}
+	if err := p.Create(context.Background(), v); err != nil {
+		// Leave no trace of a failed creation: otherwise the list shows a
+		// VM with no disk.qcow2 that can never boot.
+		_ = os.RemoveAll(v.Dir)
+		return VM{}, err
 	}
 	return fromConfig(v), nil
 }

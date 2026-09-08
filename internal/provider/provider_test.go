@@ -23,6 +23,8 @@ func (stub) Status(context.Context, *config.VM) (Status, error) {
 func (stub) Endpoint(context.Context, *config.VM) (sshx.Endpoint, error) {
 	return sshx.Endpoint{}, nil
 }
+func (stub) Create(context.Context, *config.VM) error  { return nil }
+func (stub) Destroy(context.Context, *config.VM) error { return nil }
 
 func TestForDefaultsToQemuWhenUnset(t *testing.T) {
 	Register("qemu", stub{name: "qemu"})
