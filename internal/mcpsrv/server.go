@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/project"
 )
 
@@ -98,7 +99,7 @@ func New(opts Options) *mcp.Server {
 	// method handler only covers requests the server itself initiates
 	// (sampling, elicitation), never the CallToolResult built for an
 	// incoming tools/call request. See redact.go.
-	server.AddReceivingMiddleware(s.rateLimit(), s.redact())
+	server.AddReceivingMiddleware(s.logCalls(), s.rateLimit(), s.redact())
 	return server
 }
 
@@ -200,6 +201,7 @@ func clampInt(v, lo, hi int) int {
 // ServeStdio runs the server over stdio, which is how every MCP client
 // launches a server as a subprocess.
 func ServeStdio(ctx context.Context, opts Options) error {
+	logx.L().Info("mcp serve", "transport", "stdio")
 	return New(opts).Run(ctx, &mcp.StdioTransport{})
 }
 
@@ -239,11 +241,12 @@ func ServeHTTP(ctx context.Context, addr string, opts Options) error {
 	if err != nil {
 		return err
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	logx.L().Info("mcp serve", "transport", "http", "addr", ln.Addr(), "scope", cwd)
 	if opts.Notify != nil {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
 		fmt.Fprintf(opts.Notify, "stoat mcp: streamable HTTP on http://%s\n", ln.Addr())
 		fmt.Fprintf(opts.Notify, "stoat mcp: project scope %s\n", cwd)
 		fmt.Fprintln(opts.Notify, "stoat mcp: no authentication; loopback only")

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/mcpsrv"
 )
 
@@ -20,6 +21,10 @@ func runMCP(a *Args, version string, stdout, stderr io.Writer) int {
 		if a.HTTP != "" {
 			if !a.Quiet && !a.JSON {
 				opts.Notify = stderr
+				// An HTTP server is a foreground process with a terminal, so
+				// mirror the log there. A stdio server cannot: the client owns
+				// both its streams.
+				logx.Tee(stderr)
 			}
 			err = mcpsrv.ServeHTTP(context.Background(), a.HTTP, opts)
 		} else {

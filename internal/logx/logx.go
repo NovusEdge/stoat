@@ -24,14 +24,18 @@ import (
 
 var (
 	mu     sync.Mutex
-	logger = log.NewWithOptions(io.Discard, log.Options{
+	logger = newLogger(io.Discard)
+	file   *os.File
+	path   string
+)
+
+func newLogger(w io.Writer) *log.Logger {
+	return log.NewWithOptions(w, log.Options{
 		ReportTimestamp: true,
 		TimeFormat:      time.Kitchen,
 		Level:           log.DebugLevel,
 	})
-	file *os.File
-	path string
-)
+}
 
 // Init creates <root>/logs/, opens stoat.log for append, and configures
 // the logger to write to it. Calling Init again (e.g. across test runs
@@ -56,12 +60,20 @@ func Init() error {
 	}
 	file = f
 	path = p
-	logger = log.NewWithOptions(file, log.Options{
-		ReportTimestamp: true,
-		TimeFormat:      time.Kitchen,
-		Level:           log.DebugLevel,
-	})
+	logger = newLogger(file)
 	return nil
+}
+
+// Tee sends the log to w as well as to the file. A long-running foreground
+// command calls it so the terminal shows what the file records. Init resets
+// the logger to the file alone, so call Tee after Init, not before.
+func Tee(w io.Writer) {
+	mu.Lock()
+	defer mu.Unlock()
+	if file == nil || w == nil {
+		return
+	}
+	logger = newLogger(io.MultiWriter(file, w))
 }
 
 // L returns the configured logger. Safe to call before Init: it falls
