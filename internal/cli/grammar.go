@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alecthomas/kong"
+
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/mcpsrv"
@@ -33,42 +35,57 @@ type grammar struct {
 	// contract, and so exec's guest command keeps its own --json.
 	Quiet bool `short:"q" name:"quiet" aliases:"no-interactive" help:"suppress progress chatter"`
 
-	Init   initCmd   `cmd:"" help:"write a stoat.toml for this directory"`
-	Status statusCmd `cmd:"" help:"one line per declared VM: state, health and drift"`
+	Init   initCmd   `cmd:"" group:"project" help:"write a stoat.toml for this directory"`
+	Status statusCmd `cmd:"" group:"project" help:"one line per declared VM: state, health and drift"`
 
-	LS      lsCmd      `cmd:"" name:"ls" help:"list VMs, one line per VM"`
-	Get     getCmd     `cmd:"" help:"show one VM"`
-	Create  createCmd  `cmd:"" aliases:"new" help:"create a VM without starting it"`
-	Update  updateCmd  `cmd:"" help:"change a stopped VM; only the flags you pass change"`
-	Up      upCmd      `cmd:"" help:"start a VM"`
-	Down    downCmd    `cmd:"" help:"stop a VM (graceful)"`
-	Wait    waitCmd    `cmd:"" help:"block until a VM reaches a state"`
-	RM      rmCmd      `cmd:"" name:"rm" help:"delete a VM; refuses while running"`
-	Clone   cloneCmd   `cmd:"" help:"copy a VM: overlay disk, fresh ssh port, no forwards"`
-	Exec    execCmd    `cmd:"" help:"run a command in a VM; exits with the GUEST's status"`
-	SSH     sshCmd     `cmd:"" name:"ssh" help:"ssh into a VM, replacing this process"`
-	SSHCmd  sshCmdCmd  `cmd:"" name:"ssh-command" help:"print the ssh argv instead of running it"`
-	CP      cpCmd      `cmd:"" name:"cp" help:"copy a file in or out; one side is <vm>:<path>"`
-	Forward forwardCmd `cmd:"" help:"show, set or clear host:guest port forwards"`
+	LS     lsCmd     `cmd:"" name:"ls" group:"vm" help:"list VMs, one line per VM"`
+	Get    getCmd    `cmd:"" group:"vm" help:"show one VM"`
+	Create createCmd `cmd:"" aliases:"new" group:"vm" help:"create a VM without starting it"`
+	Update updateCmd `cmd:"" group:"vm" help:"change a stopped VM; only the flags you pass change"`
+	Up     upCmd     `cmd:"" group:"vm" help:"start a VM"`
+	Down   downCmd   `cmd:"" group:"vm" help:"stop a VM (graceful)"`
+	Wait   waitCmd   `cmd:"" group:"vm" help:"block until a VM reaches a state"`
+	RM     rmCmd     `cmd:"" name:"rm" group:"vm" help:"delete a VM; refuses while running"`
+	Clone  cloneCmd  `cmd:"" group:"vm" help:"copy a VM: overlay disk, fresh ssh port, no forwards"`
 
-	Images   imagesCmd   `cmd:"" help:"list catalog and local images"`
-	Pull     pullCmd     `cmd:"" help:"download a catalog image"`
-	Snapshot snapshotCmd `cmd:"" help:"list, save, restore or delete a snapshot"`
-	Prune    pruneCmd    `cmd:"" help:"report, or with --apply remove, stale files"`
+	Exec    execCmd    `cmd:"" group:"access" help:"run a command in a VM; exits with the GUEST's status"`
+	SSH     sshCmd     `cmd:"" name:"ssh" group:"access" help:"ssh into a VM, replacing this process"`
+	SSHCmd  sshCmdCmd  `cmd:"" name:"ssh-command" group:"access" help:"print the ssh argv instead of running it"`
+	CP      cpCmd      `cmd:"" name:"cp" group:"access" help:"copy a file in or out; one side is <vm>:<path>"`
+	Forward forwardCmd `cmd:"" group:"access" help:"show, set or clear host:guest port forwards"`
 
-	Apply        applyCmd        `cmd:"" aliases:"provision" help:"run the VM's recipes, streaming output"`
-	Recipes      recipesCmd      `cmd:"" help:"list recipes, optionally only applicable ones"`
-	CheckRecipes checkRecipesCmd `cmd:"" help:"report why a recipe would not apply"`
-	Recipe       recipeCmd       `cmd:"" help:"author recipes"`
-	Guest        recipeGuestCmd  `cmd:"" help:"list or show guest OS definitions"`
+	Images   imagesCmd   `cmd:"" group:"image" help:"list catalog and local images"`
+	Pull     pullCmd     `cmd:"" group:"image" help:"download a catalog image"`
+	Snapshot snapshotCmd `cmd:"" group:"image" help:"list, save, restore or delete a snapshot"`
+	Prune    pruneCmd    `cmd:"" group:"image" help:"report, or with --apply remove, stale files"`
 
-	Logs         logsCmd         `cmd:"" help:"tail a VM's log, or stoat's own"`
-	Screenshot   screenshotCmd   `cmd:"" help:"write the VM's screen to a PNG"`
-	Doctor       doctorCmd       `cmd:"" help:"check host prerequisites"`
-	Capabilities capabilitiesCmd `cmd:"" help:"report current agent capabilities"`
-	MCP          mcpCmd          `cmd:"" name:"mcp" help:"serve MCP, or configure a client to launch it"`
-	Version      versionCmd      `cmd:"" help:"print the stoat version"`
-	Help         helpCmd         `cmd:"" help:"show this message"`
+	Apply        applyCmd        `cmd:"" aliases:"provision" group:"recipe" help:"run the VM's recipes, streaming output"`
+	Recipes      recipesCmd      `cmd:"" group:"recipe" help:"list recipes, optionally only applicable ones"`
+	CheckRecipes checkRecipesCmd `cmd:"" group:"recipe" help:"report why a recipe would not apply"`
+	Recipe       recipeCmd       `cmd:"" group:"recipe" help:"author recipes"`
+	Guest        recipeGuestCmd  `cmd:"" group:"recipe" help:"list or show guest OS definitions"`
+
+	MCP          mcpCmd          `cmd:"" name:"mcp" group:"agent" help:"serve MCP, or configure a client to launch it"`
+	Capabilities capabilitiesCmd `cmd:"" group:"agent" help:"report current agent capabilities"`
+
+	Logs       logsCmd       `cmd:"" group:"diag" help:"tail a VM's log, or stoat's own"`
+	Screenshot screenshotCmd `cmd:"" group:"diag" help:"write the VM's screen to a PNG"`
+	Doctor     doctorCmd     `cmd:"" group:"diag" help:"check host prerequisites"`
+	Version    versionCmd    `cmd:"" group:"diag" help:"print the stoat version"`
+	Help       helpCmd       `cmd:"" group:"diag" help:"show this message"`
+}
+
+// commandGroups titles the root help's command sections. A command's
+// group tag names a key here; a key with no entry renders untitled, so
+// every new top-level command needs a line in one of these groups.
+var commandGroups = []kong.Group{
+	{Key: "vm", Title: "VMs:"},
+	{Key: "access", Title: "Reaching into a VM:"},
+	{Key: "recipe", Title: "Recipes:"},
+	{Key: "image", Title: "Images and disk space:"},
+	{Key: "project", Title: "Projects:"},
+	{Key: "agent", Title: "Agents:"},
+	{Key: "diag", Title: "Diagnostics:"},
 }
 
 // mcpCmd defaults to serve, because every MCP client launches the server as
@@ -142,10 +159,14 @@ type rmCmd struct {
 type createCmd struct {
 	Name    string `arg:"" help:"new vm name"`
 	Image   string `required:"" help:"catalog image id, or a path to your own image"`
-	OS      string `help:"override the guest OS inferred from a byo image's filename"`
-	Backend string `help:"override the backend inferred from a byo image's filename"`
-	Mode    string `help:"live or disk (alpine iso only; every other image has one mode)"`
-	RAM     int    `help:"memory in MB"`
+	OS      string `help:"override the guest OS inferred from a byo image's filename (see stoat guest ls)"`
+	Backend string `help:"override the backend inferred from a byo image's filename (see stoat guest ls)"`
+	// Mode carries no enum tag. kong applies an enum to a plain string only
+	// when the field is required or has a default (tag.go), and both would
+	// change what an omitted --mode means: core picks the mode from the
+	// image, which "" is what tells it to do.
+	Mode string `help:"live or disk (alpine iso only; every other image has one mode)"`
+	RAM  int    `help:"memory in MB"`
 	// name:"cpus" is required: kong's camelCase splitter reads "CPUs" as
 	// "CP"+"Us" and would otherwise name the flag --cp-us.
 	CPUs            int      `name:"cpus" help:"vcpu count"`
@@ -167,6 +188,45 @@ type createCmd struct {
 	// present. Without it, a create at project scope is refused: a VM that
 	// exists only on one machine is exactly what stoat.toml removes.
 	Global bool `help:"create outside the project even inside one"`
+}
+
+// Help satisfies kong.HelpProvider. Kong prints a Detail block on the
+// command's own help page only, so examples here never reach the root
+// screen. Only the commands whose flag list is long enough to leave a
+// reader guessing carry one.
+func (createCmd) Help() string {
+	return `Examples:
+  stoat create dev --image debian-13 --ram 2048 --cpus 2
+  stoat create lab --image alpine-3.21 --mode live --agent-access observe
+  stoat create web --image ubuntu-24.04 --recipes nginx --set nginx.port=8080`
+}
+
+func (execCmd) Help() string {
+	return `Everything after the VM name goes to the guest verbatim, flags
+included, and stoat exits with the guest command's own status.
+
+Examples:
+  stoat exec dev -- cat /etc/os-release
+  stoat exec dev -- systemctl status nginx`
+}
+
+func (cpCmd) Help() string {
+	return `Exactly one side carries the "<vm>:" prefix. Use the flag form
+when a host path contains a colon.
+
+Examples:
+  stoat cp ./config.toml dev:/etc/app/config.toml
+  stoat cp dev:/var/log/app.log ./app.log
+  stoat cp --vm dev --direction to --local ./a:b.txt --remote /tmp/a.txt`
+}
+
+func (mcpServeCmd) Help() string {
+	return `Stdio is the default, and an MCP client starts this as a
+subprocess. The server reads the stoat.toml of its own working directory.
+
+Examples:
+  stoat mcp serve
+  stoat mcp serve --http 127.0.0.1:7777`
 }
 
 // updateCmd's pointers are the point: see the type comment on grammar.

@@ -319,19 +319,22 @@ func TestSnapshotXor(t *testing.T) {
 }
 
 // TestHelpListsEverySubcommand extends TestParseHelpCarriesGeneratedText's
-// small spot-check to the full command surface: every leaf command kong
-// generates a line for must be named here, so adding a subcommand to
-// grammar.go without it appearing in the generated help fails this build
-// rather than silently shipping an undocumented command. "provision" is
-// deliberately absent: it is a hidden alias of "apply", so kong omits it
-// from the generated help by design (see TestProvisionIsHiddenFromHelp).
+// small spot-check to the full command surface: every command kong generates
+// a line for must be named here, so adding a subcommand to grammar.go without
+// it appearing in the generated help fails this build rather than silently
+// shipping an undocumented command. "provision" is deliberately absent: it is
+// a hidden alias of "apply", so kong omits it from the generated help by
+// design (see TestProvisionIsHiddenFromHelp).
+//
+// The root screen carries the top-level commands only (NoExpandSubcommands),
+// so a parent's children are checked against that parent's own help page.
 func TestHelpListsEverySubcommand(t *testing.T) {
 	want := []string{
 		"ls", "get", "create", "update", "up", "down", "wait", "rm", "clone",
 		"exec", "ssh", "ssh-command", "cp", "forward", "images", "pull",
 		"snapshot", "prune", "apply", "recipes", "check-recipes",
-		"recipe list", "recipe new", "guest ls", "guest show",
-		"logs", "doctor", "version", "help",
+		"recipe", "guest", "mcp", "capabilities",
+		"logs", "screenshot", "doctor", "version", "help",
 	}
 	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}} {
 		a, err := Parse(args)
@@ -341,6 +344,27 @@ func TestHelpListsEverySubcommand(t *testing.T) {
 		for _, name := range want {
 			if !strings.Contains(a.Help, name) {
 				t.Errorf("Parse(%v) help omits subcommand %q", args, name)
+			}
+		}
+	}
+}
+
+// TestParentHelpListsItsChildren is the other half of the guarantee above:
+// a child command that no longer appears on the root screen must appear on
+// its parent's.
+func TestParentHelpListsItsChildren(t *testing.T) {
+	for parent, children := range map[string][]string{
+		"recipe": {"list", "new", "show", "add", "lock", "sync", "update", "rm", "search", "refresh"},
+		"guest":  {"ls", "show"},
+		"mcp":    {"serve", "install", "doctor"},
+	} {
+		a, err := Parse([]string{parent, "--help"})
+		if err != nil {
+			t.Fatalf("Parse(%s --help): %v", parent, err)
+		}
+		for _, child := range children {
+			if !strings.Contains(a.Help, parent+" "+child) {
+				t.Errorf("%s --help omits %q", parent, parent+" "+child)
 			}
 		}
 	}

@@ -198,7 +198,31 @@ func newParser(g *grammar, help *bytes.Buffer) (*kong.Kong, error) {
 		// does not happen. Main decides what gets printed.
 		kong.Exit(func(int) {}),
 		kong.Writers(help, help),
+		// Compact renders one two-column row per command; the default writer
+		// spends three lines on each. NoExpandSubcommands keeps the root
+		// screen to the top-level commands, so "recipe" is one row there and
+		// its ten children appear under `stoat recipe --help`. Together they
+		// take the root help from 149 lines to about 50.
+		kong.ConfigureHelp(kong.HelpOptions{Compact: true, FlagsLast: true, NoExpandSubcommands: true}),
+		kong.ExplicitGroups(commandGroups),
+		kong.ValueFormatter(helpValue),
 	)
+}
+
+// helpValue appends a flag's accepted values to its help line. Kong renders
+// an enum flag as --agent-access=AGENT-ACCESS and reveals the four levels
+// only in the error text, so the values reach the reader by way of a failed
+// invocation.
+func helpValue(v *kong.Value) string {
+	text := kong.DefaultHelpValueFormatter(v)
+	if v.Enum == "" {
+		return text
+	}
+	values := strings.Join(v.EnumSlice(), ", ")
+	if text == "" {
+		return "one of: " + values
+	}
+	return text + " (one of: " + values + ")"
 }
 
 // commandPath joins the selected command's COMMAND nodes, so a nested command
