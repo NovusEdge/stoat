@@ -340,10 +340,9 @@ func TestPruneRemovesABrokenVMWithAStalePidfile(t *testing.T) {
 // disk. A vm.toml can be corrupted after its VM started; that is the state
 // this test reaches.
 //
-// It uses fakeRunning, which spawns a real process with the VM's directory
-// in its argv: that is what qemu.Running matches on. An earlier version
-// used an impossible pid instead, so the guard never ran; the mutation
-// `if qemu.Running(bv)` -> `if false && ...` still passed every test.
+// It uses fakeRunning, which marks the VM running in the fake provider
+// Prune's StateOf call resolves to. An earlier version used an impossible
+// pid instead, so the guard never ran.
 func TestPruneNeverRemovesARunningBrokenVM(t *testing.T) {
 	dir := root(t)
 	writeBroken(t, dir, "busted")
