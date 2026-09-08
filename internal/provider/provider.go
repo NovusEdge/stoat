@@ -40,8 +40,9 @@ type Provider interface {
 	Endpoint(ctx context.Context, v *config.VM) (sshx.Endpoint, error)
 
 	// Create builds whatever the machine needs before it can start: a disk
-	// image, a cloud instance. It runs before vm.toml is written, so a
-	// failure leaves no record behind.
+	// image, a cloud instance. vm.toml is already written when this runs;
+	// core deletes the VM's directory if Create returns an error, so a
+	// failure still leaves no record behind, just not by running first.
 	Create(ctx context.Context, v *config.VM) error
 
 	// Destroy removes the machine. core deletes the VM record only after
