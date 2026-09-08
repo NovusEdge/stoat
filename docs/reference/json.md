@@ -210,8 +210,13 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "forwards":[{"host_port":8080,"guest_port":80}],
              "allow_exec":false,"agent_access":"manage","display":"vnc",
              "error":"only on a broken VM",
-             "project":"/home/u/myrepo","key":"dev","project_missing":false}
+             "project":"/home/u/myrepo","key":"dev","project_missing":false,
+             "provider":"gce"}
+```
 
+`provider` is omitted for a qemu VM (the empty `core.VM.Provider`), and carries the provider's own name (`"gce"`) otherwise.
+
+```json
 VMStatus    {"name":"work",...VM fields...,"health":"ok","recipes_detail":[
              {"name":"xfce","applied":true,"version":"1.2","at":"...",
               "health":"unknown","params":{},"outputs":{}}]}
