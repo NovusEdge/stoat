@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.5.0-alpha.1
+
+A pre-release. It carries the internal seam that a second execution surface
+needs, and no user-facing feature. The JSON contract version stays **3**.
+
+Every existing `vm.toml` loads unchanged, every command behaves as it did in
+v0.4.2, and QEMU on Linux with KVM remains the only way to run a VM.
+
+### Changes
+
+- `internal/provider` defines the execution surface a VM runs on, with QEMU as
+  its only implementation. `vm.toml` accepts a `provider` key; an absent value
+  means `qemu`, which is what every VM written before this release says.
+- `internal/sshx` takes an explicit endpoint. An endpoint on a routable address
+  pins the host key in its own `known_hosts` file; a loopback forward keeps the
+  settings it had.
+- `hostops` separates the local-hypervisor gate from the data-root gate. Both
+  call sites still require a hypervisor, so an unqualified host refuses exactly
+  what it refused before.
+- `stoat clone` checks whether its source is running through the same path as
+  every other lifecycle check.
+
 ## v0.4.2
 
 Release archives for macOS and Windows. The JSON contract version stays **3**.
