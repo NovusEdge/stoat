@@ -48,6 +48,12 @@ runs the same. `just lint` runs golangci-lint and shellcheck. CI runs
 all of those plus `go test ./...` on every PR. The DCO app checks the
 sign-off trailer on every commit in a PR.
 
+The `nix vendor hash` workflow runs only after dependency or flake-lock changes
+land on `main`. It creates a branch and signed pull request only when the
+computed `vendorHash` changed. GitHub may hold pull-request workflow runs from
+the bot until a maintainer approves them; review and approve those checks from
+the Actions page when the update is expected.
+
 ## Tests
 
 | tier | command | needs |

@@ -1,0 +1,63 @@
+name: nix vendor hash
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+      - flake.lock
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: update vendorHash
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pin the upstream installer release so changes to the installer cannot
+      # silently alter this trusted-main automation.
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+        with:
+          determinate: false
+
+      - name: test updater
+        run: bash tests/update-nix-vendor-hash_test.sh
+
+      - name: update vendorHash
+        run: ./scripts/update-nix-vendor-hash.sh
+
+      - name: build package
+        run: nix build .#default --no-link
+
+      - name: create update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if git diff --quiet -- flake.nix; then
+            echo 'vendorHash is already current'
+            exit 0
+          fi
+          if [[ -n "$(git diff --name-only | grep -v '^flake\.nix$' || true)" ]]; then
+            echo 'updater changed a file other than flake.nix' >&2
+            git diff --name-only >&2
+            exit 1
+          fi
+          branch="ci/nix-vendor-hash-${SOURCE_SHA}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch --create "$branch"
+          git add flake.nix
+          git commit --signoff --message 'chore: update Nix vendor hash'
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title 'chore: update Nix vendor hash' \
+            --body 'Automated update after a dependency or flake lock change. The final Nix package build passed before this PR was created.'
