@@ -258,6 +258,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.showToast("no console password to type", true)
 				return m, cmd
 			}
+			// qemu.TypeConsolePassword dials a local monitor socket that
+			// only a qemu VM has (docket d46): a gce VM's console password
+			// exists but nothing here can type it in.
+			if v.Provider != "" {
+				cmd := m.showToast("console password can only be typed on a local qemu VM", true)
+				return m, cmd
+			}
 			return m, typeConsolePassword(v)
 		case "c":
 			v := m.detail.vm
