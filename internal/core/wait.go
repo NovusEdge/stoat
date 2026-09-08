@@ -180,16 +180,27 @@ func waitReachable(ctx context.Context, v *config.VM) error {
 	return pollUntil(ctx, func() bool { return sshBannerUp(ctx, v) })
 }
 
-// sshBannerUp reports whether v's forwarded port answers as a real sshd, not
+// sshBannerUp reports whether v's ssh endpoint answers as a real sshd, not
 // merely accepting TCP. QEMU/libslirp's user-mode networking accepts the
 // host-side socket before the guest is dialled, so a bare accept() proves
 // nothing. sshBannerUp requires the "SSH-" identification banner, the same
 // check sshx.Wait's bannerReady makes. It is a ctx-aware reimplementation,
 // not a call to bannerReady, because sshx.Wait takes a fixed timeout and
 // cannot give up early when ctx is cancelled mid-dial.
+//
+// The address comes from the provider, so a VM that answers somewhere other
+// than a loopback forward is probed where it actually lives.
 func sshBannerUp(ctx context.Context, v *config.VM) bool {
+	p, err := providerFor(v)
+	if err != nil {
+		return false
+	}
+	e, err := p.Endpoint(ctx, v)
+	if err != nil {
+		return false
+	}
 	d := net.Dialer{Timeout: time.Second}
-	c, err := d.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", v.SSHPort))
+	c, err := d.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", e.Host, e.Port))
 	if err != nil {
 		return false
 	}

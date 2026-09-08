@@ -12,6 +12,7 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/provider"
 	"github.com/novusedge/stoat/internal/provider/fake"
+	"github.com/novusedge/stoat/internal/sshx"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -603,5 +604,56 @@ func TestStateRejectsAnUnknownProvider(t *testing.T) {
 	v := &config.VM{Name: "dev", Dir: t.TempDir(), Provider: "nope"}
 	if _, err := StateOf(context.Background(), v); !errors.Is(err, provider.ErrUnknownProvider) {
 		t.Errorf("StateOf() error = %v, want ErrUnknownProvider", err)
+	}
+}
+
+// The point of the endpoint seam is that a VM answering somewhere other than
+// a loopback forward is reached there. A fake endpoint is the only way to
+// prove SSHCommand consults the provider instead of rebuilding
+// sshx.LocalEndpoint for itself.
+func TestSSHCommandUsesTheProvidersEndpoint(t *testing.T) {
+	root(t)
+	f := fake.Install(t)
+	f.Ep = sshx.Endpoint{Name: "work", Host: "203.0.113.7", Port: 2022, User: "stoat"}
+	if err := (&config.VM{Name: "work", Mode: "cloud", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	argv, err := SSHCommand("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(argv, " ")
+	if !strings.Contains(got, "stoat@203.0.113.7") {
+		t.Errorf("SSHCommand = %q, want the provider's host", got)
+	}
+	if !strings.Contains(got, "-p 2022") {
+		t.Errorf("SSHCommand = %q, want the provider's port", got)
+	}
+	if strings.Contains(got, "127.0.0.1") {
+		t.Errorf("SSHCommand = %q, must not fall back to loopback", got)
+	}
+}
+
+func TestStartAndStopPropagateTheProvidersError(t *testing.T) {
+	root(t)
+	f := fake.Install(t)
+	boom := errors.New("provider refused")
+	f.StartErr = boom
+	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Start("work"); !errors.Is(err, boom) {
+		t.Errorf("Start() = %v, want the provider's error", err)
+	}
+
+	f.StartErr = nil
+	if err := Start("work"); err != nil {
+		t.Fatal(err)
+	}
+	f.StopErr = boom
+	if err := Stop("work"); !errors.Is(err, boom) {
+		t.Errorf("Stop() = %v, want the provider's error", err)
 	}
 }
