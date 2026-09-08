@@ -68,7 +68,7 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	scripts, err := recipeScripts(v)
+	scripts, err := RecipeScripts(v)
 	if err != nil {
 		return err
 	}
@@ -93,10 +93,13 @@ func (cloudinitBackend) Prepare(v *config.VM) error {
 	return nil
 }
 
-// recipeScripts resolves v.Recipes to the cloud-init scripts WrapScripts
+// RecipeScripts resolves v.Recipes to the cloud-init scripts WrapScripts
 // renders: each recipe's manifest, then the script body for v.OS. A recipe
 // with no recipe.toml went missing since create time and errors here.
-func recipeScripts(v *config.VM) ([]cloudinit.Script, error) {
+//
+// Exported so the gce provider can build the same seed content without a
+// QEMU process to attach an ISO to.
+func RecipeScripts(v *config.VM) ([]cloudinit.Script, error) {
 	stored, err := config.LoadSecrets(v.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading recipe secrets: %w", err)

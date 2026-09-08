@@ -103,6 +103,14 @@ func extraPackages(osName string) string {
 // into one #cloud-config document. Nothing here looks for packages: or
 // runcmd: by name, so a fragment using write_files: or any other key
 // survives.
+// UserData builds the seed's user-data document without writing it anywhere.
+// Seed writes the same content to a NoCloud ISO for a QEMU guest; a provider
+// with no ISO device (gce) passes this string straight into instance
+// metadata instead.
+func UserData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
+	return userData(v, pubkey, recipeBodies)
+}
+
 func userData(v *config.VM, pubkey string, recipeBodies []string) (string, error) {
 	base := fmt.Sprintf(userDataTemplate, guestShell(v.OS), pubkey, consolePasswordBlock(v.ConsolePassword))
 

@@ -1,4 +1,3 @@
-// Package gce implements the Provider interface over the Compute Engine API.
 package gce
 
 import (
@@ -41,4 +40,14 @@ func newClient(ctx context.Context, s settings.GCE) (*compute.InstancesClient, e
 		return nil, err
 	}
 	return compute.NewInstancesRESTClient(ctx, clientOptions(s)...)
+}
+
+// newFirewallsClient authenticates the same way as newClient, for the
+// separate Firewalls API surface Create and Destroy also need.
+func newFirewallsClient(ctx context.Context, s settings.GCE) (*compute.FirewallsClient, error) {
+	s, err := validateCredentials(s)
+	if err != nil {
+		return nil, err
+	}
+	return compute.NewFirewallsRESTClient(ctx, clientOptions(s)...)
 }
