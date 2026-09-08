@@ -39,3 +39,6 @@ GEMINI.md
 
 # graphify knowledge graph, rebuilt locally
 graphify-out/
+
+# local context database, rebuilt by the tool that writes it
+.veil/
