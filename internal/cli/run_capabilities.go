@@ -7,7 +7,20 @@ import (
 	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/hostcheck"
 )
+
+// toHostChecks adapts core.Doctor's result to capabilities.Input.HostChecks.
+// The two types have identical fields but capabilities cannot import core:
+// core now imports provider, which imports capabilities, so the reverse
+// import would close a cycle.
+func toHostChecks(cs []core.HostCheck) []hostcheck.Check {
+	out := make([]hostcheck.Check, len(cs))
+	for i, c := range cs {
+		out[i] = hostcheck.Check{Name: c.Name, OK: c.OK, Detail: c.Detail, Fix: c.Fix, Optional: c.Optional}
+	}
+	return out
+}
 
 func runCapabilities(a *Args, version string, stdout, stderr io.Writer) int {
 	var target *capabilities.Target
@@ -25,7 +38,7 @@ func runCapabilities(a *Args, version string, stdout, stderr io.Writer) int {
 	report := capabilities.Build(capabilities.Input{
 		Version:      version,
 		ProjectState: projectState,
-		HostChecks:   core.Doctor(),
+		HostChecks:   toHostChecks(core.Doctor()),
 		Target:       target,
 	})
 	if a.JSON {

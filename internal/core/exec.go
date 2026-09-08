@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -56,7 +55,11 @@ func Exec(ctx context.Context, name string, cmd []string) (ExecResult, error) {
 	// is the most common reason Exec cannot connect. ErrNotRunning is
 	// faster and clearer than a bare 255 with "connection refused" buried
 	// in stderr.
-	if !qemu.Running(v) {
+	state, err := StateOf(ctx, v)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	if state != StateRunning {
 		return ExecResult{}, fmt.Errorf("%w: %s", ErrNotRunning, name)
 	}
 

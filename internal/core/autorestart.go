@@ -3,8 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-
-	"github.com/novusedge/stoat/internal/qemu"
 )
 
 // AutoRestartAfterInstall waits for an uninstalled disk VM's unattended
@@ -19,14 +17,18 @@ import (
 // apkovlBackend.Args adds -no-reboot for this exact boot, so a successful
 // install's own "poweroff" (internal/apkovl's installScript) exits QEMU
 // instead of re-entering the installer. A failed install leaves the
-// installer's shell running, so qemu.Running never turns false and this
-// call rides out ctx's deadline instead of restarting.
+// installer's shell running, so the VM never stops and this call rides out
+// ctx's deadline instead of restarting.
 func AutoRestartAfterInstall(ctx context.Context, name string) (bool, error) {
 	v, err := load(name)
 	if err != nil {
 		return false, err
 	}
-	if v.Mode != "disk" || v.Installed || !qemu.Running(v) {
+	if v.Mode != "disk" || v.Installed {
+		return false, nil
+	}
+	state, err := StateOf(ctx, v)
+	if err != nil || state != StateRunning {
 		return false, nil
 	}
 

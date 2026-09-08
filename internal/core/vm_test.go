@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/provider"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -550,7 +552,7 @@ func TestAppliedNilWhenNoRecipesApplied(t *testing.T) {
 }
 
 // TestDestroyRefusesARunningBrokenVM pins a real bug: Destroy's broken-VM
-// branch once skipped the running check. qemu.Running needs only Dir, which
+// branch once skipped the running check. StateOf needs only Dir, which
 // that branch reconstructs. Skipping the check let a vm.toml corrupted
 // after its VM was started bypass the refusal that applies to every
 // healthy VM, deleting the pidfile, monitor socket and disk from under a
@@ -567,5 +569,23 @@ func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(config.Root(), "hosed")); err != nil {
 		t.Fatalf("the directory was deleted from under a running qemu: %v", err)
+	}
+}
+
+func TestStateUsesTheProvider(t *testing.T) {
+	v := &config.VM{Name: "dev", Dir: t.TempDir()}
+	got, err := StateOf(context.Background(), v)
+	if err != nil {
+		t.Fatalf("StateOf() error = %v", err)
+	}
+	if got != StateStopped {
+		t.Errorf("StateOf() = %q, want %q for a VM with no running process", got, StateStopped)
+	}
+}
+
+func TestStateRejectsAnUnknownProvider(t *testing.T) {
+	v := &config.VM{Name: "dev", Dir: t.TempDir(), Provider: "nope"}
+	if _, err := StateOf(context.Background(), v); !errors.Is(err, provider.ErrUnknownProvider) {
+		t.Errorf("StateOf() error = %v, want ErrUnknownProvider", err)
 	}
 }

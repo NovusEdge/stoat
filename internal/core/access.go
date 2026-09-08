@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -30,7 +31,15 @@ func SSHCommand(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]string{"ssh"}, sshx.Args(sshx.LocalEndpoint(v))...), nil
+	p, err := providerFor(v)
+	if err != nil {
+		return nil, err
+	}
+	ep, err := p.Endpoint(context.Background(), v)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{"ssh"}, sshx.Args(ep)...), nil
 }
 
 // Which selects one of a VM's two log files.
