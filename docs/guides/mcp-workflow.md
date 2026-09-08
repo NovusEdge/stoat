@@ -34,6 +34,26 @@ server shares a contract version and DTO package with the JSON CLI.
 Tool schemas and results are MCP-specific; see
 [JSON output](../reference/json.md) for the differences.
 
+## Connect a client Stoat does not write
+
+Codex owns its own TOML config. Add Stoat with the Codex CLI:
+
+```sh
+codex mcp add stoat -- "$(command -v stoat)" mcp
+```
+
+Codex starts the server in its own working directory, so run Codex from the
+project directory when the server must read that project's `stoat.toml`.
+
+For any other client, print the entry and translate it:
+
+```sh
+stoat mcp install claude-code --print
+```
+
+The command, the `mcp` argument, and the working directory are the only fields
+a client needs. See [other clients](../reference/mcp.md#other-clients).
+
 ## Choose a transport
 
 Stdio is the normal transport:

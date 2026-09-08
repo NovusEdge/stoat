@@ -63,6 +63,35 @@ For repository-managed VMs, declare `[vms.<key>]` in `stoat.toml` and commit
 the file. `stoat up`, `status`, and `down` then reconcile and operate on the
 declared VMs. See the [project file reference](docs/reference/project-file.md).
 
+## Connect an agent
+
+`stoat mcp` serves the Model Context Protocol over stdio. The client starts it
+as a subprocess. The server reads the `stoat.toml` of that subprocess's working
+directory, so start the client from the project directory.
+
+Stoat writes the entry for four clients:
+
+```sh
+stoat mcp install claude-code   # or claude-desktop, cursor, vscode
+stoat mcp doctor
+```
+
+Add `--project` for a `.mcp.json` next to `stoat.toml` under Claude Code.
+Codex keeps a TOML config, so add the same command through its own CLI:
+
+```sh
+codex mcp add stoat -- "$(command -v stoat)" mcp
+```
+
+Any other MCP client runs the same command. Print the entry to copy with
+`stoat mcp install claude-code --print`, or serve streamable HTTP on loopback
+with `stoat mcp --http 127.0.0.1:7777` for a client that cannot start a
+subprocess.
+
+Each VM carries an `agent_access` level from `none` to `exec`, which bounds
+what an agent may do inside that guest. See the
+[MCP reference](docs/reference/mcp.md).
+
 ## Recipes, MCP, and scripts
 
 - [Recipe overview](docs/recipes/overview.md) explains targeting, parameters,

@@ -40,6 +40,35 @@ stoat mcp doctor
 `mcp doctor` marks an entry as stale when its command points to a different
 Stoat executable. Re-run `mcp install` after changing the installation path.
 
+## Other clients
+
+Codex keeps its servers in `~/.codex/config.toml`, or in `.codex/config.toml`
+for a trusted project. Add Stoat through the Codex CLI:
+
+```sh
+codex mcp add stoat -- "$(command -v stoat)" mcp
+```
+
+That entry carries no working directory, so Codex starts the server in the
+directory Codex itself runs in. Start Codex from the project directory when the
+server must read that project's `stoat.toml`.
+
+Every other MCP client runs the same command. Take the entry from
+`stoat mcp install claude-code --print` and translate it into the client's own
+format. The three fields are the absolute Stoat executable, the single argument
+`mcp`, and the working directory:
+
+```json
+{
+  "command": "/home/you/.local/bin/stoat",
+  "args": ["mcp"],
+  "cwd": "/home/you/project"
+}
+```
+
+`stoat mcp doctor` reports the contract version and the entries of the four
+clients Stoat writes. It does not see a Codex or hand-written entry.
+
 ## Transport
 
 The default transport is stdio:
