@@ -22,6 +22,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
 )
@@ -98,6 +99,11 @@ type Entry struct {
 	// existing default.
 	DefaultDisk string
 	Notes       string
+	// GCEImage is a full image-family resource path for the gce provider
+	// (e.g. "projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64").
+	// Empty means this entry has no GCE-qualified image: its official cloud
+	// image carries no cloud-init, so stoat's seed does nothing there.
+	GCEImage string
 }
 
 // mib is a readable way to write the declared sizes above.
@@ -153,8 +159,9 @@ func Catalog() []Entry {
 			// The cloud image's distro-default user is "ubuntu", but
 			// stoat's cloud-init seed (internal/cloudinit) creates and
 			// keys only a "stoat" user, so that's what connects.
-			SSHUser: "stoat",
-			Notes:   "Ubuntu 24.04 LTS server cloud image",
+			SSHUser:  "stoat",
+			Notes:    "Ubuntu 24.04 LTS server cloud image",
+			GCEImage: "projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64",
 		},
 		{
 			ID:      "debian-13",
@@ -445,6 +452,22 @@ func Resolve(e Entry) (*Release, error) {
 		r.SHA256 = sum
 	}
 	return r, nil
+}
+
+// GCEImageFor returns the GCE image-family resource path for a catalog
+// entry, or a capabilities.ReasonImageVariantMissing error when the entry
+// has no GCE-qualified image (docket d39: those images carry no cloud-init).
+func GCEImageFor(id string) (string, error) {
+	for _, e := range Catalog() {
+		if e.ID != id {
+			continue
+		}
+		if e.GCEImage == "" {
+			return "", fmt.Errorf("%s: %s: no GCE image for this entry", id, capabilities.ReasonImageVariantMissing)
+		}
+		return e.GCEImage, nil
+	}
+	return "", fmt.Errorf("%w: %s", ErrNoSuchImage, id)
 }
 
 // fetchChecksum fetches a published sums file and returns the hex digest

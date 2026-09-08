@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -486,6 +487,41 @@ func TestSeedSkipsMountsOnDebian(t *testing.T) {
 	}
 	if !strings.Contains(arch, "mounts:") {
 		t.Errorf("arch seed is missing its 9p mounts document:\n%s", arch)
+	}
+}
+
+// A GCE instance has no 9p device; a mount unit for a device that does not
+// exist fails on every boot.
+func TestSeedOmitsNineMountsOnGCE(t *testing.T) {
+	v := &config.VM{Name: "cloudy", Mode: "cloud", OS: "ubuntu", Provider: "gce", Share: "/host"}
+	got, err := userData(v, testPubkey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "9p") {
+		t.Errorf("gce seed carries a 9p mount:\n%s", got)
+	}
+}
+
+// A future edit to mountsDoc or userData must not fork the two providers'
+// seeds by accident.
+func TestSeedIsOtherwiseIdenticalAcrossProviders(t *testing.T) {
+	base := &config.VM{Name: "cloudy", Mode: "cloud", OS: "ubuntu"}
+	local, err := userData(base, testPubkey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gce := *base
+	gce.Provider = "gce"
+	remote, err := userData(&gce, testPubkey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localMap := parseMapping(t, local)
+	delete(localMap, "mounts")
+	remoteMap := parseMapping(t, remote)
+	if !reflect.DeepEqual(localMap, remoteMap) {
+		t.Errorf("seeds differ by more than the mounts block:\nlocal (mounts stripped): %+v\ngce: %+v", localMap, remoteMap)
 	}
 }
 

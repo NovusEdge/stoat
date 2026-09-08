@@ -142,8 +142,10 @@ func SkipShares(osName string) bool {
 // nofail keeps a share that drops out at runtime from holding up boot. The
 // host mount is ro, matching what QEMU enforces, so a write fails immediately
 // instead of after a remount that appears to succeed.
+//
+// IsRemote's non-qemu providers have no 9p device to mount.
 func mountsDoc(v *config.VM) string {
-	if SkipShares(v.OS) {
+	if SkipShares(v.OS) || config.IsRemote(v.Provider) {
 		return ""
 	}
 	const opts = "trans=virtio,version=9p2000.L,%s,_netdev,nofail"
