@@ -625,8 +625,8 @@ func Stop(name string) error {
 // for. A caller that wants that calls Stop then Destroy.
 //
 // config.VM.Delete already refuses to remove anything outside the data root
-// (it checks filepath.Dir(v.Dir) == config.Root()); Destroy inherits that
-// guard rather than re-implementing it.
+// (it checks filepath.Dir(v.Dir) == config.Root() or config.Root()/v2);
+// Destroy inherits that guard rather than re-implementing it.
 func Destroy(name string) error {
 	// The same data-root lock Create and Clone take. Clone's overlay
 	// references its source's disk BY PATH, some time after Clone checks

@@ -182,7 +182,7 @@ func pruneBroken(dryRun bool) ([]PruneItem, error) {
 
 		out = append(out, PruneItem{Class: classBrokenVM, Path: dir})
 		if !dryRun {
-			// config.VM.Delete refuses any path whose parent isn't Root().
+			// config.VM.Delete refuses any path whose parent isn't Root() or Root()/v2.
 			if err := bv.Delete(); err != nil {
 				return out, err
 			}

@@ -62,7 +62,7 @@ func Clone(name, newName string) (VM, error) {
 	if strings.ContainsAny(newName, "/ ") {
 		return VM{}, fmt.Errorf("%w: name cannot contain spaces or slashes", ErrInvalidSpec)
 	}
-	if _, err := os.Stat(filepath.Join(config.Root(), newName)); err == nil {
+	if config.Exists(newName) {
 		return VM{}, fmt.Errorf("%w: %s", ErrNameTaken, newName)
 	}
 

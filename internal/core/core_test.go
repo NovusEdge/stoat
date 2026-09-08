@@ -226,6 +226,9 @@ func TestPlanRefusesDuplicateName(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "work"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "work", "vm.toml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := plan(Spec{Name: "work", Image: "alpine-virt-3.24.1-x86_64.iso"})
 	if !errors.Is(err, ErrNameTaken) {

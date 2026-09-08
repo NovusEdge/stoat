@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -180,7 +179,7 @@ func plan(s Spec) (*config.VM, error) {
 	if strings.ContainsAny(name, "/ ") {
 		return nil, fmt.Errorf("%w: name cannot contain spaces or slashes", ErrInvalidSpec)
 	}
-	if _, err := os.Stat(filepath.Join(config.Root(), name)); err == nil {
+	if config.Exists(name) {
 		return nil, fmt.Errorf("%w: %s", ErrNameTaken, name)
 	}
 
