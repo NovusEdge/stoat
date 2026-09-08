@@ -206,7 +206,7 @@ func Root() string {
 
 // EnsureRoot creates the data root and its fixed subdirectories.
 func EnsureRoot() error {
-	if err := hostops.RequireDataRoot(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	for _, d := range []string{"isos", "recipes"} {
@@ -280,7 +280,7 @@ func (v *VM) ISOPath() string {
 
 // Save writes vm.toml, creating the VM directory if needed.
 func (v *VM) Save() error {
-	if err := hostops.RequireDataRoot(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	if v.Dir == "" {
@@ -385,7 +385,7 @@ var sshPortLine = regexp.MustCompile(`(?m)^\s*sshport\s*=\s*(\d+)\s*$`)
 
 // Delete removes the VM directory. It never touches isos/.
 func (v *VM) Delete() error {
-	if err := hostops.RequireDataRoot(); err != nil {
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
 	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {

@@ -495,10 +495,15 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDoctor(a, stdout, stderr)
 	}
 
-	// RequireDataRoot never refuses today. It stays on the path a mutating
-	// command takes before it resolves secrets, reads project scope or writes
-	// logs, so a future host gate has one place to land.
-	if err := hostops.RequireDataRoot(); err != nil {
+	// Every command past this point either drives a machine or writes to the
+	// data root, so an unqualified host refuses here, before secrets resolve,
+	// project scope is read, or a log is written.
+	//
+	// hostops.RequireDataRoot exists for the day a provider runs a VM
+	// somewhere other than this host. Moving these call sites onto it needs
+	// that provider first; opening the gate earlier only lets a macOS user
+	// reach a QEMU path that cannot work.
+	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 	if len(a.Params) > 0 {
