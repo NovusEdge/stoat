@@ -376,7 +376,7 @@ func corePatch(name string, in updateIn) (core.Patch, error) {
 			return core.Patch{}, err
 		}
 		if want.rank() > cur.rank() {
-			return core.Patch{}, fmt.Errorf("vm %q has agent_access = %s; this tool may only lower it, and raising it is a CLI or TUI action", name, cur)
+			return core.Patch{}, fmt.Errorf("vm %q has agent_access = %s; this tool may only lower it; %s", name, cur, raiseHint(name, want))
 		}
 		access := want.String()
 		p.AgentAccess = &access

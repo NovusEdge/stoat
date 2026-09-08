@@ -154,7 +154,8 @@ func TestMCPErrorContractAccessAndRateRefusals(t *testing.T) {
 		t.Fatal("guest tool succeeded below its required access level")
 	}
 	accessMeta, accessFirst := decodeErrorContract(t, access)
-	if accessMeta.Code != "access_denied" || accessMeta.Message != accessFirst.Message || accessFirst.Message != `vm "locked" has agent_access = none; needs observe` {
+	wantAccess := `vm "locked" has agent_access = none; needs observe; a person raises it with: stoat update locked --agent-access observe`
+	if accessMeta.Code != "access_denied" || accessMeta.Message != accessFirst.Message || accessFirst.Message != wantAccess {
 		t.Fatalf("access refusal = %+v, first = %+v", accessMeta, accessFirst)
 	}
 

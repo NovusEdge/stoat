@@ -64,15 +64,24 @@ func currentLevel(vm string) (Level, error) {
 
 // requireAccess gates every guest-touching tool. core.Exec does not enforce
 // it, because core is a library the CLI and TUI also call and a blanket
-// refusal there would be the wrong layer. The refusal names both levels, so
-// an agent knows what to ask a person for.
+// refusal there would be the wrong layer. The refusal names both levels and
+// the exact host command that raises the level, because an agent may not
+// raise its own and has to hand a person something to run.
 func requireAccess(vm string, need Level) error {
 	have, err := currentLevel(vm)
 	if err != nil {
 		return err
 	}
 	if have.rank() < need.rank() {
-		return wire.WithSentinel(fmt.Errorf("vm %q has agent_access = %s; needs %s", vm, have, need), wire.ErrAccessDenied)
+		return wire.WithSentinel(fmt.Errorf("vm %q has agent_access = %s; needs %s; %s", vm, have, need, raiseHint(vm, need)), wire.ErrAccessDenied)
 	}
 	return nil
+}
+
+// raiseHint is the host command that raises vm to want. checkVMName has
+// already run on every vm that reaches here, so no shell metacharacter can
+// enter the string. agent_access takes effect on the next MCP call, so the
+// command holds on a running VM.
+func raiseHint(vm string, want Level) string {
+	return fmt.Sprintf("a person raises it with: stoat update %s --agent-access %s", vm, want)
 }

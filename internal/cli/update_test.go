@@ -7,7 +7,32 @@ import (
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 )
+
+// A running VM used to be told every edit waits for a restart. agent_access,
+// recipes and params are read fresh by whatever next uses them, so telling a
+// person to restart for one of those sends them to fix a VM that already
+// works.
+func TestAppliesAtOnlyRestartsForFieldsQEMUReadsAtStart(t *testing.T) {
+	running := core.VM{State: core.StateRunning}
+	stopped := core.VM{State: core.StateStopped}
+	for _, tc := range []struct {
+		vm      core.VM
+		changed []string
+		want    string
+	}{
+		{running, []string{"agent_access"}, "now"},
+		{running, []string{"recipes", "params"}, "now"},
+		{running, []string{"ram"}, "next_start"},
+		{running, []string{"agent_access", "cpus"}, "next_start"},
+		{stopped, []string{"ram"}, "now"},
+	} {
+		if got := appliesAt(tc.vm, tc.changed); got != tc.want {
+			t.Errorf("appliesAt(%s, %v) = %q, want %q", tc.vm.State, tc.changed, got, tc.want)
+		}
+	}
+}
 
 // A flag that was not given must leave its field alone. A flag given as the
 // zero value must set it to that zero value. Comparing against the zero

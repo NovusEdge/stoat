@@ -326,7 +326,14 @@ project-local `.mcp.json`. The server uses stdio by default. For HTTP, use
 `stoat mcp serve --http 127.0.0.1:7777`; non-loopback addresses are refused
 because the server has no authentication.
 
-If a tool reports an access refusal, raise `agent_access` with the CLI or TUI.
-The MCP `update` tool can lower a VM's level but cannot raise it. `observe` is
-needed for guest reads, `manage` for writes and recipe application, and `exec`
-for command and job tools.
+If a tool reports an access refusal, the refusal names the command that fixes
+it:
+
+```sh
+stoat update <vm> --agent-access exec
+```
+
+The change takes effect on the next MCP call, so the VM does not need a
+restart. The MCP `update` tool can lower a VM's level but cannot raise it.
+`observe` is needed for guest reads, `manage` for writes and recipe
+application, and `exec` for command and job tools.

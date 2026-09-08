@@ -149,6 +149,10 @@ func TestRequireAccessNamesTheLevel(t *testing.T) {
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("message = %q, want it to contain %q", err, want)
 	}
+	hint := "stoat update dev --agent-access manage"
+	if !strings.Contains(err.Error(), hint) {
+		t.Fatalf("message = %q, want it to contain the raise command %q", err, hint)
+	}
 }
 
 func TestParseLevel(t *testing.T) {
