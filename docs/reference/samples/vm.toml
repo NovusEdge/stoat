@@ -16,6 +16,7 @@ sshport          = 2200            # int; default an allocated free port; stoat 
 recipes          = ["docker"]      # string[]; default []; user/TUI and stoat create/update write the selection.
 display          = "auto"          # string; default "auto"; user/TUI writes: auto, window, or vnc.
 backend          = "apkovl"        # string; default inferred from image; stoat writes: apkovl, cloudinit, or ssh.
+provider         = "qemu"          # string; default qemu when empty; stoat writes the execution surface.
 base             = ""              # string path; default empty; stoat writes the absolute shared base-image path.
 sshuser          = "root"          # string; default guest-defined user (empty means root); stoat writes it.
 console_password = ""              # string; default "stoat" for cloud VMs, empty otherwise; stoat writes, never ssh.

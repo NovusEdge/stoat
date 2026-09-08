@@ -528,8 +528,8 @@ func Get(name string) (VM, error) {
 }
 
 // providerFor resolves v's execution surface. Every core call site goes
-// through here instead of provider.For directly, so C2's capability checks
-// have one place to land.
+// through here rather than provider.For, so a per-provider check added
+// later has one place to land.
 func providerFor(v *config.VM) (provider.Provider, error) { return provider.For(v) }
 
 // StateOf asks v's provider what the machine is doing. A provider this

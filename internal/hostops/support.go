@@ -7,8 +7,9 @@ import (
 )
 
 // ErrUnsupported reports a native host whose VM operations have not been
-// qualified yet. Only doctor and capabilities run there. The gate in
-// internal/cli sits ahead of every other command, so ls and get refuse too.
+// qualified yet. Only RequireLocalHypervisor returns it, so a command that
+// starts or stops a local VM refuses while one that reads or edits a VM
+// record does not.
 var ErrUnsupported = errors.New("native VM operations are not qualified")
 
 // requirement names the accelerator a host needs before stoat qualifies it,
@@ -44,7 +45,7 @@ func Message(goos, goarch string) string {
 		lines = append(lines, fmt.Sprintf("%s has no qualified runtime yet.", host))
 	}
 	lines = append(lines,
-		"doctor and capabilities still work here; every other command needs a qualified host.",
+		"starting and stopping a local VM needs a qualified host; commands that only read or edit VM records still work here.",
 		"Linux with KVM is the supported configuration today.",
 	)
 	out := lines[0]

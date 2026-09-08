@@ -495,10 +495,9 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runDoctor(a, stdout, stderr)
 	}
 
-	// Every mutating or process-facing command must reject before resolving
-	// secrets, reading project scope, creating the data root, or initializing
-	// logs. The independent capabilities command is dispatched before this
-	// boundary by its owner and remains metadata-only.
+	// RequireDataRoot never refuses today. It stays on the path a mutating
+	// command takes before it resolves secrets, reads project scope or writes
+	// logs, so a future host gate has one place to land.
 	if err := hostops.RequireDataRoot(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}

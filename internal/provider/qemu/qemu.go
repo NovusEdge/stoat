@@ -18,8 +18,8 @@ type Provider struct{}
 
 func (Provider) Name() string { return "qemu" }
 
-// Capabilities returns nothing in C1. The capability set moves here in C2,
-// alongside the code that consumes it.
+// Capabilities returns nothing. The capability set still lives in
+// internal/capabilities and moves here with the code that reads it.
 func (Provider) Capabilities(*config.VM) []capabilities.Capability { return nil }
 
 func (Provider) Start(_ context.Context, v *config.VM) error { return qemu.Start(v) }

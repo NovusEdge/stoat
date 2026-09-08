@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +12,6 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/keys"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -45,7 +45,11 @@ func Clone(name, newName string) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
-	if qemu.Running(src) {
+	state, err := StateOf(context.Background(), src)
+	if err != nil {
+		return VM{}, err
+	}
+	if state == StateRunning {
 		return VM{}, fmt.Errorf("%w: %s: stop it before cloning", ErrAlreadyRunning, name)
 	}
 

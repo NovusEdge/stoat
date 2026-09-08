@@ -42,9 +42,12 @@ func fakeRunning(t *testing.T, v *config.VM) func() {
 // realQemuProcess spawns a real process and points v's pidfile at it,
 // leaving the real "qemu" provider registered. Use this instead of
 // fakeRunning for a test that exercises code reading qemu.Running directly
-// (clone.go) or a provider.Start call that must actually run and fail
-// (autorestart_test.go's ISO-missing case): fake.Install swaps in a Start
-// that always succeeds, which would pass those tests for the wrong reason.
+// (clone.go), a provider.Start call that must actually run and fail
+// (autorestart_test.go's ISO-missing case: fake.Install swaps in a Start
+// that always succeeds, which would pass that test for the wrong reason),
+// or a broken-VM path whose running check is fed a hand-reconstructed
+// config.VM (TestDestroyRefusesARunningBrokenVM below), where fakeRunning's
+// name-only match can't tell whether Dir was reconstructed.
 func realQemuProcess(t *testing.T, v *config.VM) func() {
 	return testutil.FakeRunning(t, v.Dir)
 }
@@ -567,7 +570,7 @@ func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
 	root(t)
 	// A directory that is running but whose vm.toml no longer parses.
 	writeRawVMToml(t, "hosed", "name = \"hosed\"\nmode = \"disk\n")
-	defer fakeRunning(t, &config.VM{Name: "hosed"})()
+	defer realQemuProcess(t, &config.VM{Name: "hosed", Dir: filepath.Join(config.Root(), "hosed")})()
 
 	if err := Destroy("hosed"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Destroy on a running broken VM = %v, want ErrAlreadyRunning", err)
@@ -577,14 +580,22 @@ func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
 	}
 }
 
-func TestStateUsesTheProvider(t *testing.T) {
+// The fake is keyed by Name and the real provider by Dir, so this fails if
+// StateOf stops consulting the registry.
+func TestStateOfFollowsTheProvider(t *testing.T) {
+	f := fake.Install(t)
 	v := &config.VM{Name: "dev", Dir: t.TempDir()}
-	got, err := StateOf(context.Background(), v)
-	if err != nil {
-		t.Fatalf("StateOf() error = %v", err)
+
+	if got, err := StateOf(context.Background(), v); err != nil || got != StateStopped {
+		t.Fatalf("StateOf() = %q, %v, want %q, nil", got, err, StateStopped)
 	}
-	if got != StateStopped {
-		t.Errorf("StateOf() = %q, want %q for a VM with no running process", got, StateStopped)
+	f.SetRunning("dev")
+	if got, err := StateOf(context.Background(), v); err != nil || got != StateRunning {
+		t.Fatalf("StateOf() = %q, %v, want %q, nil", got, err, StateRunning)
+	}
+	f.SetStopped("dev")
+	if got, err := StateOf(context.Background(), v); err != nil || got != StateStopped {
+		t.Fatalf("StateOf() = %q, %v, want %q, nil", got, err, StateStopped)
 	}
 }
 

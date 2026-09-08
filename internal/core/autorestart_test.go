@@ -107,11 +107,11 @@ func TestAutoRestartAfterInstallGivesUpSilentlyOnTimeout(t *testing.T) {
 
 // TestAutoRestartAfterInstallAttemptsStartOnceInstallerStops proves the
 // installer-stop signal actually drives a restart attempt, not just the
-// guard. qemu.Start has no fake seam, so the restart attempt fails here for
+// guard. The fake provider's Start always succeeds, so this test keeps the
+// real qemu provider (realQemuProcess) and lets the restart attempt fail for
 // lack of a real install ISO (v.ISOPath() names nothing on disk); the test
 // asserts on that failure's shape rather than a real boot, distinguishing a
-// restart ATTEMPT (the failure names v's ISO path) from the guard's silent
-// no-op (nil error, near-instant return).
+// restart ATTEMPT from the guard's silent no-op.
 func TestAutoRestartAfterInstallAttemptsStartOnceInstallerStops(t *testing.T) {
 	dir := root(t)
 	v := &config.VM{Name: "work", Mode: "disk", Installed: false, OS: "alpine", Backend: "apkovl", RAM: 1024, CPUs: 1, SSHPort: 2404}

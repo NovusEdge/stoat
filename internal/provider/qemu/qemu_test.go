@@ -6,6 +6,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/provider"
+	"github.com/novusedge/stoat/internal/testutil"
 )
 
 func TestRegisteredAsQemu(t *testing.T) {
@@ -32,15 +33,23 @@ func TestEndpointIsLoopback(t *testing.T) {
 	}
 }
 
-func TestStatusReportsStoppedForAnUnstartedVM(t *testing.T) {
-	s, err := Provider{}.Status(context.Background(), &config.VM{Name: "dev", Dir: t.TempDir()})
+func TestStatusReflectsTheQemuProcess(t *testing.T) {
+	v := &config.VM{Name: "dev", Dir: t.TempDir()}
+
+	s, err := Provider{}.Status(context.Background(), v)
+	if err != nil || s.Running || !s.StartedAt.IsZero() {
+		t.Fatalf("Status() = %+v, %v, want a stopped zero status", s, err)
+	}
+
+	defer testutil.FakeRunning(t, v.Dir)()
+	s, err = Provider{}.Status(context.Background(), v)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if s.Running {
-		t.Error("Running = true, want false for a VM with no pidfile")
+	if !s.Running {
+		t.Error("Running = false, want true while the pidfile names a live process")
 	}
-	if s.Raw != "" {
-		t.Errorf("Raw = %q, want empty: qemu has no status word of its own", s.Raw)
+	if s.StartedAt.IsZero() {
+		t.Error("StartedAt is zero, want the pidfile's mtime")
 	}
 }
