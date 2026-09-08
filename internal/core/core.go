@@ -10,16 +10,17 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/coreerr"
+	"github.com/novusedge/stoat/internal/provider"
+	_ "github.com/novusedge/stoat/internal/provider/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
@@ -110,6 +111,10 @@ type Spec struct {
 	// validates the string against its Level enum before calling Create;
 	// core stores whatever it is given.
 	AgentAccess string
+
+	// Provider is the execution surface. Empty means qemu, matching
+	// config.VM.Provider and provider.For.
+	Provider string
 }
 
 // Create validates a Spec, writes vm.toml and allocates the disk. It does not
@@ -152,14 +157,16 @@ func Create(s Spec) (VM, error) {
 			return VM{}, err
 		}
 	}
-	if v.Mode == "disk" {
-		out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), v.Disk).CombinedOutput()
-		if err != nil {
-			// Leave no trace of a failed creation: otherwise the list shows a
-			// VM with no disk.qcow2 that can never boot.
-			_ = os.RemoveAll(v.Dir)
-			return VM{}, fmt.Errorf("qemu-img: %s", strings.TrimSpace(string(out)))
-		}
+	p, err := provider.For(v)
+	if err != nil {
+		_ = os.RemoveAll(v.Dir)
+		return VM{}, err
+	}
+	if err := p.Create(context.Background(), v); err != nil {
+		// Leave no trace of a failed creation: otherwise the list shows a
+		// VM with no disk.qcow2 that can never boot.
+		_ = os.RemoveAll(v.Dir)
+		return VM{}, err
 	}
 	return fromConfig(v), nil
 }
@@ -180,7 +187,7 @@ func plan(s Spec) (*config.VM, error) {
 	if strings.ContainsAny(name, "/ ") {
 		return nil, fmt.Errorf("%w: name cannot contain spaces or slashes", ErrInvalidSpec)
 	}
-	if _, err := os.Stat(filepath.Join(config.Root(), name)); err == nil {
+	if config.Exists(name) {
 		return nil, fmt.Errorf("%w: %s", ErrNameTaken, name)
 	}
 
@@ -282,6 +289,7 @@ func plan(s Spec) (*config.VM, error) {
 		Display:     s.Display,
 		Project:     s.Project,
 		Shares:      s.Shares,
+		Provider:    s.Provider,
 	}
 
 	if img.backend == "cloudinit" {

@@ -134,6 +134,35 @@ func TestBadKeyIsRejected(t *testing.T) {
 	}
 }
 
+func TestSchema1RejectsAProviderKey(t *testing.T) {
+	dir := write(t, "schema = 1\n\n[project]\nname = \"p\"\n\n[vms.dev]\nimage = \"debian-13\"\nprovider = \"gce\"\n")
+	if _, err := Load(dir); err == nil {
+		t.Error("Load() = nil error; a schema-1 document must not accept provider")
+	}
+}
+
+func TestSchema2AcceptsAProviderKey(t *testing.T) {
+	dir := write(t, "schema = 2\n\n[project]\nname = \"p\"\n\n[vms.dev]\nimage = \"debian-13\"\nprovider = \"gce\"\n")
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if p.VMs[0].Provider != "gce" {
+		t.Errorf("Provider = %q, want gce", p.VMs[0].Provider)
+	}
+}
+
+func TestSchema1VMResolvesToQemu(t *testing.T) {
+	dir := write(t, "schema = 1\n\n[project]\nname = \"p\"\n\n[vms.dev]\nimage = \"debian-13\"\n")
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if p.VMs[0].Provider != "" {
+		t.Errorf("Provider = %q, want empty, which resolves to qemu", p.VMs[0].Provider)
+	}
+}
+
 func TestFindUsesTheCurrentDirectoryOnly(t *testing.T) {
 	dir := write(t, full)
 	t.Chdir(dir)

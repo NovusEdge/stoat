@@ -224,7 +224,7 @@ func EnsureRoot() error {
 // files copied from a previously published index.
 func reserved(name string) bool {
 	switch name {
-	case "isos", "recipes", "shared", "logs", "index":
+	case "isos", "recipes", "shared", "logs", "index", v2Dir:
 		return true
 	}
 	return strings.HasPrefix(name, ".stoat-index-stage-") ||
@@ -285,6 +285,9 @@ func (v *VM) Save() error {
 	}
 	if v.Dir == "" {
 		v.Dir = filepath.Join(Root(), v.Name)
+		if IsRemote(v.Provider) {
+			v.Dir = filepath.Join(Root(), v2Dir, v.Name)
+		}
 	}
 	if err := os.MkdirAll(v.Dir, 0o755); err != nil {
 		return err
@@ -294,7 +297,7 @@ func (v *VM) Save() error {
 
 // Load reads one VM by name.
 func Load(name string) (*VM, error) {
-	dir := filepath.Join(Root(), name)
+	dir := DirFor(name)
 	path := filepath.Join(dir, "vm.toml")
 	// Absent allow_exec means true; the seed survives the decode, a written
 	// false overrides it.
@@ -341,6 +344,13 @@ func List() ([]*VM, error) {
 		}
 		vms = append(vms, v)
 	}
+	for _, name := range v2Names() {
+		v, err := Load(name)
+		if err != nil {
+			continue // not a VM directory
+		}
+		vms = append(vms, v)
+	}
 	sort.Slice(vms, func(i, j int) bool { return vms[i].Name < vms[j].Name })
 	return vms, nil
 }
@@ -374,6 +384,14 @@ func ListBroken() ([]Broken, error) {
 			broken = append(broken, Broken{Name: e.Name(), Err: err})
 		}
 	}
+	for _, name := range v2Names() {
+		if _, err := os.Stat(filepath.Join(Root(), v2Dir, name, "vm.toml")); err != nil {
+			continue // no vm.toml: not a VM directory
+		}
+		if _, err := Load(name); err != nil {
+			broken = append(broken, Broken{Name: name, Err: err})
+		}
+	}
 	sort.Slice(broken, func(i, j int) bool { return broken[i].Name < broken[j].Name })
 	return broken, nil
 }
@@ -388,7 +406,7 @@ func (v *VM) Delete() error {
 	if err := hostops.RequireLocalHypervisor(); err != nil {
 		return err
 	}
-	if v.Dir == "" || filepath.Dir(v.Dir) != Root() {
+	if v.Dir == "" || (filepath.Dir(v.Dir) != Root() && filepath.Dir(v.Dir) != filepath.Join(Root(), v2Dir)) {
 		return fmt.Errorf("refusing to delete %q: outside the data root", v.Dir)
 	}
 	// The 9p work share lives outside v.Dir, so removing the VM directory

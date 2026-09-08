@@ -45,6 +45,7 @@ func SpecFor(p *project.Project, key string) (Spec, error) {
 		Disk:        d.Disk,
 		Recipes:     d.Recipes,
 		AgentAccess: d.AgentAccess,
+		Provider:    normalizeProvider(d.Provider),
 		Project:     p.Dir,
 		Shares:      configShares(shares),
 		Params:      params,
@@ -143,6 +144,10 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		return nil, fmt.Errorf("%w: %s: image changed (%s -> %s); run stoat rm %s and stoat up",
 			ErrImmutableDeclaration, key, imageName(was), img.id(), key)
 	}
+	if providerName(v.Provider) != providerName(spec.Provider) {
+		return nil, fmt.Errorf("%w: %s: provider changed (%s -> %s); run stoat rm %s and stoat up",
+			ErrImmutableDeclaration, key, providerName(v.Provider), providerName(spec.Provider), key)
+	}
 	mode, err := modeFor(img.backend, "")
 	if err != nil {
 		return nil, err
@@ -172,6 +177,27 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 		add("agent_access", v.AgentAccess, spec.AgentAccess, false)
 	}
 	return out, nil
+}
+
+// normalizeProvider folds the explicit default spelling to "", matching
+// config.VM.Provider's empty-means-qemu convention. Save routes on this
+// field: a literal "qemu" here would create $STOAT_HOME/v2/<name>/vm.toml
+// for what provider.For treats as a local hypervisor VM.
+func normalizeProvider(p string) string {
+	if p == "qemu" {
+		return ""
+	}
+	return p
+}
+
+// providerName renders an empty Provider field as "qemu", matching
+// provider.For's resolution, so a provider-changed message never names an
+// empty string.
+func providerName(p string) string {
+	if p == "" {
+		return "qemu"
+	}
+	return p
 }
 
 // declaredImage names the image a VM was created from, whichever field holds

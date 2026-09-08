@@ -14,6 +14,8 @@ no walk-up: a parent directory's `stoat.toml` has no effect.
 # stoat.toml declares this repository's VMs. Commit it, and stoat.lock with it.
 # Every field carries its type, its default, and who writes it.
 schema = 1                      # int, required. The file format version.
+                                 # 2 accepts `provider` on a [vms.x] table;
+                                 # 1 rejects it.
 
 [project]
 name = "myrepo"                 # string, default: the directory name.
@@ -38,6 +40,8 @@ shares       = [".", "src"]     # directories from this project, mounted under
                                  # /work/src. Every entry stays inside the
                                  # project.
 agent_access = "manage"         # none | observe | manage | exec, default manage
+provider     = "qemu"           # execution surface, default qemu (local).
+                                 # requires schema = 2.
 
 [vms.dev.params.docker]         # non-secret recipe params
 user = "dev"                    # secrets go in .stoat/secrets.toml, 0600
@@ -82,8 +86,8 @@ step there. Ubuntu cloud VMs mount shares as usual.
   `agent_access` from the declaration, through the same path as `stoat
   update`. `cpus`, `ram` and `shares` take effect at the VM's next `down`
   and `up`.
-- `image` and `disk` are immutable. A declaration that changes either is
-  an error naming `stoat rm <key>` as the fix.
+- `image`, `disk` and `provider` are immutable. A declaration that changes
+  any of them is an error naming `stoat rm <key>` as the fix.
 
 ## Secrets
 

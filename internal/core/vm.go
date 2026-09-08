@@ -625,8 +625,8 @@ func Stop(name string) error {
 // for. A caller that wants that calls Stop then Destroy.
 //
 // config.VM.Delete already refuses to remove anything outside the data root
-// (it checks filepath.Dir(v.Dir) == config.Root()); Destroy inherits that
-// guard rather than re-implementing it.
+// (it checks filepath.Dir(v.Dir) == config.Root() or config.Root()/v2);
+// Destroy inherits that guard rather than re-implementing it.
 func Destroy(name string) error {
 	// The same data-root lock Create and Clone take. Clone's overlay
 	// references its source's disk BY PATH, some time after Clone checks
@@ -651,9 +651,27 @@ func Destroy(name string) error {
 		// started bypass the running-VM refusal, deleting the directory,
 		// pidfile, monitor socket and disk out from under a live qemu
 		// process.
-		bv := &config.VM{Name: name, Dir: filepath.Join(config.Root(), name)}
-		if state, err := StateOf(context.Background(), bv); err == nil && state == StateRunning {
+		provider, perr := config.ProviderOf(name)
+		if perr != nil {
+			return perr
+		}
+		if provider == "unknown" {
+			return fmt.Errorf("%s: cannot determine provider from a broken record", name)
+		}
+		bv := &config.VM{Name: name, Dir: config.DirFor(name), Provider: provider}
+		state, err := StateOf(context.Background(), bv)
+		if err != nil {
+			return err
+		}
+		if state == StateRunning {
 			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
+		}
+		p, err := providerFor(bv)
+		if err != nil {
+			return err
+		}
+		if err := p.Destroy(context.Background(), bv); err != nil {
+			return err
 		}
 		return bv.Delete()
 	}
@@ -666,6 +684,13 @@ func Destroy(name string) error {
 	}
 	if state == StateRunning {
 		return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
+	}
+	p, err := providerFor(v)
+	if err != nil {
+		return err
+	}
+	if err := p.Destroy(context.Background(), v); err != nil {
+		return err
 	}
 	return v.Delete()
 }
