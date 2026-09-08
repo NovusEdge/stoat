@@ -57,7 +57,7 @@ func doCopy(ctx context.Context, name, localPath, remotePath string, toRemote bo
 	}
 
 	var stderr bytes.Buffer
-	c := exec.CommandContext(ctx, "scp", sshx.CopyArgs(v, localPath, remotePath, toRemote)...)
+	c := exec.CommandContext(ctx, "scp", sshx.CopyArgs(sshx.LocalEndpoint(v), localPath, remotePath, toRemote)...)
 	c.Stderr = &stderr
 
 	err = c.Run()

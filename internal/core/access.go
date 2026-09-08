@@ -30,7 +30,7 @@ func SSHCommand(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append([]string{"ssh"}, sshx.Args(v)...), nil
+	return append([]string{"ssh"}, sshx.Args(sshx.LocalEndpoint(v))...), nil
 }
 
 // Which selects one of a VM's two log files.

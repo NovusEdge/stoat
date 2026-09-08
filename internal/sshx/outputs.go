@@ -48,7 +48,7 @@ func collectOutputs(ctx context.Context, v *config.VM, name string, m recipes.Ma
 	// it, so a multi-word script must travel as one already-quoted argv
 	// element or only its first word ends up under the escalation prefix.
 	remote := []string{"sh -c " + guest.ShQuote(script)}
-	out, err := exec.CommandContext(ctx, "ssh", Args(v, escalate(v, remote)...)...).Output()
+	out, err := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, remote)...)...).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

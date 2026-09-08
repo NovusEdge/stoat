@@ -104,7 +104,7 @@ func decodeCloudInitStatus(out []byte) string {
 func checkCloudInit(v core.VM) tea.Cmd {
 	name := v.Name
 	return func() tea.Msg {
-		out, err := exec.Command("ssh", sshx.Args(cfgVM(v), "cloud-init", "status", "--format", "json")...).Output()
+		out, err := exec.Command("ssh", sshx.Args(sshx.LocalEndpoint(cfgVM(v)), "cloud-init", "status", "--format", "json")...).Output()
 		if exitErr, ok := err.(*exec.ExitError); err != nil && (!ok || exitErr.ExitCode() == 255) {
 			// Not reachable yet is the normal case for the first ~30 seconds
 			// of a boot, so it is a state, not an error.

@@ -286,7 +286,7 @@ func rebootAndWait(ctx context.Context, v *config.VM, recipe string) error {
 	// `reboot` tears down the ssh session before the process can report an
 	// exit status back to this host, so cmd.Run() returning an error here is
 	// expected and not a failure signal; only the wait below is.
-	cmd := exec.CommandContext(ctx, "ssh", sshx.Args(v, "reboot")...)
+	cmd := exec.CommandContext(ctx, "ssh", sshx.Args(sshx.LocalEndpoint(v), "reboot")...)
 	_ = cmd.Run()
 
 	// The pre-reboot sshd can keep answering for a moment after the reboot
@@ -344,7 +344,7 @@ func discoverCloudInitApplied(ctx context.Context, v *config.VM) ([]string, erro
 		return nil, nil
 	}
 	script := fmt.Sprintf("for marker in %s/*; do case \"$marker\" in *.out) continue;; esac; [ -f \"$marker\" ] || continue; name=$(basename \"$marker\"); printf '===%%s\\n' \"$name\"; cat \"$marker.out\" 2>/dev/null; done", cloudinit.MarkerDir)
-	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(v, script)...).Output()
+	out, err := exec.CommandContext(ctx, "ssh", sshx.Args(sshx.LocalEndpoint(v), script)...).Output()
 	if err != nil {
 		return nil, nil // marker dir missing or a transient ssh error; discover nothing
 	}

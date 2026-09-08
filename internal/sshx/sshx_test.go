@@ -18,7 +18,7 @@ import (
 func TestArgs(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
-	got := strings.Join(Args(v), " ")
+	got := strings.Join(Args(LocalEndpoint(v)), " ")
 
 	for _, want := range []string{
 		"-p 2201",
@@ -40,7 +40,7 @@ func TestArgs(t *testing.T) {
 func TestArgsUsesConfiguredSSHUser(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x", SSHUser: "stoat"}
-	got := strings.Join(Args(v), " ")
+	got := strings.Join(Args(LocalEndpoint(v)), " ")
 
 	if !strings.Contains(got, "stoat@127.0.0.1") {
 		t.Errorf("expected stoat@127.0.0.1 in: %s", got)
@@ -57,7 +57,7 @@ func TestArgsUsesConfiguredSSHUser(t *testing.T) {
 func TestCopyArgsUsesScpsPortFlagNotSSHs(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
-	got := CopyArgs(v, "/tmp/local", "/root/remote", true)
+	got := CopyArgs(LocalEndpoint(v), "/tmp/local", "/root/remote", true)
 
 	if !containsPair(got, "-P", "2201") {
 		t.Errorf("missing -P 2201 in: %v", got)
@@ -75,7 +75,7 @@ func TestCopyArgsUsesScpsPortFlagNotSSHs(t *testing.T) {
 func TestCopyArgsSharesConnOptionsWithArgs(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
-	got := strings.Join(CopyArgs(v, "/tmp/local", "/root/remote", true), " ")
+	got := strings.Join(CopyArgs(LocalEndpoint(v), "/tmp/local", "/root/remote", true), " ")
 
 	for _, want := range []string{
 		"-o StrictHostKeyChecking=no",
@@ -96,12 +96,12 @@ func TestCopyArgsDirection(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
 
-	up := CopyArgs(v, "/tmp/local", "/root/remote", true)
+	up := CopyArgs(LocalEndpoint(v), "/tmp/local", "/root/remote", true)
 	if up[len(up)-2] != "/tmp/local" || up[len(up)-1] != "root@127.0.0.1:/root/remote" {
 		t.Errorf("CopyTo argv = %v, want local then remote", up)
 	}
 
-	down := CopyArgs(v, "/tmp/local", "/root/remote", false)
+	down := CopyArgs(LocalEndpoint(v), "/tmp/local", "/root/remote", false)
 	if down[len(down)-2] != "root@127.0.0.1:/root/remote" || down[len(down)-1] != "/tmp/local" {
 		t.Errorf("CopyFrom argv = %v, want remote then local", down)
 	}
@@ -118,7 +118,7 @@ func TestCopyArgsDirection(t *testing.T) {
 func TestCopyArgsRemotePathIsNotShellQuoted(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
-	got := CopyArgs(v, "/tmp/local", "/root/my file.txt", true)
+	got := CopyArgs(LocalEndpoint(v), "/tmp/local", "/root/my file.txt", true)
 
 	want := "root@127.0.0.1:/root/my file.txt"
 	if got[len(got)-1] != want {
@@ -129,7 +129,7 @@ func TestCopyArgsRemotePathIsNotShellQuoted(t *testing.T) {
 func TestArgsExtraGoesAfterTarget(t *testing.T) {
 	t.Setenv("STOAT_HOME", "/data")
 	v := &config.VM{Name: "x", SSHPort: 2201, Dir: "/data/x"}
-	got := Args(v, "sh", "-s")
+	got := Args(LocalEndpoint(v), "sh", "-s")
 	if got[len(got)-2] != "sh" || got[len(got)-1] != "-s" {
 		t.Errorf("extra args must come last, got %v", got)
 	}
@@ -237,7 +237,7 @@ func TestWaitTimesOutWhenAcceptedButNoBanner(t *testing.T) {
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
 	start := time.Now()
-	err := Wait(context.Background(), v, 500*time.Millisecond)
+	err := Wait(context.Background(), LocalEndpoint(v), 500*time.Millisecond)
 	elapsed := time.Since(start)
 	t.Logf("accept-without-banner: Wait took %s", elapsed)
 	if err == nil {
@@ -253,7 +253,7 @@ func TestWaitSucceedsOnceBannerArrives(t *testing.T) {
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
 	start := time.Now()
-	err := Wait(context.Background(), v, 2*time.Second)
+	err := Wait(context.Background(), LocalEndpoint(v), 2*time.Second)
 	elapsed := time.Since(start)
 	t.Logf("accept-with-banner: Wait took %s", elapsed)
 	if err != nil {
@@ -287,7 +287,7 @@ func TestWaitSucceedsOnSlowBanner(t *testing.T) {
 
 	v := &config.VM{Name: "x", SSHPort: port, Dir: t.TempDir()}
 	start := time.Now()
-	err = Wait(context.Background(), v, 3*time.Second)
+	err = Wait(context.Background(), LocalEndpoint(v), 3*time.Second)
 	elapsed := time.Since(start)
 	t.Logf("slow-banner (500ms): Wait took %s", elapsed)
 	if err != nil {
@@ -299,7 +299,7 @@ func TestWaitTimesOutOnClosedPort(t *testing.T) {
 	// Port 1 on loopback: reserved, nothing listens.
 	v := &config.VM{Name: "x", SSHPort: 1, Dir: t.TempDir()}
 	start := time.Now()
-	err := Wait(context.Background(), v, 300*time.Millisecond)
+	err := Wait(context.Background(), LocalEndpoint(v), 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("Wait returned nil for a closed port")
 	}
@@ -352,7 +352,7 @@ func TestWaitCancelDuringRetrySleepReturnsPromptly(t *testing.T) {
 	}()
 
 	start := time.Now()
-	err := Wait(ctx, v, 10*time.Second)
+	err := Wait(ctx, LocalEndpoint(v), 10*time.Second)
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
@@ -374,7 +374,7 @@ func TestWaitAlreadyCancelledReturnsImmediately(t *testing.T) {
 	cancel()
 
 	start := time.Now()
-	err := Wait(ctx, v, 10*time.Second)
+	err := Wait(ctx, LocalEndpoint(v), 10*time.Second)
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
