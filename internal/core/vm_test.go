@@ -476,28 +476,33 @@ func TestGetDoesNotModifyVMTomlOnDisk(t *testing.T) {
 
 // TestStartedAtRunningVsStopped pins that a running VM's StartedAt comes
 // from the pidfile qemu.Running just read, and a stopped one gets the zero
-// time, not some stale value left over from a previous run.
+// time, not some stale value left over from a previous run. It uses
+// realQemuProcess, not fakeRunning, so this still exercises qemu.StartedAt
+// reading the pidfile's mtime rather than a hardcoded fake value.
 func TestStartedAtRunningVsStopped(t *testing.T) {
-	root(t)
-	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+	dir := root(t)
+	v := &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}
+	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
+	v.Dir = filepath.Join(dir, "work")
 
-	v, err := Get("work")
+	got, err := Get("work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !v.StartedAt.IsZero() {
-		t.Errorf("stopped VM: StartedAt = %v, want the zero time", v.StartedAt)
+	if !got.StartedAt.IsZero() {
+		t.Errorf("stopped VM: StartedAt = %v, want the zero time", got.StartedAt)
 	}
 
-	defer fakeRunning(t, &config.VM{Name: "work"})()
+	stop := realQemuProcess(t, v)
+	defer stop()
 
-	v, err = Get("work")
+	got, err = Get("work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.StartedAt.IsZero() {
+	if got.StartedAt.IsZero() {
 		t.Error("running VM: StartedAt is the zero time, want the pidfile's mtime")
 	}
 }
