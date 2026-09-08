@@ -10,6 +10,8 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
+	"github.com/novusedge/stoat/internal/provider/fake"
 )
 
 // saveVM writes a minimal stopped VM into the current test data root.
@@ -61,6 +63,45 @@ func TestGetHumanReadable(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "name: work") {
 		t.Errorf("output missing the name line: %q", out.String())
+	}
+}
+
+// TestGetShowsProviderQEMU pins the one-line addition for a local VM: "get"
+// must say which surface a VM runs on even when it is the default one.
+func TestGetShowsProviderQEMU(t *testing.T) {
+	cliRoot(t)
+	saveVM(t, &config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200})
+
+	var out, errOut strings.Builder
+	if code := Main([]string{"get", "work"}, "test", strings.NewReader(""), &out, &errOut); code != ExitOK {
+		t.Fatalf("exit = %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "provider: qemu") {
+		t.Errorf("output missing the provider line: %q", out.String())
+	}
+}
+
+// TestGetShowsProviderBlockForGCE pins the plan's provider block: name, gcp
+// project and zone, present only for a non-qemu VM.
+func TestGetShowsProviderBlockForGCE(t *testing.T) {
+	cliRoot(t)
+	// Status must not dial the network: register a fake rather than rely on
+	// another test in this package having already done so.
+	provider.Register("gce", &fake.Provider{})
+	saveVM(t, &config.VM{
+		Name: "cloudy", Mode: "cloud", OS: "ubuntu", RAM: 4096, CPUs: 2, SSHPort: 22,
+		Provider: "gce", GCEProject: "engrammic", GCEZone: "europe-west4-a",
+	})
+
+	var out, errOut strings.Builder
+	if code := Main([]string{"get", "cloudy"}, "test", strings.NewReader(""), &out, &errOut); code != ExitOK {
+		t.Fatalf("exit = %d: %s", code, errOut.String())
+	}
+	got := out.String()
+	for _, want := range []string{"provider: gce", "gcp project: engrammic", "zone: europe-west4-a"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 )
 
@@ -21,6 +22,7 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "name: %s\n", v.Name)
 	fmt.Fprintf(stdout, "os: %s\n", v.OS)
 	fmt.Fprintf(stdout, "mode: %s\n", v.Mode)
+	printProviderBlock(stdout, v)
 	fmt.Fprintf(stdout, "backend: %s\n", v.Backend)
 	fmt.Fprintf(stdout, "state: %s\n", v.State)
 	fmt.Fprintf(stdout, "cpus: %d\n", v.CPUs)
@@ -56,6 +58,31 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "error: %s\n", v.Error)
 	}
 	return ExitOK
+}
+
+// printProviderBlock prints the provider line, and for a non-qemu VM the
+// project and zone it was created in. Machine type, address and the two
+// deadlines are not printed: nothing in the Provider interface exposes them
+// yet (Status carries only a running bit and the provider's raw status
+// word), so showing them here would mean guessing rather than reporting.
+func printProviderBlock(stdout io.Writer, v core.VM) {
+	provider := v.Provider
+	if provider == "" {
+		provider = "qemu"
+		fmt.Fprintf(stdout, "provider: %s\n", provider)
+		return
+	}
+	fmt.Fprintf(stdout, "provider: %s\n", provider)
+	cfg, err := config.Load(v.Name)
+	if err != nil {
+		return
+	}
+	if cfg.GCEProject != "" {
+		fmt.Fprintf(stdout, "gcp project: %s\n", cfg.GCEProject)
+	}
+	if cfg.GCEZone != "" {
+		fmt.Fprintf(stdout, "zone: %s\n", cfg.GCEZone)
+	}
 }
 
 func sortedKeys(values map[string]string) []string {
