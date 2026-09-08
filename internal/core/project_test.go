@@ -265,6 +265,34 @@ func TestDiffRefusesADiskChange(t *testing.T) {
 	}
 }
 
+func TestDiffRefusesAProviderChange(t *testing.T) {
+	p := projectDir(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\n")
+	haveImage(t, os.Getenv("STOAT_HOME"), "alpine-standard-3.24.1-x86_64.iso")
+	s, err := SpecFor(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Dir, project.FileName),
+		[]byte("schema = 2\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nimage = \"alpine-virt\"\nprovider = \"gce\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := project.Load(p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Diff(p2, "dev")
+	if !errors.Is(err, ErrImmutableDeclaration) {
+		t.Fatalf("err = %v, want ErrImmutableDeclaration", err)
+	}
+	if !strings.Contains(err.Error(), "dev: provider changed (qemu -> gce)") ||
+		!strings.Contains(err.Error(), "stoat rm dev") {
+		t.Errorf("err = %q, want the provider-changed message with the stoat rm hint", err.Error())
+	}
+}
+
 // A cloud VM's stored image field is Base, an absolute path (core.go sets
 // v.Base = img.abs regardless of whether the image came from the catalog).
 // imageName must still resolve that path back to a catalog id on both sides

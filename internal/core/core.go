@@ -111,6 +111,10 @@ type Spec struct {
 	// validates the string against its Level enum before calling Create;
 	// core stores whatever it is given.
 	AgentAccess string
+
+	// Provider is the execution surface. Empty means qemu, matching
+	// config.VM.Provider and provider.For.
+	Provider string
 }
 
 // Create validates a Spec, writes vm.toml and allocates the disk. It does not
@@ -285,6 +289,7 @@ func plan(s Spec) (*config.VM, error) {
 		Display:     s.Display,
 		Project:     s.Project,
 		Shares:      s.Shares,
+		Provider:    s.Provider,
 	}
 
 	if img.backend == "cloudinit" {

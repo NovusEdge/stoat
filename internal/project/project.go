@@ -24,7 +24,7 @@ const CacheDir = ".stoat"
 
 // Schema is the schema this stoat reads. A file declaring a higher one is
 // refused, so a newer project does not decode as a silently smaller one.
-const Schema = 1
+const Schema = 2
 
 // nameRE is the VM name grammar, shared by a declaration key, a name
 // override and the generated global name. internal/mcpsrv's checkVMName uses
@@ -49,6 +49,10 @@ type VM struct {
 	Shares      []string                  `toml:"shares"`
 	AgentAccess string                    `toml:"agent_access"`
 	Params      map[string]map[string]any `toml:"params"`
+
+	// Provider names the execution surface, valid only under schema 2. Empty
+	// resolves to qemu, matching every schema-1 document's meaning.
+	Provider string `toml:"provider"`
 }
 
 // meta is the [project] table.
@@ -99,6 +103,13 @@ func Load(dir string) (*Project, error) {
 	}
 	if f.Schema > Schema {
 		return nil, fmt.Errorf("%s: schema %d is newer than this stoat (%d)", FileName, f.Schema, Schema)
+	}
+	if f.Schema < 2 {
+		for key, v := range f.VMs {
+			if v.Provider != "" {
+				return nil, fmt.Errorf("%s: vms.%s.provider requires schema = 2", FileName, key)
+			}
+		}
 	}
 
 	p := &Project{Dir: abs, Recipes: f.Recipes, byKey: make(map[string]VM, len(f.VMs))}
