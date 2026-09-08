@@ -94,6 +94,10 @@ type VM struct {
 	// Written by the form at creation time; dispatch elsewhere in stoat
 	// keys off Mode, not this field.
 	Backend string `toml:"backend"`
+	// Provider is the execution surface: "qemu" for a local hypervisor VM,
+	// or a cloud provider's name. Empty means "qemu", which is what every
+	// vm.toml written before this field existed says.
+	Provider string `toml:"provider,omitempty"`
 	// Base is the absolute path to the shared base image an overlay is
 	// created from. Cloud mode only.
 	Base string `toml:"base"`
