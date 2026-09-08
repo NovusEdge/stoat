@@ -119,7 +119,7 @@ func TestAutoRestartAfterInstallAttemptsStartOnceInstallerStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	v.Dir = dir + "/work"
-	stop := fakeRunning(t, v)
+	stop := realQemuProcess(t, v)
 
 	go func() {
 		time.Sleep(2 * pollInterval)

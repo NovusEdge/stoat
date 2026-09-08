@@ -11,6 +11,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/provider"
+	"github.com/novusedge/stoat/internal/provider/fake"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -29,16 +30,22 @@ func writeRawVMToml(t *testing.T, name, content string) {
 	}
 }
 
-// fakeRunning marks v as running without a real qemu process. It spawns
-// `sleep` with v.Dir in its argv (qemu.Running's cmdlineMatches only checks
-// that /proc/<pid>/cmdline contains dir+"/", not which binary it is), and
-// points the VM's pidfile at it. The returned func kills the process; the
-// caller must defer it.
-//
-// This makes Start/Stop/Destroy's "is it running" branches testable without
-// qemu-system-x86_64 installed, the same CI constraint existing tests work
-// around for qemu-img.
+// fakeRunning marks v as running in the fake provider installed for this
+// test. The returned func marks it stopped again; the caller must call or
+// defer it.
 func fakeRunning(t *testing.T, v *config.VM) func() {
+	f := fake.Install(t)
+	f.RunningVMs[v.Name] = true
+	return func() { delete(f.RunningVMs, v.Name) }
+}
+
+// realQemuProcess spawns a real process and points v's pidfile at it,
+// leaving the real "qemu" provider registered. Use this instead of
+// fakeRunning for a test that exercises code reading qemu.Running directly
+// (clone.go) or a provider.Start call that must actually run and fail
+// (autorestart_test.go's ISO-missing case): fake.Install swaps in a Start
+// that always succeeds, which would pass those tests for the wrong reason.
+func realQemuProcess(t *testing.T, v *config.VM) func() {
 	return testutil.FakeRunning(t, v.Dir)
 }
 
@@ -237,8 +244,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	v.Dir = filepath.Join(dir, "work")
-	stop := fakeRunning(t, v)
-	defer stop()
+	defer fakeRunning(t, v)()
 
 	if err := Start("work"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("err = %v, want ErrAlreadyRunning", err)
@@ -277,15 +283,12 @@ func TestDestroyRefusesWhileRunning(t *testing.T) {
 	stop := fakeRunning(t, v)
 
 	if err := Destroy("work"); !errors.Is(err, ErrAlreadyRunning) {
-		stop()
 		t.Fatalf("err = %v, want ErrAlreadyRunning", err)
 	}
 	if _, err := os.Stat(v.Dir); err != nil {
-		stop()
 		t.Fatalf("VM directory should still exist after a refused destroy: %v", err)
 	}
 	stop()
-	_ = os.Remove(v.PidPath())
 
 	if err := Destroy("work"); err != nil {
 		t.Fatalf("Destroy after stopping: %v", err)
@@ -475,7 +478,7 @@ func TestGetDoesNotModifyVMTomlOnDisk(t *testing.T) {
 // from the pidfile qemu.Running just read, and a stopped one gets the zero
 // time, not some stale value left over from a previous run.
 func TestStartedAtRunningVsStopped(t *testing.T) {
-	dir := root(t)
+	root(t)
 	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -488,9 +491,7 @@ func TestStartedAtRunningVsStopped(t *testing.T) {
 		t.Errorf("stopped VM: StartedAt = %v, want the zero time", v.StartedAt)
 	}
 
-	cv := &config.VM{Name: "work", Dir: filepath.Join(dir, "work")}
-	stop := fakeRunning(t, cv)
-	defer stop()
+	defer fakeRunning(t, &config.VM{Name: "work"})()
 
 	v, err = Get("work")
 	if err != nil {
@@ -561,8 +562,7 @@ func TestDestroyRefusesARunningBrokenVM(t *testing.T) {
 	root(t)
 	// A directory that is running but whose vm.toml no longer parses.
 	writeRawVMToml(t, "hosed", "name = \"hosed\"\nmode = \"disk\n")
-	stop := fakeRunning(t, &config.VM{Name: "hosed", Dir: filepath.Join(config.Root(), "hosed")})
-	defer stop()
+	defer fakeRunning(t, &config.VM{Name: "hosed"})()
 
 	if err := Destroy("hosed"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Destroy on a running broken VM = %v, want ErrAlreadyRunning", err)
