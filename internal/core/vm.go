@@ -651,8 +651,19 @@ func Destroy(name string) error {
 		// started bypass the running-VM refusal, deleting the directory,
 		// pidfile, monitor socket and disk out from under a live qemu
 		// process.
-		bv := &config.VM{Name: name, Dir: filepath.Join(config.Root(), name)}
-		if state, err := StateOf(context.Background(), bv); err == nil && state == StateRunning {
+		provider, perr := config.ProviderOf(name)
+		if perr != nil {
+			return perr
+		}
+		if provider == "unknown" {
+			return fmt.Errorf("%s: cannot determine provider from a broken record", name)
+		}
+		bv := &config.VM{Name: name, Dir: config.DirFor(name), Provider: provider}
+		state, err := StateOf(context.Background(), bv)
+		if err != nil {
+			return err
+		}
+		if state == StateRunning {
 			return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
 		}
 		return bv.Delete()

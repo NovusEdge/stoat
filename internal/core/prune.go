@@ -155,23 +155,34 @@ func pruneBroken(dryRun bool) ([]PruneItem, error) {
 	}
 	var out []PruneItem
 	for _, b := range broken {
-		dir := filepath.Join(config.Root(), b.Name)
-		bv := &config.VM{Name: b.Name, Dir: dir}
+		provider, err := config.ProviderOf(b.Name)
+		if err != nil {
+			return out, err
+		}
+		if provider == "unknown" {
+			// A cloud instance behind this record may still be running and
+			// billing. Skip rather than guess a state check against qemu.
+			continue
+		}
+		dir := config.DirFor(b.Name)
+		bv := &config.VM{Name: b.Name, Dir: dir, Provider: provider}
 
 		// StateOf only needs v.Dir and v.PidPath(), both derivable without a
 		// parsed vm.toml, so it works on a broken VM too. The VM may have
 		// started before the edit that broke vm.toml. Destroy refuses to
 		// touch a running VM; Prune must refuse the same way, even acting
 		// in bulk.
-		if state, err := StateOf(context.Background(), bv); err == nil && state == StateRunning {
+		state, err := StateOf(context.Background(), bv)
+		if err != nil {
+			return out, err
+		}
+		if state == StateRunning {
 			continue
 		}
 
 		out = append(out, PruneItem{Class: classBrokenVM, Path: dir})
 		if !dryRun {
 			// config.VM.Delete refuses any path whose parent isn't Root().
-			// dir always satisfies that: b.Name is a bare directory entry,
-			// never a path with a separator.
 			if err := bv.Delete(); err != nil {
 				return out, err
 			}
