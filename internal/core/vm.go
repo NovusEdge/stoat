@@ -198,8 +198,9 @@ type VM struct {
 	Paths Paths
 
 	// Error is populated only when State is StateBroken, and holds
-	// config.Load's parse error so a caller can show the user why, not just
-	// that it's broken.
+	// config.Load's parse error, or providerFor's or Status's error when the
+	// config parsed but its provider could not be resolved, so a caller can
+	// show the user why, not just that it's broken.
 	Error string
 
 	// Project is the absolute directory of the stoat.toml that declared this
@@ -658,7 +659,11 @@ func Destroy(name string) error {
 	if err != nil {
 		return err
 	}
-	if state, err := StateOf(context.Background(), v); err == nil && state == StateRunning {
+	state, err := StateOf(context.Background(), v)
+	if err != nil {
+		return err
+	}
+	if state == StateRunning {
 		return fmt.Errorf("%w: %s: stop it first", ErrAlreadyRunning, name)
 	}
 	return v.Delete()
