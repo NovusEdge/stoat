@@ -84,9 +84,19 @@ codex mcp add stoat -- "$(command -v stoat)" mcp
 ```
 
 Any other MCP client runs the same command. Print the entry to copy with
-`stoat mcp install claude-code --print`, or serve streamable HTTP on loopback
-with `stoat mcp --http 127.0.0.1:7777` for a client that cannot start a
-subprocess.
+`stoat mcp install claude-code --print`.
+
+To run one server for several clients instead of a subprocess per client,
+serve streamable HTTP on loopback:
+
+```sh
+stoat mcp serve --http 127.0.0.1:7777
+claude mcp add --transport http stoat http://127.0.0.1:7777/mcp
+codex mcp add stoat --url http://127.0.0.1:7777/mcp
+```
+
+That server has no authentication and refuses a non-loopback address. It also
+holds one working directory, so every client on it reads the same project.
 
 Each VM carries an `agent_access` level from `none` to `exec`, which bounds
 what an agent may do inside that guest. See the

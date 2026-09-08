@@ -89,6 +89,23 @@ The HTTP address must be loopback (`127.0.0.1`, `::1`, or `localhost`). The
 server has no authentication, so it refuses addresses that bind another
 interface.
 
+One HTTP server serves several clients at once. Point each client at the
+address:
+
+```sh
+claude mcp add --transport http stoat http://127.0.0.1:7777/mcp
+codex mcp add stoat --url http://127.0.0.1:7777/mcp
+```
+
+The handler answers on every path, so the trailing `/mcp` is a convention.
+`stoat mcp install` writes a stdio entry only; write the URL entry through the
+client's own command or its config file.
+
+The process holds one working directory, so every client on a shared HTTP
+server reads the same project's `stoat.toml`. Run one server per project, on
+its own port, when the projects differ. The rate limits below apply to the
+server, so clients on one address share the budget.
+
 The default rate limits are 30 calls in the per-tool burst with a refill of
 0.5 calls per second, and 60 calls in the shared burst with a refill of 2
 calls per second. Change them with `--tool-burst`, `--tool-rate`, `--burst`,
