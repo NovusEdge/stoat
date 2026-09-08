@@ -268,11 +268,14 @@ func checkGuest(v *config.VM) error {
 func fromConfigUnchecked(v *config.VM) VM {
 	state := StateStopped
 	var startedAt time.Time
-	if p, err := providerFor(v); err == nil {
-		if s, err := p.Status(context.Background(), v); err == nil && s.Running {
-			state = StateRunning
-			startedAt = s.StartedAt
-		}
+	var stateErr string
+	p, err := providerFor(v)
+	if err != nil {
+		state, stateErr = StateBroken, err.Error()
+	} else if s, err := p.Status(context.Background(), v); err != nil {
+		state, stateErr = StateBroken, err.Error()
+	} else if s.Running {
+		state, startedAt = StateRunning, s.StartedAt
 	}
 	osName, backend := inferMissing(v)
 	return VM{
@@ -284,6 +287,7 @@ func fromConfigUnchecked(v *config.VM) VM {
 		Mode:            v.Mode,
 		Backend:         backend,
 		State:           state,
+		Error:           stateErr,
 		StartedAt:       startedAt,
 		RAM:             v.RAM,
 		CPUs:            v.CPUs,
