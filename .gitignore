@@ -13,8 +13,12 @@
 
 # agent / planning cruft and internal notes — local only. Design docs, specs,
 # and QA scripts stay out of the published site and off GitHub.
-docs/superpowers/
-docs/specs/
+#
+# No trailing slash on the first two: they are symlinks to a store outside the
+# repo, so git clean cannot take the content with them. A directory-only
+# pattern would leave the links showing as untracked.
+docs/superpowers
+docs/specs
 docs/qa/
 docs/recipe-authoring-spec.md
 docs/recipe-spec-v2.md
