@@ -8,7 +8,12 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tag="$(git -C "$repo" describe --tags --abbrev=0)"
+# Pinned rather than "newest tag". v0.4.2 is the last release built before
+# config.VM had a provider field, so it is the binary this gate must prove
+# blind to a v2 record. Following the newest tag would eventually build a
+# stoat that knows about v2, and the gate would keep passing while proving
+# nothing.
+tag="${STOAT_LEGACY_TAG:-v0.4.2}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
