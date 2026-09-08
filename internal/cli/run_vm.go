@@ -53,7 +53,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 			state = "running"
 		}
 		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %-6d %s\n",
-			v.Name, v.Mode, colorState(state, 8), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
+			v.Name, v.Mode, a.prose(stdout).State(state, 8), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
@@ -63,7 +63,7 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 			continue
 		}
 		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %-6s %s\n",
-			v.Name, "-", colorState("broken", 8), "-", "-", "-", "-", oneLine(v.Error))
+			v.Name, "-", a.prose(stdout).State("broken", 8), "-", "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
 }
@@ -118,9 +118,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	if v.State == core.StateBroken {
 		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
-	if !a.Quiet {
-		fmt.Fprintf(stdout, "starting %s...\n", a.VM)
-	}
+	a.prose(stdout).Step("starting %s...", a.VM)
 	if err := core.Start(a.VM); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
@@ -131,7 +129,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		v = started
 	}
 	if !a.JSON {
-		fmt.Fprintf(stdout, "%s started (ssh :%d)\n", a.VM, v.SSHPort)
+		a.prose(stdout).Done("%s started (ssh :%d)", a.VM, v.SSHPort)
 		printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
 	}
 
@@ -141,9 +139,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	// --no-apply skips the recipe run below, not this: the disk must still
 	// boot the installed system either way.
 	if v.Mode == "disk" && !v.Installed {
-		if !a.Quiet {
-			fmt.Fprintf(stdout, "installing %s (a few minutes)...\n", a.VM)
-		}
+		a.prose(stdout).Step("installing %s (a few minutes)...", a.VM)
 		restarted, err := core.AutoRestartAfterInstall(context.Background(), a.VM)
 		if err != nil || !restarted {
 			if a.JSON {
@@ -152,7 +148,8 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 				}
 				return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
 			}
-			fmt.Fprintf(stdout, "install did not finish. see: stoat logs %s\n", a.VM)
+			a.prose(stdout).Warn("install did not finish")
+			a.prose(stdout).Hint("see: stoat logs %s", a.VM)
 			return ExitOK
 		}
 		if started, err := core.Get(a.VM); err == nil {
@@ -192,18 +189,14 @@ func afterStart(a *Args, v core.VM, stdout, stderr io.Writer) int {
 		return ExitOK
 	}
 
-	if !a.Quiet {
-		fmt.Fprintf(stdout, "waiting for ssh on %s...\n", a.VM)
-	}
+	a.prose(stdout).Step("waiting for ssh on %s...", a.VM)
 	ctx, cancel := context.WithTimeout(context.Background(), sshx.WaitTimeout)
 	defer cancel()
 	if err := core.Wait(ctx, a.VM, core.UntilReachable); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 
-	if !a.Quiet {
-		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
-	}
+	a.prose(stdout).Step("applying recipes to %s...", a.VM)
 	// Under --json, raw log bytes must not reach stdout: they would sit
 	// inside the JSON Lines stream and break every consumer's parse. Each
 	// appended line becomes a "log" event instead (run_apply.go's runApply).

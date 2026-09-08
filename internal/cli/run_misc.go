@@ -12,41 +12,6 @@ import (
 	"github.com/novusedge/stoat/internal/recipes"
 )
 
-// colorEnabled reports whether ANSI color may be used on stdout: honouring
-// NO_COLOR and disabling automatically when stdout is not a terminal, so
-// piped output (`stoat ls | awk ...`) never carries escape codes.
-func colorEnabled() bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
-
-// colorState pads to width FIRST, then wraps in escapes: the codes are
-// zero-width on screen but count toward %-8s, so colouring before padding
-// silently eats 9 columns and skews every row after STATE.
-func colorState(state string, width int) string {
-	return colorize(fmt.Sprintf("%-*s", width, state), state)
-}
-
-func colorize(padded, state string) string {
-	if !colorEnabled() {
-		return padded
-	}
-	switch state {
-	case "running":
-		return "\x1b[32m" + padded + "\x1b[0m" // green
-	case "broken":
-		return "\x1b[31m" + padded + "\x1b[0m" // red
-	default:
-		return padded
-	}
-}
-
 func oneLine(s string) string {
 	return strings.ReplaceAll(strings.TrimSpace(s), "\n", " ")
 }

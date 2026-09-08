@@ -39,12 +39,10 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 			"vm": a.VM, "direction": direction, "local": a.Local, "remote": a.Remote,
 		})
 	}
-	if !a.Quiet {
-		if a.ToRemote {
-			fmt.Fprintf(stdout, "copied %s to %s:%s\n", a.Local, a.VM, a.Remote)
-		} else {
-			fmt.Fprintf(stdout, "copied %s:%s to %s\n", a.VM, a.Remote, a.Local)
-		}
+	if a.ToRemote {
+		a.prose(stdout).Step("copied %s to %s:%s", a.Local, a.VM, a.Remote)
+	} else {
+		a.prose(stdout).Step("copied %s:%s to %s", a.VM, a.Remote, a.Local)
 	}
 	return ExitOK
 }

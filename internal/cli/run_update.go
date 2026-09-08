@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
@@ -28,26 +27,39 @@ func runUpdate(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, map[string]any{
 			"vm":         wire.FromVM(v, core.GraphicalSession()),
 			"changed":    a.Changed,
-			"applies_at": appliesAt(v),
+			"applies_at": appliesAt(v, a.Changed),
 		})
 	}
 	if !a.Quiet {
-		fmt.Fprintf(stdout, "updated %s: %v\n", v.Name, a.Changed)
-		if appliesAt(v) == "next_start" {
-			fmt.Fprintf(stdout, "%s is running. this takes effect at next start\n", v.Name)
+		a.prose(stdout).Done("updated %s: %v", v.Name, a.Changed)
+		if appliesAt(v, a.Changed) == "next_start" {
+			a.prose(stdout).Warn("%s is running. this takes effect at next start", v.Name)
 		}
 	}
 	return ExitOK
 }
 
-// appliesAt reports when an accepted edit becomes real. Every mutable field
-// except Recipes is read by qemu at start, so a running VM keeps its current
-// values until it is restarted. Recipes only affects the next Apply, but a
-// caller cannot act on a per-field answer through one CLI invocation, so the
-// conservative one is reported for the whole call.
-func appliesAt(v core.VM) string {
-	if v.State == core.StateRunning {
-		return "next_start"
+// restartFields are the update fields qemu reads at start, so a running VM
+// keeps its current values until it is restarted. Every other mutable field
+// is read fresh by whatever next uses it: recipes and params by the next
+// apply, agent_access by the next MCP call, installed by the next start
+// decision. A disk grow is refused outright while a VM runs.
+var restartFields = map[string]bool{
+	"cpus": true, "disk": true, "display": true,
+	"ram": true, "share": true, "ssh_port": true,
+}
+
+// appliesAt reports when an accepted edit becomes real. It answers for the
+// call, not per field, so one restart-bound field in a mixed update makes the
+// whole answer next_start.
+func appliesAt(v core.VM, changed []string) string {
+	if v.State != core.StateRunning {
+		return "now"
+	}
+	for _, f := range changed {
+		if restartFields[f] {
+			return "next_start"
+		}
 	}
 	return "now"
 }

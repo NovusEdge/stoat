@@ -43,9 +43,7 @@ func runApply(a *Args, stdout, stderr io.Writer) int {
 		applied = v.Recipes
 	}
 
-	if !a.Quiet {
-		fmt.Fprintf(stdout, "applying recipes to %s...\n", a.VM)
-	}
+	a.prose(stdout).Step("applying recipes to %s...", a.VM)
 
 	// Under --json, raw log bytes must not reach stdout: they would sit
 	// inside the JSON Lines stream and break every consumer's parse. Each

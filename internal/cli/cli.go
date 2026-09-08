@@ -34,6 +34,7 @@ import (
 	"github.com/novusedge/stoat/internal/mcpsrv"
 	"github.com/novusedge/stoat/internal/project"
 	"github.com/novusedge/stoat/internal/recipes"
+	"github.com/novusedge/stoat/internal/ui"
 )
 
 // Exit codes, because the whole point of a CLI is scripting against them.
@@ -51,6 +52,11 @@ type Args struct {
 	Quiet bool
 	Yes   bool
 	N     int // logs -n
+
+	// w caches the ui.Writer prose() hands out, and wOut is the stream it
+	// was built for. Parse leaves both nil; only prose() sets them.
+	w    *ui.Writer
+	wOut io.Writer
 
 	// Out belongs to "screenshot": the -o path, empty for the default.
 	Out string
@@ -207,6 +213,16 @@ func newParser(g *grammar, help *bytes.Buffer) (*kong.Kong, error) {
 		kong.ExplicitGroups(commandGroups),
 		kong.ValueFormatter(helpValue),
 	)
+}
+
+// prose returns the writer for this command's human output. It is cached
+// per stream: ui.New stats the file descriptor, and runLS would otherwise
+// repeat that syscall once per VM row.
+func (a *Args) prose(out io.Writer) *ui.Writer {
+	if a.w == nil || a.wOut != out {
+		a.w, a.wOut = ui.New(out, a.Quiet), out
+	}
+	return a.w
 }
 
 // helpValue appends a flag's accepted values to its help line. Kong renders

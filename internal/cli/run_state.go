@@ -141,15 +141,13 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 		if a.JSON {
 			return a.ok(stdout, map[string]any{"vm": a.VM, "tag": a.Tag, "action": action})
 		}
-		if !a.Quiet {
-			switch action {
-			case "restore":
-				fmt.Fprintf(stdout, "%s restored to %s\n", a.VM, a.Tag)
-			case "delete":
-				fmt.Fprintf(stdout, "deleted %s\n", a.Tag)
-			case "save":
-				fmt.Fprintf(stdout, "saved %s\n", a.Tag)
-			}
+		switch action {
+		case "restore":
+			a.prose(stdout).Step("%s restored to %s", a.VM, a.Tag)
+		case "delete":
+			a.prose(stdout).Step("deleted %s", a.Tag)
+		case "save":
+			a.prose(stdout).Step("saved %s", a.Tag)
 		}
 		return ExitOK
 	}

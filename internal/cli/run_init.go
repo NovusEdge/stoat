@@ -76,9 +76,9 @@ func runInit(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, wire.InitResult{Path: path, Project: name, GitignoreUpdated: ignored})
 	}
 	if !a.Quiet {
-		fmt.Fprintf(stdout, "%s created in %s\n", project.FileName, dir)
+		a.prose(stdout).Step("%s created in %s", project.FileName, dir)
 		if ignored {
-			fmt.Fprintf(stdout, "added %s/ to .gitignore\n", project.CacheDir)
+			a.prose(stdout).Step("added %s/ to .gitignore", project.CacheDir)
 		}
 	}
 	return ExitOK
