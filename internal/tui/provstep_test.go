@@ -57,8 +57,8 @@ func TestReadProvStep(t *testing.T) {
 		},
 		{
 			"failed",
-			"waiting for ssh on port 2200…\nFAILED: work: ssh not reachable on port 2200 after 1m30s\n",
-			"waiting for ssh", "FAILED: work: ssh not reachable on port 2200 after 1m30s",
+			"waiting for ssh on port 2200…\nFAILED: work: ssh not reachable at 127.0.0.1:2200 after 1m30s\n",
+			"waiting for ssh", "FAILED: work: ssh not reachable at 127.0.0.1:2200 after 1m30s",
 		},
 	}
 	for _, c := range cases {

@@ -111,10 +111,10 @@ every command and for the TUI:
 `STOAT_GRAPHICAL=0` is also the answer to the OpenGL error above, where a
 session exists but QEMU cannot draw on it.
 
-## `ssh not reachable on port N after 1m30s`
+## `ssh not reachable at HOST:PORT after 1m30s`
 
 ```
-<name>: ssh not reachable on port <N> after 1m30s
+<name>: ssh not reachable at <host>:<port> after 1m30s
 ```
 
 **If this happens while applying recipes to a disk VM:** the VM is still
