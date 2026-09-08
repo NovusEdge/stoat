@@ -79,6 +79,12 @@ race:
 e2e:
     ./scripts/e2e.sh
 
+# shell gates that build a binary or add a worktree, run separately from
+# `go test`
+[group('test')]
+gates:
+    bash tests/legacy-binary-refusal_test.sh
+
 # coverage summary per package
 [group('test')]
 cover:
