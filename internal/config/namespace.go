@@ -15,6 +15,14 @@ import (
 // these records one level down is what an old binary cannot open.
 const v2Dir = "v2"
 
+// IsRemote reports whether a provider name means a VM running off this host,
+// which is what decides the namespace in Save.
+//
+// The explicit spelling "qemu" and an empty field mean the same thing, so
+// both stay flat. A hand-written vm.toml carrying provider = "qemu" would
+// otherwise land in v2, hiding a local VM from older binaries for no reason.
+func IsRemote(provider string) bool { return provider != "" && provider != "qemu" }
+
 // DirFor is where name's vm.toml lives. An existing flat record keeps its
 // location forever: this work moves no VM.
 func DirFor(name string) string {

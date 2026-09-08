@@ -126,3 +126,31 @@ func TestProviderOfReadsALegacyRecordAsQemu(t *testing.T) {
 		t.Errorf("ProviderOf = %q, want qemu for a flat record", got)
 	}
 }
+
+// An explicit provider = "qemu" means the same thing as an empty field, so it
+// must not route a local VM into the namespace older binaries cannot open.
+func TestSaveKeepsAnExplicitQemuVMFlat(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("STOAT_HOME", root)
+	v := &VM{Name: "local", Provider: "qemu", SSHPort: 2224}
+	if err := v.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "local", "vm.toml")); err != nil {
+		t.Errorf("local/vm.toml missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "v2", "local", "vm.toml")); err == nil {
+		t.Error("an explicit qemu VM landed in v2, where an older stoat cannot see it")
+	}
+}
+
+func TestIsRemote(t *testing.T) {
+	for _, c := range []struct {
+		provider string
+		want     bool
+	}{{"", false}, {"qemu", false}, {"gce", true}} {
+		if got := IsRemote(c.provider); got != c.want {
+			t.Errorf("IsRemote(%q) = %v, want %v", c.provider, got, c.want)
+		}
+	}
+}

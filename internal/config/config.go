@@ -285,7 +285,7 @@ func (v *VM) Save() error {
 	}
 	if v.Dir == "" {
 		v.Dir = filepath.Join(Root(), v.Name)
-		if v.Provider != "" {
+		if IsRemote(v.Provider) {
 			v.Dir = filepath.Join(Root(), v2Dir, v.Name)
 		}
 	}
