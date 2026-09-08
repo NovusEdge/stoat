@@ -1,0 +1,45 @@
+{
+  "kind": "compute#instance",
+  "id": "4519028374619283746",
+  "name": "cloudy",
+  "status": "RUNNING",
+  "zone": "https://www.googleapis.com/compute/v1/projects/engrammic/zones/europe-west4-a",
+  "machineType": "https://www.googleapis.com/compute/v1/projects/engrammic/zones/europe-west4-a/machineTypes/e2-custom-2-4096",
+  "creationTimestamp": "2026-09-08T13:00:00.123-07:00",
+  "lastStartTimestamp": "2026-09-08T13:00:00.000-07:00",
+  "scheduling": {
+    "onHostMaintenance": "MIGRATE",
+    "automaticRestart": true,
+    "preemptible": false,
+    "provisioningModel": "STANDARD",
+    "instanceTerminationAction": "STOP",
+    "maxRunDuration": {
+      "seconds": "28800"
+    }
+  },
+  "networkInterfaces": [
+    {
+      "kind": "compute#networkInterface",
+      "network": "https://www.googleapis.com/compute/v1/projects/engrammic/global/networks/default",
+      "networkIP": "10.164.0.5",
+      "accessConfigs": [
+        {
+          "kind": "compute#accessConfig",
+          "type": "ONE_TO_ONE_NAT",
+          "name": "External NAT",
+          "natIP": "34.12.221.212",
+          "networkTier": "PREMIUM"
+        }
+      ]
+    }
+  ],
+  "labels": {
+    "stoat-owned": "true",
+    "stoat-vm": "cloudy",
+    "stoat-soft-deadline": "2026-09-08t22-14-00z"
+  },
+  "tags": {
+    "items": ["stoat-cloudy"]
+  },
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/engrammic/zones/europe-west4-a/instances/cloudy"
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "compute#operation",
+  "id": "7573813263269085000",
+  "name": "operation-1757366400123-abcdef0123456-a1b2c3d4-e5f6a7b8",
+  "operationType": "insert",
+  "targetLink": "https://www.googleapis.com/compute/v1/projects/engrammic/zones/europe-west4-a/instances/cloudy",
+  "status": "DONE",
+  "progress": 100,
+  "user": "developer@engrammic.iam.gserviceaccount.com",
+  "insertTime": "2026-09-08T13:00:00.123-07:00",
+  "startTime": "2026-09-08T13:00:00.456-07:00",
+  "endTime": "2026-09-08T13:00:04.789-07:00",
+  "zone": "https://www.googleapis.com/compute/v1/projects/engrammic/zones/europe-west4-a",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/engrammic/zones/europe-west4-a/operations/operation-1757366400123-abcdef0123456-a1b2c3d4-e5f6a7b8"
+}
