@@ -67,6 +67,10 @@ const (
 	// CodeHostUnsupported identifies hostops.ErrUnsupported: a native host
 	// without a qualified VM runtime (see internal/hostops.Message).
 	CodeHostUnsupported Code = "host_unsupported"
+	// CodeCapabilityUnavailable identifies core.ErrCapabilityUnavailable: an
+	// operation the VM's provider does not support. kvm_unusable stays
+	// QEMU-specific and is never emitted for this.
+	CodeCapabilityUnavailable Code = "capability_unavailable"
 )
 
 // Codes returns every declared code, sorted. Built from the same string
@@ -88,6 +92,7 @@ func Codes() []Code {
 		CodeScreenshotFailed,
 		CodeLockOutOfDate,
 		CodeHostUnsupported,
+		CodeCapabilityUnavailable,
 	}
 	slices.Sort(out)
 	return out
@@ -178,6 +183,7 @@ var codeTable = []struct {
 	{CodeNotRunning, qemu.ErrNotRunning},
 	{CodeLockOutOfDate, core.ErrLockOutOfDate},
 	{CodeHostUnsupported, hostops.ErrUnsupported},
+	{CodeCapabilityUnavailable, core.ErrCapabilityUnavailable},
 }
 
 // MapError converts a core (or context) error into an ErrorInfo, walking

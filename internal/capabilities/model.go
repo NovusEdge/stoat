@@ -21,6 +21,12 @@ const (
 	ReasonTargetModeUnknown    = "target_mode_unknown"
 	ReasonProjectStateUnknown  = "project_state_unknown"
 
+	ReasonProviderUnsupported    = "provider_unsupported"
+	ReasonImageVariantMissing    = "image_variant_missing"
+	ReasonCredentialsUnavailable = "credentials_unavailable"
+	ReasonQuotaExceeded          = "quota_exceeded"
+	ReasonDeadlineExpired        = "deadline_expired"
+
 	LimitAgentAccessRequired    = "agent_access_required"
 	LimitTargetRequired         = "target_required"
 	LimitDiskRequired           = "disk_required"

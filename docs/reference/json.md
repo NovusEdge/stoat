@@ -151,6 +151,7 @@ bump the contract version. Do not write code that requires them.
 | `rate_limited` | MCP refused a tool call because its per-tool or shared rate bucket was exhausted |
 | `lock_out_of_date` | a project declaration is not pinned in `stoat.lock` |
 | `host_unsupported` | this host has no qualified native VM runtime yet |
+| `capability_unavailable` | the VM's provider does not support this operation |
 | `internal` | anything unanticipated; the escape hatch |
 
 **Codes are only ever added.** Never renamed, never repurposed, never removed.

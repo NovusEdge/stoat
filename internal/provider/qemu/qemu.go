@@ -21,9 +21,20 @@ type Provider struct{}
 
 func (Provider) Name() string { return "qemu" }
 
-// Capabilities returns nothing. The capability set still lives in
-// internal/capabilities and moves here with the code that reads it.
-func (Provider) Capabilities(*config.VM) []capabilities.Capability { return nil }
+// qemuCapabilities is what a local QEMU VM supports. Every entry here is
+// StatusSupported: C2 adds the enforcement path, not a QEMU restriction.
+var qemuCapabilities = []string{
+	"vm.lifecycle", "vm.snapshot", "recipes",
+	"mcp.guest.observe", "mcp.guest.manage", "mcp.guest.exec", "cli.guest.shell",
+}
+
+func (Provider) Capabilities(*config.VM) []capabilities.Capability {
+	out := make([]capabilities.Capability, len(qemuCapabilities))
+	for i, name := range qemuCapabilities {
+		out[i] = capabilities.Capability{Name: name, Status: capabilities.StatusSupported}
+	}
+	return out
+}
 
 func (Provider) Start(_ context.Context, v *config.VM) error { return qemu.Start(v) }
 
