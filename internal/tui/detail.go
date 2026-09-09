@@ -442,30 +442,35 @@ func (m model) viewDetail() string {
 		}
 		facts.row("", "", effect)
 	}
-	line("display", displayPrefLabel(v.Display))
-	// qemu.DisplayKind takes pref and host graphical directly, not a
-	// *config.VM, so a core.VM caller can call it without going through
-	// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
-	//
-	// A bare socket path is not enough: the user needs the actual command
-	// that opens it, so this prints one for a viewer installed on this host.
-	//
-	// With no graphical session, a VM that would otherwise get a window also
-	// lands on this socket. That is the case where the user needs the
-	// explanation most, since the VM would otherwise look like it refused
-	// to start.
-	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, graphical) != qemu.DisplayWindow {
-		if !graphical && qemu.DisplayKind(v.Display, true) == qemu.DisplayWindow {
-			facts.row("", "", warnStyle.Render("no usable graphical session on this host: falling back to vnc"))
-		}
-		line("vnc", v.Paths.VNCSocket)
-		att := qemu.AttachVNC(v.Paths.VNCSocket)
-		if att.Command == "" {
-			facts.row("", "", warnStyle.Render("no VNC viewer found: install "+strings.Join(att.Missing, " or ")))
-		} else {
-			facts.row("", "", dimStyle.Render(att.Command))
-			if att.Then != "" {
-				facts.row("", "", dimStyle.Render(att.Then))
+	// Display and the VNC socket below describe a qemu process on this host.
+	// A cloud VM has neither, and a socket path nothing listens on sends a
+	// user hunting for a viewer to attach to it.
+	if v.Provider == "" || v.Provider == "qemu" {
+		line("display", displayPrefLabel(v.Display))
+		// qemu.DisplayKind takes pref and host graphical directly, not a
+		// *config.VM, so a core.VM caller can call it without going through
+		// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
+		//
+		// A bare socket path is not enough: the user needs the actual command
+		// that opens it, so this prints one for a viewer installed on this host.
+		//
+		// With no graphical session, a VM that would otherwise get a window also
+		// lands on this socket. That is the case where the user needs the
+		// explanation most, since the VM would otherwise look like it refused
+		// to start.
+		if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, graphical) != qemu.DisplayWindow {
+			if !graphical && qemu.DisplayKind(v.Display, true) == qemu.DisplayWindow {
+				facts.row("", "", warnStyle.Render("no usable graphical session on this host: falling back to vnc"))
+			}
+			line("vnc", v.Paths.VNCSocket)
+			att := qemu.AttachVNC(v.Paths.VNCSocket)
+			if att.Command == "" {
+				facts.row("", "", warnStyle.Render("no VNC viewer found: install "+strings.Join(att.Missing, " or ")))
+			} else {
+				facts.row("", "", dimStyle.Render(att.Command))
+				if att.Then != "" {
+					facts.row("", "", dimStyle.Render(att.Then))
+				}
 			}
 		}
 	}

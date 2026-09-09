@@ -107,8 +107,10 @@ func deadlineWarning(v core.VM) (string, bool) {
 	if left > provider.WarnWithin {
 		return "", false
 	}
-	return fmt.Sprintf("%s: stops in %s (%s). extend with: stoat gce extend %s 4h",
-		v.Name, formatDuration(left), which, v.Name), true
+	// No command is named here yet. `stoat gce extend` moves the soft
+	// deadline and lands in the next slice; naming it now would tell a user
+	// to run something that does not exist.
+	return fmt.Sprintf("%s: stops in %s (%s)", v.Name, formatDuration(left), which), true
 }
 
 // warnDeadline prints deadlineWarning's line to stderr for a single command
