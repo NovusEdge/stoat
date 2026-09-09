@@ -92,6 +92,46 @@ func TestRemotePassMakesNoAPICallWithoutAProvider(t *testing.T) {
 	}
 }
 
+// Prune must actually invoke remotePass, not just leave it as a helper
+// only tests call. A user with a GCE project configured expects `stoat
+// prune` itself to report the remote pass's findings.
+func TestPruneIncludesTheRemotePass(t *testing.T) {
+	dir := root(t)
+	withGCEProject(t, dir, "engrammic")
+	stubRemotes(t, []gce.Remote{{VM: "cloudy", Zone: "europe-west4-a", Status: "RUNNING"}}, nil)
+
+	removed, err := Prune(PruneOpts{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range removed {
+		if r.Class == classOrphan {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Prune did not include the remote pass's orphan: %+v", removed)
+	}
+}
+
+// Prune's own --apply (DryRun false) must reach the remote pass's apply
+// path too, deleting a stale local record the same way a direct
+// remotePass(true) call does.
+func TestPruneApplyDeletesAStaleGCERecord(t *testing.T) {
+	dir := root(t)
+	withGCEProject(t, dir, "engrammic")
+	gceVM(t, "stale-one", "engrammic")
+	stubRemotes(t, nil, nil)
+
+	if _, err := Prune(PruneOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale-one")); !os.IsNotExist(err) {
+		t.Error("Prune (non-dry-run) left the stale gce record behind")
+	}
+}
+
 func TestRemotePassApplyDeletesOnlyStaleLocalRecords(t *testing.T) {
 	dir := root(t)
 	withGCEProject(t, dir, "engrammic")

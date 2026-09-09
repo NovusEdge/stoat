@@ -52,7 +52,9 @@ type PruneItem struct {
 	// matching pruneBroken, prunePartialDownloads and pruneImages respectively.
 	Class string
 	// Path is the absolute path acted on (or that would have been, under
-	// DryRun).
+	// DryRun). For classOrphan, classStale and classStopped, which name a
+	// remote instance rather than a local path, this holds RemoteItem's
+	// Message instead.
 	Path string
 }
 
@@ -85,13 +87,16 @@ type PruneOpts struct {
 }
 
 // Prune removes, or with DryRun only reports, disposable stoat state:
-// broken VMs, abandoned partial downloads, and unreferenced local images.
-// PruneOpts and the three helpers below gate each class. Prune returns
-// every item acted on, each tagged with its class, so a caller can render
-// or log the decision without parsing a formatted string.
+// broken VMs, abandoned partial downloads, unreferenced local images, and
+// (see remotePass) GCE instances out of sync with local records. PruneOpts
+// gates each local class; the remote pass gates itself on providers.gce
+// being configured. Prune returns every item acted on, each tagged with
+// its class, so a caller can render or log the decision without parsing a
+// formatted string.
 //
-// Each helper only touches one scoped directory: Root()/<broken-vm-dir>,
-// Root()/isos/*.part, or Root()/isos/*. Prune never reaches id_stoat,
+// Each local-state helper only touches one scoped directory:
+// Root()/<broken-vm-dir>, Root()/isos/*.part, or Root()/isos/*. Prune never
+// reaches id_stoat,
 // guest_host_ed25519_key, recipes/, .manifest, or a VM directory outside
 // Root(); config.VM.Delete's own guard enforces the last one.
 func Prune(opts PruneOpts) ([]PruneItem, error) {
@@ -128,6 +133,14 @@ func Prune(opts PruneOpts) ([]PruneItem, error) {
 		if err != nil {
 			return removed, err
 		}
+	}
+
+	rr, err := remotePass(!opts.DryRun)
+	for _, ri := range rr {
+		removed = append(removed, PruneItem{Class: ri.Class, Path: ri.Message})
+	}
+	if err != nil {
+		return removed, err
 	}
 
 	// Sorts by the formatted "<prefix>: <path>" line, the key the old
