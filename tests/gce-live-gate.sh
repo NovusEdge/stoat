@@ -85,10 +85,36 @@ for op in "snapshot $vm tag1" "forward $vm 8080:80"; do
   echo "$out" | grep -q provider_unsupported || fail "$op did not carry a reason: $out"
 done
 
+echo "== prune stays quiet about a healthy VM =="
+# Running, with a local record, matches none of prune's three classes.
+out="$("$work/stoat" prune 2>&1 || true)"
+echo "$out" | grep -q "$vm" && fail "prune reported a healthy running VM: $out"
+
+echo "== extend =="
+# Under the 30m run-time limit this gate sets. Extending past the hard
+# deadline is refused by design, which the next check exercises.
+"$work/stoat" gce extend "$vm" 10m >/dev/null || fail "gce extend failed"
+if "$work/stoat" gce extend "$vm" 400h >/dev/null 2>&1; then
+  fail "extend accepted a deadline past the run-time limit"
+fi
+state="$(gcloud compute instances describe "$vm" --project="$project" --zone="$zone" --format='value(status)')"
+[ "$state" = "RUNNING" ] || fail "extend left the instance $state; it must keep running"
+gcloud compute instances describe "$vm" --project="$project" --zone="$zone" \
+  --format='value(labels.stoat-soft-deadline)' | grep -q . \
+  || fail "extend did not write a soft-deadline label"
+
 echo "== persistence across down and up =="
 "$work/stoat" down "$vm" >/dev/null
 gcloud compute disks describe "$vm" --project="$project" --zone="$zone" --format='value(status)' | grep -q READY \
   || fail "boot disk did not survive the stop"
+
+# A stopped instance keeps billing for that disk, so prune names it. This is
+# the one class the gate can produce without faking a lost record.
+out="$("$work/stoat" prune 2>&1 || true)"
+echo "$out" | grep -q "$vm" || fail "prune does not report the stopped instance: $out"
+gcloud compute instances describe "$vm" --project="$project" --zone="$zone" >/dev/null 2>&1 \
+  || fail "prune deleted the instance; a sweep must never remove a remote resource"
+
 "$work/stoat" up "$vm" >/dev/null
 "$work/stoat" wait "$vm" --until reachable --timeout 5m >/dev/null || fail "VM unreachable after restart"
 got="$("$work/stoat" exec "$vm" -- cat /home/stoat/marker)"

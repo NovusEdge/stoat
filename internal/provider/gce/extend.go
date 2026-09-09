@@ -38,7 +38,11 @@ func extend(ctx context.Context, c *compute.InstancesClient, s settings.GCE, v *
 	}
 	newDeadline := now.Add(d)
 	if hard, ok := hardDeadline(inst); ok && newDeadline.After(hard) {
-		return time.Time{}, fmt.Errorf("gce: %s's run-time limit is %s; extending past it needs a stop and start to reset that limit first",
+		// No "gce:" prefix. This refusal reaches the user through
+		// `stoat gce extend`, which already renders as "stoat: gce: ...";
+		// the sibling errors here keep theirs because they surface from up
+		// and down, where naming the provider is the only context there is.
+		return time.Time{}, fmt.Errorf("%s's run-time limit is %s; extending past it needs a stop and start to reset that limit first",
 			v.Name, hard.UTC().Format(time.RFC3339))
 	}
 
