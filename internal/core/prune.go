@@ -218,12 +218,12 @@ func remotePass(apply bool) ([]RemoteItem, error) {
 		case local[r.VM] == nil:
 			out = append(out, RemoteItem{
 				Class: classOrphan, VM: r.VM,
-				Message: fmt.Sprintf("orphan %s (%s, %s) — no local record", r.VM, r.Zone, strings.ToLower(r.Status)),
+				Message: fmt.Sprintf("orphan %s (%s, %s) — no local record, run `stoat rm` if it's disposable", r.VM, r.Zone, strings.ToLower(r.Status)),
 			})
 		case r.Status == "TERMINATED":
 			out = append(out, RemoteItem{
 				Class: classStopped, VM: r.VM,
-				Message: fmt.Sprintf("stopped %s — stopped %s, disk still billing", r.VM, roundedDays(r.StoppedSince)),
+				Message: fmt.Sprintf("stopped %s — stopped %s, disk still billing, run `stoat rm` if it's disposable", r.VM, roundedDays(r.StoppedSince)),
 			})
 		}
 	}

@@ -178,7 +178,8 @@ cleared before stoat can reconnect.
 guest for the GCE path. Google's official Debian GCE images carry no
 cloud-init, so stoat's seed — the mechanism that installs the SSH key,
 creates the `stoat` user, and runs recipes on first boot — never runs.
-A Debian instance created this way comes up with no way in.
+`stoat create --provider gce` with a Debian image is refused before any
+instance is created: `no GCE image for this OS`.
 
 A GCE instance also has no equivalent of these local, QEMU-specific
 operations: `screenshot`, sending a key to the console, tailing a console
