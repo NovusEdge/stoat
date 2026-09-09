@@ -22,6 +22,14 @@ type GCE struct {
 	// looking for a key file.
 	ServiceAccountKeyFile string `toml:"service_account_key_file"`
 
+	// MaxRunDuration bounds how long an instance runs before GCP stops it,
+	// as a Go duration string. Empty means 24h.
+	//
+	// This is the backstop that survives stoat being uninstalled, so it is
+	// set once at create and never moved: instances.setScheduling needs a
+	// stopped instance. Extending a deadline moves the label instead.
+	MaxRunDuration string `toml:"max_run_duration"`
+
 	// SourceRange is the CIDR the SSH firewall rule admits. Empty means ask
 	// an echo service what address it saw and scope the rule to that.
 	//

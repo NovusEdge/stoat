@@ -25,7 +25,28 @@ const maxMetadataValueBytes = 256 * 1024
 // defaultMaxRunDuration bounds every instance this provider creates. Paired
 // with instanceTerminationAction=STOP, a VM nobody stops manually still
 // stops billing on its own.
-const defaultMaxRunDuration = 6 * time.Hour
+const defaultMaxRunDuration = 24 * time.Hour
+
+// maxRunDuration is how long GCP lets an instance run before stopping it.
+// It is fixed at create: instances.setScheduling needs a stopped instance,
+// so this value never moves for the life of the machine. Extending a
+// deadline moves the soft-deadline label instead.
+func maxRunDuration(s settings.GCE) (time.Duration, error) {
+	raw := strings.TrimSpace(s.MaxRunDuration)
+	if raw == "" {
+		return defaultMaxRunDuration, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("providers.gce max_run_duration %q: %w", raw, err)
+	}
+	// Compute's own bounds. Below the floor the API rejects the insert; above
+	// the ceiling it wants an instance schedule instead.
+	if d < 30*time.Second || d > 120*24*time.Hour {
+		return 0, fmt.Errorf("providers.gce max_run_duration %s is outside compute's 30s to 120d range", d)
+	}
+	return d, nil
+}
 
 // operatorEndpoint echoes back the caller's address in a bare-text body.
 // domains.google.com/checkip filled this role until Google Domains was
@@ -45,6 +66,10 @@ func insertRequest(v *config.VM, s settings.GCE, image, seed, sourceRange string
 	diskGB, err := diskSizeGB(v.Disk)
 	if err != nil {
 		return nil, fmt.Errorf("disk size %q: %w", v.Disk, err)
+	}
+	runFor, err := maxRunDuration(s)
+	if err != nil {
+		return nil, err
 	}
 
 	tag := vmTag(v.Name)
@@ -71,7 +96,7 @@ func insertRequest(v *config.VM, s settings.GCE, image, seed, sourceRange string
 			}},
 		}},
 		Scheduling: &computepb.Scheduling{
-			MaxRunDuration:            &computepb.Duration{Seconds: proto.Int64(int64(defaultMaxRunDuration.Seconds()))},
+			MaxRunDuration:            &computepb.Duration{Seconds: proto.Int64(int64(runFor.Seconds()))},
 			InstanceTerminationAction: proto.String("STOP"),
 		},
 	}

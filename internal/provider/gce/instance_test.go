@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/settings"
@@ -139,5 +140,35 @@ func TestSourceRangeForRejectsAMalformedValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "source_range") {
 		t.Errorf("error %q must name the config key", err)
+	}
+}
+
+func TestMaxRunDurationDefaultsToADay(t *testing.T) {
+	got, err := maxRunDuration(settings.GCE{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 24*time.Hour {
+		t.Errorf("maxRunDuration() = %s, want 24h", got)
+	}
+}
+
+func TestMaxRunDurationTakesTheConfiguredValue(t *testing.T) {
+	got, err := maxRunDuration(settings.GCE{MaxRunDuration: "90m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 90*time.Minute {
+		t.Errorf("maxRunDuration() = %s, want 90m", got)
+	}
+}
+
+func TestMaxRunDurationRejectsValuesComputeWouldReject(t *testing.T) {
+	// 10s is under compute's 30s floor; 3000h is 125 days, past its 120 day
+	// ceiling, where an instance schedule is the documented answer instead.
+	for _, raw := range []string{"10s", "3000h", "banana"} {
+		if _, err := maxRunDuration(settings.GCE{MaxRunDuration: raw}); err == nil {
+			t.Errorf("maxRunDuration(%q) = nil error", raw)
+		}
 	}
 }
