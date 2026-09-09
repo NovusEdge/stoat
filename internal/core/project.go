@@ -132,7 +132,7 @@ func Diff(p *project.Project, key string) ([]Drift, error) {
 
 	// vm.toml stores the resolved ISO path or base image, never a catalog
 	// id. The declared image is compared against its resolved spelling.
-	img, err := resolveImage(spec.Image)
+	img, err := resolveImage(spec.Image, config.IsRemote(spec.Provider))
 	if err != nil {
 		return nil, err
 	}

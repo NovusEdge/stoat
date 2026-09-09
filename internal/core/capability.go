@@ -1,7 +1,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/novusedge/stoat/internal/capabilities"
@@ -9,8 +8,28 @@ import (
 )
 
 // ErrCapabilityUnavailable identifies an operation the VM's provider does
-// not support, wrapping the capability's Reason so a caller can report why.
-var ErrCapabilityUnavailable = errors.New("capability unavailable")
+// not support. Match it with errors.Is; read the machine-readable reason by
+// unwrapping to *CapabilityError with errors.As.
+var ErrCapabilityUnavailable = capErr{}
+
+type capErr struct{}
+
+func (capErr) Error() string { return "capability unavailable" }
+
+// CapabilityError carries why an operation was refused in fields, not only
+// in its message. A JSON or MCP caller branches on Reason; parsing it back
+// out of the sentence would make the wording a contract.
+type CapabilityError struct {
+	VM        string
+	Operation string
+	Reason    string
+}
+
+func (e *CapabilityError) Error() string {
+	return fmt.Sprintf("capability unavailable: %s: %s (%s)", e.VM, e.Operation, e.Reason)
+}
+
+func (e *CapabilityError) Is(target error) bool { return target == ErrCapabilityUnavailable }
 
 // RequireCapability refuses unless v's provider declares name as
 // capabilities.StatusSupported. A provider that never declares the
@@ -27,11 +46,11 @@ func RequireCapability(v *config.VM, name string) error {
 		if c.Status == capabilities.StatusSupported {
 			return nil
 		}
-		reason := ""
-		if c.Reason != nil {
+		reason := capabilities.ReasonProviderUnsupported
+		if c.Reason != nil && c.Reason.Code != "" {
 			reason = c.Reason.Code
 		}
-		return fmt.Errorf("%w: %s: %s (%s)", ErrCapabilityUnavailable, v.Name, name, reason)
+		return &CapabilityError{VM: v.Name, Operation: name, Reason: reason}
 	}
-	return fmt.Errorf("%w: %s: %s (undeclared)", ErrCapabilityUnavailable, v.Name, name)
+	return &CapabilityError{VM: v.Name, Operation: name, Reason: "undeclared"}
 }

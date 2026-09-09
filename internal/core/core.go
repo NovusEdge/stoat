@@ -210,7 +210,7 @@ func plan(s Spec) (*config.VM, error) {
 		return nil, fmt.Errorf("%w: %s", ErrNameTaken, name)
 	}
 
-	img, err := resolveImage(s.Image)
+	img, err := resolveImage(s.Image, config.IsRemote(s.Provider))
 	if err != nil {
 		return nil, err
 	}

@@ -84,3 +84,34 @@ func TestQemuDeclaresEveryGatedOperation(t *testing.T) {
 		}
 	}
 }
+
+// The reason must be readable as a field. A JSON or MCP caller branching on
+// it should never have to parse the message, which would make the wording a
+// contract.
+func TestCapabilityErrorCarriesItsReasonInAField(t *testing.T) {
+	root(t)
+	f := fake.Install(t)
+	f.Caps = []capabilities.Capability{{
+		Name:   capabilities.OpSnapshot,
+		Status: capabilities.StatusUnsupported,
+		Reason: &capabilities.Reason{Code: capabilities.ReasonProviderUnsupported},
+	}}
+	v := &config.VM{Name: "cloudy", Mode: "cloud", RAM: 1024, CPUs: 1, Disk: "10G", SSHPort: 2297}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	err := RequireCapability(v, capabilities.OpSnapshot)
+	var ce *CapabilityError
+	if !errors.As(err, &ce) {
+		t.Fatalf("RequireCapability() = %v, want a *CapabilityError", err)
+	}
+	if ce.Reason != capabilities.ReasonProviderUnsupported {
+		t.Errorf("Reason = %q, want %q", ce.Reason, capabilities.ReasonProviderUnsupported)
+	}
+	if ce.Operation != capabilities.OpSnapshot || ce.VM != "cloudy" {
+		t.Errorf("CapabilityError = %+v, want the vm and operation named", ce)
+	}
+	if !errors.Is(err, ErrCapabilityUnavailable) {
+		t.Error("errors.Is(err, ErrCapabilityUnavailable) = false; existing callers match on the sentinel")
+	}
+}

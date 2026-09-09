@@ -28,3 +28,38 @@ func LocalEndpoint(v *config.VM) Endpoint {
 		User: User(v),
 	}
 }
+
+// endpointResolver is how sshx reaches a VM that does not answer on a
+// loopback forward. internal/provider installs it at init; sshx cannot ask
+// the provider registry itself, since provider imports this package.
+//
+// A nil resolver means loopback, which is what every test and every
+// pre-provider caller gets.
+var endpointResolver func(*config.VM) (Endpoint, error)
+
+// SetEndpointResolver installs the provider-backed resolver. Called once,
+// from internal/provider's init.
+func SetEndpointResolver(f func(*config.VM) (Endpoint, error)) { endpointResolver = f }
+
+// endpointFor is where this package's own ssh invocations connect. Provision,
+// RunCheck and Run all reach a guest that may not be local, so none of them
+// may build a LocalEndpoint directly.
+func endpointFor(v *config.VM) (Endpoint, error) {
+	if endpointResolver == nil {
+		return LocalEndpoint(v), nil
+	}
+	return endpointResolver(v)
+}
+
+// mustEndpoint is endpointFor for the call sites inside this package that
+// build an ssh argv inline. A resolver failure means the VM's provider is
+// unreachable or unknown; falling back to loopback there would dial a port
+// on this host that belongs to nothing, so the zero Endpoint is returned
+// instead and ssh fails naming an empty host.
+func mustEndpoint(v *config.VM) Endpoint {
+	e, err := endpointFor(v)
+	if err != nil {
+		return Endpoint{Name: v.Name, User: User(v)}
+	}
+	return e
+}

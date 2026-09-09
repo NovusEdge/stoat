@@ -127,7 +127,7 @@ func (i image) id() string {
 //
 // A catalog entry that has not been downloaded is ErrImageNotDownloaded and
 // not an inference failure: the caller can fix it by fetching the image.
-func resolveImage(spec string) (image, error) {
+func resolveImage(spec string, remote bool) (image, error) {
 	if spec == "" {
 		return image{}, fmt.Errorf("%w: no image given", ErrNotFound)
 	}
@@ -153,6 +153,22 @@ func resolveImage(spec string) (image, error) {
 		}
 		f := MatchLocal(e, files)
 		if f == "" {
+			// A remote provider boots the catalog entry's own published
+			// image, never this qcow2, so requiring a multi-gigabyte
+			// download of a file nothing opens would make the provider
+			// unusable. The entry still supplies the OS, backend and
+			// account facts every provider needs.
+			if remote {
+				return image{
+					entry:       &e,
+					osName:      e.OS,
+					backend:     e.Backend,
+					sshUser:     e.SSHUser,
+					cpuModel:    e.CPUModel,
+					requiredCPU: e.RequiredCPU,
+					defaultDisk: e.DefaultDisk,
+				}, nil
+			}
 			return image{}, fmt.Errorf("%w: %s", ErrImageNotDownloaded, e.ID)
 		}
 		abs, err := filepath.Abs(filepath.Join(config.Root(), "isos", f))

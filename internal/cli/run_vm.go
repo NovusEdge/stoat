@@ -92,6 +92,13 @@ func whereCell(v core.VM) string {
 // deadlines is under provider.WarnWithin away. ok is false for a qemu VM
 // (both deadlines zero) and for one further out than the threshold.
 func deadlineWarning(v core.VM) (string, bool) {
+	// A stopped instance has no run-time deadline. Compute clears the
+	// termination timestamp on stop and recalculates it from the next start,
+	// so warning that a stopped VM "stops in 28m" names a deadline that is
+	// not counting and offers an extend that would change nothing.
+	if v.State != core.StateRunning {
+		return "", false
+	}
 	when, which, ok := provider.Nearest(v.HardDeadline, v.SoftDeadline, time.Now())
 	if !ok {
 		return "", false
@@ -189,8 +196,16 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		v = started
 	}
 	if !a.JSON {
-		a.prose(stdout).Done("%s started (ssh :%d)", a.VM, v.SSHPort)
-		printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+		// A cloud VM answers on a routable address, and the loopback forward
+		// and the qemu window that the local lines describe do not exist for
+		// it. Printing them names a port nothing listens on and a window
+		// nobody can open.
+		if v.Provider == "" || v.Provider == "qemu" {
+			a.prose(stdout).Done("%s started (ssh :%d)", a.VM, v.SSHPort)
+			printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+		} else {
+			a.prose(stdout).Done("%s started on %s (%s)", a.VM, v.Provider, v.Address)
+		}
 	}
 
 	// An uninstalled disk VM's own installer is running now, not the system

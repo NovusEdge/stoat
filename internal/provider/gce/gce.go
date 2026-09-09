@@ -3,12 +3,16 @@ package gce
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"path"
 	"path/filepath"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/googleapis/gax-go/v2/apierror"
+	"google.golang.org/api/googleapi"
 
 	"github.com/novusedge/stoat/internal/backend"
 	"github.com/novusedge/stoat/internal/capabilities"
@@ -74,11 +78,42 @@ func vmSettings(v *config.VM) (settings.GCE, error) {
 	return gce, nil
 }
 
-// Create builds the firewall rule first, then the instance, so the instance
-// never comes up reachable-then-locked-down. A failed insert deletes the
-// rule it already created; core has not written vm.toml as created yet, so
-// a caller retrying Create must not find an orphaned rule from this attempt.
+// Create validates everything a later Start needs and creates nothing. A
+// stoat VM is a record until `stoat up` runs it: the README says create
+// writes the VM without starting it, and compute has no way to insert an
+// instance that does not boot. Start does the insert instead.
+//
+// The validation still belongs here. Settings, the guest's GCE image and
+// the seed's size are all knowable before any billable resource exists, and
+// a create that succeeds only to fail at first start is worse than one that
+// refuses now.
 func (Provider) Create(ctx context.Context, v *config.VM) error {
+	s, err := vmSettings(v)
+	if err != nil {
+		return err
+	}
+	if _, err := iso.GCEImageForOS(v.OS); err != nil {
+		return err
+	}
+	seed, err := buildSeed(v)
+	if err != nil {
+		return err
+	}
+	if len(seed) > maxMetadataValueBytes {
+		return fmt.Errorf("gce: seed is %d bytes, over metadata's %d byte limit", len(seed), maxMetadataValueBytes)
+	}
+	if _, err := maxRunDuration(s); err != nil {
+		return fmt.Errorf("gce: %w", err)
+	}
+	return nil
+}
+
+// insert creates the firewall rule and the instance, in that order, so the
+// instance never comes up reachable before it is locked down. A failed
+// instance insert deletes the rule it already created, leaving a retry
+// nothing orphaned to trip over. Start calls this for a VM that does not
+// exist yet; nothing else does.
+func insert(ctx context.Context, v *config.VM) error {
 	s, err := vmSettings(v)
 	if err != nil {
 		return err
@@ -172,6 +207,9 @@ func buildSeed(v *config.VM) (string, error) {
 	return cloudinit.UserData(v, pub, bodies)
 }
 
+// Start makes the instance exist and run. The first start inserts it; every
+// later one restarts the instance the previous Stop left behind, which is
+// what keeps the boot disk and its contents across a down and up.
 func (Provider) Start(ctx context.Context, v *config.VM) error {
 	s, err := vmSettings(v)
 	if err != nil {
@@ -182,6 +220,14 @@ func (Provider) Start(ctx context.Context, v *config.VM) error {
 		return err
 	}
 	defer c.Close()
+
+	if _, err := c.Get(ctx, &computepb.GetInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name}); err != nil {
+		if !isNotFound(err) {
+			return fmt.Errorf("gce: looking up %s: %w", v.Name, err)
+		}
+		return insert(ctx, v)
+	}
+
 	op, err := c.Start(ctx, &computepb.StartInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name})
 	if err != nil {
 		return fmt.Errorf("gce: starting %s: %w", v.Name, err)
@@ -271,10 +317,33 @@ func (Provider) Status(ctx context.Context, v *config.VM) (provider.Status, erro
 func statusFor(ctx context.Context, c *compute.InstancesClient, s settings.GCE, v *config.VM) (provider.Status, error) {
 	inst, err := c.Get(ctx, &computepb.GetInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name})
 	if err != nil {
+		// A VM created but never started has no instance yet, and neither
+		// does one whose instance someone deleted in the console. Both are
+		// stopped from stoat's side, and Raw says which of the two a caller
+		// is looking at.
+		if isNotFound(err) {
+			return provider.Status{Raw: "NOT_CREATED"}, nil
+		}
 		return provider.Status{}, fmt.Errorf("gce: getting %s: %w", v.Name, err)
 	}
 	raw := inst.GetStatus()
 	return provider.Status{Running: running[raw], Raw: raw}, nil
+}
+
+// isNotFound reports whether err is compute's 404. The client wraps its HTTP
+// status in one of two error types depending on transport, so both are
+// checked; a missed 404 turns "this instance does not exist yet" into a hard
+// failure on every list.
+func isNotFound(err error) bool {
+	var ge *googleapi.Error
+	if errors.As(err, &ge) {
+		return ge.Code == http.StatusNotFound
+	}
+	var ae *apierror.APIError
+	if errors.As(err, &ae) {
+		return ae.HTTPCode() == http.StatusNotFound
+	}
+	return false
 }
 
 // Endpoint pins the host key to a per-VM file: this connection crosses a

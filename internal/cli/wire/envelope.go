@@ -52,6 +52,11 @@ type ErrorInfo struct {
 	// Kind classifies Subject: one of "vm", "field", "recipe", "image",
 	// "snapshot", "port", "path", or absent.
 	Kind string `json:"kind,omitempty"`
+	// Reason narrows a code that covers several situations. Present on
+	// capability_unavailable, carrying one of internal/capabilities' Reason
+	// constants, so an agent branches on a field instead of parsing prose
+	// out of Message.
+	Reason string `json:"reason,omitempty"`
 }
 
 // WithSubject sets Subject and Kind and returns e, for a one-line call at
