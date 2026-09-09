@@ -144,6 +144,10 @@ type Args struct {
 	Which         core.Which
 	Only          []string
 
+	// Duration belongs to "gce extend": how far to move the soft deadline
+	// forward, from now.
+	Duration time.Duration
+
 	// Patch belongs to "update", and Changed names the flags that were
 	// actually GIVEN. core.Patch is all pointers so "not set" differs from
 	// "set to the zero value", and kong's own pointer fields carry that
@@ -610,6 +614,8 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return runMCP(a, version, stdout, stderr)
 	case "status":
 		return runStatus(a, stdout, stderr)
+	case "gce":
+		return runGCE(a, stdout, stderr)
 	default:
 		// Unreachable: Parse already rejected anything not handled above.
 		fmt.Fprintln(stderr, "stoat: unknown subcommand", a.Cmd)

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,7 +10,153 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/provider/gce"
 )
+
+// withGCEProject writes config.toml naming project, so remotePass's
+// settings gate lets the remote pass run.
+func withGCEProject(t *testing.T, dir, project string) {
+	t.Helper()
+	body := "[providers.gce]\nproject = \"" + project + "\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stubRemotes makes listRemotes return remotes with no client and no
+// network, and restores the real implementation when the test ends.
+func stubRemotes(t *testing.T, remotes []gce.Remote, err error) {
+	t.Helper()
+	prev := listRemotes
+	listRemotes = func(context.Context) ([]gce.Remote, error) { return remotes, err }
+	t.Cleanup(func() { listRemotes = prev })
+}
+
+// gceVM saves a local vm.toml owned by the gce provider, the shape
+// remotePass compares GCP's list against.
+func gceVM(t *testing.T, name, project string) {
+	t.Helper()
+	v := &config.VM{Name: name, Provider: "gce", GCEProject: project, GCEZone: "europe-west4-a"}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func classesOf(items []RemoteItem) []string {
+	var out []string
+	for _, i := range items {
+		out = append(out, i.Class)
+	}
+	return out
+}
+
+func containsClass(items []RemoteItem, class string) bool {
+	for _, i := range items {
+		if i.Class == class {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRemotePassReportsAnOrphanWithoutDeletingIt(t *testing.T) {
+	dir := root(t)
+	withGCEProject(t, dir, "engrammic")
+	stubRemotes(t, []gce.Remote{{VM: "cloudy", Zone: "europe-west4-a", Status: "RUNNING"}}, nil)
+
+	items, err := remotePass(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsClass(items, classOrphan) {
+		t.Fatalf("remotePass did not report the orphan: %+v", items)
+	}
+}
+
+func TestRemotePassMakesNoAPICallWithoutAProvider(t *testing.T) {
+	root(t) // no config.toml: providers.gce.project is unset
+
+	calls := 0
+	prev := listRemotes
+	listRemotes = func(context.Context) ([]gce.Remote, error) {
+		calls++
+		return nil, nil
+	}
+	defer func() { listRemotes = prev }()
+
+	if _, err := remotePass(false); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Errorf("listRemotes called %d times with no gce settings configured, want 0", calls)
+	}
+}
+
+// Prune must actually invoke remotePass, not just leave it as a helper
+// only tests call. A user with a GCE project configured expects `stoat
+// prune` itself to report the remote pass's findings.
+func TestPruneIncludesTheRemotePass(t *testing.T) {
+	dir := root(t)
+	withGCEProject(t, dir, "engrammic")
+	stubRemotes(t, []gce.Remote{{VM: "cloudy", Zone: "europe-west4-a", Status: "RUNNING"}}, nil)
+
+	removed, err := Prune(PruneOpts{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range removed {
+		if r.Class == classOrphan {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Prune did not include the remote pass's orphan: %+v", removed)
+	}
+}
+
+// Prune's own --apply (DryRun false) must reach the remote pass's apply
+// path too, deleting a stale local record the same way a direct
+// remotePass(true) call does.
+func TestPruneApplyDeletesAStaleGCERecord(t *testing.T) {
+	dir := root(t)
+	withGCEProject(t, dir, "engrammic")
+	gceVM(t, "stale-one", "engrammic")
+	stubRemotes(t, nil, nil)
+
+	if _, err := Prune(PruneOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale-one")); !os.IsNotExist(err) {
+		t.Error("Prune (non-dry-run) left the stale gce record behind")
+	}
+}
+
+func TestRemotePassApplyDeletesOnlyStaleLocalRecords(t *testing.T) {
+	dir := root(t)
+	withGCEProject(t, dir, "engrammic")
+	gceVM(t, "stale-one", "engrammic")
+	gceVM(t, "stopped-one", "engrammic")
+	stubRemotes(t, []gce.Remote{
+		{VM: "orphan-one", Zone: "europe-west4-a", Status: "RUNNING"},
+		{VM: "stopped-one", Zone: "europe-west4-a", Status: "TERMINATED", StoppedSince: 6 * 24 * time.Hour},
+	}, nil)
+
+	items, err := remotePass(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := classesOf(items); len(got) != 3 {
+		t.Fatalf("classes = %v, want one orphan, one stale, one stopped", got)
+	}
+
+	if _, err := os.Stat(config.DirFor("stale-one")); !os.IsNotExist(err) {
+		t.Error("--apply left the stale local record behind")
+	}
+	if _, err := os.Stat(config.DirFor("stopped-one")); err != nil {
+		t.Error("--apply deleted a local record whose instance still exists in GCP")
+	}
+}
 
 // writeBroken drops a vm.toml under dir/name that fails to parse (an
 // unterminated string), optionally with extra lines appended verbatim before

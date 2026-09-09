@@ -70,6 +70,12 @@ type Detailer interface {
 	Details(ctx context.Context, v *config.VM) (Details, error)
 }
 
+// Extender is implemented by a Provider that can move v's soft deadline
+// forward, returning the new one, without stopping v.
+type Extender interface {
+	Extend(ctx context.Context, v *config.VM, d time.Duration) (time.Time, error)
+}
+
 // WarnWithin is how far ahead of a deadline the CLI starts warning.
 const WarnWithin = time.Hour
 

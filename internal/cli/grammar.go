@@ -54,6 +54,8 @@ type grammar struct {
 	CP      cpCmd      `cmd:"" name:"cp" group:"access" help:"copy a file in or out; one side is <vm>:<path>"`
 	Forward forwardCmd `cmd:"" group:"access" help:"show, set or clear host:guest port forwards"`
 
+	GCE gceCmd `cmd:"" name:"gce" group:"vm" help:"gce-specific commands"`
+
 	Images   imagesCmd   `cmd:"" group:"image" help:"list catalog and local images"`
 	Pull     pullCmd     `cmd:"" group:"image" help:"download a catalog image"`
 	Snapshot snapshotCmd `cmd:"" group:"image" help:"list, save, restore or delete a snapshot"`
@@ -111,6 +113,15 @@ type mcpInstallCmd struct {
 }
 
 type mcpDoctorCmd struct{}
+
+type gceCmd struct {
+	Extend gceExtendCmd `cmd:"" help:"move a running instance's soft deadline forward, without stopping it"`
+}
+
+type gceExtendCmd struct {
+	VM       string `arg:"" help:"vm name"`
+	Duration string `arg:"" help:"how far to move the soft deadline forward, from now (e.g. 4h)"`
+}
 
 type helpCmd struct{}
 
@@ -711,6 +722,18 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "mcp doctor":
 		a.Cmd, a.Sub = "mcp", "doctor"
+
+	case "gce extend":
+		e := g.GCE.Extend
+		d, err := time.ParseDuration(e.Duration)
+		if err != nil {
+			return nil, usageError("gce extend: duration: " + err.Error())
+		}
+		if d <= 0 {
+			return nil, usageError("gce extend: duration must be positive")
+		}
+		a.Cmd, a.Sub = "gce", "extend"
+		a.VM, a.Duration = e.VM, d
 
 	default:
 		return nil, usageError("unknown subcommand " + path)
