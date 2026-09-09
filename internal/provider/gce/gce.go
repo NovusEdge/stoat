@@ -89,7 +89,7 @@ func (Provider) Create(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	sourceRange, err := operatorRange(ctx)
+	sourceRange, err := sourceRangeFor(ctx, s)
 	if err != nil {
 		return fmt.Errorf("gce: %w", err)
 	}

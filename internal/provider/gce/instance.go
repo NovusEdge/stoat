@@ -134,6 +134,21 @@ func diskSizeGB(s string) (int64, error) {
 	return gb, nil
 }
 
+// sourceRangeFor is the CIDR the SSH firewall rule admits. A configured
+// source_range wins outright and skips the lookup: an operator whose SSH
+// traffic leaves by a different path than an HTTPS request gets back an
+// address the instance never sees, and retrying does not fix that.
+func sourceRangeFor(ctx context.Context, s settings.GCE) (string, error) {
+	r := strings.TrimSpace(s.SourceRange)
+	if r == "" {
+		return operatorRange(ctx)
+	}
+	if _, _, err := net.ParseCIDR(r); err != nil {
+		return "", fmt.Errorf("providers.gce source_range %q: %w", r, err)
+	}
+	return r, nil
+}
+
 // operatorRange asks operatorEndpoint what address it saw the request come
 // from, and returns it as a single-address CIDR the firewall rule can use
 // as its source range. The instance always gets a v4-only ONE_TO_ONE_NAT

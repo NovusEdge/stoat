@@ -121,3 +121,23 @@ func TestOperatorRangeRejectsIPv6(t *testing.T) {
 		t.Error("operatorRangeWith() = nil error for an IPv6 address; the instance is v4-only")
 	}
 }
+
+func TestSourceRangeForPrefersTheConfiguredValue(t *testing.T) {
+	got, err := sourceRangeFor(context.Background(), settings.GCE{SourceRange: "203.0.113.0/24"})
+	if err != nil {
+		t.Fatalf("sourceRangeFor() error = %v", err)
+	}
+	if got != "203.0.113.0/24" {
+		t.Errorf("sourceRangeFor() = %q, want the configured range with no lookup", got)
+	}
+}
+
+func TestSourceRangeForRejectsAMalformedValue(t *testing.T) {
+	_, err := sourceRangeFor(context.Background(), settings.GCE{SourceRange: "203.0.113.1"})
+	if err == nil {
+		t.Fatal("sourceRangeFor() = nil error for a bare address; a CIDR is required")
+	}
+	if !strings.Contains(err.Error(), "source_range") {
+		t.Errorf("error %q must name the config key", err)
+	}
+}
