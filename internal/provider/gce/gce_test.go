@@ -53,7 +53,7 @@ func TestStatusMapsRunningStates(t *testing.T) {
 
 func TestStatusForReadsRawAndMapping(t *testing.T) {
 	c := fakeInstancesClient(t, `{"status":"STOPPING"}`)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	st, err := statusFor(context.Background(), c, settings.GCE{Project: "p", Zone: "z"}, &config.VM{Name: "cloudy"})
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestStatusForReadsRawAndMapping(t *testing.T) {
 
 func TestEndpointReadsTheExternalAddress(t *testing.T) {
 	c := fakeInstancesClient(t, `{"networkInterfaces":[{"accessConfigs":[{"natIP":"34.12.221.212"}]}]}`)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	v := &config.VM{Name: "cloudy", Dir: "/data/vms/cloudy"}
 	ep, err := endpointFor(context.Background(), c, settings.GCE{Project: "p", Zone: "z"}, v)
 	if err != nil {

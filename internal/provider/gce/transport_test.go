@@ -71,8 +71,8 @@ func fakeCompute(t *testing.T, bodies ...string) (*compute.InstancesClient, *com
 // shape a real create actually returns rather than a synchronous success.
 func TestTransportCreatesFirewallThenInstance(t *testing.T) {
 	ic, fc := fakeCompute(t, "operation_running.json", "operation_done.json")
-	defer ic.Close()
-	defer fc.Close()
+	defer func() { _ = ic.Close() }()
+	defer func() { _ = fc.Close() }()
 	ctx := context.Background()
 
 	fwOp, err := fc.Insert(ctx, &computepb.InsertFirewallRequest{
@@ -101,7 +101,7 @@ func TestTransportCreatesFirewallThenInstance(t *testing.T) {
 
 func TestTransportStartsAnInstance(t *testing.T) {
 	ic, _ := fakeCompute(t, "operation_running.json", "operation_done.json")
-	defer ic.Close()
+	defer func() { _ = ic.Close() }()
 	ctx := context.Background()
 	op, err := ic.Start(ctx, &computepb.StartInstanceRequest{Project: "p", Zone: "europe-west4-a", Instance: "cloudy"})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestTransportStartsAnInstance(t *testing.T) {
 
 func TestTransportStopsAnInstance(t *testing.T) {
 	ic, _ := fakeCompute(t, "operation_running.json", "operation_done.json")
-	defer ic.Close()
+	defer func() { _ = ic.Close() }()
 	ctx := context.Background()
 	op, err := ic.Stop(ctx, &computepb.StopInstanceRequest{Project: "p", Zone: "europe-west4-a", Instance: "cloudy"})
 	if err != nil {
@@ -129,8 +129,8 @@ func TestTransportStopsAnInstance(t *testing.T) {
 // instance is gone before its firewall rule is deleted.
 func TestTransportDestroysInstanceThenFirewall(t *testing.T) {
 	ic, fc := fakeCompute(t, "operation_running.json", "operation_done.json")
-	defer ic.Close()
-	defer fc.Close()
+	defer func() { _ = ic.Close() }()
+	defer func() { _ = fc.Close() }()
 	ctx := context.Background()
 
 	delOp, err := ic.Delete(ctx, &computepb.DeleteInstanceRequest{Project: "p", Zone: "europe-west4-a", Instance: "cloudy"})
@@ -153,7 +153,7 @@ func TestTransportDestroysInstanceThenFirewall(t *testing.T) {
 // and maxRunDuration alone.
 func TestTransportStatusReadsARecordedInstance(t *testing.T) {
 	ic, _ := fakeCompute(t, "instance_get.json")
-	defer ic.Close()
+	defer func() { _ = ic.Close() }()
 	ctx := context.Background()
 	v := &config.VM{Name: "cloudy", Dir: "/data/vms/cloudy"}
 	s := settings.GCE{Project: "engrammic", Zone: "europe-west4-a"}

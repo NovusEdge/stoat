@@ -135,7 +135,7 @@ func insert(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	defer fwClient.Close()
+	defer func() { _ = fwClient.Close() }()
 
 	fwOp, err := fwClient.Insert(ctx, &computepb.InsertFirewallRequest{
 		Project:          s.Project,
@@ -159,7 +159,7 @@ func insert(ctx context.Context, v *config.VM) error {
 		_ = deleteFirewallRule(ctx, fwClient, s, v.Name)
 		return err
 	}
-	defer instClient.Close()
+	defer func() { _ = instClient.Close() }()
 
 	insOp, err := instClient.Insert(ctx, req)
 	if err != nil {
@@ -219,7 +219,7 @@ func (Provider) Start(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	if _, err := c.Get(ctx, &computepb.GetInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name}); err != nil {
 		if !isNotFound(err) {
@@ -244,7 +244,7 @@ func (Provider) Stop(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	op, err := c.Stop(ctx, &computepb.StopInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name})
 	if err != nil {
 		return fmt.Errorf("gce: stopping %s: %w", v.Name, err)
@@ -266,7 +266,7 @@ func (Provider) Destroy(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	op, err := c.Delete(ctx, &computepb.DeleteInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name})
 	if err != nil {
 		return fmt.Errorf("gce: deleting %s: %w", v.Name, err)
@@ -279,7 +279,7 @@ func (Provider) Destroy(ctx context.Context, v *config.VM) error {
 	if err != nil {
 		return err
 	}
-	defer fwClient.Close()
+	defer func() { _ = fwClient.Close() }()
 	return deleteFirewallRule(ctx, fwClient, s, v.Name)
 }
 
@@ -308,7 +308,7 @@ func (Provider) Status(ctx context.Context, v *config.VM) (provider.Status, erro
 	if err != nil {
 		return provider.Status{}, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	return statusFor(ctx, c, s, v)
 }
 
@@ -358,7 +358,7 @@ func (Provider) Endpoint(ctx context.Context, v *config.VM) (sshx.Endpoint, erro
 	if err != nil {
 		return sshx.Endpoint{}, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	return endpointFor(ctx, c, s, v)
 }
 
@@ -391,7 +391,7 @@ func (Provider) Details(ctx context.Context, v *config.VM) (provider.Details, er
 	if err != nil {
 		return provider.Details{}, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	inst, err := c.Get(ctx, &computepb.GetInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name})
 	if err != nil {
 		return provider.Details{}, fmt.Errorf("gce: getting %s: %w", v.Name, err)

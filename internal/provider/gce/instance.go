@@ -192,7 +192,7 @@ func operatorRangeWith(ctx context.Context, client *http.Client) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("looking up the operator's address: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
 	if err != nil {
 		return "", err

@@ -1,6 +1,7 @@
 package gce
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -8,7 +9,11 @@ import (
 )
 
 func TestClientOptionsPlainADC(t *testing.T) {
-	if got := clientOptions(settings.GCE{Project: "p"}); len(got) != 0 {
+	got, err := clientOptions(context.Background(), settings.GCE{Project: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
 		t.Errorf("clientOptions = %d options, want none: plain ADC needs no option", len(got))
 	}
 }

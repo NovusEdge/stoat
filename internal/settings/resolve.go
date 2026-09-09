@@ -109,7 +109,7 @@ func gcloudActiveConfig() (project, zone string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	section := ""
 	scanner := bufio.NewScanner(f)
