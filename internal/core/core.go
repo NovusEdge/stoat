@@ -20,8 +20,10 @@ import (
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/coreerr"
 	"github.com/novusedge/stoat/internal/provider"
+	_ "github.com/novusedge/stoat/internal/provider/gce"
 	_ "github.com/novusedge/stoat/internal/provider/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
+	"github.com/novusedge/stoat/internal/settings"
 )
 
 // Typed errors, because every caller branches on them and string matching is
@@ -115,6 +117,13 @@ type Spec struct {
 	// Provider is the execution surface. Empty means qemu, matching
 	// config.VM.Provider and provider.For.
 	Provider string
+
+	// GCEProject and GCEZone are the --gcp-project/--gcp-zone flags, honored
+	// only when Provider is "gce". Create resolves them through
+	// settings.ResolveGCE (flag, then config.toml, then gcloud), so either
+	// or both may be empty here.
+	GCEProject string
+	GCEZone    string
 }
 
 // Create validates a Spec, writes vm.toml and allocates the disk. It does not
@@ -144,6 +153,14 @@ func Create(s Spec) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
+	var gceSource settings.Source
+	if v.Provider == "gce" {
+		resolved, err := settings.ResolveGCE(s.GCEProject, s.GCEZone)
+		if err != nil {
+			return VM{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		}
+		v.GCEProject, v.GCEZone, gceSource = resolved.Project, resolved.Zone, resolved.Source
+	}
 	if err := v.Save(); err != nil {
 		return VM{}, err
 	}
@@ -168,7 +185,9 @@ func Create(s Spec) (VM, error) {
 		_ = os.RemoveAll(v.Dir)
 		return VM{}, err
 	}
-	return fromConfig(v), nil
+	out := fromConfig(v)
+	out.GCESource = string(gceSource)
+	return out, nil
 }
 
 // Plan is Create without side effects: it validates a Spec and returns the

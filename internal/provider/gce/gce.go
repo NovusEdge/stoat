@@ -4,6 +4,7 @@ package gce
 import (
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 
 	compute "cloud.google.com/go/compute/apiv1"
@@ -305,6 +306,34 @@ func endpointFor(ctx context.Context, c *compute.InstancesClient, s settings.GCE
 		Port:       22,
 		User:       sshx.User(v),
 		KnownHosts: filepath.Join(v.Dir, "known_hosts"),
+	}, nil
+}
+
+// Details reports the facts CLI and TUI show beyond Status: project, zone,
+// machine type, external address and both stop deadlines.
+func (Provider) Details(ctx context.Context, v *config.VM) (provider.Details, error) {
+	s, err := vmSettings(v)
+	if err != nil {
+		return provider.Details{}, err
+	}
+	c, err := newClient(ctx, s)
+	if err != nil {
+		return provider.Details{}, err
+	}
+	defer c.Close()
+	inst, err := c.Get(ctx, &computepb.GetInstanceRequest{Project: s.Project, Zone: s.Zone, Instance: v.Name})
+	if err != nil {
+		return provider.Details{}, fmt.Errorf("gce: getting %s: %w", v.Name, err)
+	}
+	hard, _ := hardDeadline(inst)
+	soft, _ := softDeadline(inst.GetLabels())
+	return provider.Details{
+		Project:      s.Project,
+		Zone:         s.Zone,
+		MachineType:  path.Base(inst.GetMachineType()),
+		Address:      externalAddress(inst),
+		HardDeadline: hard,
+		SoftDeadline: soft,
 	}, nil
 }
 
