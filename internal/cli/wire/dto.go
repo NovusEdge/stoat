@@ -117,8 +117,17 @@ type VM struct {
 	ProjectMissing bool   `json:"project_missing"`
 
 	// Provider is the execution surface: absent for qemu (the empty
-	// core.VM.Provider), named otherwise ("gce").
-	Provider string `json:"provider,omitempty"`
+	// core.VM.Provider), named otherwise ("gce"). GCEProject, GCEZone,
+	// MachineType and Address are empty for qemu and for a gce VM whose
+	// details call failed; the deadlines are RFC3339, empty when that
+	// deadline does not apply.
+	Provider     string `json:"provider,omitempty"`
+	GCEProject   string `json:"gcp_project,omitempty"`
+	GCEZone      string `json:"gcp_zone,omitempty"`
+	MachineType  string `json:"machine_type,omitempty"`
+	Address      string `json:"address,omitempty"`
+	HardDeadline string `json:"hard_deadline,omitempty"`
+	SoftDeadline string `json:"soft_deadline,omitempty"`
 }
 
 // RecipeState is one recipe's redacted per-VM state.
@@ -218,7 +227,20 @@ func FromVM(v core.VM, graphical bool) VM {
 		Key:            v.Key,
 		ProjectMissing: v.ProjectMissing,
 		Provider:       v.Provider,
+		GCEProject:     v.GCEProject,
+		GCEZone:        v.GCEZone,
+		MachineType:    v.MachineType,
+		Address:        v.Address,
+		HardDeadline:   rfc3339OrEmpty(v.HardDeadline),
+		SoftDeadline:   rfc3339OrEmpty(v.SoftDeadline),
 	}
+}
+
+func rfc3339OrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func FromVMs(vs []core.VM, graphical bool) []VM {

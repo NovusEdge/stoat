@@ -5,10 +5,11 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
-	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
 )
 
 func runGet(a *Args, stdout, stderr io.Writer) int {
@@ -19,6 +20,7 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 	if a.JSON {
 		return a.ok(stdout, wire.VMStatusResult{VM: wire.FromVMStatus(v, core.GraphicalSession())})
 	}
+	warnDeadline(stderr, v)
 	fmt.Fprintf(stdout, "name: %s\n", v.Name)
 	fmt.Fprintf(stdout, "os: %s\n", v.OS)
 	fmt.Fprintf(stdout, "mode: %s\n", v.Mode)
@@ -61,27 +63,30 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 }
 
 // printProviderBlock prints the provider line, and for a non-qemu VM the
-// project and zone it was created in. Machine type, address and the two
-// deadlines are not printed: nothing in the Provider interface exposes them
-// yet (Status carries only a running bit and the provider's raw status
-// word), so showing them here would mean guessing rather than reporting.
+// project, zone, machine type, address and the nearer of its two deadlines.
 func printProviderBlock(stdout io.Writer, v core.VM) {
-	provider := v.Provider
-	if provider == "" {
-		provider = "qemu"
-		fmt.Fprintf(stdout, "provider: %s\n", provider)
+	name := v.Provider
+	if name == "" {
+		name = "qemu"
+	}
+	fmt.Fprintf(stdout, "provider: %s\n", name)
+	if v.Provider == "" {
 		return
 	}
-	fmt.Fprintf(stdout, "provider: %s\n", provider)
-	cfg, err := config.Load(v.Name)
-	if err != nil {
-		return
+	if v.GCEProject != "" {
+		fmt.Fprintf(stdout, "gcp project: %s\n", v.GCEProject)
 	}
-	if cfg.GCEProject != "" {
-		fmt.Fprintf(stdout, "gcp project: %s\n", cfg.GCEProject)
+	if v.GCEZone != "" {
+		fmt.Fprintf(stdout, "zone: %s\n", v.GCEZone)
 	}
-	if cfg.GCEZone != "" {
-		fmt.Fprintf(stdout, "zone: %s\n", cfg.GCEZone)
+	if v.MachineType != "" {
+		fmt.Fprintf(stdout, "machine type: %s\n", v.MachineType)
+	}
+	if v.Address != "" {
+		fmt.Fprintf(stdout, "address: %s\n", v.Address)
+	}
+	if when, which, ok := provider.Nearest(v.HardDeadline, v.SoftDeadline, time.Now()); ok {
+		fmt.Fprintf(stdout, "expires: %s (in %s, %s)\n", when.UTC().Format(time.RFC3339), formatDuration(time.Until(when)), which)
 	}
 }
 
