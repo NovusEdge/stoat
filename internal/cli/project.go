@@ -17,7 +17,7 @@ var vmCommands = map[string]bool{
 	"get": true, "up": true, "down": true, "ssh": true, "ssh-command": true,
 	"rm": true, "clone": true, "exec": true, "cp": true, "forward": true,
 	"snapshot": true, "wait": true, "apply": true,
-	"update": true, "logs": true, "capabilities": true,
+	"update": true, "logs": true, "capabilities": true, "gce": true,
 }
 
 // fanOutCommands are the commands that act on every declared VM when given no
