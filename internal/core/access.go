@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -91,6 +92,15 @@ func Logs(name string, which Which) (io.ReadCloser, error) {
 	secrets, err := config.LoadSecrets(v.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+
+	// The console log is QEMU's -serial output. A provider with no serial
+	// device has no file to open, and an empty reader would read as a quiet
+	// guest rather than an operation this provider cannot do.
+	if which == WhichConsole {
+		if err := RequireCapability(v, capabilities.OpConsoleLog); err != nil {
+			return nil, err
+		}
 	}
 
 	path := v.ProvisionLogPath()

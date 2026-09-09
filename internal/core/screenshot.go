@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/qemu"
 )
 
@@ -30,6 +31,9 @@ type Shot struct {
 func Screenshot(name, dest string) (Shot, error) {
 	v, err := load(name)
 	if err != nil {
+		return Shot{}, err
+	}
+	if err := RequireCapability(v, capabilities.OpScreenshot); err != nil {
 		return Shot{}, err
 	}
 	if !qemu.Running(v) {

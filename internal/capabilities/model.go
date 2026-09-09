@@ -27,6 +27,25 @@ const (
 	ReasonQuotaExceeded          = "quota_exceeded"
 	ReasonDeadlineExpired        = "deadline_expired"
 
+	// The operation names core.RequireCapability gates on. Every provider
+	// declares a status for every one of them: RequireCapability treats an
+	// undeclared name as a refusal, so a provider that adds a method without
+	// declaring it fails closed.
+	//
+	// These are separate from the vm.* and mcp.* names above, which describe
+	// what `stoat capabilities` reports about a target. Two providers using
+	// two vocabularies is what made the first wiring of this refuse
+	// snapshots on QEMU.
+	OpSnapshot   = "snapshot"
+	OpClone      = "clone"
+	OpScreenshot = "screenshot"
+	OpSendKey    = "sendkey"
+	OpForward    = "forward"
+	OpConsoleLog = "console_log"
+	OpShare      = "share"
+	OpUpdateRAM  = "update.ram"
+	OpUpdateCPU  = "update.cpu"
+
 	LimitAgentAccessRequired    = "agent_access_required"
 	LimitTargetRequired         = "target_required"
 	LimitDiskRequired           = "disk_required"

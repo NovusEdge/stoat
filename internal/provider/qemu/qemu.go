@@ -21,9 +21,18 @@ type Provider struct{}
 
 func (Provider) Name() string { return "qemu" }
 
-// qemuCapabilities is what a local QEMU VM supports. Every entry here is
-// StatusSupported: C2 adds the enforcement path, not a QEMU restriction.
+// qemuCapabilities is what a local QEMU VM supports, which is everything.
+// The gated operation names come first, so this list reads against
+// gce.unsupported; the rest describe the target to `stoat capabilities`.
+//
+// Every Op* constant must appear here. RequireCapability treats an
+// undeclared name as a refusal, so omitting one refuses that operation on
+// QEMU, which is how the first wiring of this broke snapshots.
 var qemuCapabilities = []string{
+	capabilities.OpSnapshot, capabilities.OpClone, capabilities.OpScreenshot,
+	capabilities.OpSendKey, capabilities.OpForward, capabilities.OpConsoleLog,
+	capabilities.OpShare, capabilities.OpUpdateRAM, capabilities.OpUpdateCPU,
+
 	"vm.lifecycle", "vm.snapshot", "recipes",
 	"mcp.guest.observe", "mcp.guest.manage", "mcp.guest.exec", "cli.guest.shell",
 }

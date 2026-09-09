@@ -37,8 +37,10 @@ type Provider struct{}
 // which has no equivalent on a Compute Engine instance short of a stop,
 // SetMachineResources, and restart this provider does not yet implement.
 var unsupported = []string{
-	"share", "screenshot", "sendkey", "console_log", "forward",
-	"snapshot", "clone", "update.ram", "update.cpu",
+	capabilities.OpShare, capabilities.OpScreenshot, capabilities.OpSendKey,
+	capabilities.OpConsoleLog, capabilities.OpForward,
+	capabilities.OpSnapshot, capabilities.OpClone,
+	capabilities.OpUpdateRAM, capabilities.OpUpdateCPU,
 }
 
 func (Provider) Name() string { return "gce" }

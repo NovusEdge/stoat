@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/qemu"
 )
@@ -93,6 +94,9 @@ func Snapshots(name string) ([]Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := RequireCapability(v, capabilities.OpSnapshot); err != nil {
+		return nil, err
+	}
 	if v.Mode == "live" {
 		return nil, fmt.Errorf("%w: %s is a live VM", ErrNoDisk, name)
 	}
@@ -131,6 +135,9 @@ func snapshotTarget(name, tag string) (*config.VM, error) {
 	}
 	v, err := load(name)
 	if err != nil {
+		return nil, err
+	}
+	if err := RequireCapability(v, capabilities.OpSnapshot); err != nil {
 		return nil, err
 	}
 	if v.Mode == "live" {
