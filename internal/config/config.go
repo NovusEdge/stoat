@@ -98,6 +98,13 @@ type VM struct {
 	// or a cloud provider's name. Empty means "qemu", which is what every
 	// vm.toml written before this field existed says.
 	Provider string `toml:"provider,omitempty"`
+	// GCEProject and GCEZone pin a gce VM to the project and zone it was
+	// created in. settings.ResolveGCE only runs at create time; every later
+	// command (start, stop, destroy) needs the instance's location without
+	// re-resolving flags, config.toml and gcloud's config against a possibly
+	// different environment.
+	GCEProject string `toml:"gce_project,omitempty"`
+	GCEZone    string `toml:"gce_zone,omitempty"`
 	// Base is the absolute path to the shared base image an overlay is
 	// created from. Cloud mode only.
 	Base string `toml:"base"`

@@ -14,6 +14,7 @@ import (
 	"github.com/novusedge/stoat/internal/guest"
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/provider"
+	_ "github.com/novusedge/stoat/internal/provider/gce"
 	_ "github.com/novusedge/stoat/internal/provider/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 )
@@ -215,6 +216,25 @@ type VM struct {
 	// from the active project. It is not in vm.toml: only a loaded stoat.toml
 	// knows it, and two projects could name the same VM differently.
 	Key string
+
+	// Provider is the execution surface, empty meaning qemu; see
+	// config.VM.Provider and provider.For.
+	Provider string
+
+	// GCEProject, GCEZone and GCESource mirror config.VM's fields, plus
+	// where they came from. GCESource is set only by Create's own return
+	// value: it is never stored in vm.toml, so a later Get leaves it empty.
+	GCEProject string
+	GCEZone    string
+	GCESource  string
+
+	// MachineType, Address and the two deadlines come from the provider's
+	// Detailer interface, not vm.toml; empty for qemu and for a gce VM
+	// whose Status call failed.
+	MachineType  string
+	Address      string
+	HardDeadline time.Time
+	SoftDeadline time.Time
 }
 
 // A VM's IDENTITY is its DIRECTORY under the data root. It is never the
@@ -238,7 +258,7 @@ type VM struct {
 // parse (ErrBroken). Start/Stop/Destroy need that distinction to give a
 // broken VM a real error instead of a raw TOML parse message.
 func load(name string) (*config.VM, error) {
-	if _, err := os.Stat(filepath.Join(config.Root(), name, "vm.toml")); err != nil {
+	if !config.Exists(name) {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	v, err := config.Load(name)
@@ -271,13 +291,21 @@ func fromConfigUnchecked(v *config.VM) VM {
 	state := StateStopped
 	var startedAt time.Time
 	var stateErr string
+	var details provider.Details
 	p, err := providerFor(v)
 	if err != nil {
 		state, stateErr = StateBroken, err.Error()
 	} else if s, err := p.Status(context.Background(), v); err != nil {
 		state, stateErr = StateBroken, err.Error()
-	} else if s.Running {
-		state, startedAt = StateRunning, s.StartedAt
+	} else {
+		if s.Running {
+			state, startedAt = StateRunning, s.StartedAt
+		}
+		// Details is best-effort: a get that failed after Status already
+		// succeeded must not turn a running VM broken over a display fact.
+		if d, ok := p.(provider.Detailer); ok {
+			details, _ = d.Details(context.Background(), v)
+		}
 	}
 	osName, backend := inferMissing(v)
 	return VM{
@@ -311,6 +339,13 @@ func fromConfigUnchecked(v *config.VM) VM {
 		AgentAccess:     v.AgentAccess,
 		Project:         v.Project,
 		ProjectMissing:  v.Project != "" && !dirExists(v.Project),
+		Provider:        v.Provider,
+		GCEProject:      v.GCEProject,
+		GCEZone:         v.GCEZone,
+		MachineType:     details.MachineType,
+		Address:         details.Address,
+		HardDeadline:    details.HardDeadline,
+		SoftDeadline:    details.SoftDeadline,
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),

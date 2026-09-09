@@ -210,8 +210,15 @@ VM          {"name":"work","os":"alpine","mode":"cloud","backend":"cloudinit",
              "forwards":[{"host_port":8080,"guest_port":80}],
              "allow_exec":false,"agent_access":"manage","display":"vnc",
              "error":"only on a broken VM",
-             "project":"/home/u/myrepo","key":"dev","project_missing":false}
+             "project":"/home/u/myrepo","key":"dev","project_missing":false,
+             "provider":"gce","gcp_project":"engrammic","gcp_zone":"europe-west4-a",
+             "machine_type":"e2-medium","address":"34.12.221.212",
+             "hard_deadline":"2026-09-08T22:14:00Z","soft_deadline":""}
+```
 
+`provider` is omitted for a qemu VM (the empty `core.VM.Provider`), and carries the provider's own name (`"gce"`) otherwise. `gcp_project`, `gcp_zone`, `machine_type` and `address` are omitted for qemu and for a gce VM whose details call failed. `hard_deadline` and `soft_deadline` are RFC3339, each omitted when that deadline does not apply.
+
+```json
 VMStatus    {"name":"work",...VM fields...,"health":"ok","recipes_detail":[
              {"name":"xfce","applied":true,"version":"1.2","at":"...",
               "health":"unknown","params":{},"outputs":{}}]}

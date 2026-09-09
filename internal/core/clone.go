@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/guest"
@@ -43,6 +44,9 @@ func Clone(name, newName string) (VM, error) {
 
 	src, err := load(name)
 	if err != nil {
+		return VM{}, err
+	}
+	if err := RequireCapability(src, capabilities.OpClone); err != nil {
 		return VM{}, err
 	}
 	state, err := StateOf(context.Background(), src)

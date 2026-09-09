@@ -232,6 +232,23 @@ func TestTypeConsolePasswordKeyRefusesWhenUnavailable(t *testing.T) {
 	}
 }
 
+// TestTypeConsolePasswordKeyRefusesOnANonQEMUProvider proves "t" never dials
+// qemu.TypeConsolePassword's monitor socket for a VM with no local qemu
+// process, even a running one with a password set (docket d46): a gce VM
+// carries a console password of its own, but no monitor socket exists for
+// it to be typed through.
+func TestTypeConsolePasswordKeyRefusesOnANonQEMUProvider(t *testing.T) {
+	v := core.VM{Name: "cloudy", Mode: "cloud", Provider: "gce", ConsolePassword: "stoat", State: core.StateRunning}
+	m := model{screen: screenDetail, detail: detailModel{vm: v}}
+
+	newM, cmd := m.updateDetail(keyMsg("t"))
+	got := newM.(model)
+
+	if got.toast.text == "" || !got.toast.err {
+		t.Fatalf("expected an error toast refusing to type the password, got %+v (cmd nil=%v)", got.toast, cmd == nil)
+	}
+}
+
 // The TUI detail pane is a sink in its own right. It must render stored
 // recipe state through the redacted core projection, even when a lower layer
 // accidentally hands it a raw value.

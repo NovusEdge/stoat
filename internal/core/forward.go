@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/config"
 )
 
@@ -62,6 +63,9 @@ func ParseForwards(pairs []string) ([]PortForward, error) {
 func Forward(name string, fwds []PortForward) (active bool, err error) {
 	v, err := load(name)
 	if err != nil {
+		return false, err
+	}
+	if err := RequireCapability(v, capabilities.OpForward); err != nil {
 		return false, err
 	}
 	if err := validateForwards(v, fwds); err != nil {

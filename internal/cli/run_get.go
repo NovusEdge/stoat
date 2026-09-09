@@ -5,9 +5,11 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
 )
 
 func runGet(a *Args, stdout, stderr io.Writer) int {
@@ -18,9 +20,11 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 	if a.JSON {
 		return a.ok(stdout, wire.VMStatusResult{VM: wire.FromVMStatus(v, core.GraphicalSession())})
 	}
+	warnDeadline(stderr, v)
 	fmt.Fprintf(stdout, "name: %s\n", v.Name)
 	fmt.Fprintf(stdout, "os: %s\n", v.OS)
 	fmt.Fprintf(stdout, "mode: %s\n", v.Mode)
+	printProviderBlock(stdout, v)
 	fmt.Fprintf(stdout, "backend: %s\n", v.Backend)
 	fmt.Fprintf(stdout, "state: %s\n", v.State)
 	fmt.Fprintf(stdout, "cpus: %d\n", v.CPUs)
@@ -56,6 +60,34 @@ func runGet(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "error: %s\n", v.Error)
 	}
 	return ExitOK
+}
+
+// printProviderBlock prints the provider line, and for a non-qemu VM the
+// project, zone, machine type, address and the nearer of its two deadlines.
+func printProviderBlock(stdout io.Writer, v core.VM) {
+	name := v.Provider
+	if name == "" {
+		name = "qemu"
+	}
+	fmt.Fprintf(stdout, "provider: %s\n", name)
+	if v.Provider == "" {
+		return
+	}
+	if v.GCEProject != "" {
+		fmt.Fprintf(stdout, "gcp project: %s\n", v.GCEProject)
+	}
+	if v.GCEZone != "" {
+		fmt.Fprintf(stdout, "zone: %s\n", v.GCEZone)
+	}
+	if v.MachineType != "" {
+		fmt.Fprintf(stdout, "machine type: %s\n", v.MachineType)
+	}
+	if v.Address != "" {
+		fmt.Fprintf(stdout, "address: %s\n", v.Address)
+	}
+	if when, which, ok := provider.Nearest(v.HardDeadline, v.SoftDeadline, time.Now()); ok {
+		fmt.Fprintf(stdout, "expires: %s (in %s, %s)\n", when.UTC().Format(time.RFC3339), formatDuration(time.Until(when)), which)
+	}
 }
 
 func sortedKeys(values map[string]string) []string {

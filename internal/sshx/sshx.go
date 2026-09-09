@@ -291,7 +291,7 @@ func cloudInitProbe(ctx context.Context, v *config.VM, log io.Writer) (cloudInit
 		defer cancel()
 
 		var out bytes.Buffer
-		ci := exec.CommandContext(probeCtx, "ssh", Args(LocalEndpoint(v), argv...)...)
+		ci := exec.CommandContext(probeCtx, "ssh", Args(mustEndpoint(v), argv...)...)
 		ci.Cancel = func() error { return ci.Process.Signal(syscall.SIGTERM) }
 		ci.WaitDelay = recipeShutdownGrace
 		ci.Stdout = &out
@@ -388,7 +388,7 @@ func RunCheck(ctx context.Context, v *config.VM, command string, timeout time.Du
 		prelude = guest.Prelude(o, "sh")
 	}
 	body := prelude + "\n" + command + "\n"
-	cmd := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
+	cmd := exec.CommandContext(ctx, "ssh", Args(mustEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = healthShutdownGrace
 	cmd.Stdin = strings.NewReader(body)
@@ -421,7 +421,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 	defer func() { _ = log.Close() }()
 
 	fmt.Fprintf(log, "waiting for ssh on port %d…\n", v.SSHPort)
-	if err := Wait(ctx, LocalEndpoint(v), WaitTimeout); err != nil {
+	if err := Wait(ctx, mustEndpoint(v), WaitTimeout); err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintf(log, "CANCELLED: %v\n", err)
 		} else {
@@ -451,7 +451,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 
 	if o, ok := guest.Lookup(v.OS); ok && strings.TrimSpace(o.Pkg.Setup) != "" {
 		fmt.Fprintln(log, "refreshing the package index...")
-		st := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
+		st := exec.CommandContext(ctx, "ssh", Args(mustEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
 		st.Cancel = func() error { return st.Process.Signal(syscall.SIGTERM) }
 		st.WaitDelay = recipeShutdownGrace
 		st.Stdin = strings.NewReader(guest.Prelude(o, "sh") + "stoat_pkg_setup\n")
@@ -502,7 +502,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 
 		if bootstrap := recipes.BootstrapScript(runtime, v.OS); bootstrap != "" {
 			fmt.Fprintf(log, "ensuring %s is installed...\n", runtime)
-			bs := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
+			bs := exec.CommandContext(ctx, "ssh", Args(mustEndpoint(v), escalate(v, []string{"sh", "-s"})...)...)
 			bs.Cancel = func() error { return bs.Process.Signal(syscall.SIGTERM) }
 			bs.WaitDelay = recipeShutdownGrace
 			bs.Stdin = strings.NewReader(guest.WithPrelude(bootstrap, preludeFor(v, "sh")))
@@ -518,7 +518,7 @@ func Provision(ctx context.Context, v *config.VM) (err error) {
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), escalate(v, recipes.InterpreterArgs(runtime))...)...)
+		cmd := exec.CommandContext(ctx, "ssh", Args(mustEndpoint(v), escalate(v, recipes.InterpreterArgs(runtime))...)...)
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = recipeShutdownGrace
 		cmd.Stdin = strings.NewReader(input)

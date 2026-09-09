@@ -43,13 +43,17 @@ func Run(ctx context.Context, v *config.VM, root bool, argv []string, stdin io.R
 	if root {
 		remote = escalate(v, argv)
 	}
+	ep, err := endpointFor(v)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	var out, errb bytes.Buffer
-	c := exec.CommandContext(ctx, "ssh", Args(LocalEndpoint(v), Quote(remote))...)
+	c := exec.CommandContext(ctx, "ssh", Args(ep, Quote(remote))...)
 	c.Stdin = stdin
 	c.Stdout = &out
 	c.Stderr = &errb
 
-	err := c.Run()
+	err = c.Run()
 	var ee *exec.ExitError
 	switch {
 	case err == nil:

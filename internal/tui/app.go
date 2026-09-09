@@ -267,6 +267,10 @@ func (m model) updateApp(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetWidth(listWidth)
 		m.syncListHeight()
 		return m, nil
+	case editRunningMsg:
+		m.edit.running = msg.running
+		return m, nil
+
 	case vmsLoadedMsg:
 		m.vms = msg.vms
 		// SetItems returns a Cmd that re-applies an active filter to the new

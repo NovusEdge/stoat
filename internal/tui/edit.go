@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -12,10 +13,18 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
-	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/theme"
 )
+
+// vmRunning asks v's provider whether it is running. qemu.Running checks a
+// local pidfile, which a non-qemu VM never has even while its provider
+// reports it live, so this replaces both call sites that used to read it
+// directly for a gce VM's sake.
+func vmRunning(v *config.VM) bool {
+	state, err := core.StateOf(context.Background(), v)
+	return err == nil && state == core.StateRunning
+}
 
 // editModel is the in-TUI editor for an existing VM. It replaces the round
 // trip through $EDITOR for the fields worth changing. "E" still opens the
@@ -38,6 +47,21 @@ type editModel struct {
 	recipeSel   map[string]bool
 
 	display string // one of displayChoices; seeded from vm.Display, "" reads as "auto"
+
+	// running is resolved once, by checkEditRunning's tea.Cmd, when the pane
+	// opens. viewEdit reads this instead of calling vmRunning itself: that
+	// call reaches a gce Provider's Status, an unbounded network round trip
+	// Bubble Tea's View function must never block on.
+	running bool
+}
+
+// editRunningMsg carries checkEditRunning's answer back to Update.
+type editRunningMsg struct{ running bool }
+
+// checkEditRunning resolves whether v is running off Bubble Tea's Update/View
+// path, so viewEdit never starts a network call of its own.
+func checkEditRunning(v *config.VM) tea.Cmd {
+	return func() tea.Msg { return editRunningMsg{running: vmRunning(v)} }
 }
 
 // edit field indices
@@ -419,7 +443,7 @@ func (m model) updateEdit(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.edit.err = err.Error()
 				return m, nil
 			}
-			saved, errText := saveEdit(m.edit.name(), p, qemu.Running(m.edit.vm))
+			saved, errText := saveEdit(m.edit.name(), p, vmRunning(m.edit.vm))
 			if errText != "" {
 				m.edit.err = errText
 				return m, nil
@@ -520,7 +544,7 @@ func (m model) viewEdit() string {
 	if !e.dirty() {
 		note(dimStyle.Render("no changes"))
 	}
-	if qemu.Running(e.vm) {
+	if e.running {
 		note(warnStyle.Render("running: ram/cpus/ssh apply on restart"))
 	}
 	if e.err != "" {

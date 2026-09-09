@@ -32,7 +32,27 @@ type Provider struct {
 
 func (*Provider) Name() string { return "qemu" }
 
-func (p *Provider) Capabilities(*config.VM) []capabilities.Capability { return p.Caps }
+// Capabilities answers like the QEMU provider this fake stands in for: every
+// gated operation supported. A test that wants a refusal sets Caps itself.
+//
+// Returning nil would refuse everything, since RequireCapability treats an
+// undeclared operation as unsupported. That would make every core test that
+// clones, forwards or snapshots fail for a reason the test is not about.
+func (p *Provider) Capabilities(*config.VM) []capabilities.Capability {
+	if p.Caps != nil {
+		return p.Caps
+	}
+	ops := []string{
+		capabilities.OpSnapshot, capabilities.OpClone, capabilities.OpScreenshot,
+		capabilities.OpSendKey, capabilities.OpForward, capabilities.OpConsoleLog,
+		capabilities.OpShare, capabilities.OpUpdateRAM, capabilities.OpUpdateCPU,
+	}
+	out := make([]capabilities.Capability, len(ops))
+	for i, name := range ops {
+		out[i] = capabilities.Capability{Name: name, Status: capabilities.StatusSupported}
+	}
+	return out
+}
 
 // SetRunning marks name live. Tests that need a VM to look started without
 // calling Start use this.

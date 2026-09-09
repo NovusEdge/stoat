@@ -188,6 +188,13 @@ type createCmd struct {
 	// present. Without it, a create at project scope is refused: a VM that
 	// exists only on one machine is exactly what stoat.toml removes.
 	Global bool `help:"create outside the project even inside one"`
+
+	// Provider, GCEProject and GCEZone select a cloud execution surface.
+	// Empty Provider means qemu; the other two are honored only when
+	// Provider is "gce" and fall back through settings.ResolveGCE.
+	Provider   string `help:"execution surface: qemu (default) or gce"`
+	GCEProject string `name:"gcp-project" help:"gce project (default: config.toml, then gcloud's active config)"`
+	GCEZone    string `name:"gcp-zone" help:"gce zone (default: config.toml, then gcloud's active config)"`
 }
 
 // Help satisfies kong.HelpProvider. Kong prints a Detail block on the
@@ -475,6 +482,9 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 			ConsolePassword: c.ConsolePassword, Recipes: trimList(c.Recipes),
 			AllowExec:   &allowExec,
 			AgentAccess: access,
+			Provider:    c.Provider,
+			GCEProject:  c.GCEProject,
+			GCEZone:     c.GCEZone,
 		}
 		edits, err := parseParamFlags(c.Set, nil, c.Secret)
 		if err != nil {

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/project"
+	"github.com/novusedge/stoat/internal/provider"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
@@ -36,7 +38,8 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, wire.VMList{VMs: wire.FromVMs(vms, core.GraphicalSession())})
 	}
 
-	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
+	fmt.Fprintf(stdout, "%-15s %-5s %-8s %-5s %-5s %-6s %-6s %s\n", "NAME", "MODE", "STATE", "WHERE", "CPUS", "RAM", "SSH", "PROJECT")
+	var warnings []string
 	// core.List() sorts every VM, broken ones included, together by name,
 	// so a broken VM can interleave alphabetically with good ones. The
 	// original two calls (config.List then config.ListBroken) printed every
@@ -52,8 +55,14 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State == core.StateRunning {
 			state = "running"
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5d %-6d %-6d %s\n",
-			v.Name, v.Mode, a.prose(stdout).State(state, 8), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-5d %-6d %-6d %s\n",
+			v.Name, v.Mode, a.prose(stdout).State(state, 8), whereCell(v), v.CPUs, v.RAM, v.SSHPort, projectCell(v))
+		if line, ok := deadlineWarning(v); ok {
+			warnings = append(warnings, line)
+		}
+	}
+	for _, line := range warnings {
+		fmt.Fprintln(stdout, line)
 	}
 	// Broken VMs are real entries: hiding them is the bug that was already
 	// reported once. They get dashes for the fields a broken vm.toml can't
@@ -62,10 +71,69 @@ func runLS(a *Args, stdout, stderr io.Writer) int {
 		if v.State != core.StateBroken {
 			continue
 		}
-		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-6s %-4s %-6s %s\n",
-			v.Name, "-", a.prose(stdout).State("broken", 8), "-", "-", "-", "-", oneLine(v.Error))
+		fmt.Fprintf(stdout, "%-15s %-5s %s %-5s %-5s %-6s %-4s %-6s %s\n",
+			v.Name, "-", a.prose(stdout).State("broken", 8), "-", "-", "-", "-", "-", oneLine(v.Error))
 	}
 	return ExitOK
+}
+
+// whereCell renders the WHERE column: "local" for qemu (the empty Provider
+// field, matching provider.For's own default) and the provider's own name
+// otherwise.
+func whereCell(v core.VM) string {
+	if v.Provider == "" {
+		return "local"
+	}
+	return v.Provider
+}
+
+// deadlineWarning reports the line printed under stoat ls, and to stderr by
+// every command that touches this VM, once the nearer of its two gce
+// deadlines is under provider.WarnWithin away. ok is false for a qemu VM
+// (both deadlines zero) and for one further out than the threshold.
+func deadlineWarning(v core.VM) (string, bool) {
+	// A stopped instance has no run-time deadline. Compute clears the
+	// termination timestamp on stop and recalculates it from the next start,
+	// so warning that a stopped VM "stops in 28m" names a deadline that is
+	// not counting and offers an extend that would change nothing.
+	if v.State != core.StateRunning {
+		return "", false
+	}
+	when, which, ok := provider.Nearest(v.HardDeadline, v.SoftDeadline, time.Now())
+	if !ok {
+		return "", false
+	}
+	left := time.Until(when)
+	if left > provider.WarnWithin {
+		return "", false
+	}
+	// No command is named here yet. `stoat gce extend` moves the soft
+	// deadline and lands in the next slice; naming it now would tell a user
+	// to run something that does not exist.
+	return fmt.Sprintf("%s: stops in %s (%s)", v.Name, formatDuration(left), which), true
+}
+
+// warnDeadline prints deadlineWarning's line to stderr for a single command
+// touching v, matching stoat ls's own line under the table.
+func warnDeadline(stderr io.Writer, v core.VM) {
+	if line, ok := deadlineWarning(v); ok {
+		fmt.Fprintln(stderr, line)
+	}
+}
+
+// formatDuration renders a warning-window duration as "42m" or "1h5m": coarse
+// enough that a value recomputed a few seconds later still reads the same.
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	d = d.Round(time.Minute)
+	h := d / time.Hour
+	m := (d % time.Hour) / time.Minute
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 // projectCell renders the PROJECT column: the declaring directory, marked
@@ -118,6 +186,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	if v.State == core.StateBroken {
 		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
+	warnDeadline(stderr, v)
 	a.prose(stdout).Step("starting %s...", a.VM)
 	if err := core.Start(a.VM); err != nil {
 		return a.fail(stdout, stderr, err)
@@ -129,8 +198,16 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		v = started
 	}
 	if !a.JSON {
-		a.prose(stdout).Done("%s started (ssh :%d)", a.VM, v.SSHPort)
-		printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+		// A cloud VM answers on a routable address, and the loopback forward
+		// and the qemu window that the local lines describe do not exist for
+		// it. Printing them names a port nothing listens on and a window
+		// nobody can open.
+		if v.Provider == "" || v.Provider == "qemu" {
+			a.prose(stdout).Done("%s started (ssh :%d)", a.VM, v.SSHPort)
+			printDisplay(stdout, core.DisplayFor(v, core.GraphicalSession()))
+		} else {
+			a.prose(stdout).Done("%s started on %s (%s)", a.VM, v.Provider, v.Address)
+		}
 	}
 
 	// An uninstalled disk VM's own installer is running now, not the system
@@ -332,6 +409,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 	if v.State != core.StateRunning {
 		return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
 	}
+	warnDeadline(stderr, v)
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "stopping %s...\n", a.VM)
 	}
@@ -372,6 +450,7 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	if v.State == core.StateRunning {
 		return a.failMsg(stdout, stderr, core.ErrAlreadyRunning, a.VM+" is running; stop it first")
 	}
+	warnDeadline(stderr, v)
 	if ok, code := confirm(a, stdin, stdout, stderr, "delete VM "+a.VM+"?"); !ok {
 		return code
 	}
@@ -418,6 +497,9 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
+		if v.Provider == "gce" {
+			fmt.Fprintf(stdout, "gcp project %s, zone %s, from %s\n", v.GCEProject, v.GCEZone, v.GCESource)
+		}
 		fmt.Fprintf(stdout, "start it with: stoat up %s\n", v.Name)
 	}
 	return ExitOK

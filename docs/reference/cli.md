@@ -95,13 +95,20 @@ Lists every VM directory under the data root, plus any directory whose `vm.toml`
 
 ```
 $ stoat ls
-NAME            MODE  STATE    CPUS RAM    SSH
-work            live  running  4    4096   2222
-scratch         disk  stopped  2    2048   2223
-oldvm           -     broken   -    -      -    unexpected token near line 4
+NAME            MODE  STATE    WHERE CPUS RAM    SSH
+work            live  running  local 4    4096   2222
+cloudy          cloud running  gce   2    4096   22
+scratch         disk  stopped  local 2    2048   2223
+oldvm           -     broken   -     -    -      -    unexpected token near line 4
 ```
 
-The `STATE` column is colored (green `running`, red `broken`) when [color is enabled](#scripting). `-q`/`--quiet` is accepted but has no effect on `ls`'s output.
+`WHERE` names the execution surface: `local` for a qemu VM, or the provider's own name (`gce`) otherwise. The `STATE` column is colored (green `running`, red `broken`) when [color is enabled](#scripting). `-q`/`--quiet` is accepted but has no effect on `ls`'s output.
+
+A gce VM within an hour of its run-time limit or an operator-requested stop gets a line under the table, and the same line prints to stderr for every command that touches it:
+
+```
+cloudy: stops in 42m (run-time limit). extend with: stoat gce extend cloudy 4h
+```
 
 `--project` filters the list to VMs the `stoat.toml` in the current directory declares. It refuses outside a project.
 
@@ -138,13 +145,14 @@ A VM `stoat.toml` declares but that does not exist yet shows state `missing`. An
 
 ## `stoat get <name>`
 
-Prints one VM's fields as `key: value` lines: name, os, mode, backend, state, cpus, ram, disk, share, ssh port, ssh user, recipes, forwards, display, plus an `error:` line when the VM is broken.
+Prints one VM's fields as `key: value` lines: name, os, mode, provider, backend, state, cpus, ram, disk, share, ssh port, ssh user, recipes, forwards, display, plus an `error:` line when the VM is broken.
 
 ```
 $ stoat get work
 name: work
 os: alpine
 mode: live
+provider: qemu
 backend: apkovl
 state: running
 cpus: 4
@@ -160,6 +168,8 @@ display: a qemu window
 
 `display` is the only line here that is not a `vm.toml` field. See [`stoat up`](#stoat-up-name) for what it means and why the answer changes. It is omitted entirely for a broken VM, whose `vm.toml` supplies neither of the facts the answer depends on.
 
+A non-qemu VM gets `gcp project:`, `zone:`, `machine type:`, `address:` and `expires:` lines right after `provider:`, before `backend:`. `expires` names the nearer of the run-time limit and any operator-requested stop.
+
 **Exit codes:** 0 on success; 1 if the VM can't be loaded.
 
 ## `stoat create <name> --image=IMAGE`
@@ -172,7 +182,16 @@ created work (alpine, live, ssh port 2222)
 start it with: stoat up work
 ```
 
-Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--agent-access` (`none`, `observe`, `manage`, or `exec`; default `manage`, controls MCP guest access). The hidden `--allow-exec` flag remains as a compatibility alias: true maps to `exec`, false to `manage`.
+Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--agent-access` (`none`, `observe`, `manage`, or `exec`; default `manage`, controls MCP guest access), `--provider` (`qemu`, the default, or `gce`), `--gcp-project` and `--gcp-zone` (honored only with `--provider gce`; each falls back to `config.toml`, then gcloud's active configuration). The hidden `--allow-exec` flag remains as a compatibility alias: true maps to `exec`, false to `manage`.
+
+A `--provider gce` create prints a second line naming where it landed and where the project and zone came from:
+
+```
+$ stoat create cloudy --image ubuntu-24.04 --provider gce
+created cloudy (ubuntu, cloud, ssh port 22)
+gcp project engrammic, zone europe-west4-a, from ~/.stoat/config.toml
+start it with: stoat up cloudy
+```
 
 `create` (alias `new`) refuses at project scope: `a stoat.toml is present; declare the VM there and run stoat up, or pass --global`. `--global` creates the VM outside the project.
 

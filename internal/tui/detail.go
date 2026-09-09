@@ -15,6 +15,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -161,7 +162,7 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenEdit
 			m.showHelp = false
 			m.status = ""
-			return m, nil
+			return m, checkEditRunning(cv)
 		case "E":
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
@@ -256,6 +257,13 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v := m.detail.vm
 			if !consolePasswordAvailable(v) {
 				cmd := m.showToast("no console password to type", true)
+				return m, cmd
+			}
+			// qemu.TypeConsolePassword dials a local monitor socket that
+			// only a qemu VM has (docket d46): a gce VM's console password
+			// exists but nothing here can type it in.
+			if v.Provider != "" {
+				cmd := m.showToast("console password can only be typed on a local qemu VM", true)
 				return m, cmd
 			}
 			return m, typeConsolePassword(v)
@@ -356,6 +364,30 @@ func (m model) viewDetail() string {
 	facts.gap()
 
 	line := func(k, val string) { facts.row("", k, val) }
+	if v.Provider != "" {
+		line("provider", v.Provider)
+		if v.GCEProject != "" {
+			line("gcp project", v.GCEProject)
+		}
+		if v.GCEZone != "" {
+			line("zone", v.GCEZone)
+		}
+		if v.MachineType != "" {
+			line("machine type", v.MachineType)
+		}
+		if v.Address != "" {
+			line("address", v.Address)
+		}
+		if when, which, ok := provider.Nearest(v.HardDeadline, v.SoftDeadline, time.Now()); ok {
+			left := time.Until(when).Round(time.Minute)
+			style := dimStyle
+			if left <= provider.WarnWithin {
+				style = warnStyle
+			}
+			line("expires", style.Render(fmt.Sprintf("%s (in %s, %s)", when.UTC().Format(time.RFC3339), left, which)))
+		}
+		facts.gap()
+	}
 	// A cloud VM has no ISO. It boots an overlay of a base image instead, so
 	// the row would otherwise render as an empty label.
 	if v.ISO != "" {
@@ -410,30 +442,35 @@ func (m model) viewDetail() string {
 		}
 		facts.row("", "", effect)
 	}
-	line("display", displayPrefLabel(v.Display))
-	// qemu.DisplayKind takes pref and host graphical directly, not a
-	// *config.VM, so a core.VM caller can call it without going through
-	// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
-	//
-	// A bare socket path is not enough: the user needs the actual command
-	// that opens it, so this prints one for a viewer installed on this host.
-	//
-	// With no graphical session, a VM that would otherwise get a window also
-	// lands on this socket. That is the case where the user needs the
-	// explanation most, since the VM would otherwise look like it refused
-	// to start.
-	if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, graphical) != qemu.DisplayWindow {
-		if !graphical && qemu.DisplayKind(v.Display, true) == qemu.DisplayWindow {
-			facts.row("", "", warnStyle.Render("no usable graphical session on this host: falling back to vnc"))
-		}
-		line("vnc", v.Paths.VNCSocket)
-		att := qemu.AttachVNC(v.Paths.VNCSocket)
-		if att.Command == "" {
-			facts.row("", "", warnStyle.Render("no VNC viewer found: install "+strings.Join(att.Missing, " or ")))
-		} else {
-			facts.row("", "", dimStyle.Render(att.Command))
-			if att.Then != "" {
-				facts.row("", "", dimStyle.Render(att.Then))
+	// Display and the VNC socket below describe a qemu process on this host.
+	// A cloud VM has neither, and a socket path nothing listens on sends a
+	// user hunting for a viewer to attach to it.
+	if v.Provider == "" || v.Provider == "qemu" {
+		line("display", displayPrefLabel(v.Display))
+		// qemu.DisplayKind takes pref and host graphical directly, not a
+		// *config.VM, so a core.VM caller can call it without going through
+		// qemu.NeedsWindow/WantsWindow, which need a *config.VM.
+		//
+		// A bare socket path is not enough: the user needs the actual command
+		// that opens it, so this prints one for a viewer installed on this host.
+		//
+		// With no graphical session, a VM that would otherwise get a window also
+		// lands on this socket. That is the case where the user needs the
+		// explanation most, since the VM would otherwise look like it refused
+		// to start.
+		if graphical := qemu.GraphicalSession(); qemu.DisplayKind(v.Display, graphical) != qemu.DisplayWindow {
+			if !graphical && qemu.DisplayKind(v.Display, true) == qemu.DisplayWindow {
+				facts.row("", "", warnStyle.Render("no usable graphical session on this host: falling back to vnc"))
+			}
+			line("vnc", v.Paths.VNCSocket)
+			att := qemu.AttachVNC(v.Paths.VNCSocket)
+			if att.Command == "" {
+				facts.row("", "", warnStyle.Render("no VNC viewer found: install "+strings.Join(att.Missing, " or ")))
+			} else {
+				facts.row("", "", dimStyle.Render(att.Command))
+				if att.Then != "" {
+					facts.row("", "", dimStyle.Render(att.Then))
+				}
 			}
 		}
 	}

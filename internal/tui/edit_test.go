@@ -11,7 +11,30 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
+	"github.com/novusedge/stoat/internal/provider/fake"
 )
+
+// TestVMRunningAsksTheProviderNotQEMU pins the fix for edit.go's two former
+// qemu.Running calls: a VM whose provider is not qemu has no local process
+// for that check to find, so it always read "not running" even while the
+// provider reported it live.
+func TestVMRunningAsksTheProviderNotQEMU(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	// fake.Install initializes the running map fake.Provider needs SetRunning
+	// for; registering the same instance again under "gce" reuses that map.
+	f := fake.Install(t)
+	provider.Register("gce", f)
+	v := &config.VM{Name: "cloudy", Provider: "gce"}
+
+	if vmRunning(v) {
+		t.Error("vmRunning() = true before the fake provider reports it running")
+	}
+	f.SetRunning("cloudy")
+	if !vmRunning(v) {
+		t.Error("vmRunning() = false with the provider reporting it running; qemu.Running cannot see a remote VM")
+	}
+}
 
 // editFixture saves a real VM under a fresh STOAT_HOME and opens it for
 // editing. It must be a real, saved VM, not a bare struct. The form routes

@@ -17,21 +17,23 @@ import (
 // wider than its column truncates or wraps instead of shoving every column
 // after it out of place.
 const (
-	nameCellWidth = 14
-	modeCellWidth = 5
-	ramValueWidth = 5  // digits only, right-aligned; "M" is appended after
-	cpuValueWidth = 2  // digits only, right-aligned; "c" is appended after
-	upCellWidth   = 13 // "up " plus a duration up to "999h59m59s"
-	portCellWidth = 6  // ":" plus up to 5 digits
+	nameCellWidth  = 14
+	modeCellWidth  = 5
+	whereCellWidth = 5  // "local" or "gce"
+	ramValueWidth  = 5  // digits only, right-aligned; "M" is appended after
+	cpuValueWidth  = 2  // digits only, right-aligned; "c" is appended after
+	upCellWidth    = 13 // "up " plus a duration up to "999h59m59s"
+	portCellWidth  = 6  // ":" plus up to 5 digits
 )
 
 var (
-	nameCellStyle = lipgloss.NewStyle().Width(nameCellWidth)
-	modeCellStyle = lipgloss.NewStyle().Width(modeCellWidth)
-	ramCellStyle  = lipgloss.NewStyle().Width(ramValueWidth).Align(lipgloss.Right)
-	cpuCellStyle  = lipgloss.NewStyle().Width(cpuValueWidth).Align(lipgloss.Right)
-	upCellStyle   = lipgloss.NewStyle().Width(upCellWidth)
-	portCellStyle = lipgloss.NewStyle().Width(portCellWidth).Align(lipgloss.Right)
+	nameCellStyle  = lipgloss.NewStyle().Width(nameCellWidth)
+	modeCellStyle  = lipgloss.NewStyle().Width(modeCellWidth)
+	whereCellStyle = lipgloss.NewStyle().Width(whereCellWidth)
+	ramCellStyle   = lipgloss.NewStyle().Width(ramValueWidth).Align(lipgloss.Right)
+	cpuCellStyle   = lipgloss.NewStyle().Width(cpuValueWidth).Align(lipgloss.Right)
+	upCellStyle    = lipgloss.NewStyle().Width(upCellWidth)
+	portCellStyle  = lipgloss.NewStyle().Width(portCellWidth).Align(lipgloss.Right)
 )
 
 // vmItem is one row of the VM list. A single type covers both good VMs and
@@ -126,13 +128,23 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	// inside an otherwise highlighted row.
 	name := nameCellStyle.Render(ansi.Truncate(v.Name, nameCellWidth, "…"))
 	mode := modeCellStyle.Render(v.Mode)
+	where := whereCellStyle.Render(whereLabel(v))
 	ram := ramCellStyle.Render(fmt.Sprintf("%d", v.RAM)) + "M"
 	cpu := cpuCellStyle.Render(fmt.Sprintf("%d", v.CPUs)) + "c"
-	label := name + " " + mode + " " + ram + " " + cpu + "  "
+	label := name + " " + mode + " " + where + " " + ram + " " + cpu + "  "
 	if selected {
 		label = selStyle.Render(label)
 	}
 	fmt.Fprint(w, cursor+dotStyle.Render(dot)+" "+label+state)
+}
+
+// whereLabel matches the CLI's WHERE column: "local" for qemu (the empty
+// Provider field), the provider's own name otherwise.
+func whereLabel(v core.VM) string {
+	if v.Provider == "" {
+		return "local"
+	}
+	return v.Provider
 }
 
 // listWidth and listVisibleRows size the VM list. Fixed rather than derived
@@ -140,14 +152,15 @@ func (d vmDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 // budget is what bubbles/list paginates against.
 const (
 	// Wide enough for the widest row the format can produce with reachable
-	// values: a 14-char name, 5-digit RAM, 2-digit cpus, an uptime just
-	// under 1000 hours, and a 5-digit port (the edit form allows up to
-	// 65535). Sized off the RUNNING row on purpose. A stopped row is only
-	// 38 cells, which is why an undersized value looks fine in every test
-	// render and then wraps the port onto its own line the moment
-	// something is actually up. A terminal narrower than this still clamps
-	// (paneAt bounds to the window); that is unavoidable at that size.
-	listWidth       = 60
+	// values: a 14-char name, a 5-char WHERE cell, 5-digit RAM, 2-digit
+	// cpus, an uptime just under 1000 hours, and a 5-digit port (the edit
+	// form allows up to 65535). Sized off the RUNNING row on purpose. A
+	// stopped row is shorter, which is why an undersized value looks fine
+	// in every test render and then wraps the port onto its own line the
+	// moment something is actually up. A terminal narrower than this still
+	// clamps (paneAt bounds to the window); that is unavoidable at that
+	// size.
+	listWidth       = 66
 	listVisibleRows = 6
 	listMinRows     = 2
 	// banner, pane frame, search line, status line, footer. The search and

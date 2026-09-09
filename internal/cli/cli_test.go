@@ -11,6 +11,8 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
+	"github.com/novusedge/stoat/internal/provider/fake"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -320,17 +322,40 @@ func TestRunLSOutput(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("got %d lines, want 3 (header + good + broken): %q", len(lines), out.String())
 	}
-	wantHeader := fmt.Sprintf("%-15s %-5s %-8s %-5s %-6s %-6s %s", "NAME", "MODE", "STATE", "CPUS", "RAM", "SSH", "PROJECT")
+	wantHeader := fmt.Sprintf("%-15s %-5s %-8s %-5s %-5s %-6s %-6s %s", "NAME", "MODE", "STATE", "WHERE", "CPUS", "RAM", "SSH", "PROJECT")
 	if lines[0] != wantHeader {
 		t.Errorf("header = %q, want %q", lines[0], wantHeader)
 	}
-	wantGood := fmt.Sprintf("%-15s %-5s %s %-5d %-6d %-6d %s", "good", "live", "stopped ", 2, 1024, 2200, "-")
+	wantGood := fmt.Sprintf("%-15s %-5s %s %-5s %-5d %-6d %-6d %s", "good", "live", "stopped ", "local", 2, 1024, 2200, "-")
 	if lines[1] != wantGood {
 		t.Errorf("good row = %q, want %q", lines[1], wantGood)
 	}
-	wantBrokenPrefix := fmt.Sprintf("%-15s %-5s %s %-5s %-6s %-4s ", "broken-vm", "-", "broken  ", "-", "-", "-")
+	wantBrokenPrefix := fmt.Sprintf("%-15s %-5s %s %-5s %-5s %-6s %-4s ", "broken-vm", "-", "broken  ", "-", "-", "-", "-")
 	if !strings.HasPrefix(lines[2], wantBrokenPrefix) {
 		t.Errorf("broken row = %q, want prefix %q", lines[2], wantBrokenPrefix)
+	}
+}
+
+// TestRunLSWhereColumnNamesTheProvider registers a fake "gce" provider (the
+// real one dials the network on Status, forbidden in a test) so a VM created
+// with Provider: "gce" lists as such, distinguishing it from a local one.
+func TestRunLSWhereColumnNamesTheProvider(t *testing.T) {
+	cliRoot(t)
+	provider.Register("gce", &fake.Provider{})
+	if err := (&config.VM{Name: "cloudy", Mode: "cloud", RAM: 4096, CPUs: 2, SSHPort: 22, Provider: "gce"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := Main([]string{"ls"}, "test", nil, &out, &errOut)
+	if code != ExitOK {
+		t.Fatalf("ls: exit %d, stderr %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "WHERE") {
+		t.Error("ls header has no WHERE column")
+	}
+	if !strings.Contains(out.String(), "gce") {
+		t.Errorf("ls output does not show the gce VM's provider:\n%s", out.String())
 	}
 }
 

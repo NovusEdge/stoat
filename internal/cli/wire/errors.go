@@ -201,6 +201,14 @@ func MapError(err error) *ErrorInfo {
 	if err == nil {
 		return nil
 	}
+	var capErr *core.CapabilityError
+	if errors.As(err, &capErr) {
+		return &ErrorInfo{
+			Code:    CodeCapabilityUnavailable,
+			Message: err.Error(),
+			Reason:  capErr.Reason,
+		}
+	}
 	for _, e := range codeTable {
 		if errors.Is(err, e.err) {
 			return &ErrorInfo{Code: e.code, Message: err.Error()}

@@ -50,6 +50,47 @@ type Provider interface {
 	Destroy(ctx context.Context, v *config.VM) error
 }
 
+// Details is what a cloud provider knows about a machine beyond Status: where
+// it runs, its shape, and when it must stop. qemu has none of this, so it is
+// a separate, optional interface rather than added to Provider's required
+// surface.
+type Details struct {
+	Project      string
+	Zone         string
+	MachineType  string
+	Address      string
+	HardDeadline time.Time
+	SoftDeadline time.Time
+}
+
+// Detailer is implemented by a Provider that can report Details. A caller
+// type-asserts for it rather than assuming every Provider carries these
+// facts.
+type Detailer interface {
+	Details(ctx context.Context, v *config.VM) (Details, error)
+}
+
+// WarnWithin is how far ahead of a deadline the CLI starts warning.
+const WarnWithin = time.Hour
+
+// Nearest picks whichever of a Details' two deadlines comes first. A zero
+// time.Time means that deadline does not apply. which is the label the
+// warning line names ("run-time limit" or "soft deadline").
+func Nearest(hard, soft, now time.Time) (when time.Time, which string, ok bool) {
+	switch {
+	case hard.IsZero() && soft.IsZero():
+		return time.Time{}, "", false
+	case hard.IsZero():
+		return soft, "soft deadline", true
+	case soft.IsZero():
+		return hard, "run-time limit", true
+	case soft.Before(hard):
+		return soft, "soft deadline", true
+	default:
+		return hard, "run-time limit", true
+	}
+}
+
 var registry = map[string]Provider{}
 
 // Register adds p under name. Implementations register from their own
