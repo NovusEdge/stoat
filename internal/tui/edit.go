@@ -47,6 +47,21 @@ type editModel struct {
 	recipeSel   map[string]bool
 
 	display string // one of displayChoices; seeded from vm.Display, "" reads as "auto"
+
+	// running is resolved once, by checkEditRunning's tea.Cmd, when the pane
+	// opens. viewEdit reads this instead of calling vmRunning itself: that
+	// call reaches a gce Provider's Status, an unbounded network round trip
+	// Bubble Tea's View function must never block on.
+	running bool
+}
+
+// editRunningMsg carries checkEditRunning's answer back to Update.
+type editRunningMsg struct{ running bool }
+
+// checkEditRunning resolves whether v is running off Bubble Tea's Update/View
+// path, so viewEdit never starts a network call of its own.
+func checkEditRunning(v *config.VM) tea.Cmd {
+	return func() tea.Msg { return editRunningMsg{running: vmRunning(v)} }
 }
 
 // edit field indices
@@ -529,7 +544,7 @@ func (m model) viewEdit() string {
 	if !e.dirty() {
 		note(dimStyle.Render("no changes"))
 	}
-	if vmRunning(e.vm) {
+	if e.running {
 		note(warnStyle.Render("running: ram/cpus/ssh apply on restart"))
 	}
 	if e.err != "" {

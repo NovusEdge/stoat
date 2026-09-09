@@ -15,6 +15,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/provider"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/sshx"
 )
@@ -161,7 +162,7 @@ func (m model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenEdit
 			m.showHelp = false
 			m.status = ""
-			return m, nil
+			return m, checkEditRunning(cv)
 		case "E":
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
@@ -363,6 +364,30 @@ func (m model) viewDetail() string {
 	facts.gap()
 
 	line := func(k, val string) { facts.row("", k, val) }
+	if v.Provider != "" {
+		line("provider", v.Provider)
+		if v.GCEProject != "" {
+			line("gcp project", v.GCEProject)
+		}
+		if v.GCEZone != "" {
+			line("zone", v.GCEZone)
+		}
+		if v.MachineType != "" {
+			line("machine type", v.MachineType)
+		}
+		if v.Address != "" {
+			line("address", v.Address)
+		}
+		if when, which, ok := provider.Nearest(v.HardDeadline, v.SoftDeadline, time.Now()); ok {
+			left := time.Until(when).Round(time.Minute)
+			style := dimStyle
+			if left <= provider.WarnWithin {
+				style = warnStyle
+			}
+			line("expires", style.Render(fmt.Sprintf("%s (in %s, %s)", when.UTC().Format(time.RFC3339), left, which)))
+		}
+		facts.gap()
+	}
 	// A cloud VM has no ISO. It boots an overlay of a base image instead, so
 	// the row would otherwise render as an empty label.
 	if v.ISO != "" {
