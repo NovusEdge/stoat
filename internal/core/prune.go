@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/provider/gce"
+	"github.com/novusedge/stoat/internal/settings"
 )
 
 // partStaleAfter is how long a *.part file under isos/ sits with no mtime
@@ -139,6 +142,105 @@ func Prune(opts PruneOpts) ([]PruneItem, error) {
 		return prefix[removed[i].Class]+removed[i].Path < prefix[removed[j].Class]+removed[j].Path
 	})
 	return removed, nil
+}
+
+// listRemotes is gce.Provider.List, indirected so a test can hand remotePass
+// a fixed remote set with no real client or network.
+var listRemotes = func(ctx context.Context) ([]gce.Remote, error) {
+	return gce.Provider{}.List(ctx)
+}
+
+const (
+	classOrphan  = "orphan"
+	classStale   = "stale"
+	classStopped = "stopped"
+)
+
+// RemoteItem is one instance remotePass found by comparing GCP's stoat-owned
+// instances against local vm.toml records. Message is the full user-facing
+// report line.
+type RemoteItem struct {
+	Class   string
+	VM      string
+	Message string
+}
+
+// remotePass compares GCP's stoat-owned instances against local records.
+// It runs only when providers.gce.project is set: a user who runs no cloud
+// VMs makes no API call and sees nothing from this pass (docket d51).
+//
+// apply deletes the local vm.toml for a stale record only. An orphan (GCP
+// holds it, no local record) or a stopped instance (both agree, disk still
+// billing) is never deleted here; the report names `stoat rm` instead.
+// Deleting a resource still on GCP from a sweep is how someone loses work.
+func remotePass(apply bool) ([]RemoteItem, error) {
+	cfg, err := settings.Load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Providers.GCE.Project == "" {
+		return nil, nil
+	}
+
+	remotes, err := listRemotes(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	vms, err := config.List()
+	if err != nil {
+		return nil, err
+	}
+	local := map[string]*config.VM{}
+	for _, v := range vms {
+		if v.Provider == "gce" {
+			local[v.Name] = v
+		}
+	}
+
+	var out []RemoteItem
+	seen := map[string]bool{}
+	for _, r := range remotes {
+		seen[r.VM] = true
+		switch {
+		case local[r.VM] == nil:
+			out = append(out, RemoteItem{
+				Class: classOrphan, VM: r.VM,
+				Message: fmt.Sprintf("orphan %s (%s, %s) — no local record", r.VM, r.Zone, strings.ToLower(r.Status)),
+			})
+		case r.Status == "TERMINATED":
+			out = append(out, RemoteItem{
+				Class: classStopped, VM: r.VM,
+				Message: fmt.Sprintf("stopped %s — stopped %s, disk still billing", r.VM, roundedDays(r.StoppedSince)),
+			})
+		}
+	}
+	for name, v := range local {
+		if seen[name] {
+			continue
+		}
+		out = append(out, RemoteItem{
+			Class: classStale, VM: name,
+			Message: fmt.Sprintf("stale %s — vm.toml exists, no instance in %s", name, v.GCEProject),
+		})
+		if apply {
+			if err := v.Delete(); err != nil {
+				return out, err
+			}
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].VM < out[j].VM })
+	return out, nil
+}
+
+// roundedDays renders d as whole days when it is at least one, else whole
+// hours: the report's audience is deciding whether an instance is worth
+// keeping stopped, not tracking it to the minute.
+func roundedDays(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
 // pruneBroken removes VM directories whose vm.toml exists but fails to
