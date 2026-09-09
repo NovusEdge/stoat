@@ -81,6 +81,7 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
 | [`capabilities`](#stoat-capabilities-vm) | Report current agent capabilities | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
+| [`gce extend`](#stoat-gce-extend-name-duration) | Move a gce VM's soft deadline forward | 0, 1, 2 |
 | [`mcp`](mcp.md) | Serve MCP, or configure and inspect a client entry | 0, 1, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
@@ -829,6 +830,25 @@ Without `--json`, Stoat prints a NAME, STATUS, SCOPE table. With `--json`, it
 prints the standard result envelope carrying the schema 1 capability report.
 
 MCP enforces `agent_access`. The CLI's own `stoat exec` and `stoat cp` do not.
+
+## `stoat gce extend <name> <duration>`
+
+Moves a gce VM's soft deadline forward by `<duration>` from now, without
+stopping the instance. `<duration>` is a Go duration (`4h`, `90m`).
+
+```
+$ stoat gce extend cloudy 4h
+cloudy: soft deadline now 2026-09-09T18:04:00Z (in 4h0m0s)
+```
+
+Refused when the new deadline would pass the instance's run-time limit
+(`max_run_duration`), since that limit can't move without a stop and
+start; the error names the limit and that fix. Refused outright on a
+non-gce VM.
+
+**Exit codes:** 0 on success; 1 if the VM can't be loaded, isn't a gce VM,
+or the extend fails (including past the run-time limit); 2 if `<duration>`
+is missing, unparseable, or not positive.
 
 ## `stoat doctor`
 

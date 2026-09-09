@@ -23,6 +23,7 @@ Choose a guide for your task:
 | Connect an AI agent | [MCP workflow](guides/mcp-workflow.md) |
 | Use Stoat from scripts or a shell-based agent | [CLI reference](reference/cli.md) and [JSON output](reference/json.md) |
 | Keep a repeatable environment in a repository | [Project workflow](guides/project-workflow.md) |
+| Run a VM on Google Cloud instead of locally | [The GCP path](guides/gcp.md) |
 
 ## Choose an environment
 

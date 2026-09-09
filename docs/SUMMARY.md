@@ -11,6 +11,7 @@
 
 * [Project workflow](guides/project-workflow.md)
 * [MCP workflow](guides/mcp-workflow.md)
+* [The GCP path](guides/gcp.md)
 
 ## Concepts
 
