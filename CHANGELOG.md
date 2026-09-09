@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.5.0-alpha.2
+
+A pre-release. Stoat can now run a VM on Google Compute Engine instead of on
+your own machine. Local VMs are unchanged. The JSON contract version stays **3**.
+
+```sh
+gcloud auth application-default login
+stoat create dev --provider gce --image ubuntu-24.04 --ram 4096 --cpus 2
+stoat up dev
+stoat exec dev -- uname -a
+```
+
+Project and zone go in `~/.stoat/config.toml`. Without them stoat reads
+gcloud's own settings, and prints which it used, so a VM never lands quietly in
+the wrong project.
+
+### Changes
+
+- `--provider gce` creates a Compute Engine instance. `exec`, `cp`, recipes,
+  services and the file tools all work on it.
+- Ubuntu is the only guest for now. Debian's images on GCE have no cloud-init,
+  so stoat cannot set them up, and it says so instead of leaving you with a
+  half-built VM.
+- Instances stop themselves after a day, so one you forget stops costing money.
+  Change it with `max_run_duration`.
+- SSH is opened to your address only, and the VM's host key is checked. Set
+  `source_range` if stoat guesses your address wrong.
+- Things a cloud VM cannot do, like snapshots and screenshots, say so instead
+  of failing oddly.
+- `stoat ls` shows where each VM runs. `stoat get` shows the project, zone,
+  address and when the VM stops. Both appear in the TUI too.
+
+### Not yet
+
+`stoat prune` does not look for VMs on GCP, and there is no way to extend a
+VM's deadline yet. Both come next.
+
 ## v0.5.0-alpha.1
 
 A pre-release with no new features. It is groundwork for running VMs somewhere
