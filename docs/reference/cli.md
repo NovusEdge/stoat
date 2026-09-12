@@ -82,7 +82,7 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`capabilities`](#stoat-capabilities-vm) | Report current agent capabilities | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`gce extend`](#stoat-gce-extend-name-duration) | Move a gce VM's soft deadline forward | 0, 1, 2 |
-| [`mcp`](mcp.md) | Serve MCP, or configure and inspect a client entry | 0, 1, 2 |
+| [`mcp`](mcp.md) | Serve MCP, run it in the background, or configure and inspect a client entry | 0, 1, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
