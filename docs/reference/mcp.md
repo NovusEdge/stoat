@@ -198,7 +198,7 @@ seconds capped at 600, not a duration string.
 | `read_file`, `list_dir`, `stat`, `ps`, `svc_status`, `tail_log` | `observe` | Read guest files, directories, process state, service state, or logs. Guest paths are absolute. |
 | `write_file`, `copy_to`, `copy_from`, `pkg_install`, `svc`, `useradd` | `manage` | Modify files, copy data under the VM's shared directory, install packages, manage services, or add a user. |
 | `exec`, `exec_bg`, `job_kill` | `exec` | Run or signal arbitrary guest commands. `argv` is an argument array, not a shell string. |
-| `job_status`, `job_output`, `list_jobs` | `exec` | Inspect background jobs created by `exec_bg`. A guest reboot clears the job files and a job can become `unknown`. |
+| `job_status`, `job_output`, `list_jobs` | `exec` | Inspect background jobs created by `exec_bg`. A job reads `starting` until the guest records its pid, then `running`, then `exited`. A guest reboot clears the job files and a job becomes `unknown`. |
 
 Guest operations require a running VM. `copy_to` and `copy_from` restrict the
 host side to the VM's configured shared directory. `pkg_install` uses the

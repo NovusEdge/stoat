@@ -55,7 +55,7 @@ type forwardIn struct {
 type waitIn struct {
 	VM             string `json:"vm" jsonschema:"name of the VM"`
 	Until          string `json:"until,omitempty" jsonschema:"reachable, applied or stopped; reachable is the default"`
-	Healthy        bool   `json:"healthy,omitempty" jsonschema:"also wait for every applied recipe's health check to pass"`
+	Healthy        bool   `json:"healthy,omitempty" jsonschema:"wait for sshd and then every applied recipe's health check; it replaces until and cannot be passed with it"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"a plain count of seconds, not a duration string, capped at 600"`
 }
 
@@ -246,7 +246,7 @@ func (s *srv) registerVM(server *mcp.Server) {
 		})
 
 	register(server, "wait", classMutate,
-		"Block until a VM reaches a state: reachable when sshd answers, applied when the most recent recipe run finished, or stopped when qemu is gone. With healthy=true it also waits for every applied recipe's health check to pass. The bound is timeout_seconds, a plain count of seconds and not a duration string, capped at 600. A state the VM can never reach fails at once rather than waiting out the timeout. Mutating only in that it blocks the caller.",
+		"Block until a VM reaches a state: reachable when sshd answers, applied when the most recent recipe run finished, or stopped when qemu is gone. healthy=true is a fourth state, not a modifier: it waits for sshd and then for every applied recipe's health check, and passing it together with until is refused. The bound is timeout_seconds, a plain count of seconds and not a duration string, capped at 600. A state the VM can never reach fails at once rather than waiting out the timeout. Mutating only in that it blocks the caller.",
 		func(ctx context.Context, in waitIn) (wire.WaitResult, error) {
 			name, err := checkVMName(in.VM)
 			if err != nil {
@@ -260,7 +260,7 @@ func (s *srv) registerVM(server *mcp.Server) {
 			}
 			if in.Healthy {
 				if in.Until != "" {
-					return wire.WaitResult{}, fmt.Errorf("healthy and until are two different waits; pass one")
+					return wire.WaitResult{}, wire.WithSentinel(fmt.Errorf("healthy and until are two different waits; pass one"), wire.ErrBadInput)
 				}
 				until = core.UntilHealthy
 			}
@@ -376,7 +376,7 @@ func corePatch(name string, in updateIn) (core.Patch, error) {
 			return core.Patch{}, err
 		}
 		if want.rank() > cur.rank() {
-			return core.Patch{}, fmt.Errorf("vm %q has agent_access = %s; this tool may only lower it; %s", name, cur, raiseHint(name, want))
+			return core.Patch{}, wire.WithSentinel(fmt.Errorf("vm %q has agent_access = %s; this tool may only lower it; %s", name, cur, raiseHint(name, want)), wire.ErrAccessDenied)
 		}
 		access := want.String()
 		p.AgentAccess = &access

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/novusedge/stoat/internal/cli/wire"
 )
 
 func TestCheckVMName(t *testing.T) {
@@ -76,8 +78,12 @@ func TestCheckHostPath(t *testing.T) {
 		}
 	})
 	t.Run("relative", func(t *testing.T) {
-		if _, err := checkHostPath("f.txt", "work"); err == nil {
+		_, err := checkHostPath("f.txt", "work")
+		if err == nil {
 			t.Fatal("accepted a relative path")
+		}
+		if got := wire.MapError(err).Code; got != wire.CodeUsage {
+			t.Errorf("code = %q, want %q", got, wire.CodeUsage)
 		}
 	})
 	t.Run("traversal", func(t *testing.T) {
@@ -86,8 +92,12 @@ func TestCheckHostPath(t *testing.T) {
 		}
 	})
 	t.Run("outside", func(t *testing.T) {
-		if _, err := checkHostPath("/etc/passwd", "work"); err == nil {
+		_, err := checkHostPath("/etc/passwd", "work")
+		if err == nil {
 			t.Fatal("accepted /etc/passwd")
+		}
+		if got := wire.MapError(err).Code; got != wire.CodeUsage {
+			t.Errorf("code = %q, want %q", got, wire.CodeUsage)
 		}
 	})
 	t.Run("sibling_prefix", func(t *testing.T) {
@@ -249,8 +259,15 @@ func TestCheckGuestPath(t *testing.T) {
 	// A relative path is an error, never resolved against $HOME, so a tool
 	// call means the same thing on every guest.
 	for _, s := range []string{"", "etc/hosts", "./x", "~/x", "/x\x00"} {
-		if _, err := checkGuestPath(s); err == nil {
+		err := func() error { _, err := checkGuestPath(s); return err }()
+		if err == nil {
 			t.Errorf("checkGuestPath(%q) accepted", s)
+			continue
+		}
+		// The code separates the caller's mistake from a server fault. These
+		// answered "internal", which reads as a bug in stoat.
+		if got := wire.MapError(err).Code; got != wire.CodeUsage {
+			t.Errorf("checkGuestPath(%q) code = %q, want %q", s, got, wire.CodeUsage)
 		}
 	}
 }

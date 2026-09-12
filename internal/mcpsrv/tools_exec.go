@@ -122,7 +122,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 		})
 
 	register(server, "exec_bg", classExec,
-		"Start a command inside a VM and return at once with a job id. The command's stdout, stderr and exit code land under /run/stoat/jobs in the guest; read them with job_status and job_output. A reboot clears the guest side and job_status then reports unknown. It needs agent_access exec, and it refuses when the VM is not running. It reaches outside this process.",
+		"Start a command inside a VM and return at once with a job id. The command's stdout, stderr and exit code land under /run/stoat/jobs in the guest; read them with job_status and job_output. It returns before the guest records the pid, so job_status reports starting for a moment. A reboot clears the guest side and job_status then reports unknown. It needs agent_access exec, and it refuses when the VM is not running. It reaches outside this process.",
 		func(ctx context.Context, in execBgIn) (wire.JobStarted, error) {
 			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
@@ -168,7 +168,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 		})
 
 	register(server, "job_status", classRead,
-		"Report a background job's state: running while its process is alive, exited with the command's exit code once it finished, or unknown when the guest side is gone, which is what a reboot leaves. It needs agent_access exec.",
+		"Report a background job's state: starting between exec_bg and the guest recording the command's pid, running while that process is alive, exited with the command's exit code once it finished, or unknown when the guest side is gone, which is what a reboot leaves. It needs agent_access exec.",
 		func(ctx context.Context, in jobIn) (wire.JobStatus, error) {
 			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
@@ -191,6 +191,18 @@ func (s *srv) registerExec(server *mcp.Server) {
 				return wire.JobStatus{}, err
 			}
 			if pidCode != 0 {
+				// No pid file has two causes, and a caller acts on them
+				// differently. The job directory still being there means the
+				// wrapper has not written the pid yet, which is where a
+				// job_status call right after exec_bg lands. A directory that
+				// is gone is what a reboot leaves.
+				_, _, dirCode, err := sshx.Run(ctx, v, false, []string{"test", "-d", j.Dir}, nil)
+				if err != nil {
+					return wire.JobStatus{}, err
+				}
+				if dirCode == 0 {
+					return wire.JobStatus{JobID: j.ID, State: "starting"}, nil
+				}
 				return wire.JobStatus{JobID: j.ID, State: "unknown"}, nil
 			}
 			pid := strings.TrimSpace(string(pidOut))

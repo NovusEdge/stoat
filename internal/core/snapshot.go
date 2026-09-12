@@ -26,7 +26,10 @@ type Snapshot struct {
 //
 // A live-mode VM is diskless by design: it boots an ISO into a tmpfs root.
 // There is nowhere to store a snapshot, and nothing in it would survive one.
-var ErrNoDisk = fmt.Errorf("no disk to snapshot")
+// The text says "snapshots" rather than "to snapshot" because restore and
+// list share this error, and "no disk to snapshot" read as the wrong
+// operation when a restore hit it.
+var ErrNoDisk = fmt.Errorf("no disk for snapshots")
 
 // TakeSnapshot saves VM name's current state under tag.
 //
