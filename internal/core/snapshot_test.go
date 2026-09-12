@@ -129,6 +129,9 @@ func TestSnapshotRejectsBadTags(t *testing.T) {
 // An unknown tag used to reach qemu, which answered in its own prose and
 // mapped to the internal code. It is the caller's mistake, so it is not_found.
 func TestRestoreAndDeleteRejectAnUnknownTag(t *testing.T) {
+	// The stopped-VM path reads the tag list with qemu-img. Without it the
+	// lookup fails before the tag is ever compared.
+	haveQemuImg(t)
 	root(t)
 	// A cloud VM that never started has no qcow2, so Snapshots reports none
 	// rather than failing. That is the empty case the message distinguishes.
