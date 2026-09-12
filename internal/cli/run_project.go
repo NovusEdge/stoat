@@ -17,6 +17,7 @@ import (
 func fanOut(a *Args, stdout, stderr io.Writer, one func(name string) error) int {
 	var runs []wire.ProjectRunVM
 	failed := false
+	done := 0
 	for _, d := range a.Project.VMs {
 		name := a.Project.GlobalName(d.Key)
 		entry := wire.ProjectRunVM{Key: d.Key, Name: name, Status: "ok"}
@@ -26,6 +27,8 @@ func fanOut(a *Args, stdout, stderr io.Writer, one func(name string) error) int 
 		default:
 			if err := one(name); err != nil {
 				entry.Status, entry.Error, failed = "error", err.Error(), true
+			} else {
+				done++
 			}
 		}
 		runs = append(runs, entry)
@@ -35,6 +38,12 @@ func fanOut(a *Args, stdout, stderr io.Writer, one func(name string) error) int 
 				fmt.Fprintf(stderr, "stoat: %s: %s: %s\n", a.Cmd, d.Key, entry.Error)
 			}
 		}
+	}
+	// A stop at the first failure leaves the VMs before it running. Nothing
+	// else says so, and a user who reads "error" then "skipped" reasonably
+	// assumes the whole run was undone.
+	if failed && done > 0 && !a.Quiet && !a.JSON {
+		fmt.Fprintf(stderr, "stoat: %s: %d vm(s) ran before the failure and are unchanged; `stoat down` stops the project\n", a.Cmd, done)
 	}
 	if a.JSON {
 		code := ExitOK
