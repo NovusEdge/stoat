@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/filelock"
 )
 
 // DefaultAddr is the address `mcp up` binds when the caller names none.
@@ -55,6 +56,32 @@ func key(dir string) string {
 func statePath(dir string) string { return filepath.Join(stateDir(), key(dir)+".json") }
 func logPath(dir string) string   { return filepath.Join(stateDir(), key(dir)+".log") }
 
+// lock serialises up and down across processes. Reading the record, starting
+// the child and writing the record back are three steps, and two `mcp up`
+// calls interleaved in that gap both start a server while only the last
+// record survives.
+//
+// It is its own file rather than config.Lock: that one calls config.EnsureRoot,
+// which refuses a host with no local hypervisor, and the MCP server runs on
+// macOS and Windows.
+func lock() (func(), error) {
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(stateDir(), ".lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := filelock.Lock(f, filelock.Exclusive, false); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = filelock.Unlock(f)
+		_ = f.Close()
+	}, nil
+}
+
 // Up starts a detached HTTP server for the current directory and records it.
 // It waits for the address to answer, so a failure to bind surfaces here
 // instead of in a log file the caller never reads.
@@ -69,14 +96,31 @@ func Up(dir, addr string) (Daemon, error) {
 	if err != nil {
 		return Daemon{}, err
 	}
-	if d, ok := lookup(dir); ok {
-		return Daemon{}, fmt.Errorf("mcp server already running for %s on %s (pid %d)", d.Dir, d.Addr, d.PID)
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		return Daemon{}, err
 	}
-	exe, err := executable()
+	unlock, err := lock()
 	if err != nil {
 		return Daemon{}, err
 	}
-	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+	defer unlock()
+
+	if d, ok := lookup(dir); ok {
+		return Daemon{}, fmt.Errorf("mcp server already running for %s on %s (pid %d)", d.Dir, d.Addr, d.PID)
+	}
+	// Claim the port before the child exists. Without this, a second project
+	// running `mcp up` on an address another project already serves would find
+	// the dial in waitReady answered by that other server, and record a
+	// daemon its own child never started.
+	probe, err := net.Listen("tcp", addr)
+	if err != nil {
+		return Daemon{}, fmt.Errorf("%s is in use: %w", addr, err)
+	}
+	if err := probe.Close(); err != nil {
+		return Daemon{}, err
+	}
+	exe, err := executable()
+	if err != nil {
 		return Daemon{}, err
 	}
 	lp := logPath(dir)
@@ -117,12 +161,21 @@ func Down(dir string) (Daemon, error) {
 	if err != nil {
 		return Daemon{}, err
 	}
+	unlock, err := lock()
+	if err != nil {
+		return Daemon{}, err
+	}
+	defer unlock()
+
 	d, ok := read(dir)
 	if !ok {
 		return Daemon{}, ErrNotRunning
 	}
-	_ = os.Remove(statePath(dir))
-	if !alive(d.PID) {
+	// running() proves the pid still serves this record's address, which is
+	// the identity check: a reused pid belongs to an unrelated process, and
+	// signalling it would kill a stranger.
+	if !running(d) {
+		_ = os.Remove(statePath(dir))
 		return d, nil
 	}
 	if err := terminate(d.PID); err != nil {
@@ -131,6 +184,9 @@ func Down(dir string) (Daemon, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !alive(d.PID) {
+			// The record outlives a failed stop on purpose: `status` must keep
+			// naming a server that is still up.
+			_ = os.Remove(statePath(dir))
 			return d, nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -148,6 +204,13 @@ func Status() ([]Daemon, error) {
 		}
 		return nil, err
 	}
+	// Held because this prunes: without it, a record written by an `mcp up`
+	// mid-flight elsewhere could be read half-written and deleted.
+	unlock, err := lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	var out []Daemon
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {

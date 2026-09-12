@@ -116,6 +116,31 @@ func TestUpRefusesSecondServerForOneProject(t *testing.T) {
 	}
 }
 
+// A second project pointed at an address another server already holds must
+// fail. Dialling the address alone would find the first project's server
+// answering and record a daemon this call never started.
+func TestUpRefusesAnAddressAlreadyServed(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	addr := freeAddr(t)
+	exe := childExe(t, addr)
+	executable = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { executable = os.Executable })
+
+	first := t.TempDir()
+	if _, err := Up(first, addr); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	t.Cleanup(func() { _, _ = Down(first) })
+
+	second := t.TempDir()
+	if _, err := Up(second, addr); err == nil {
+		t.Fatal("Up accepted an address another server holds")
+	}
+	if _, err := os.Stat(statePath(second)); !os.IsNotExist(err) {
+		t.Error("Up recorded a daemon it never started")
+	}
+}
+
 func TestUpRejectsNonLoopback(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if _, err := Up(t.TempDir(), "0.0.0.0:7777"); err == nil {

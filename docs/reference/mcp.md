@@ -131,6 +131,10 @@ the server for the current directory.
 Nothing restarts these servers after a reboot or a logout. `status` checks both
 the pid and the address, and drops a record whose server is gone.
 
+`up` starts the child with the default rate limits. To change them, run
+`stoat mcp serve --http` yourself with `--tool-burst`, `--tool-rate`,
+`--burst` or `--rate`.
+
 The default rate limits are 30 calls in the per-tool burst with a refill of
 0.5 calls per second, and 60 calls in the shared burst with a refill of 2
 calls per second. Change them with `--tool-burst`, `--tool-rate`, `--burst`,
