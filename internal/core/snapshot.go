@@ -66,10 +66,36 @@ func Restore(name, tag string) error {
 	if err != nil {
 		return err
 	}
+	if err := requireSnapshot(name, tag); err != nil {
+		return err
+	}
 	if qemu.Running(v) {
 		return qemu.SnapshotLoad(v, tag)
 	}
 	return qemuImgSnapshot(v, "-a", tag)
+}
+
+// requireSnapshot rejects a tag the VM does not have, before qemu does. Both
+// backends answer an unknown tag with their own prose, which reached a caller
+// as an unmapped internal failure rather than the caller's own mistake. The
+// known tags come back in the message because a wrong tag is usually a typo
+// of a right one.
+func requireSnapshot(name, tag string) error {
+	snaps, err := Snapshots(name)
+	if err != nil {
+		return err
+	}
+	tags := make([]string, 0, len(snaps))
+	for _, s := range snaps {
+		if s.Tag == tag {
+			return nil
+		}
+		tags = append(tags, s.Tag)
+	}
+	if len(tags) == 0 {
+		return fmt.Errorf("%w: %s has no snapshot %q, and none at all", ErrNotFound, name, tag)
+	}
+	return fmt.Errorf("%w: %s has no snapshot %q; it has %s", ErrNotFound, name, tag, strings.Join(tags, ", "))
 }
 
 // DeleteSnapshot removes one snapshot and frees its space in the qcow2. It
@@ -78,6 +104,9 @@ func Restore(name, tag string) error {
 func DeleteSnapshot(name, tag string) error {
 	v, err := snapshotTarget(name, tag)
 	if err != nil {
+		return err
+	}
+	if err := requireSnapshot(name, tag); err != nil {
 		return err
 	}
 	if qemu.Running(v) {

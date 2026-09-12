@@ -15,6 +15,9 @@
 - `stoat update <vm> --agent-access exec` set the level without updating the
   legacy `allow_exec` field beside it, so the VM reported `allow_exec: false`
   in every JSON and MCP payload while exec worked. The two stay in step now.
+- Restoring or deleting a snapshot tag a VM does not have answered with qemu's
+  own wording under the error code `internal`, which reads as a fault in stoat.
+  It answers `not_found` now, and names the tags the VM does have.
 
 ## v0.6.1
 

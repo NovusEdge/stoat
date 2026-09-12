@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -122,6 +123,34 @@ func TestSnapshotRejectsBadTags(t *testing.T) {
 		if err := TakeSnapshot("d", tag); !errors.Is(err, ErrInvalidSpec) {
 			t.Errorf("TakeSnapshot(tag=%q) = %v, want ErrInvalidSpec", tag, err)
 		}
+	}
+}
+
+// An unknown tag used to reach qemu, which answered in its own prose and
+// mapped to the internal code. It is the caller's mistake, so it is not_found.
+func TestRestoreAndDeleteRejectAnUnknownTag(t *testing.T) {
+	root(t)
+	// A cloud VM that never started has no qcow2, so Snapshots reports none
+	// rather than failing. That is the empty case the message distinguishes.
+	if err := (&config.VM{Name: "d", Mode: "cloud", RAM: 512, CPUs: 1, SSHPort: 2200, Disk: "8G"}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"Restore", func() error { return Restore("d", "nope") }},
+		{"DeleteSnapshot", func() error { return DeleteSnapshot("d", "nope") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("%s = %v, want ErrNotFound", tc.name, err)
+			}
+			if !strings.Contains(err.Error(), "nope") {
+				t.Fatalf("%s = %v, want the tag named", tc.name, err)
+			}
+		})
 	}
 }
 
