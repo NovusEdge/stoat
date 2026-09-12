@@ -97,6 +97,21 @@ checkout. Every reader renders a secret as `<set>` or `<unset>`, never as its
 value. A VM created outside a project keeps secrets in its own data-directory
 `secrets.toml`.
 
+## Limits
+
+A `[limits]` table lowers the account limits in `~/.stoat/config.toml` for
+this project:
+
+```toml
+[limits]
+max_vms = 4
+max_ram_mb = 8192
+```
+
+A project can only lower a limit. A value above the account's is ignored, and
+an unset key leaves the account value alone. The file sits in the repository,
+where an agent that writes files could otherwise lift its own ceiling.
+
 ## Commands
 
 | Command | Effect |
