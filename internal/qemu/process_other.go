@@ -21,3 +21,6 @@ func StartedAt(*config.VM) time.Time { return time.Time{} }
 func terminate(int) error { return hostops.ErrUnsupported }
 
 func kill(int) error { return hostops.ErrUnsupported }
+
+// waitExit has no pidfd equivalent here. The caller polls.
+func waitExit(int, time.Duration) (bool, bool) { return false, false }

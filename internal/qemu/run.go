@@ -194,8 +194,19 @@ var (
 	killWait      = 5 * time.Second
 )
 
-// gone polls until the VM's QEMU process is no longer running.
+// gone waits until the VM's QEMU process is no longer running.
+//
+// Linux answers through a pidfd, which wakes at the exit itself. Everywhere
+// else, and on a kernel older than 5.3, it falls back to polling.
 func gone(v *config.VM, within time.Duration) bool {
+	if !Running(v) {
+		return true
+	}
+	if p := pid(v); p != 0 {
+		if exited, supported := waitExit(p, within); supported {
+			return exited
+		}
+	}
 	deadline := time.Now().Add(within)
 	for {
 		if !Running(v) {
