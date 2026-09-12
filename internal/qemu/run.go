@@ -156,17 +156,54 @@ func Stop(v *config.VM) error {
 	if c, err := dialMonitor(v); err == nil {
 		fmt.Fprintln(c, "system_powerdown")
 		_ = c.Close()
-		for i := 0; i < 100; i++ {
-			if !Running(v) {
-				logx.L().Info("stopped", "vm", v.Name)
-				return nil
-			}
-			time.Sleep(100 * time.Millisecond)
+		if gone(v, powerdownWait) {
+			logx.L().Info("stopped", "vm", v.Name)
+			return nil
 		}
 	}
-	if p := pid(v); p != 0 {
-		logx.L().Warn("graceful powerdown timed out, sending SIGTERM", "vm", v.Name, "pid", p)
-		_ = terminate(p)
+	p := pid(v)
+	if p == 0 {
+		return nil
 	}
-	return nil
+	logx.L().Warn("graceful powerdown timed out, sending SIGTERM", "vm", v.Name, "pid", p)
+	if err := terminate(p); err != nil {
+		return fmt.Errorf("%s: sending SIGTERM to qemu pid %d: %w", v.Name, p, err)
+	}
+	if gone(v, termWait) {
+		return nil
+	}
+	// QEMU blocked in an uninterruptible operation, such as a stalled disk
+	// write, never reaps its SIGTERM. Returning here left the process running
+	// while `down` reported success, which is how a host collects VMs nothing
+	// admits are up.
+	logx.L().Warn("qemu ignored SIGTERM, sending SIGKILL", "vm", v.Name, "pid", p)
+	if err := kill(p); err != nil {
+		return fmt.Errorf("%s: sending SIGKILL to qemu pid %d: %w", v.Name, p, err)
+	}
+	if gone(v, killWait) {
+		return nil
+	}
+	return fmt.Errorf("%s: qemu pid %d survived SIGKILL", v.Name, p)
+}
+
+// The three waits Stop allows, in order. They are variables so a test can
+// shorten them; nothing else writes them.
+var (
+	powerdownWait = 10 * time.Second
+	termWait      = 10 * time.Second
+	killWait      = 5 * time.Second
+)
+
+// gone polls until the VM's QEMU process is no longer running.
+func gone(v *config.VM, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for {
+		if !Running(v) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
