@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/project"
 )
 
 // haveImage drops a placeholder ISO into <home>/isos so core.Create resolves
@@ -210,6 +213,40 @@ func TestNewGlobalBypassesTheRefusal(t *testing.T) {
 	}
 	if v.Project != "" {
 		t.Errorf("project = %q, want empty for a --global VM", v.Project)
+	}
+}
+
+// A failure part-way through leaves the VMs before it running, and the run
+// says so. Without the line, "error" followed by "skipped" reads as a run that
+// undid itself.
+func TestFanOutNamesTheVMsLeftRunning(t *testing.T) {
+	p := &project.Project{Name: "myrepo", VMs: []project.VM{{Key: "one"}, {Key: "two"}, {Key: "three"}}}
+	a := &Args{Cmd: "up", Project: p}
+	var stdout, stderr bytes.Buffer
+	calls := 0
+	code := fanOut(a, &stdout, &stderr, func(string) error {
+		calls++
+		if calls == 2 {
+			return errors.New("boot timed out")
+		}
+		return nil
+	})
+	if code != ExitFail {
+		t.Fatalf("exit = %d, want %d", code, ExitFail)
+	}
+	if !strings.Contains(stderr.String(), "1 vm(s) ran before the failure") {
+		t.Errorf("stderr = %q, want the count of VMs left running", stderr.String())
+	}
+}
+
+// Nothing ran before a first-VM failure, so the line would be a lie.
+func TestFanOutStaysQuietWhenTheFirstVMFails(t *testing.T) {
+	p := &project.Project{Name: "myrepo", VMs: []project.VM{{Key: "one"}, {Key: "two"}}}
+	a := &Args{Cmd: "up", Project: p}
+	var stdout, stderr bytes.Buffer
+	fanOut(a, &stdout, &stderr, func(string) error { return errors.New("boot timed out") })
+	if strings.Contains(stderr.String(), "ran before the failure") {
+		t.Errorf("stderr = %q, want no count line", stderr.String())
 	}
 }
 
