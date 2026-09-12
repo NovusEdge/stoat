@@ -96,6 +96,9 @@ type mcpCmd struct {
 	Serve   mcpServeCmd   `cmd:"" default:"withargs" help:"serve MCP over stdio"`
 	Install mcpInstallCmd `cmd:"" help:"write an MCP client's config entry"`
 	Doctor  mcpDoctorCmd  `cmd:"" help:"report contract, transport and client entries"`
+	Up      mcpUpCmd      `cmd:"" help:"start a background HTTP server for this project"`
+	Down    mcpDownCmd    `cmd:"" help:"stop this project's background HTTP server"`
+	Status  mcpStatusCmd  `cmd:"" help:"list the background HTTP servers"`
 }
 
 type mcpServeCmd struct {
@@ -113,6 +116,14 @@ type mcpInstallCmd struct {
 }
 
 type mcpDoctorCmd struct{}
+
+type mcpUpCmd struct {
+	HTTP string `name:"http" help:"loopback address to serve; defaults to 127.0.0.1:7777"`
+}
+
+type mcpDownCmd struct{}
+
+type mcpStatusCmd struct{}
 
 type gceCmd struct {
 	Extend gceExtendCmd `cmd:"" help:"move a running instance's soft deadline forward, without stopping it"`
@@ -722,6 +733,16 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "mcp doctor":
 		a.Cmd, a.Sub = "mcp", "doctor"
+
+	case "mcp up":
+		a.Cmd, a.Sub = "mcp", "up"
+		a.HTTP = g.MCP.Up.HTTP
+
+	case "mcp down":
+		a.Cmd, a.Sub = "mcp", "down"
+
+	case "mcp status":
+		a.Cmd, a.Sub = "mcp", "status"
 
 	case "gce extend":
 		e := g.GCE.Extend

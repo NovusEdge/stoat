@@ -919,6 +919,21 @@ type MCPInstall struct {
 	JSON   string `json:"json"`
 }
 
+// MCPDaemon is one supervised HTTP server: `mcp up`'s output, and one row of
+// MCPDaemonList.
+type MCPDaemon struct {
+	Dir     string    `json:"dir"`
+	Addr    string    `json:"addr"`
+	PID     int       `json:"pid"`
+	Started time.Time `json:"started"`
+	Log     string    `json:"log,omitempty"`
+}
+
+// MCPDaemonList is the `mcp status` command's output.
+type MCPDaemonList struct {
+	Servers []MCPDaemon `json:"servers"`
+}
+
 // MCPClient is one row of MCPDoctor.Clients: whether the named MCP client
 // has a stoat entry and whether that entry points at the binary that is
 // running. A stale entry launches a different stoat than the one that wrote

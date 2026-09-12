@@ -106,6 +106,31 @@ server reads the same project's `stoat.toml`. Run one server per project, on
 its own port, when the projects differ. The rate limits below apply to the
 server, so clients on one address share the budget.
 
+## A background server
+
+`stoat mcp serve --http` runs in the foreground. To keep one server per project
+without holding a terminal, use `up`, `status`, and `down`:
+
+```sh
+stoat mcp up                      # serves 127.0.0.1:7777 for this directory
+stoat mcp up --http 127.0.0.1:7801
+stoat mcp status
+stoat mcp down
+```
+
+`up` starts a detached `stoat mcp serve --http` for the current directory and
+waits for the address to answer, so a bound port or a bad address fails at the
+prompt. It records the pid, address, and directory under
+`$STOAT_HOME/mcp/<id>.json`, and writes the server's output to
+`<id>.log` beside it.
+
+The directory is the identity. `up` refuses a second server for a directory
+that already has one, and `status` lists every project's server. `down` stops
+the server for the current directory.
+
+Nothing restarts these servers after a reboot or a logout. `status` checks both
+the pid and the address, and drops a record whose server is gone.
+
 The default rate limits are 30 calls in the per-tool burst with a refill of
 0.5 calls per second, and 60 calls in the shared burst with a refill of 2
 calls per second. Change them with `--tool-burst`, `--tool-rate`, `--burst`,
