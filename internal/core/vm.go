@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -504,6 +505,11 @@ func inferMissing(v *config.VM) (osName, backend string) {
 	return osName, backend
 }
 
+// listWorkers bounds the status calls List runs at once. GCE answers one
+// instance per call, and a fleet would otherwise open as many API clients as
+// there are VMs.
+const listWorkers = 8
+
 // List returns every VM in the data root, sorted by name, including broken
 // ones as StateBroken rather than omitting them.
 //
@@ -517,17 +523,39 @@ func List() ([]VM, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []VM
-	for _, cv := range cvms {
-		if err := checkGuest(cv); err != nil {
-			out = append(out, VM{Name: filepath.Base(cv.Dir), State: StateBroken, Error: err.Error()})
-			continue
-		}
-		view, err := fromConfigChecked(cv)
+	// Each VM's view costs one provider Status call. For a local VM that is a
+	// pidfile read; for a GCE VM it is an API round trip, and a fleet of them
+	// paid that latency one VM at a time.
+	//
+	// Each goroutine writes its own index, so nothing is shared and the order
+	// survives whatever order they finish in.
+	out := make([]VM, len(cvms))
+	errs := make([]error, len(cvms))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, listWorkers)
+	for i, cv := range cvms {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := checkGuest(cv); err != nil {
+				out[i] = VM{Name: filepath.Base(cv.Dir), State: StateBroken, Error: err.Error()}
+				return
+			}
+			view, err := fromConfigChecked(cv)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			out[i] = view
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, view)
 	}
 
 	broken, err := config.ListBroken()

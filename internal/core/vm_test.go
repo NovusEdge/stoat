@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,40 @@ func TestListIncludesBrokenRatherThanOmittingThem(t *testing.T) {
 	}
 	if vms[1].Name != "hosed" || vms[1].State != StateBroken || vms[1].Error == "" {
 		t.Errorf("vms[1] = %+v, want hosed/broken with a non-empty Error", vms[1])
+	}
+}
+
+// List fans its per-VM status calls across goroutines. Each writes its own
+// index, so a VM must never land under another VM's fields, and the count
+// must be exact past the worker pool's width.
+func TestListKeepsEveryVMWhenItFansOut(t *testing.T) {
+	root(t)
+	const n = listWorkers*3 + 1
+	want := make([]string, 0, n)
+	for i := range n {
+		name := fmt.Sprintf("vm-%02d", i)
+		want = append(want, name)
+		v := &config.VM{Name: name, Mode: "live", OS: "alpine", RAM: 1024 + i, CPUs: 1, SSHPort: 2200 + i}
+		if err := v.Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	vms, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vms) != n {
+		t.Fatalf("List() = %d entries, want %d", len(vms), n)
+	}
+	for i, v := range vms {
+		if v.Name != want[i] {
+			t.Fatalf("vms[%d].Name = %q, want %q", i, v.Name, want[i])
+		}
+		// RAM is unique per VM, so a crossed write shows up here.
+		if v.RAM != 1024+i {
+			t.Errorf("%s carries RAM %d, want %d", v.Name, v.RAM, 1024+i)
+		}
 	}
 }
 
