@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.6.2
+
+The recipe index gets its first entry, plus two fixes found by driving the
+MCP tools against a live VM. The JSON contract version stays **3**.
 
 ### Added
 
