@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/settings"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
 
@@ -65,10 +66,11 @@ type meta struct {
 // internal/recipes owns that union. Decoding it into a concrete type here
 // would give this package a second, drifting definition of it.
 type file struct {
-	Schema  int            `toml:"schema"`
-	Project meta           `toml:"project"`
-	Recipes map[string]any `toml:"recipes"`
-	VMs     map[string]VM  `toml:"vms"`
+	Schema  int             `toml:"schema"`
+	Project meta            `toml:"project"`
+	Recipes map[string]any  `toml:"recipes"`
+	VMs     map[string]VM   `toml:"vms"`
+	Limits  settings.Limits `toml:"limits"`
 }
 
 // Project is one loaded stoat.toml.
@@ -85,6 +87,10 @@ type Project struct {
 
 	// Recipes is the [recipes] table, uninterpreted. internal/recipes reads it.
 	Recipes map[string]any
+
+	// Limits is the [limits] table. It only ever lowers the account limits in
+	// config.toml; see settings.Limits.Tighten.
+	Limits settings.Limits
 
 	byKey map[string]VM
 }
@@ -112,7 +118,7 @@ func Load(dir string) (*Project, error) {
 		}
 	}
 
-	p := &Project{Dir: abs, Recipes: f.Recipes, byKey: make(map[string]VM, len(f.VMs))}
+	p := &Project{Dir: abs, Recipes: f.Recipes, Limits: f.Limits, byKey: make(map[string]VM, len(f.VMs))}
 	p.Name = f.Project.Name
 	if p.Name == "" {
 		p.Name = slug(filepath.Base(abs))

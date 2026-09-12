@@ -45,8 +45,43 @@ type Providers struct {
 	GCE GCE `toml:"gce"`
 }
 
+// Limits is the [limits] table: the ceiling on what stoat starts before it
+// refuses. It exists for agents, which retry a failed spawn instead of
+// noticing that the host is full.
+//
+// Zero means no limit, so an absent table changes nothing.
+type Limits struct {
+	// MaxVMs bounds how many VMs exist, counted at create.
+	MaxVMs int `toml:"max_vms"`
+
+	// MaxRAMMB bounds the RAM of running QEMU VMs, summed. GCE instances run
+	// on Google's hardware, so they do not count here.
+	MaxRAMMB int `toml:"max_ram_mb"`
+}
+
+// Tighten returns the stricter of two limits, field by field. A project's
+// stoat.toml may lower an account limit and never raise it: the file sits in
+// the repository, and an agent that can write it would otherwise lift its own
+// ceiling.
+func (l Limits) Tighten(o Limits) Limits {
+	return Limits{MaxVMs: lower(l.MaxVMs, o.MaxVMs), MaxRAMMB: lower(l.MaxRAMMB, o.MaxRAMMB)}
+}
+
+func lower(a, b int) int {
+	switch {
+	case a <= 0:
+		return b
+	case b <= 0:
+		return a
+	case b < a:
+		return b
+	}
+	return a
+}
+
 type Settings struct {
 	Providers Providers `toml:"providers"`
+	Limits    Limits    `toml:"limits"`
 }
 
 // Path is config.toml's location in the data root.

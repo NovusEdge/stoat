@@ -185,7 +185,11 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	}
 	warnDeadline(stderr, v)
 	a.prose(stdout).Step("starting %s...", a.VM)
-	if err := core.Start(a.VM); err != nil {
+	start := core.Start
+	if a.Yes {
+		start = core.StartForced
+	}
+	if err := start(a.VM); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
 	// Re-read rather than keeping the pre-Start copy: state is the field a

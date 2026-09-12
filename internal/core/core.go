@@ -149,6 +149,9 @@ func Create(s Spec) (VM, error) {
 	}
 	defer unlock()
 
+	if err := CheckCreate(s.Project); err != nil {
+		return VM{}, err
+	}
 	v, err := plan(s)
 	if err != nil {
 		return VM{}, err

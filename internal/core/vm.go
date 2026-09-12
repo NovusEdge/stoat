@@ -594,17 +594,36 @@ func StateOf(ctx context.Context, v *config.VM) (State, error) {
 // string matching. Start checks StateOf first and returns typed
 // ErrAlreadyRunning instead; the provider's own check never fires, because
 // this function has already returned.
-func Start(name string) error {
+func Start(name string) error { return start(name, false) }
+
+// StartForced starts past the host memory check. The configured RAM limit
+// still refuses: a limit a caller can wave away is not a limit.
+func StartForced(name string) error { return start(name, true) }
+
+func start(name string, force bool) error {
 	v, err := load(name)
 	if err != nil {
 		return err
 	}
+	// The limit check counts running VMs, and the start makes this one of
+	// them. Two starts in that gap would both find room, so both steps happen
+	// under the data-root lock. Nothing below p.Start takes it; see the
+	// nesting rule on config.Lock.
+	unlock, err := config.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	state, err := StateOf(context.Background(), v)
 	if err != nil {
 		return err
 	}
 	if state == StateRunning {
 		return fmt.Errorf("%w: %s", ErrAlreadyRunning, name)
+	}
+	if err := CheckStart(v, force); err != nil {
+		return err
 	}
 	p, err := providerFor(v)
 	if err != nil {

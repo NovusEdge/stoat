@@ -148,6 +148,7 @@ type getCmd struct {
 type upCmd struct {
 	VM      string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
 	NoApply bool   `name:"no-apply" aliases:"no-provision" help:"start only; skip the automatic post-boot apply"`
+	Yes     bool   `short:"y" help:"start even when the host reports less free memory than the VM asks for"`
 }
 
 type downCmd struct {
@@ -459,6 +460,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "up":
 		a.VM = g.Up.VM
 		a.NoApply = g.Up.NoApply
+		a.Yes = g.Up.Yes
 
 	case "rm":
 		a.VM, a.Yes = g.RM.VM, g.RM.Yes

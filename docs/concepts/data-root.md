@@ -138,6 +138,29 @@ and is ignored.
 Stoat still attempts to read and reserve the `sshport` value from a broken
 file. This prevents a new VM from receiving the same host port.
 
+## Limits
+
+`config.toml` caps what stoat starts:
+
+```toml
+[limits]
+max_vms = 8
+max_ram_mb = 16384
+```
+
+`max_vms` counts every VM in the data root, running or not, and `create`
+refuses past it. `max_ram_mb` sums the RAM of running local VMs, and `up`
+refuses a start that would cross it. An unset key means no limit. GCE
+instances count toward `max_vms` and never toward `max_ram_mb`, since they
+run on Google's hardware.
+
+A project's `stoat.toml` can lower both for its own VMs, and never raise
+them.
+
+Separately, and whether or not limits are set, `up` refuses when the VM asks
+for more memory than the host reports free. `stoat up -y` starts it anyway.
+The MCP server has no such flag, so an agent gets the refusal.
+
 ## `isos/` and `recipes/`
 
 `isos/` is never touched by VM deletion: removing a VM only removes its own
