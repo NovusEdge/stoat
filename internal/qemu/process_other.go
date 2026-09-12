@@ -19,3 +19,5 @@ func Running(*config.VM) bool { return false }
 func StartedAt(*config.VM) time.Time { return time.Time{} }
 
 func terminate(int) error { return hostops.ErrUnsupported }
+
+func kill(int) error { return hostops.ErrUnsupported }

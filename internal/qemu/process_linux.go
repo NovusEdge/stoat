@@ -58,3 +58,8 @@ func StartedAt(v *config.VM) time.Time {
 }
 
 func terminate(p int) error { return syscall.Kill(p, syscall.SIGTERM) }
+
+func kill(p int) error { return syscall.Kill(p, syscall.SIGKILL) }
+
+// terminate0 delivers no signal and performs the existence check only.
+func terminate0(p int) error { return syscall.Kill(p, 0) }
