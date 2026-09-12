@@ -90,7 +90,7 @@ func Start(v *config.VM) error {
 			msg = err.Error()
 		}
 		logx.L().Error("start failed", "vm", v.Name, "err", msg)
-		return fmt.Errorf("%w: qemu failed to start: %s%s", ErrStartFailed, msg, explainDisplayFailure(msg))
+		return fmt.Errorf("%w: %s%s", ErrStartFailed, msg, explainDisplayFailure(msg))
 	}
 	// Log how to get in, not just that it started. This is the line someone
 	// greps for when a VM is up but unreachable.

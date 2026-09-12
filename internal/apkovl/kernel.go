@@ -13,7 +13,13 @@ import (
 // KernelAppend is the kernel command line for an Alpine live or installer boot,
 // taken from the ISO's syslinux entry. It is the same across the x86_64 Alpine
 // flavors, so it is fixed here rather than parsed.
-const KernelAppend = "modules=loop,squashfs,sd-mod,usb-storage quiet"
+//
+// console=ttyS0 is stoat's own addition. Args wires a serial chardev to the
+// VM's console.log as the one postmortem a headless VM has, and without this
+// the kernel writes to tty0 only, leaving that file empty: `stoat logs` had
+// nothing to show for a VM that failed to boot. tty0 stays in the list so the
+// qemu window still shows the boot.
+const KernelAppend = "modules=loop,squashfs,sd-mod,usb-storage quiet console=tty0 console=ttyS0,115200"
 
 // KernelPath and InitramfsPath are where ExtractKernel writes the boot files,
 // under the VM directory with fixed names so Args needs no lookup.

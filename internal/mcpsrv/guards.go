@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
 )
@@ -100,14 +101,14 @@ func checkHostPath(path, vm string) (string, error) {
 	// relative directory name.
 	candidate := config.Expand(path)
 	if !filepath.IsAbs(candidate) {
-		return "", fmt.Errorf("path %q must be absolute, under %s", path, sandbox)
+		return "", wire.WithSentinel(fmt.Errorf("path %q must be absolute, under %s", path, sandbox), wire.ErrBadInput)
 	}
 	resolved, err := resolveExisting(candidate)
 	if err != nil {
 		return "", err
 	}
 	if resolved != sandbox && !strings.HasPrefix(resolved, sandbox+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path %q resolves to %s, which is outside this VM's shared directory (%s)", path, resolved, sandbox)
+		return "", wire.WithSentinel(fmt.Errorf("path %q resolves to %s, which is outside this VM's shared directory (%s)", path, resolved, sandbox), wire.ErrBadInput)
 	}
 	return resolved, nil
 }
@@ -219,13 +220,13 @@ func checkParamName(name string) (string, error) {
 // thing on every guest.
 func checkGuestPath(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("guest path is required")
+		return "", wire.WithSentinel(fmt.Errorf("guest path is required"), wire.ErrBadInput)
 	}
 	if strings.ContainsRune(path, 0) {
-		return "", fmt.Errorf("guest path contains a null byte")
+		return "", wire.WithSentinel(fmt.Errorf("guest path contains a null byte"), wire.ErrBadInput)
 	}
 	if !strings.HasPrefix(path, "/") {
-		return "", fmt.Errorf("guest path %q must be absolute", path)
+		return "", wire.WithSentinel(fmt.Errorf("guest path %q must be absolute", path), wire.ErrBadInput)
 	}
 	return path, nil
 }

@@ -111,6 +111,13 @@ var ErrAccessDenied = errors.New("access denied")
 // ErrRateLimited identifies an MCP tool call refused by a rate limiter.
 var ErrRateLimited = errors.New("rate limited")
 
+// ErrBadInput identifies a tool call refused for what the caller passed: a
+// relative guest path, a host path outside the VM's shared directory, a
+// project tool with no stoat.toml. It maps to the "usage" code, so a caller
+// can tell its own mistake from a server fault; without it these answered
+// "internal", which reads as a bug in stoat.
+var ErrBadInput = errors.New("invalid input")
+
 type sentinelError struct {
 	err      error
 	sentinel error
@@ -166,6 +173,7 @@ var codeTable = []struct {
 	{CodeConfirmationRequired, ErrConfirmationRequired},
 	{CodeAccessDenied, ErrAccessDenied},
 	{CodeRateLimited, ErrRateLimited},
+	{CodeUsage, ErrBadInput},
 	{CodeQemuMissing, qemu.ErrBinaryMissing},
 	{CodeKVMUnusable, qemu.ErrKVMUnusable},
 	{CodeQemuStartFailed, qemu.ErrStartFailed},

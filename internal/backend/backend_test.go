@@ -31,6 +31,19 @@ func TestApkovlBootsKernelDirectly(t *testing.T) {
 	}
 }
 
+// The kernel must write to the serial console, which Args wires to the VM's
+// console.log. Without console=ttyS0 that file stays empty and `stoat logs`
+// has nothing to show for a VM that failed to boot. tty0 stays first so the
+// qemu window still shows the boot.
+func TestApkovlKernelWritesToTheSerialConsole(t *testing.T) {
+	if !strings.Contains(apkovl.KernelAppend, "console=ttyS0") {
+		t.Errorf("KernelAppend = %q, want a serial console so console.log is not empty", apkovl.KernelAppend)
+	}
+	if !strings.Contains(apkovl.KernelAppend, "console=tty0") {
+		t.Errorf("KernelAppend = %q, want tty0 kept for the qemu window", apkovl.KernelAppend)
+	}
+}
+
 // TestDiskInstallerExitsOnReboot pins -no-reboot to the uninstalled disk boot.
 // The installer kernel is still attached, so a guest reboot would re-run
 // setup-alpine and wipe the disk again; -no-reboot makes that reboot exit QEMU,

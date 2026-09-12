@@ -3,6 +3,7 @@ package mcpsrv
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
@@ -23,7 +24,15 @@ func (s *srv) requireProject() (*project.Project, error) {
 		return nil, s.projErr
 	}
 	if s.proj == nil {
-		return nil, fmt.Errorf("this server's working directory has no %s; run stoat init there, or use start, stop, apply_recipes and wait with a vm", project.FileName)
+		// The directory is named because the server holds the one it started
+		// in, and a client launched from elsewhere gives no other way to see
+		// which that was. The project is read once at startup, so a stoat init
+		// run afterwards needs a restart.
+		dir, err := os.Getwd()
+		if err != nil {
+			dir = "this server's working directory"
+		}
+		return nil, wire.WithSentinel(fmt.Errorf("%s has no %s; run stoat init there and restart this server, or use start, stop, apply_recipes and wait with a vm", dir, project.FileName), wire.ErrBadInput)
 	}
 	return s.proj, nil
 }
