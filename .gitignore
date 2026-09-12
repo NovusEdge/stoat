@@ -46,4 +46,10 @@ graphify-out/
 
 # local context database, rebuilt by the tool that writes it
 .veil/
+
+# stoat's own secrets and recipe cache
 .stoat/
+
+# a maintainer's own dev VM, which is theirs to shape. A project that wants
+# its VMs to travel with the repository commits this file instead.
+stoat.toml
