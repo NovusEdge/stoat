@@ -43,6 +43,45 @@ func TestUpdateImmutableFields(t *testing.T) {
 	}
 }
 
+// Create derives allow_exec from agent_access, and every wire payload still
+// carries the legacy field. An update that changed only the level left a VM
+// reporting allow_exec false while exec worked.
+func TestUpdateAgentAccessKeepsAllowExecInStep(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "work", Mode: "live", OS: "alpine", Backend: "apkovl", RAM: 1024, CPUs: 1, SSHPort: 2200, AgentAccess: "manage"}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		level string
+		want  bool
+	}{
+		{"exec", true},
+		{"observe", false},
+	} {
+		t.Run(tc.level, func(t *testing.T) {
+			got, err := Update("work", Patch{AgentAccess: ptr(tc.level)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.AgentAccess != tc.level {
+				t.Fatalf("agent_access = %q, want %q", got.AgentAccess, tc.level)
+			}
+			if got.AllowExec != tc.want {
+				t.Fatalf("allow_exec = %v for level %q, want %v", got.AllowExec, tc.level, tc.want)
+			}
+			stored, err := config.Load("work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.AllowExec != tc.want {
+				t.Fatalf("vm.toml allow_exec = %v, want %v", stored.AllowExec, tc.want)
+			}
+		})
+	}
+}
+
 // Setting an immutable field to its current value is not a change
 // request. An MCP tool or CLI flag that round-trips a full VM through
 // Patch must not be refused for fields it never meant to touch.

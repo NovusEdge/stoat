@@ -49,15 +49,20 @@ fields and validation rules.
 Declare a recipe in `[recipes]`, then resolve it to a commit:
 
 ```sh
-stoat recipe add https://github.com/OWNER/REPOSITORY.git@TAG
+stoat recipe add caddy
 stoat recipe lock
 stoat recipe sync
 ```
 
-Replace the URL and tag with a repository that contains a valid `recipe.toml`.
-The repository's current `index.toml` has no published entries, so an index
-name cannot be resolved from this checkout. Bundled recipes such as `docker`
-are already available and do not need `recipe add`.
+`caddy` is an index name. Pass a Git URL with an optional `@tag` instead for a
+repository the index does not carry:
+
+```sh
+stoat recipe add https://github.com/OWNER/REPOSITORY.git@TAG
+```
+
+Bundled recipes such as `docker` are already available and do not need
+`recipe add`.
 
 An index name can be used when the configured index contains it. A Git URL can
 be passed instead, with an optional `@tag` or branch. `recipe add` writes the

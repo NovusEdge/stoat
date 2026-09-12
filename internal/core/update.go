@@ -198,6 +198,11 @@ func Update(name string, p Patch) (VM, error) {
 	}
 	if p.AgentAccess != nil {
 		work.AgentAccess = *p.AgentAccess
+		// Create derives allow_exec from the level and the two never disagree
+		// on disk. Setting the level alone here left the legacy field behind,
+		// so a VM raised to exec reported allow_exec false to every wire
+		// reader while exec itself worked.
+		work.AllowExec = work.AgentAccess == "exec"
 	}
 
 	if p.SSHPort != nil && *p.SSHPort != work.SSHPort {
