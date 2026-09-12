@@ -3,6 +3,15 @@
 # name to the git repository that holds that recipe: recipe.toml at its root,
 # scripts beside it, one recipe per repository. The user's stoat.lock pins the
 # commit, so a change here never moves an existing VM's recipe.
+#
+# A name here must not repeat a bundled recipe name. CheckCollision refuses
+# that name, and the MCP add_recipe tool passes no --force, so an agent could
+# never install the entry.
 schema = 1
 
 [recipes]
+
+[recipes.caddy]
+source = "https://github.com/NovusEdge/stoat-recipe-caddy"
+description = "Caddy web server, serving a local directory over HTTP"
+os = ["alpine", "ubuntu", "debian", "fedora", "arch"]

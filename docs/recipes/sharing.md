@@ -33,6 +33,27 @@ stoat recipe add https://github.com/example/stoat-my-tools@main -y
 name collision with a bundled, local, or remote recipe. Use it only when the
 replacement is intentional.
 
+## Publish a recipe to the index
+
+Put the recipe in its own repository, with `recipe.toml` at the root and the
+scripts beside it, then open a pull request against `index.toml` in the Stoat
+repository:
+
+```toml
+[recipes.caddy]
+source = "https://github.com/NovusEdge/stoat-recipe-caddy"
+description = "Caddy web server, serving a local directory over HTTP"
+os = ["alpine", "ubuntu", "debian", "fedora", "arch"]
+```
+
+Pick a name no bundled recipe uses. `stoat recipe add` refuses a bundled name
+without `--force`, and the MCP `add_recipe` tool passes no force, so an agent
+can never install an entry named after a bundled recipe.
+
+Tag the recipe repository so users can pin a ref. An entry changes what a new
+`recipe add` resolves; it never moves a recipe an existing VM already pinned,
+because the commit lives in the user's `stoat.lock`.
+
 List installed recipes, their scope, and the short commit pin:
 
 ```sh

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,25 @@ func coreRemoteRoot(t *testing.T) string {
 	t.Helper()
 	home := root(t)
 	index := testutil.GitRepo(t, map[string]string{"index.toml": "schema = 1\n"})
+	t.Setenv("STOAT_INDEX", index)
+	return home
+}
+
+// coreIndexRoot is coreRemoteRoot with a populated index, for the paths an
+// agent reaches through add_recipe: a name, never a URL.
+func coreIndexRoot(t *testing.T, sources map[string]string) string {
+	t.Helper()
+	home := root(t)
+	body := "schema = 1\n\n[recipes]\n"
+	names := make([]string, 0, len(sources))
+	for name := range sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body += fmt.Sprintf("\n[recipes.%s]\nsource = %q\ndescription = %q\n", name, sources[name], name+" test recipe")
+	}
+	index := testutil.GitRepo(t, map[string]string{"index.toml": body})
 	t.Setenv("STOAT_INDEX", index)
 	return home
 }
@@ -105,6 +125,156 @@ func TestRemoveCheckedWithRecipeUsersDoesNotDeadlock(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("RemoveChecked() blocked on its own scope lock")
+	}
+}
+
+// add_recipe refuses a URL, so an index name is the only source an agent can
+// name. The declaration it writes carries the ref alone: the index owns the
+// source, and a later index edit moves every project that names the recipe.
+func TestAddRecipeResolvesAnIndexName(t *testing.T) {
+	src := coreRecipeRepo(t, "demo", "demo")
+	coreIndexRoot(t, map[string]string{"demo": src})
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte("[recipes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AddRecipe("demo", AddOpts{Yes: true}); err != nil {
+		t.Fatalf("AddRecipe(demo) = %v", err)
+	}
+	scope, err := recipes.ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := scope.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := lock.Recipes["demo"]
+	if !ok {
+		t.Fatalf("lock = %+v, want a demo entry", lock.Recipes)
+	}
+	if entry.Source != src {
+		t.Fatalf("lock source = %q, want the index source %q", entry.Source, src)
+	}
+	if len(entry.Commit) != 40 {
+		t.Fatalf("lock commit = %q, want a full commit", entry.Commit)
+	}
+	decls, err := scope.Decls()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decl, ok := decls["demo"]; !ok || decl.Source != "" {
+		t.Fatalf("declaration = %+v, want an index name with no source", decl)
+	}
+}
+
+// An index name that repeats a bundled name is unreachable from add_recipe:
+// the tool passes no force, and CheckCollision refuses without it. Index
+// entries have to avoid the bundled names.
+func TestAddRecipeRefusesAnIndexNameThatShadowsABundledRecipe(t *testing.T) {
+	src := coreRecipeRepo(t, "xfce", "xfce")
+	coreIndexRoot(t, map[string]string{"xfce": src})
+	if err := recipes.Install(); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte("[recipes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := AddRecipe("xfce", AddOpts{Yes: true})
+	if err == nil {
+		t.Fatal("AddRecipe(xfce) = nil, want a collision refusal")
+	}
+	if !strings.Contains(err.Error(), "bundled") {
+		t.Fatalf("AddRecipe(xfce) = %v, want the bundled collision named", err)
+	}
+}
+
+func TestUpdateRecipeRepinsTheDeclaredRef(t *testing.T) {
+	src := coreRecipeRepo(t, "demo", "demo")
+	coreIndexRoot(t, map[string]string{"demo": src})
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte("[recipes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRecipe("demo", AddOpts{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	moved := testutil.GitCommit(t, src, map[string]string{"install.sh": "#!/bin/sh\necho v2\n"}, "")
+
+	if err := UpdateRecipe("demo"); err != nil {
+		t.Fatalf("UpdateRecipe(demo) = %v", err)
+	}
+	scope, err := recipes.ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := scope.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lock.Recipes["demo"].Commit; got != moved {
+		t.Fatalf("lock commit = %q, want the new branch head %q", got, moved)
+	}
+	body, err := os.ReadFile(filepath.Join(scope.CachePath, "demo", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "v2") {
+		t.Fatalf("cache install.sh = %q, want the updated script", body)
+	}
+}
+
+// remove_recipe has no force, so this refusal is the whole guard on that tool.
+func TestRemoveRecipeRefusesWhileAVMListsIt(t *testing.T) {
+	src := coreRecipeRepo(t, "demo", "demo")
+	coreIndexRoot(t, map[string]string{"demo": src})
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := os.WriteFile(filepath.Join(project, "stoat.toml"), []byte("[recipes]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddRecipe("demo", AddOpts{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	v := &config.VM{Name: "work", Mode: "live", OS: "alpine", RAM: 1024, CPUs: 1, SSHPort: 2200, Recipes: []string{"demo"}}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	err := RemoveRecipe("demo", false)
+	if !errors.Is(err, ErrInUse) || !strings.Contains(err.Error(), "work") {
+		t.Fatalf("RemoveRecipe(demo) = %v, want ErrInUse naming work", err)
+	}
+	scope, err := recipes.ScopeFor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := scope.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lock.Recipes["demo"]; !ok {
+		t.Fatal("the refused removal dropped the lock entry")
+	}
+
+	if err := RemoveRecipe("demo", true); err != nil {
+		t.Fatalf("RemoveRecipe(demo, force) = %v", err)
+	}
+	lock, err = scope.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lock.Recipes["demo"]; ok {
+		t.Fatal("the forced removal left the lock entry")
+	}
+	if _, err := os.Stat(filepath.Join(scope.CachePath, "demo")); !os.IsNotExist(err) {
+		t.Fatalf("cache stat = %v, want the checkout gone", err)
 	}
 }
 
