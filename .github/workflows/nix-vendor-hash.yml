@@ -22,7 +22,7 @@ jobs:
 
       # Pin the upstream installer release so changes to the installer cannot
       # silently alter this trusted-main automation.
-      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
         with:
           determinate: false
 
