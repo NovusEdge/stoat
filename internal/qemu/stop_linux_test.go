@@ -22,21 +22,19 @@ func stubQEMU(t *testing.T, dir string, deaf bool) int {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The loop matters. A shell given a trap and one command still execs that
-	// command on some shells, which drops the trap and makes a "deaf" stub
-	// die on the first SIGTERM.
 	// The loop keeps the shell in place. A shell given one command execs it,
 	// which both drops a trap and replaces the cmdline that Running matches
 	// the VM directory against.
 	//
-	// The ready file is written after the trap is installed. A SIGTERM that
-	// arrives before that still kills a stub meant to ignore it.
+	// The ready file comes after the trap, and the caller waits for it. Wrong
+	// order, and a SIGTERM lands in the window before the trap exists: the
+	// stub dies, and the escalation this file tests never runs. That order
+	// held on a fast machine and lost on a CI runner.
 	ready := filepath.Join(dir, "ready")
-	script := "while true; do sleep 0.1; done"
+	script := "touch " + ready + "; while true; do sleep 0.1; done"
 	if deaf {
 		script = "trap '' TERM; " + script
 	}
-	script = "touch " + ready + "; " + script
 	// The directory reaches the cmdline as a plain argument, which is what
 	// Running reads; $0 for a -c script is the argument after it.
 	cmd := exec.Command("/bin/sh", "-c", script, dir+"/qemu.pid")
