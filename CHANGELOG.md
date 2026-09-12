@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.6.0
+
+Stoat can hold limits on what an agent starts, keep an MCP server running in
+the background, and it now confirms that a VM actually stopped. The JSON
+contract version stays **3**.
+
+```sh
+stoat mcp up                 # background MCP server for this project
+stoat mcp status
+stoat mcp down
+```
+
+### Limits
+
+`[limits]` in `~/.stoat/config.toml` caps what exists and what runs:
+
+```toml
+[limits]
+max_vms = 8
+max_ram_mb = 16384
+```
+
+`max_vms` counts every VM in the data root and `create` refuses past it.
+`max_ram_mb` sums the RAM of running local VMs and `up` refuses a start that
+crosses it. An unset key means no limit, so nothing changes until you set one.
+
+A project's `stoat.toml` takes the same table and may only lower it. That file
+lives in your repository, where an agent that writes files could otherwise
+lift its own ceiling.
+
+Whether or not you set a limit, `up` refuses a VM that asks for more memory
+than the host has free. `stoat up -y` starts it anyway. The MCP server has no
+such flag, so an agent gets the refusal.
+
+### Changes
+
+- `stoat mcp up`, `down` and `status` run one HTTP MCP server per project in
+  the background. `up` waits for the address to answer, so a bound port fails
+  at the prompt. Nothing restarts a server after a reboot.
+- `stoat down` waits for QEMU to exit, and kills what ignores SIGTERM. It used
+  to send the signal and report success while the process kept running, which
+  is how a host collected VMs nothing admitted were up.
+- A project-wide `up` that fails part way now says how many VMs are still
+  running, and that `stoat down` stops them.
+- `stoat ls`, `status` and the TUI's first paint fetch VM status in parallel.
+  A fleet of GCE instances paid one network round trip per VM, in series.
+
 ## v0.5.0
 
 Stoat can run a VM on Google Compute Engine instead of on your own machine.

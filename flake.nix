@@ -28,7 +28,7 @@
           # `git describe` isn't available in the nix build sandbox, so pin a
           # version string here; bump on release the same way release.yml's
           # ${GITHUB_REF_NAME} does for the tarball builds.
-          version = "0.5.0";
+          version = "0.6.0";
         in
         {
           default = pkgs.buildGoModule {
@@ -38,7 +38,7 @@
             src = self;
 
             # Recompute when go.mod or go.sum changes.
-            vendorHash = "sha256-Wg91Gxj25SbUttCot+YzmWw7cgZ+O2r82AHx6FSYXIo=";
+            vendorHash = "sha256-XiUQLKk1HuLBGXgEAQ4arbaV9R0aDJ6vV/qTmWoYuVM=";
 
             subPackages = [ "cmd/stoat" ];
 
