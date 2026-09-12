@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.6.1
+
+Fixes found by driving the MCP tools against a live VM. The JSON contract
+version stays **3**, and nothing changes about how you use stoat.
+
+### Fixes
+
+- `job_status` reported `unknown` for a job that had just started, which the
+  tools define as a job whose guest side is gone. An agent polling right after
+  `exec_bg` read a healthy job as lost. A job that has not recorded its pid yet
+  now reports `starting`.
+- An Alpine VM's console log stayed empty, so `stoat logs` had no record of a
+  boot that failed. The kernel now writes to the serial console as well as the
+  qemu window.
+- A relative guest path, a host path outside a VM's shared directory, and a
+  project tool with no `stoat.toml` all answered with the error code
+  `internal`, which reads as a fault in stoat. They answer `usage` now. The
+  project message also names the directory the server is serving, since a
+  client started elsewhere has no other way to see it.
+- `stoat mcp`'s `wait` tool described `healthy` as an extra condition on
+  `until`, while both the tool and the CLI treat it as its own state.
+- A `restore` on a live VM said "no disk to snapshot", and a failed VM start
+  printed "qemu failed to start" twice.
+- `stoat down` waits on the process itself on Linux instead of polling, so it
+  returns as soon as QEMU exits.
+
 ## v0.6.0
 
 Stoat can hold limits on what an agent starts, keep an MCP server running in
