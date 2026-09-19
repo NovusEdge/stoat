@@ -24,6 +24,7 @@ import (
 	_ "github.com/novusedge/stoat/internal/provider/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
 	"github.com/novusedge/stoat/internal/settings"
+	"github.com/novusedge/stoat/internal/vmname"
 )
 
 // Typed errors, because every caller branches on them and string matching is
@@ -203,11 +204,8 @@ func Plan(s Spec) (*config.VM, error) { return plan(s) }
 
 func plan(s Spec) (*config.VM, error) {
 	name := strings.TrimSpace(s.Name)
-	if name == "" {
-		return nil, fmt.Errorf("%w: name is required", ErrInvalidSpec)
-	}
-	if strings.ContainsAny(name, "/ ") {
-		return nil, fmt.Errorf("%w: name cannot contain spaces or slashes", ErrInvalidSpec)
+	if err := vmname.Validate(name); err != nil {
+		return nil, err
 	}
 	if config.Exists(name) {
 		return nil, fmt.Errorf("%w: %s", ErrNameTaken, name)

@@ -61,7 +61,10 @@ func runInit(a *Args, stdout, stderr io.Writer) int {
 
 	name := a.Tag
 	if name == "" {
-		name = strings.ToLower(filepath.Base(dir))
+		name = project.DefaultName(dir)
+	}
+	if err := project.ValidateProjectName(name); err != nil {
+		return a.fail(stdout, stderr, err)
 	}
 	if err := os.WriteFile(path, []byte(initTemplate(name)), 0o644); err != nil {
 		return a.fail(stdout, stderr, err)

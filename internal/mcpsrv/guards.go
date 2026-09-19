@@ -13,12 +13,8 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/vmname"
 )
-
-// A VM name becomes a directory name under the data root, so the pattern is
-// what keeps an operation inside it. Rejecting beats sanitizing: a rewrite
-// hides the attempt.
-var vmNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // A catalog image id never contains a separator. An absolute path here is an
 // arbitrary host file read, booted as a disk.
@@ -36,24 +32,11 @@ var (
 // grants an arbitrary host directory into a guest read-write.
 var forbiddenPatchKeys = []string{"share", "image", "base", "iso", "console_password"}
 
+// checkVMName keeps an operation inside the data root: the name becomes a
+// directory there.
 func checkVMName(name string) (string, error) {
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("vm name is required")
-	}
-	if name != strings.TrimSpace(name) {
-		return "", fmt.Errorf("vm name %q has leading or trailing whitespace", name)
-	}
-	if name == "." || name == ".." {
-		return "", fmt.Errorf("vm name %q is a path traversal", name)
-	}
-	if strings.ContainsAny(name, `/\`) {
-		return "", fmt.Errorf("vm name %q contains a path separator", name)
-	}
-	if strings.ContainsRune(name, 0) {
-		return "", fmt.Errorf("vm name contains a null byte")
-	}
-	if !vmNameRE.MatchString(name) {
-		return "", fmt.Errorf("invalid vm name %q: must match %s", name, vmNameRE)
+	if err := vmname.Validate(name); err != nil {
+		return "", err
 	}
 	return name, nil
 }

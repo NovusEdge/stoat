@@ -57,7 +57,14 @@ See the [sample file](samples/stoat.toml) on its own.
 
 A VM's global name is its declaration's `name` field, if set, otherwise
 `<project>-<key>`. `project.name` defaults to the repository directory
-name.
+name, lower-cased, with every character outside the grammar replaced by a
+dash.
+
+A declaration key, a `name` override and `project.name` are lower-case
+letters, digits and dashes, starting with a letter or a digit. The global
+name must also clear the rule in [cli.md](cli.md#vm-names): it becomes a
+directory, so a Windows device name such as `nul` is refused there even
+though the grammar accepts it.
 
 A bare command argument resolves to the declaration key first, then to a
 global name. `stoat ssh dev` reaches `shared-dev`.
