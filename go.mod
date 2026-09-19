@@ -8,7 +8,7 @@ require (
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
-	cloud.google.com/go/compute v1.67.0
+	cloud.google.com/go/compute v1.68.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/alecthomas/kong v1.16.1
 	github.com/charmbracelet/x/ansi v0.11.8
