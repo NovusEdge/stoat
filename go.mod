@@ -18,7 +18,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/sys v0.48.0
-	google.golang.org/api v0.297.0
+	google.golang.org/api v0.298.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
