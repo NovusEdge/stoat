@@ -11,8 +11,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/novusedge/stoat/internal/coreerr"
 	"github.com/novusedge/stoat/internal/settings"
 	"github.com/novusedge/stoat/internal/tomlx"
+	"github.com/novusedge/stoat/internal/vmname"
 )
 
 // FileName is the declaration file. Its presence in os.Getwd() is the whole
@@ -121,10 +123,10 @@ func Load(dir string) (*Project, error) {
 	p := &Project{Dir: abs, Recipes: f.Recipes, Limits: f.Limits, byKey: make(map[string]VM, len(f.VMs))}
 	p.Name = f.Project.Name
 	if p.Name == "" {
-		p.Name = slug(filepath.Base(abs))
+		p.Name = DefaultName(abs)
 	}
-	if !nameRE.MatchString(p.Name) {
-		return nil, fmt.Errorf("%s: project.name %q must match %s", FileName, p.Name, nameRE)
+	if err := ValidateProjectName(p.Name); err != nil {
+		return nil, fmt.Errorf("%s: project.name %w", FileName, err)
 	}
 
 	for _, key := range order(path, f.VMs) {
@@ -148,6 +150,10 @@ func Load(dir string) (*Project, error) {
 	seen := map[string]string{}
 	for _, v := range p.VMs {
 		g := p.GlobalName(v.Key)
+		// nameRE passes "nul", which is a Windows device at every path level.
+		if err := vmname.Validate(g); err != nil {
+			return nil, fmt.Errorf("%s: vms.%s: %w", FileName, v.Key, err)
+		}
 		if first, dup := seen[g]; dup {
 			a, b := sortPair(first, v.Key)
 			return nil, fmt.Errorf("%s: vms.%s and vms.%s both resolve to %q", FileName, a, b, g)
@@ -155,6 +161,25 @@ func Load(dir string) (*Project, error) {
 		seen[g] = v.Key
 	}
 	return p, nil
+}
+
+// DefaultName is the project name a directory implies, for a file that
+// declares none. stoat init writes it and Load falls back to it, so both must
+// call this and not lower-case the base name themselves: a checkout called
+// "my_repo" lower-cases to a name the grammar rejects.
+func DefaultName(dir string) string { return slug(filepath.Base(dir)) }
+
+// ValidateProjectName reports why name cannot be project.name, or nil. The
+// name prefixes every generated VM directory, so stoat init checks it before
+// it writes the file, not only Load after the fact.
+//
+// The device-name rule does not apply here. A prefix never stands alone as a
+// directory; GlobalName's result carries that check.
+func ValidateProjectName(name string) error {
+	if !nameRE.MatchString(name) {
+		return fmt.Errorf("%w: %q must match %s", coreerr.ErrInvalidSpec, name, nameRE)
+	}
+	return nil
 }
 
 // Find loads the project in the current directory, if there is one. There is

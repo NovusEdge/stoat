@@ -51,6 +51,40 @@ func TestInitDefaultsTheNameToTheDirectory(t *testing.T) {
 	}
 }
 
+// project.name prefixes every generated VM directory. init refuses a bad one
+// here, where the user typed it, and not at the next command that loads the
+// file it wrote.
+func TestInitRefusesABadName(t *testing.T) {
+	cliRoot(t)
+	for _, name := range []string{"../evil", "My_Repo", "-lead", "a b"} {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		if code, _ := runJSON(t, "init", "--name", name); code == ExitOK {
+			t.Errorf("init --name %q = ExitOK, want a failure", name)
+		}
+		if _, err := os.Stat(filepath.Join(dir, project.FileName)); err == nil {
+			t.Errorf("init --name %q wrote %s", name, project.FileName)
+		}
+	}
+}
+
+// A checkout named "My_Repo" lower-cases to "my_repo", which the name grammar
+// rejects. init writes the same slug Load falls back to.
+func TestInitSlugsTheDirectoryName(t *testing.T) {
+	cliRoot(t)
+	dir := filepath.Join(t.TempDir(), "My_Repo")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if code, _ := runJSON(t, "init"); code != ExitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if _, err := project.Load(dir); err != nil {
+		t.Errorf("the file init wrote does not load: %v", err)
+	}
+}
+
 // .stoat holds the recipe cache and the secrets file. Committing either is a
 // mistake init prevents once, in a git checkout only.
 func TestInitAppendsTheCacheDirToGitignore(t *testing.T) {

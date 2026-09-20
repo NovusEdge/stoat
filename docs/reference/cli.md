@@ -30,6 +30,14 @@ for the documented one-letter forms: `-q`, `-y`, `-n`, and `-h`. For example,
   `stoat --json --version` is a usage error. Scripts should use the `version`
   subcommand, which supports `--json` normally.
 
+## VM names
+
+A VM name becomes a directory under the data root, so `create` and `stoat.toml` hold it to one grammar: letters, digits, dot, dash and underscore, starting with a letter or digit. `stoat` also refuses `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9` and `LPT1`-`LPT9`, with or without an extension and in any case. Windows resolves each of those to a device at every path level, and a data root is portable. The rule applies on every platform for that reason.
+
+A rejected name reports `invalid_spec` under `--json` and to MCP. A VM created before this rule keeps working; the check runs at create time only.
+
+`stoat.toml` is stricter still: a declaration key, a `name` override and `project.name` are lower-case letters, digits and dashes. See [project-file.md](project-file.md).
+
 ## Project scope
 
 A `stoat.toml` in the current directory activates project scope. `up`,

@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +118,29 @@ func TestDuplicateGlobalNameIsAnError(t *testing.T) {
 	want := `stoat.toml: vms.ci and vms.dev both resolve to "myrepo-dev"`
 	if err.Error() != want {
 		t.Errorf("err = %q, want %q", err.Error(), want)
+	}
+}
+
+// The vm key grammar accepts "nul", which is a Windows device at every path
+// level. The global name is what becomes a directory, so the check belongs
+// there.
+func TestReservedGlobalNameIsRejected(t *testing.T) {
+	dir := write(t, "schema = 1\n\n[project]\nname = \"myrepo\"\n\n[vms.dev]\nname = \"nul\"\nimage = \"a\"\n")
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load accepted a reserved device name")
+	}
+	if !strings.Contains(err.Error(), "reserved device name") {
+		t.Errorf("err = %q, want it to name the reserved word", err)
+	}
+}
+
+// A prefix never stands alone as a directory, so the device rule does not
+// reach it: "nul-dev" is a fine directory.
+func TestReservedProjectNameIsAccepted(t *testing.T) {
+	dir := write(t, "schema = 1\n\n[project]\nname = \"nul\"\n\n[vms.dev]\nimage = \"a\"\n")
+	if _, err := Load(dir); err != nil {
+		t.Fatalf("Load = %v, want a project named nul to load", err)
 	}
 }
 

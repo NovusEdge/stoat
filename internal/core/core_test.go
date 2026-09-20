@@ -255,7 +255,9 @@ func TestPlanUnknownImage(t *testing.T) {
 func TestPlanRejectsBadNames(t *testing.T) {
 	dir := root(t)
 	haveImage(t, dir, "alpine-virt-3.24.1-x86_64.iso")
-	for _, name := range []string{"", "  ", "a/b", "a b"} {
+	// internal/vmname owns the rule and covers each class; this holds the
+	// wiring and the error code plan reports.
+	for _, name := range []string{"", "  ", "a/b", "a b", `a\b`, "..", "-lead", "nul", "COM1.txt"} {
 		if _, err := plan(Spec{Name: name, Image: "alpine-virt-3.24.1-x86_64.iso"}); !errors.Is(err, ErrInvalidSpec) {
 			t.Errorf("plan(name=%q) err = %v, want ErrInvalidSpec", name, err)
 		}
