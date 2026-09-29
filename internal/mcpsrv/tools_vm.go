@@ -143,7 +143,7 @@ func (s *srv) registerVM(server *mcp.Server) {
 		s.byName(core.Stop))
 
 	register(server, "destroy", classDestructive,
-		"Permanently delete a VM's directory and its disk. It refuses while the VM is running. This is NOT reversible: there is no undo, and a snapshot taken before the deletion goes with it.",
+		"Permanently delete a VM's directory, its disk, and its shared directory (shared_dir in vm_status, so files in it are lost too). It refuses while the VM is running. This is NOT reversible: there is no undo, and a snapshot taken before the deletion goes with it.",
 		s.byName(core.Destroy))
 
 	register(server, "update", classMutate,
@@ -183,7 +183,7 @@ func (s *srv) registerVM(server *mcp.Server) {
 		})
 
 	register(server, "snapshot", classMutate,
-		"Save a disk snapshot of a VM under a tag. It needs a disk to snapshot, so a live-mode VM refuses. Reversible: restore rolls back to it, and a person can remove the tag with stoat snapshot --delete. Mutating: it writes a new qemu snapshot.",
+		"Save a disk-only snapshot of a VM under a tag. It works on a running or a stopped VM, and it needs a disk, so a live-mode VM refuses. The snapshot holds no RAM, and one taken while the VM runs is crash-consistent, like a power cut. Reversible: restore rolls back to it, and delete_snapshot removes it. Mutating: it writes a new qemu snapshot.",
 		func(ctx context.Context, in snapshotIn) (wire.SnapshotList, error) {
 			name, err := checkVMName(in.VM)
 			if err != nil {
@@ -192,15 +192,21 @@ func (s *srv) registerVM(server *mcp.Server) {
 			if err := core.TakeSnapshot(name, in.Tag); err != nil {
 				return wire.SnapshotList{}, err
 			}
-			ss, err := core.Snapshots(name)
+			return snapshotList(name)
+		})
+
+	register(server, "list_snapshots", classRead,
+		"List a VM's snapshots: tag, created (RFC 3339, UTC) and size_bytes. size_bytes is the saved RAM state, so it is 0 for a disk-only snapshot, which is all this server takes. Read-only.",
+		func(ctx context.Context, in vmIn) (wire.SnapshotList, error) {
+			name, err := checkVMName(in.VM)
 			if err != nil {
 				return wire.SnapshotList{}, err
 			}
-			return wire.SnapshotList{Snapshots: wire.FromSnapshots(ss)}, nil
+			return snapshotList(name)
 		})
 
 	register(server, "restore", classDestructive,
-		"Roll a VM's disk back to a saved snapshot tag and discard everything written since. Destructive: it is reversible only when another snapshot was taken after the one you restore to.",
+		"Roll a stopped VM's disk back to a saved snapshot tag and discard everything written since. It refuses a running VM: stop it first. Destructive: it is reversible only when another snapshot was taken after the one you restore to.",
 		func(ctx context.Context, in snapshotIn) (wire.SnapshotList, error) {
 			name, err := checkVMName(in.VM)
 			if err != nil {
@@ -209,11 +215,20 @@ func (s *srv) registerVM(server *mcp.Server) {
 			if err := core.Restore(name, in.Tag); err != nil {
 				return wire.SnapshotList{}, err
 			}
-			ss, err := core.Snapshots(name)
+			return snapshotList(name)
+		})
+
+	register(server, "delete_snapshot", classDestructive,
+		"Delete one snapshot by tag and free its space in the disk image. It works on a running or a stopped VM. NOT reversible: there is no way to bring the tag back. Destructive.",
+		func(ctx context.Context, in snapshotIn) (wire.SnapshotList, error) {
+			name, err := checkVMName(in.VM)
 			if err != nil {
 				return wire.SnapshotList{}, err
 			}
-			return wire.SnapshotList{Snapshots: wire.FromSnapshots(ss)}, nil
+			if err := core.DeleteSnapshot(name, in.Tag); err != nil {
+				return wire.SnapshotList{}, err
+			}
+			return snapshotList(name)
 		})
 
 	register(server, "forward", classMutate,
@@ -382,4 +397,12 @@ func corePatch(name string, in updateIn) (core.Patch, error) {
 		p.AgentAccess = &access
 	}
 	return p, nil
+}
+
+func snapshotList(name string) (wire.SnapshotList, error) {
+	ss, err := core.Snapshots(name)
+	if err != nil {
+		return wire.SnapshotList{}, err
+	}
+	return wire.SnapshotList{Snapshots: wire.FromSnapshots(ss)}, nil
 }

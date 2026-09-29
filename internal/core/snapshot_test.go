@@ -2,89 +2,83 @@ package core
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/qemu"
 )
 
-// TestParseSnapshotsRealOutput parses QEMU's actual table output, not an
-// invented sample. The columns are padded to fit their content, so a fixed
-// byte-offset parse breaks the first time a tag is longer than the header.
-func TestParseSnapshotsRealOutput(t *testing.T) {
-	// CAPTURED VERBATIM from `qemu-img snapshot -l` on a real qcow2
-	// (qemu-img 11.0.2, 2026-08-04), not written from memory.
-	stopped := `Snapshot list:
-ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT
-1       clean                 0 B 2026-08-04 00:21:33  0000:00:00.000          0
-2       before-upgrade        0 B 2026-08-04 00:21:33  0000:00:00.000          0
-`
-	got := parseSnapshots(stopped)
+func TestSnapshotsFrom(t *testing.T) {
+	got := snapshotsFrom([]qemu.SnapshotEntry{
+		{Name: "disk", DateSec: 1785844800},
+		{Name: "old-ram", VMStateSize: 283 << 20, DateSec: 1785844800, DateNsec: 5},
+	})
 	if len(got) != 2 {
-		t.Fatalf("parsed %d snapshots, want 2: %+v", len(got), got)
+		t.Fatalf("got %d snapshots, want 2: %+v", len(got), got)
 	}
-	if got[0].Tag != "clean" || got[1].Tag != "before-upgrade" {
-		t.Errorf("tags = %q, %q", got[0].Tag, got[1].Tag)
+	if got[0].VMState || got[0].SizeBytes != 0 {
+		t.Errorf("disk-only snapshot reports memory: %+v", got[0])
 	}
-	for _, s := range got {
-		if s.VMState {
-			t.Errorf("%q reports VMState on a 0 B snapshot; a stopped snapshot captures no RAM", s.Tag)
-		}
+	if !got[1].VMState || got[1].SizeBytes != 283<<20 {
+		t.Errorf("snapshot with a memory state reports none: %+v", got[1])
 	}
-
-	// CAPTURED VERBATIM over QMP from a running Alpine VM (2026-08-04),
-	// CRLF endings included. The ID and ICOUNT columns are "--", not
-	// numeric: a running VM's snapshots have no numeric ID. A parser that
-	// requires one silently drops every snapshot from a running VM.
-	running := "List of snapshots present on all disks:\r\n" +
-		"ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT\r\n" +
-		"--      live              283 MiB 2026-08-04 00:24:24  0000:00:40.074         --\r\n"
-	got = parseSnapshots(running)
-	if len(got) != 1 {
-		t.Fatalf("parsed %d snapshots, want 1: %+v", len(got), got)
-	}
-	if !got[0].VMState {
-		t.Error("a 203 MiB snapshot must report VMState: restoring it resumes execution rather than rebooting")
-	}
-	if got[0].Size != "283 MiB" {
-		t.Errorf("Size = %q, want %q", got[0].Size, "283 MiB")
-	}
-	if got[0].Created != "2026-08-04 00:24:24" {
-		t.Errorf("Created = %q", got[0].Created)
+	if got[0].Created.Location() != time.UTC || got[0].Created.Format(time.RFC3339) != "2026-08-04T12:00:00Z" {
+		t.Errorf("Created = %v, want 2026-08-04T12:00:00Z in UTC", got[0].Created)
 	}
 }
 
-// A long tag shifts every column after it. This is the case that breaks any
-// fixed-width parse, and long tags are exactly what people write.
-func TestParseSnapshotsLongTagShiftsColumns(t *testing.T) {
-	// The column layout is real qemu-img output; the long tag genuinely does
-	// push every following column right, which is why parsing is by fields.
-	out := `ID      TAG               VM_SIZE                DATE        VM_CLOCK     ICOUNT
-2       a-really-long-snapshot-tag-name      1.5 GiB 2026-08-04 00:21:33  0000:00:00.000          0
-`
-	got := parseSnapshots(out)
-	if len(got) != 1 {
-		t.Fatalf("parsed %d, want 1: %+v", len(got), got)
+// A stopped VM's snapshots go through the real qemu-img: the JSON field names
+// are the contract snapshotsFrom depends on.
+func TestSnapshotLifecycleOnStoppedDisk(t *testing.T) {
+	haveQemuImg(t)
+	root(t)
+	v := &config.VM{Name: "d", Mode: "cloud", RAM: 512, CPUs: 1, SSHPort: 2200, Disk: "8G"}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
 	}
-	if got[0].Tag != "a-really-long-snapshot-tag-name" {
-		t.Errorf("Tag = %q", got[0].Tag)
+	if out, err := exec.Command("qemu-img", "create", "-f", "qcow2", v.DiskPath(), "64M").CombinedOutput(); err != nil {
+		t.Fatalf("qemu-img create: %v: %s", err, out)
 	}
-	if got[0].Size != "1.5 GiB" || !got[0].VMState {
-		t.Errorf("Size = %q, VMState = %v", got[0].Size, got[0].VMState)
+	before := time.Now().Add(-time.Minute)
+	if err := TakeSnapshot("d", "clean"); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := Snapshots("d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 1 || snaps[0].Tag != "clean" || snaps[0].VMState || snaps[0].SizeBytes != 0 {
+		t.Fatalf("snapshots = %+v", snaps)
+	}
+	if snaps[0].Created.Before(before) || snaps[0].Created.After(time.Now().Add(time.Minute)) {
+		t.Errorf("Created = %v, want about now", snaps[0].Created)
+	}
+	if err := Restore("d", "clean"); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteSnapshot("d", "clean"); err != nil {
+		t.Fatal(err)
+	}
+	if snaps, _ = Snapshots("d"); len(snaps) != 0 {
+		t.Errorf("snapshots after delete = %+v", snaps)
 	}
 }
 
-// Headers, preambles and blank lines must not become snapshots. An empty list
-// is a normal state, not an error.
-func TestParseSnapshotsIgnoresNonRows(t *testing.T) {
-	for _, out := range []string{
-		"",
-		"Snapshot list:\n",
-		"List of snapshots present on all disks:\nID        TAG                     VM SIZE\n",
-	} {
-		if got := parseSnapshots(out); len(got) != 0 {
-			t.Errorf("parseSnapshots(%q) = %+v, want none", out, got)
-		}
+// QEMU cannot revert an internal snapshot under a live disk. The refusal must
+// name the fix and carry the already_running code, not surface QEMU's text.
+func TestRestoreRefusesRunningVM(t *testing.T) {
+	root(t)
+	v := &config.VM{Name: "d", Mode: "cloud", RAM: 512, CPUs: 1, SSHPort: 2200, Disk: "8G"}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	defer realQemuProcess(t, v)()
+	err := Restore("d", "clean")
+	if !errors.Is(err, ErrAlreadyRunning) || !strings.Contains(err.Error(), "stoat down d") {
+		t.Errorf("Restore = %v, want ErrAlreadyRunning naming stoat down d", err)
 	}
 }
 
@@ -111,9 +105,7 @@ func TestSnapshotRefusesLiveVM(t *testing.T) {
 	}
 }
 
-// A tag reaches the monitor as a bare word in "savevm <tag>". Whitespace in
-// it would be read as extra arguments. Refused rather than mangled, the
-// same rule passwordKeys applies to sendkey.
+// Whitespace in a tag is refused, not mangled.
 func TestSnapshotRejectsBadTags(t *testing.T) {
 	root(t)
 	if err := (&config.VM{Name: "d", Mode: "disk", RAM: 512, CPUs: 1, SSHPort: 2200, Disk: "8G"}).Save(); err != nil {

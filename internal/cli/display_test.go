@@ -178,7 +178,8 @@ func TestJSONCarriesTheDisplayKindButNeverTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []string{root, "vnc.sock", "gvncviewer"} {
+	// shared_dir is public on purpose, so only the VM's own directory is leaked.
+	for _, bad := range []string{filepath.Join(root, "v2"), "vnc.sock", "gvncviewer"} {
 		if strings.Contains(string(b), bad) {
 			t.Errorf("JSON leaks %q:\n%s", bad, b)
 		}

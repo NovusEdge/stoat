@@ -21,9 +21,6 @@ import (
 //     with a diff, while core is under concurrent development.
 //  3. Go field names (CPUs, RAM, SSHPort) are the wrong public contract;
 //     units belong in the name (ram_mb) for a reader that does arithmetic.
-//  4. core.Snapshot.Size/Created are qemu table output scraped as strings,
-//     not structured data; naming them size_display/created_display says so
-//     instead of publishing free-form qemu output as a contract.
 //
 // Every slice-valued field is normalized nil -> []: Go's encoding/json
 // emits "null" for a nil slice, and a Python `for f in vm["forwards"]`
@@ -73,6 +70,8 @@ func FromPortForwards(fs []core.PortForward) []PortForward {
 //   - ISO / Base: plain vm.toml facts a human debugging config might want,
 //     but not part of the MCP boundary (§3.2). Judgment call: add them if a
 //     real caller needs them.
+//   - Every path except SharedDir: it is the one host directory copy_to and
+//     copy_from accept, so a caller cannot use those tools without it.
 //   - The VNC socket path, and any rendered command containing it. Display
 //     below carries WHICH surface, never WHERE. A rendered attach command
 //     still embeds the raw path, and an agent cannot run a GUI viewer, so
@@ -82,21 +81,27 @@ func FromPortForwards(fs []core.PortForward) []PortForward {
 // Error is present only for a broken VM (empty string omits it, matching
 // every other VM where core.VM.Error is unset).
 type VM struct {
-	Name      string        `json:"name"`
-	OS        string        `json:"os"`
-	Mode      string        `json:"mode"`
-	Backend   string        `json:"backend"`
-	State     string        `json:"state"`
-	CPUs      int           `json:"cpus"`
-	RAMMB     int           `json:"ram_mb"`
-	Disk      string        `json:"disk"`
-	Share     string        `json:"share"`
-	Recipes   []string      `json:"recipes"`
-	SSHPort   int           `json:"ssh_port"`
-	SSHUser   string        `json:"ssh_user"`
-	Installed bool          `json:"installed"`
-	Forwards  []PortForward `json:"forwards"`
-	AllowExec bool          `json:"allow_exec"`
+	Name    string `json:"name"`
+	OS      string `json:"os"`
+	Mode    string `json:"mode"`
+	Backend string `json:"backend"`
+	State   string `json:"state"`
+	CPUs    int    `json:"cpus"`
+	RAMMB   int    `json:"ram_mb"`
+	Disk    string `json:"disk"`
+	Share   string `json:"share"`
+	// SharedDir is the host directory behind the guest's always-mounted work
+	// share, and SharedMount where the guest sees it. Both are empty for a VM
+	// without one (a broken vm.toml, a gce VM). Destroying the VM deletes
+	// SharedDir.
+	SharedDir   string        `json:"shared_dir,omitempty"`
+	SharedMount string        `json:"shared_mount,omitempty"`
+	Recipes     []string      `json:"recipes"`
+	SSHPort     int           `json:"ssh_port"`
+	SSHUser     string        `json:"ssh_user"`
+	Installed   bool          `json:"installed"`
+	Forwards    []PortForward `json:"forwards"`
+	AllowExec   bool          `json:"allow_exec"`
 	// AgentAccess mirrors config.VM.AgentAccess: none, observe, manage or
 	// exec. Additive alongside AllowExec, which stays for existing readers;
 	// see internal/mcpsrv's access levels for who enforces it.
@@ -211,6 +216,8 @@ func FromVM(v core.VM, graphical bool) VM {
 		RAMMB:       v.RAM,
 		Disk:        v.Disk,
 		Share:       v.Share,
+		SharedDir:   v.SharedDir,
+		SharedMount: sharedMount(v.SharedDir),
 		Recipes:     nonNil(v.Recipes),
 		SSHPort:     v.SSHPort,
 		SSHUser:     v.SSHUser,
@@ -234,6 +241,13 @@ func FromVM(v core.VM, graphical bool) VM {
 		HardDeadline:   rfc3339OrEmpty(v.HardDeadline),
 		SoftDeadline:   rfc3339OrEmpty(v.SoftDeadline),
 	}
+}
+
+func sharedMount(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return core.SharedMount
 }
 
 func rfc3339OrEmpty(t time.Time) string {
@@ -305,23 +319,21 @@ func FromDownloadResult(r core.DownloadResult) DownloadResult {
 	}
 }
 
-// Snapshot is core.Snapshot for the wire. Size/Created are named
-// *_display: they are qemu's own formatted table output (see
-// core.Snapshot's doc comment), opaque and never to be parsed by a
-// consumer (§6).
+// Snapshot is core.Snapshot for the wire. Created is RFC 3339 in UTC.
+// SizeBytes is the saved memory state and is 0 for a disk-only snapshot.
 type Snapshot struct {
-	Tag            string `json:"tag"`
-	VMState        bool   `json:"vm_state"`
-	SizeDisplay    string `json:"size_display"`
-	CreatedDisplay string `json:"created_display"`
+	Tag       string `json:"tag"`
+	VMState   bool   `json:"vm_state"`
+	SizeBytes int64  `json:"size_bytes"`
+	Created   string `json:"created"`
 }
 
 func FromSnapshot(s core.Snapshot) Snapshot {
 	return Snapshot{
-		Tag:            s.Tag,
-		VMState:        s.VMState,
-		SizeDisplay:    s.Size,
-		CreatedDisplay: s.Created,
+		Tag:       s.Tag,
+		VMState:   s.VMState,
+		SizeBytes: s.SizeBytes,
+		Created:   s.Created.UTC().Format(time.RFC3339),
 	}
 }
 

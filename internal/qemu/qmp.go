@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"strings"
+	"path/filepath"
 	"time"
 
 	"github.com/novusedge/stoat/internal/config"
 )
 
-// qmpTimeout bounds a whole QMP exchange. Snapshotting a running VM writes the
-// guest's entire RAM into the qcow2, so this is generous by design: a 4GB VM
-// on a slow disk legitimately takes tens of seconds. It exists to stop a
-// wedged QEMU hanging the caller forever, not to police normal work.
+// qmpTimeout bounds a whole QMP exchange. It exists to stop a wedged QEMU
+// hanging the caller forever, not to police normal work.
 const qmpTimeout = 5 * time.Minute
 
 // qmp is a connected QMP session. QEMU serves it on a second socket alongside
@@ -103,86 +101,89 @@ func (q *qmp) command(name string, args map[string]any) (json.RawMessage, error)
 	}
 }
 
-// hmp runs a human-monitor command through QMP and returns its text output.
+// SnapshotEntry is one internal snapshot as QEMU's ImageInfo reports it, both
+// over QMP and from `qemu-img info --output=json`.
+type SnapshotEntry struct {
+	Name        string `json:"name"`
+	VMStateSize int64  `json:"vm-state-size"`
+	DateSec     int64  `json:"date-sec"`
+	DateNsec    int64  `json:"date-nsec"`
+}
+
+// diskDevice finds the block device backed by the VM's qcow2. Its `device`
+// name ("virtio0" for an unnamed -drive) is what the snapshot commands take,
+// and args.go gives the drive no id to look it up by.
+func (q *qmp) diskDevice(v *config.VM) (device string, snaps []SnapshotEntry, err error) {
+	raw, err := q.command("query-block", nil)
+	if err != nil {
+		return "", nil, err
+	}
+	var blocks []struct {
+		Device   string `json:"device"`
+		Inserted *struct {
+			File  string `json:"file"`
+			Image struct {
+				Snapshots []SnapshotEntry `json:"snapshots"`
+			} `json:"image"`
+		} `json:"inserted"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return "", nil, fmt.Errorf("qmp query-block: %w", err)
+	}
+	disk := filepath.Clean(v.DiskPath())
+	for _, b := range blocks {
+		if b.Inserted != nil && filepath.Clean(b.Inserted.File) == disk {
+			return b.Device, b.Inserted.Image.Snapshots, nil
+		}
+	}
+	return "", nil, fmt.Errorf("%w: qmp: no block device backs %s", ErrMonitorRejected, disk)
+}
+
+// SnapshotSave takes a disk-only internal snapshot of a RUNNING VM's qcow2.
 //
-// Snapshots are the reason this exists. QMP's own snapshot API
-// (snapshot-save/snapshot-load, QEMU 6.0+) is an ASYNCHRONOUS JOB interface:
-// the command returns immediately and the caller must poll query-jobs for
-// completion, then interpret job states. human-monitor-command runs the
-// long-standing savevm/loadvm/delvm synchronously and hands back whatever the
-// monitor printed, far less machinery for an operation stoat performs one at
-// a time and waits on anyway.
-//
-// The tradeoff, stated plainly: HMP reports failure as TEXT, so the caller has
-// to inspect the string. What QMP still buys over talking to the human monitor
-// socket directly is framing: the reply is exactly this command's output,
-// delimited, with transport errors distinguishable from command output. That
-// is the part the human monitor's prompt-interleaved stream cannot give.
-func (q *qmp) hmp(cmd string) (string, error) {
-	raw, err := q.command("human-monitor-command", map[string]any{"command-line": cmd})
-	if err != nil {
-		return "", err
-	}
-	var out string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("qmp %q: %w", cmd, err)
-	}
-	return out, nil
-}
-
-// hmpChecked runs an HMP command that is expected to print NOTHING on success.
-// savevm, loadvm and delvm all follow that convention, so any output at all is
-// the error message, which is the only way to detect failure over HMP, since
-// the QMP layer itself succeeded in running the command.
-func (q *qmp) hmpChecked(cmd string) error {
-	out, err := q.hmp(cmd)
-	if err != nil {
-		return err
-	}
-	if s := strings.TrimSpace(out); s != "" {
-		return fmt.Errorf("%s", s)
-	}
-	return nil
-}
-
-// snapshotCmd dials QMP, runs an HMP command that prints nothing on success,
-// and closes the session. savevm, loadvm and delvm all share this shape.
-func snapshotCmd(v *config.VM, hmp string) error {
-	q, err := dialQMP(v)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = q.Close() }()
-	return q.hmpChecked(hmp)
-}
-
-// SnapshotSave takes a live snapshot of a RUNNING VM, capturing RAM as well as
-// disk, so restoring resumes execution rather than rebooting.
+// savevm and snapshot-save cannot be used: QEMU refuses migration while the
+// always-on `work` virtfs export is attached (args.go), and both go through
+// the migration code. blockdev-snapshot-internal-sync touches only the image,
+// so the guest keeps running and the snapshot is crash-consistent: the guest
+// agent is not present to freeze filesystems first.
 func SnapshotSave(v *config.VM, tag string) error {
-	return snapshotCmd(v, "savevm "+tag)
-}
-
-// SnapshotLoad restores a RUNNING VM to a snapshot.
-func SnapshotLoad(v *config.VM, tag string) error {
-	return snapshotCmd(v, "loadvm "+tag)
-}
-
-// SnapshotDelete removes a snapshot from a RUNNING VM's disk.
-func SnapshotDelete(v *config.VM, tag string) error {
-	return snapshotCmd(v, "delvm "+tag)
-}
-
-// SnapshotInfo returns the raw "info snapshots" text from a RUNNING VM.
-//
-// It is not read from the qcow2 with qemu-img while the VM is up: QEMU holds
-// the image open and writes to it, and qemu-img explicitly warns that
-// inspecting an image in use can report inconsistent state. Asking the process
-// that owns the file is the answer that is actually true.
-func SnapshotInfo(v *config.VM) (string, error) {
 	q, err := dialQMP(v)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer func() { _ = q.Close() }()
-	return q.hmp("info snapshots")
+	dev, _, err := q.diskDevice(v)
+	if err != nil {
+		return err
+	}
+	_, err = q.command("blockdev-snapshot-internal-sync", map[string]any{"device": dev, "name": tag})
+	return err
+}
+
+// SnapshotDelete removes a snapshot from a RUNNING VM's qcow2.
+func SnapshotDelete(v *config.VM, tag string) error {
+	q, err := dialQMP(v)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = q.Close() }()
+	dev, _, err := q.diskDevice(v)
+	if err != nil {
+		return err
+	}
+	_, err = q.command("blockdev-snapshot-delete-internal-sync", map[string]any{"device": dev, "name": tag})
+	return err
+}
+
+// SnapshotList returns the snapshots of a RUNNING VM's qcow2. It asks the
+// process that owns the file: qemu-img on an image in use can report
+// inconsistent state.
+func SnapshotList(v *config.VM) ([]SnapshotEntry, error) {
+	q, err := dialQMP(v)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = q.Close() }()
+	_, snaps, err := q.diskDevice(v)
+	return snaps, err
 }

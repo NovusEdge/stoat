@@ -486,8 +486,12 @@ Lists, saves, restores or deletes a disk snapshot. There is no separate "list" f
 ```
 $ stoat snapshot work
 TAG                      SIZE       CREATED              RAM
-before-upgrade           1.2GiB     2026-07-30 10:04:00  yes
+before-upgrade           -          2026-07-30 10:04:00  no
 ```
+
+A snapshot holds the disk only, never the guest's memory. The SIZE column shows the size of a saved memory state, so it is `-` for every snapshot that `stoat` takes. RAM is `yes` only for a snapshot that an earlier `stoat` version took. CREATED is in local time.
+
+`save` and `--delete` work on a running VM. A snapshot of a running VM is crash-consistent: it holds what the guest had written to disk, as after a power cut. Stop the VM first for a clean filesystem. `--restore` refuses a running VM with the `already_running` code. Run `stoat down <name>` first.
 
 ```
 $ stoat snapshot work before-upgrade
@@ -500,7 +504,7 @@ deleted before-upgrade
 
 Snapshots need a disk to snapshot: a `live` VM (no persistent disk) has nothing to snapshot and the command refuses with an explanatory error rather than a generic failure.
 
-**Exit codes:** 0 on success; 1 if the VM can't be loaded, has no disk to snapshot, the tag doesn't exist for `--restore`/`--delete`, or the operation itself fails; 2 if `--restore` or `--delete` is given without a tag, or both are given together.
+**Exit codes:** 0 on success; 1 if the VM can't be loaded, has no disk to snapshot, the tag doesn't exist for `--restore`/`--delete`, `--restore` is used on a running VM, or the operation itself fails; 2 if `--restore` or `--delete` is given without a tag, or both are given together.
 
 ## `stoat prune`
 

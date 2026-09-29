@@ -352,11 +352,11 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 		})
 
 	register(server, "copy_to", classExec,
-		"Copy a file from the host into a VM's guest filesystem. The host path must resolve under that VM's own shared directory, and anything else is refused before stoat runs. It needs agent_access manage or higher. It overwrites whatever was at the guest destination, and that is not reversible from here. It reaches outside this process.",
+		"Copy a file from the host into a VM's guest filesystem. The host path must resolve under that VM's own shared directory (shared_dir in vm_status, ~/.stoat/shared/<vm>; the guest sees it at shared_mount, /mnt/work), and anything else is refused before stoat runs. It needs agent_access manage or higher. It overwrites whatever was at the guest destination, and that is not reversible from here. It reaches outside this process.",
 		s.copyHandler(true))
 
 	register(server, "copy_from", classExec,
-		"Copy a file out of a VM's guest filesystem to the host. The host destination must resolve under that VM's own shared directory, and anything else is refused before stoat runs. It needs agent_access manage or higher. It overwrites whatever was at the host destination, and that is not reversible from here. It reaches outside this process.",
+		"Copy a file out of a VM's guest filesystem to the host. The host destination must resolve under that VM's own shared directory (shared_dir in vm_status, ~/.stoat/shared/<vm>; the guest sees it at shared_mount, /mnt/work), and anything else is refused before stoat runs. It needs agent_access manage or higher. It overwrites whatever was at the host destination, and that is not reversible from here. It reaches outside this process.",
 		s.copyHandler(false))
 
 	register(server, "pkg_install", classExec,
@@ -553,7 +553,7 @@ func (s *srv) copyHandler(toRemote bool) func(context.Context, copyIn) (wire.Cop
 			err = core.CopyFrom(ctx, name, remote, local)
 		}
 		if err != nil {
-			return wire.CopyResult{}, err
+			return wire.CopyResult{}, fmt.Errorf("host path %s: %w", local, err)
 		}
 		// The result echoes the host path this server authorised. The 9p
 		// mapped-xattr defence and this guard are independent, and neither

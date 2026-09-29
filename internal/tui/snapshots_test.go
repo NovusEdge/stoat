@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -137,7 +138,7 @@ func TestSnapshotsDestructiveActionsRequireConfirmation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
 			sm := newSnapshotsModal("snap-vm-3", []core.Snapshot{
-				{Tag: "clean", Size: "1.0 MiB", Created: "2026-01-01 00:00:00"},
+				{Tag: "clean", SizeBytes: 1 << 20, Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
 			})
 
 			// The key arms the prompt: no Cmd yet, and the modal now shows

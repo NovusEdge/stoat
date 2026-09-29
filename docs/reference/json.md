@@ -227,8 +227,8 @@ Image       {"id":"alpine-virt","os":"alpine","variant":"virt",
              "backend":"apkovl","file":"alpine-virt-3.24.1-x86_64.iso",
              "downloaded":true,"bytes":62914560,"bytes_exact":true,"byo":false}
 
-Snapshot    {"tag":"clean","vm_state":true,"size_display":"203 MiB",
-             "created_display":"2026-08-04 12:00:00"}
+Snapshot    {"tag":"clean","vm_state":false,"size_bytes":0,
+             "created":"2026-08-04T12:00:00Z"}
 
 Check       {"name":"qemu-img","ok":false,"detail":"not found",
              "fix":["sudo","pacman","-S","qemu-img"],"optional":false}
@@ -359,8 +359,15 @@ below it. An explicitly stored `allow_exec = true` maps to `exec`. An explicit
 key still appears as `allow_exec:true` in the VM DTO. MCP permissions must use
 `agent_access`; direct `stoat exec` and `stoat cp` commands do not enforce it.
 
-`Snapshot.size_display` and `created_display` are named that way because they
-are qemu's own formatted table output. They are opaque. Do not parse them.
+`Snapshot.created` is RFC 3339 in UTC. `Snapshot.size_bytes` is the size of the
+saved memory state. It is 0 for a disk-only snapshot, and `stoat` takes only
+disk-only snapshots. `vm_state` is true only for a snapshot that an earlier
+`stoat` version took with memory.
+
+`VM.shared_dir` is the host directory behind the work share that every qemu VM
+mounts in the guest at `VM.shared_mount` (`/mnt/work`). Both fields are omitted
+for a VM with no work share. `copy_to` and `copy_from` accept host paths under
+`shared_dir` only. Destroying the VM deletes `shared_dir`.
 
 `Recipe.reboot` says the guest needs a restart before that recipe's effect is
 visible. A caller that runs `apply` and then waits for `reachable` can see the
@@ -627,6 +634,11 @@ contract stays 3.
 
 The `default_from` addition to `RecipeParam` is the same kind of change: a
 new optional field on an existing object, absent unless a param declares it.
+The contract stays 3.
+
+`Snapshot` lost `size_display` and `created_display`, which the contract already
+declared opaque, and gained `size_bytes` and `created`. `VM` gained `shared_dir`
+and `shared_mount`. The MCP server gained `list_snapshots` and `delete_snapshot`.
 The contract stays 3.
 
 ## Capability discovery
