@@ -68,6 +68,9 @@ var ErrAlreadyRunning = errors.New("already running")
 // and errors.Is matches by identity.
 var ErrBroken = coreerr.ErrBroken
 
+// SharedMount is where the guest mounts the work share.
+const SharedMount = "/mnt/work"
+
 // Paths are the on-disk locations for one VM, resolved once here so a caller
 // (an MCP server describing a VM, a TUI detail screen) does not have to
 // import config and call five separate methods to get them. Every field
@@ -199,6 +202,10 @@ type VM struct {
 	AgentAccess string
 
 	Paths Paths
+
+	// SharedDir is the host side of the writable work share every qemu VM
+	// gets, empty for other providers. Destroy deletes it.
+	SharedDir string
 
 	// Error is populated only when State is StateBroken, and holds
 	// config.Load's parse error, or providerFor's or Status's error when the
@@ -347,6 +354,7 @@ func fromConfigUnchecked(v *config.VM) VM {
 		Address:         details.Address,
 		HardDeadline:    details.HardDeadline,
 		SoftDeadline:    details.SoftDeadline,
+		SharedDir:       sharedDirOf(v),
 		Paths: Paths{
 			Dir:           v.Dir,
 			Disk:          v.DiskPath(),
@@ -356,6 +364,13 @@ func fromConfigUnchecked(v *config.VM) VM {
 			MonitorSocket: v.MonitorPath(),
 		},
 	}
+}
+
+func sharedDirOf(v *config.VM) string {
+	if v.Provider != "" {
+		return ""
+	}
+	return v.WorkDir()
 }
 
 // dirExists answers whether a VM's project directory is still there. A stat

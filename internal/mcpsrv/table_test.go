@@ -7,6 +7,7 @@ var toolTable = []toolSpec{
 	{"list_vms", classRead, LevelNone},
 	{"vm_status", classRead, LevelNone},
 	{"list_images", classRead, LevelNone},
+	{"list_snapshots", classRead, LevelNone},
 	{"list_recipes", classRead, LevelNone},
 	{"check_recipes", classRead, LevelNone},
 	{"logs", classRead, LevelNone},
@@ -32,6 +33,7 @@ var toolTable = []toolSpec{
 	{"destroy", classDestructive, LevelNone},
 	{"prune", classDestructive, LevelNone},
 	{"restore", classDestructive, LevelNone},
+	{"delete_snapshot", classDestructive, LevelNone},
 
 	// Recipe index (Task 15).
 	{"add_recipe", classMutate, LevelNone},

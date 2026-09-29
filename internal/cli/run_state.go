@@ -169,7 +169,11 @@ func runSnapshot(a *Args, stdout, stderr io.Writer) int {
 		if s.VMState {
 			ram = "yes"
 		}
-		fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", s.Tag, s.Size, s.Created, ram)
+		size := "-"
+		if s.SizeBytes > 0 {
+			size = humanSize(s.SizeBytes)
+		}
+		fmt.Fprintf(stdout, "%-24s %-10s %-20s %s\n", s.Tag, size, s.Created.Local().Format("2006-01-02 15:04:05"), ram)
 	}
 	return ExitOK
 }

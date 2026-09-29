@@ -21,10 +21,8 @@ import (
 // viewDetail renders this modal inline. app.go's renderModal only handles
 // *imageModal, so this file avoids app.go entirely.
 //
-// Rows key off Tag, not ID. A running VM's `info snapshots` prints "--" for
-// ID, and core.Snapshot has no ID field (see parseSnapshots in
-// internal/core/snapshot.go). core.Restore, core.DeleteSnapshot and
-// core.TakeSnapshot all take Tag too.
+// Rows key off Tag, not ID: core.Snapshot has no ID field, and core.Restore,
+// core.DeleteSnapshot and core.TakeSnapshot all take Tag.
 type snapshotsModal struct {
 	vmName string
 	list   list.Model
@@ -347,14 +345,16 @@ func (d snapshotDelegate) Render(w io.Writer, m list.Model, index int, item list
 	if index == m.Index() {
 		label = selStyle.Render(label)
 	}
-	// VMState distinguishes a snapshot taken while running (disk + RAM,
-	// resumes execution) from one taken while stopped (disk only, boots
-	// normally); see core.Snapshot's own doc. Both are useful, so the state
-	// is shown rather than left implicit.
+	// VMState is set only on a snapshot from an earlier stoat version; see
+	// core.Snapshot.
 	state := dimStyle.Render("disk only")
 	if it.snap.VMState {
 		state = upStyle.Render("disk+ram")
 	}
-	size := dimStyle.Render(fmt.Sprintf("%-9s", it.snap.Size))
-	fmt.Fprint(w, cursor+label+size+state+"  "+dimStyle.Render(it.snap.Created))
+	size := "-"
+	if it.snap.SizeBytes > 0 {
+		size = humanBytes(it.snap.SizeBytes)
+	}
+	created := it.snap.Created.Local().Format("2006-01-02 15:04:05")
+	fmt.Fprint(w, cursor+label+dimStyle.Render(fmt.Sprintf("%-9s", size))+state+"  "+dimStyle.Render(created))
 }

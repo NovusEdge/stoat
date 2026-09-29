@@ -182,8 +182,8 @@ unavailable fork and continuation proposals. Discovery does not mutate a VM.
 | `list_guests`, `guest_info` | Inspect loaded guest definitions and their package/service commands. |
 | `doctor`, `logs` | Check host prerequisites or tail a VM's console/apply log. |
 | `capabilities` | Read host checks and optional stored VM metadata; report current capabilities and limits. |
-| `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM and its disk. |
-| `snapshot`, `restore`, `forward`, `wait`, `prune` | Manage disk snapshots, port forwards, state waits, and stale files. `prune` is dry-run unless `apply=true`. |
+| `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM, its disk and its shared directory. |
+| `snapshot`, `list_snapshots`, `restore`, `delete_snapshot`, `forward`, `wait`, `prune` | Manage disk-only snapshots, port forwards, state waits, and stale files. `snapshot` and `delete_snapshot` work on a running VM; `restore` needs a stopped VM. `prune` is dry-run unless `apply=true`. |
 | `project_status`, `project_up`, `project_down`, `project_apply`, `project_wait` | Inspect or operate on every VM declared by the server working directory's `stoat.toml`, in declaration order. A failure stops the run and later VMs are marked skipped. |
 
 `start` has no force option. When the VM needs more memory than the host has

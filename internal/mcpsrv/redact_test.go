@@ -103,7 +103,7 @@ func argsFor(name string) map[string]any {
 		return map[string]any{"name": "x", "image": "alpine-virt"}
 	case "clone":
 		return map[string]any{"source": "dev", "name": "dev2"}
-	case "snapshot", "restore":
+	case "snapshot", "restore", "delete_snapshot":
 		return map[string]any{"vm": "dev", "tag": "t"}
 	case "check_recipes":
 		return map[string]any{"recipes": []string{"docker"}, "os": "alpine"}

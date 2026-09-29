@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/guest"
@@ -130,10 +131,12 @@ func TestImageBYODerivedFromEmptyID(t *testing.T) {
 	}
 }
 
-func TestSnapshotGoldenUsesDisplaySuffix(t *testing.T) {
-	s := core.Snapshot{Tag: "clean", VMState: true, Size: "203 MiB", Created: "2026-08-04 12:00:00"}
+func TestSnapshotGolden(t *testing.T) {
+	// A non-UTC zone: the wire form must still be UTC.
+	at := time.Date(2026, 8, 4, 14, 0, 0, 0, time.FixedZone("CEST", 2*3600))
+	s := core.Snapshot{Tag: "clean", SizeBytes: 1 << 20, Created: at}
 	got := marshal(t, FromSnapshot(s))
-	want := `{"tag":"clean","vm_state":true,"size_display":"203 MiB","created_display":"2026-08-04 12:00:00"}`
+	want := `{"tag":"clean","vm_state":false,"size_bytes":1048576,"created":"2026-08-04T12:00:00Z","size_display":"1 MiB","created_display":"` + at.Local().Format("2006-01-02 15:04:05") + `"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -465,4 +468,15 @@ func marshal(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestVMSharedDir(t *testing.T) {
+	local := FromVM(core.VM{Name: "work", SharedDir: "/home/u/.stoat/shared/work"}, true)
+	if local.SharedDir != "/home/u/.stoat/shared/work" || local.SharedMount != "/mnt/work" {
+		t.Errorf("shared = %q at %q", local.SharedDir, local.SharedMount)
+	}
+	none := marshal(t, FromVM(core.VM{Name: "cloudy", Provider: "gce"}, true))
+	if strings.Contains(none, "shared_") {
+		t.Errorf("a VM with no shared dir must omit both fields: %s", none)
+	}
 }
