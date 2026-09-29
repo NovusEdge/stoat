@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -27,9 +28,46 @@ func Quote(argv []string) string {
 	return strings.Join(q, " ")
 }
 
+// ErrUnreachable marks an ssh failure before any remote command ran: the
+// guest refused, dropped, or never answered the connection. Right after a
+// start, sshd is not up yet and every call fails this way.
+var ErrUnreachable = errors.New("ssh cannot reach the guest")
+
+// transportMarkers are the fragments ssh prints, at LogLevel=ERROR, when the
+// connection fails before a session opens.
+var transportMarkers = []string{
+	"ssh: connect to host",
+	"ssh: Could not resolve hostname",
+	"banner exchange",
+	"kex_exchange_identification",
+	"Connection closed by",
+	"Connection reset by",
+	"Connection timed out",
+}
+
+// IsTransportFailure reports whether stderr is ssh's or scp's own report of a
+// connection that never opened. Exit 255 alone is not enough: a remote command
+// can exit 255 too, so the text decides.
+func IsTransportFailure(stderr []byte) bool {
+	s := string(stderr)
+	for _, m := range transportMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// NewUnreachable wraps ErrUnreachable with the VM name and ssh's first line.
+func NewUnreachable(name string, stderr []byte) error {
+	line, _, _ := strings.Cut(strings.TrimSpace(string(stderr)), "\n")
+	return fmt.Errorf("%s: %w: %s", name, ErrUnreachable, line)
+}
+
 // Run executes argv inside v's guest and returns the guest's raw output and
 // exit status. A command that ran and exited non-zero is a result, not an
-// error; Run returns an error only when ssh could not run at all.
+// error; Run returns an error only when ssh could not run at all, or when it
+// could not connect (ErrUnreachable).
 //
 // argv is an argv, never a shell string. Run is the one place stoat's in-VM
 // tools quote it for the guest shell, so no tool caller has to decide.
@@ -64,6 +102,9 @@ func Run(ctx context.Context, v *config.VM, root bool, argv []string, stdin io.R
 			// A caller that cannot tell "timed out" from "the command
 			// failed" retries something that was never going to finish.
 			return out.Bytes(), errb.Bytes(), ee.ExitCode(), ctxErr
+		}
+		if ee.ExitCode() == 255 && IsTransportFailure(errb.Bytes()) {
+			return out.Bytes(), errb.Bytes(), 255, NewUnreachable(v.Name, errb.Bytes())
 		}
 		return out.Bytes(), errb.Bytes(), ee.ExitCode(), nil
 	default:

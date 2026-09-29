@@ -359,9 +359,8 @@ func TestRunLSWhereColumnNamesTheProvider(t *testing.T) {
 	}
 }
 
-// runDown must refuse before printing its "stopping..." progress line, not
-// after, matching the pre-core behaviour where the running/not-running
-// check happened before anything was written to stdout.
+// down on a stopped VM is already the state the caller asked for: it exits 0
+// and prints no "stopping..." progress line.
 func TestRunDownNotRunning(t *testing.T) {
 	cliRoot(t)
 	if err := (&config.VM{Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
@@ -370,14 +369,14 @@ func TestRunDownNotRunning(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := Main([]string{"down", "work"}, "test", nil, &out, &errOut)
-	if code != ExitFail {
-		t.Fatalf("down: exit %d, want %d", code, ExitFail)
+	if code != ExitOK {
+		t.Fatalf("down: exit %d, want %d", code, ExitOK)
 	}
-	if want := "stoat: down: work is not running\n"; errOut.String() != want {
-		t.Errorf("errOut = %q, want %q", errOut.String(), want)
+	if want := "work is already stopped\n"; out.String() != want {
+		t.Errorf("stdout = %q, want %q", out.String(), want)
 	}
-	if out.Len() != 0 {
-		t.Errorf("stdout = %q, want empty (no progress line on a refusal)", out.String())
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", errOut.String())
 	}
 }
 

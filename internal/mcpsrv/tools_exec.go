@@ -2,6 +2,7 @@ package mcpsrv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -24,7 +25,7 @@ type execIn struct {
 	Stdin          string            `json:"stdin,omitempty" jsonschema:"data to send on the command's stdin"`
 	CWD            string            `json:"cwd,omitempty" jsonschema:"absolute directory in the guest to run in"`
 	Env            map[string]string `json:"env,omitempty" jsonschema:"environment variables to set for this command"`
-	TimeoutSeconds int               `json:"timeout_seconds,omitempty" jsonschema:"a plain count of seconds, capped at 600; 60 is the default"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty" jsonschema:"a plain count of seconds, capped at 600; 60 is the default. On timeout the call still returns the partial output with timed_out=true, and the guest kills the command"`
 }
 
 type execBgIn struct {
@@ -62,6 +63,17 @@ func execTimeout(seconds int) time.Duration {
 	return time.Duration(clampInt(seconds, 1, maxExecSecs)) * time.Second
 }
 
+// withGuestTimeout runs argv under the guest's timeout(1) when it has one.
+// Killing the local ssh does not stop the remote command: without a pty, sshd
+// only closes its pipes, and a command that never writes keeps running. The
+// guest-side limit is the only thing that ends it. KILL is used because
+// busybox and coreutils both accept -s and only coreutils accepts -k; a guest
+// with no timeout runs the command unguarded.
+func withGuestTimeout(limit time.Duration, argv []string) []string {
+	const guard = `s="$1"; shift; if command -v timeout >/dev/null 2>&1; then exec timeout -s KILL "$s" "$@"; fi; exec "$@"`
+	return append([]string{"sh", "-c", guard, "stoat_timeout", strconv.Itoa(int(limit.Seconds()))}, argv...)
+}
+
 // envArgv prefixes an argv with env so a variable is set without any shell
 // syntax. Names are bounded because env itself splits on the first "=".
 func envArgv(env map[string]string, cwd string, argv []string) ([]string, error) {
@@ -90,7 +102,7 @@ func envArgv(env map[string]string, cwd string, argv []string) ([]string, error)
 
 func (s *srv) registerExec(server *mcp.Server) {
 	register(server, "exec", classExec,
-		"Run a command inside a VM over ssh and return its stdout, stderr and exit code. argv is an argv, never a shell string, so a value with a space or a semicolon stays one word. The command runs with the guest ssh user's privileges, and effects inside the guest are whatever the command does. timeout_seconds is capped at 600. It needs agent_access exec, and it refuses when the VM is not running. It reaches outside this process.",
+		"Run a command inside a VM over ssh and return its stdout, stderr and exit code. argv is an argv, never a shell string, so a value with a space or a semicolon stays one word. The command runs with the guest ssh user's privileges, and effects inside the guest are whatever the command does. timeout_seconds is capped at 600, and a command that exceeds it returns its partial output with timed_out=true; use exec_bg for anything longer. It needs agent_access exec, and it refuses when the VM is not running. When the VM is running but sshd is not up yet it fails with cannot_reach; call wait first. It reaches outside this process.",
 		func(ctx context.Context, in execIn) (wire.CommandResult, error) {
 			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
@@ -103,13 +115,20 @@ func (s *srv) registerExec(server *mcp.Server) {
 			if err != nil {
 				return wire.CommandResult{}, err
 			}
-			ctx, cancel := context.WithTimeout(ctx, execTimeout(in.TimeoutSeconds))
+			limit := execTimeout(in.TimeoutSeconds)
+			ctx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
 			var stdin io.Reader
 			if in.Stdin != "" {
 				stdin = strings.NewReader(in.Stdin)
 			}
-			out, errb, code, err := sshx.Run(ctx, v, false, argv, stdin)
+			out, errb, code, err := sshx.Run(ctx, v, false, withGuestTimeout(limit, argv), stdin)
+			if errors.Is(err, context.DeadlineExceeded) {
+				return wire.CommandResult{
+					Stdout: string(out), Stderr: string(errb), ExitCode: code, TimedOut: true,
+					Message: fmt.Sprintf("timed out after %s; the output above is partial. Use exec_bg for a command that runs longer, then job_status and job_output.", limit),
+				}, nil
+			}
 			if err != nil {
 				return wire.CommandResult{}, err
 			}

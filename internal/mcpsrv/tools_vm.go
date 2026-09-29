@@ -56,7 +56,7 @@ type waitIn struct {
 	VM             string `json:"vm" jsonschema:"name of the VM"`
 	Until          string `json:"until,omitempty" jsonschema:"reachable, applied or stopped; reachable is the default"`
 	Healthy        bool   `json:"healthy,omitempty" jsonschema:"wait for sshd and then every applied recipe's health check; it replaces until and cannot be passed with it"`
-	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"a plain count of seconds, not a duration string, capped at 600"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"a plain count of seconds, not a duration string; 300 is the default and 600 the cap"`
 }
 
 type pruneIn struct {
@@ -72,8 +72,13 @@ type applyIn struct {
 
 // waitTimeout clamps the caller's seconds. The stdio transport serves one
 // request at a time, and wait is the only tool that blocks on purpose, so it
-// is the only one that needs a ceiling a caller cannot raise.
+// is the only one that needs a ceiling a caller cannot raise. An unset value
+// gets defaultWaitSecs: a one-second wait right after start always fails,
+// because sshd needs tens of seconds to come up.
 func waitTimeout(seconds int) time.Duration {
+	if seconds == 0 {
+		seconds = defaultWaitSecs
+	}
 	return time.Duration(clampInt(seconds, 1, maxWaitSecs)) * time.Second
 }
 
@@ -261,7 +266,7 @@ func (s *srv) registerVM(server *mcp.Server) {
 		})
 
 	register(server, "wait", classMutate,
-		"Block until a VM reaches a state: reachable when sshd answers, applied when the most recent recipe run finished, or stopped when qemu is gone. healthy=true is a fourth state, not a modifier: it waits for sshd and then for every applied recipe's health check, and passing it together with until is refused. The bound is timeout_seconds, a plain count of seconds and not a duration string, capped at 600. A state the VM can never reach fails at once rather than waiting out the timeout. Mutating only in that it blocks the caller.",
+		"Block until a VM reaches a state: reachable when sshd answers, applied when the most recent recipe run finished, or stopped when qemu is gone. healthy=true is a fourth state, not a modifier: it waits for sshd and then for every applied recipe's health check, and passing it together with until is refused. The bound is timeout_seconds, a plain count of seconds and not a duration string; it defaults to 300 and is capped at 600. Call it after start or create before exec, since exec on a booting VM fails with cannot_reach. A state the VM can never reach fails at once rather than waiting out the timeout. Mutating only in that it blocks the caller.",
 		func(ctx context.Context, in waitIn) (wire.WaitResult, error) {
 			name, err := checkVMName(in.VM)
 			if err != nil {

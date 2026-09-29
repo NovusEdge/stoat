@@ -29,6 +29,51 @@ func TestExecClampsTheTimeout(t *testing.T) {
 	}
 }
 
+func TestExecTimeoutReturnsPartialOutput(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	// exec, so the kill lands on sleep itself: a shell parent would leave it
+	// holding the output pipe open.
+	calls := testutil.FakeSSH(t, `printf partial; exec sleep 30`)
+	res := callTool(t, "exec", map[string]any{"vm": "dev", "argv": []string{"slow"}, "timeout_seconds": 1})
+	if res.IsError {
+		t.Fatalf("a timeout came back as an error: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var got struct {
+		Stdout   string `json:"stdout"`
+		TimedOut bool   `json:"timed_out"`
+		Message  string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Stdout != "partial" || !got.TimedOut || !strings.Contains(got.Message, "exec_bg") {
+		t.Fatalf("result = %s", raw)
+	}
+	if !strings.Contains(calls.Calls()[0].Remote, "timeout -s KILL") {
+		t.Fatalf("the guest was not given its own time limit: %q", calls.Calls()[0].Remote)
+	}
+}
+
+func TestExecOnABootingVMSaysToWait(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	testutil.FakeSSH(t, `echo "Connection timed out during banner exchange" >&2; exit 255`)
+	res := callTool(t, "exec", map[string]any{"vm": "dev", "argv": []string{"id"}})
+	if !res.IsError {
+		t.Fatal("exec reported success when ssh never connected")
+	}
+	raw, _ := json.Marshal(res.Content)
+	if !strings.Contains(string(raw), "call wait first") {
+		t.Fatalf("error did not point at wait: %s", raw)
+	}
+	meta, _ := json.Marshal(res.Meta)
+	if !strings.Contains(string(meta), "cannot_reach") {
+		t.Fatalf("code is not cannot_reach: %s", meta)
+	}
+}
+
 func TestExecEnvNameWithUnderscoreReachesArgv(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	writeVM(t, "dev", "exec")

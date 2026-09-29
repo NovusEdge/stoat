@@ -28,8 +28,8 @@ func haveImage(t *testing.T, home, name string) {
 
 // The fan-out runs in declaration order, stops at the first failure and
 // reports every VM after it as skipped, so a half-built project is readable.
-// down refuses every fixture VM here, since none are running; "one" is first
-// in declaration order, so it is the first failure.
+// rm refuses every fixture VM here, since --json never prompts and no -y is
+// given; "one" is first in declaration order, so it is the first failure.
 func TestFanOutStopsAtTheFirstError(t *testing.T) {
 	projectRoot(t, `
 schema = 1
@@ -51,7 +51,7 @@ image = "alpine-virt"
 			t.Fatal(err)
 		}
 	}
-	code, objs := runJSON(t, "down")
+	code, objs := runJSON(t, "rm")
 	if code != ExitFail {
 		t.Errorf("exit = %d, want %d", code, ExitFail)
 	}

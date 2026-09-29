@@ -165,6 +165,8 @@ type upCmd struct {
 	VM      string `arg:"" optional:"" complete:"vm" help:"vm name; omit at project scope for every declared VM"`
 	NoApply bool   `name:"no-apply" aliases:"no-provision" help:"start only; skip the automatic post-boot apply"`
 	Yes     bool   `short:"y" help:"start even when the host reports less free memory than the VM asks for"`
+	Wait    bool   `xor:"wait" help:"block until ssh answers and recipe health checks pass; the default when stdout is not a terminal and under --json"`
+	NoWait  bool   `name:"no-wait" xor:"wait" help:"return as soon as the VM starts, even when stdout is not a terminal"`
 }
 
 type downCmd struct {
@@ -492,6 +494,7 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		a.VM = g.Up.VM
 		a.NoApply = g.Up.NoApply
 		a.Yes = g.Up.Yes
+		a.Wait, a.NoWait = g.Up.Wait, g.Up.NoWait
 
 	case "rm":
 		a.VM, a.Yes = g.RM.VM, g.RM.Yes

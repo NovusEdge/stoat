@@ -308,7 +308,22 @@ stoat wait <name> --until reachable
 Run the failing health command yourself with `stoat exec` only when the VM's
 agent access policy and your workflow permit it. The CLI timeout is a Go
 duration and defaults to two minutes; the MCP `wait` tool uses
-`timeout_seconds` and caps it at 600 seconds.
+`timeout_seconds`, defaults to 300 seconds, and caps it at 600 seconds.
+
+## `exec`, `cp` or `ssh` says `<name> is booting`
+
+The VM process runs, but sshd has not answered yet. A cold boot takes 30 to 60
+seconds. MCP clients see the error code `cannot_reach` with `call wait first`.
+
+**Fix:** wait for ssh, then repeat the command:
+
+```sh
+stoat wait <name>
+```
+
+`stoat up` waits by itself when stdout is not a terminal or with `--json`. Pass
+`--wait` to get the same on a terminal. If `wait` times out, read the console
+log with `stoat logs <name>`.
 
 ## An MCP client cannot find `stoat` or project VMs
 

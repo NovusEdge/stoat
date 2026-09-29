@@ -86,6 +86,9 @@ func doCopy(ctx context.Context, name, localPath, remotePath string, toRemote bo
 	}
 
 	var ee *exec.ExitError
+	if errors.As(err, &ee) && sshx.IsTransportFailure(stderr.Bytes()) {
+		return sshx.NewUnreachable(name, stderr.Bytes())
+	}
 	if errors.As(err, &ee) && stderr.Len() > 0 {
 		// scp ran and failed: its own stderr (no such file, permission
 		// denied, ...) is a far better error than a bare exit status.

@@ -18,6 +18,7 @@ import (
 	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/project"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 // class is a tool's annotation class. toolTable in table_test.go assigns
@@ -50,12 +51,14 @@ type Options struct {
 }
 
 const (
-	maxLogLines   = 2000
-	maxWaitSecs   = 600
-	maxReadBytes  = 1 << 20
-	maxDirEntries = 2000
-	maxPSRows     = 2000
-	maxExecSecs   = 600
+	maxLogLines = 2000
+	maxWaitSecs = 600
+	// defaultWaitSecs covers a cold boot plus a first recipe run.
+	defaultWaitSecs = 300
+	maxReadBytes    = 1 << 20
+	maxDirEntries   = 2000
+	maxPSRows       = 2000
+	maxExecSecs     = 600
 )
 
 // srv carries the per-process state the handlers need. It is a value on the
@@ -231,6 +234,9 @@ func toolError(err error) *mcp.CallToolResult {
 	// Keep the redaction that receiving middleware applies to the human block
 	// before copying the message into metadata and the JSON fallback.
 	info.Message = redactText(info.Message)
+	if errors.Is(err, sshx.ErrUnreachable) {
+		info.Message += "; call wait first"
+	}
 	rawJSON, marshalErr := json.Marshal(map[string]any{"error": info})
 	if marshalErr != nil {
 		panic(fmt.Sprintf("marshal MCP error result: %v", marshalErr))
