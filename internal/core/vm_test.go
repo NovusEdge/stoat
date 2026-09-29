@@ -211,6 +211,27 @@ func TestGetUsesStoredRecipeHealthWithoutSSH(t *testing.T) {
 	}
 }
 
+// One applied ok recipe must not vouch for a configured recipe that never
+// applied or does not exist.
+func TestGetHealthIsNotOKWithAnUnappliedRecipe(t *testing.T) {
+	root(t)
+	v := &config.VM{
+		Name: "work", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2201,
+		Recipes: []string{"docker", "no-such-recipe"},
+		Applied: map[string]config.AppliedRecipe{"docker": {Health: string(HealthOK)}},
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Get(v.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Health != HealthUnknown {
+		t.Errorf("Health = %q, want %q", got.Health, HealthUnknown)
+	}
+}
+
 func TestGetUnknownVM(t *testing.T) {
 	root(t)
 	if _, err := Get("nope"); !errors.Is(err, ErrNotFound) {

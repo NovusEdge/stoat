@@ -2,8 +2,10 @@ package mcpsrv
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/novusedge/stoat/internal/testutil"
 )
@@ -233,5 +235,170 @@ func TestJobIDIsValidated(t *testing.T) {
 		if res := callTool(t, "job_status", map[string]any{"vm": "dev", "job_id": id}); !res.IsError {
 			t.Errorf("job_status accepted job_id %q", id)
 		}
+	}
+}
+
+func TestJobIDErrorCodes(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	for id, want := range map[string]string{"j-XYZ": "usage", "j-00000009": "not_found"} {
+		res := callTool(t, "job_status", map[string]any{"vm": "dev", "job_id": id})
+		if !res.IsError {
+			t.Fatalf("job_status accepted %q", id)
+		}
+		if meta, _ := decodeErrorContract(t, res); meta.Code != want {
+			t.Errorf("job_id %q answered %q, want %q", id, meta.Code, want)
+		}
+	}
+}
+
+// sameJSON compares a structured result with the JSON it should carry,
+// ignoring key order, which the SDK does not fix.
+func sameJSON(t *testing.T, got any, want string) {
+	t.Helper()
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g, w any
+	if err := json.Unmarshal(raw, &g); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(g, w) {
+		t.Fatalf("got  %s\nwant %s", raw, want)
+	}
+}
+
+// jobFake answers the guest calls jobState makes: the exit file, the pid file
+// and kill -0. state is "running" or "exited".
+func jobFake(t *testing.T, state string) *testutil.SSHCalls {
+	t.Helper()
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	if err := saveJob("dev", job{ID: "j-00000001", Argv: []string{"true"}, User: "stoat", Dir: "/run/stoat/jobs/j-00000001"}); err != nil {
+		t.Fatal(err)
+	}
+	return testutil.FakeSSH(t, `case "$1" in
+  cat) case "$2" in
+    */exit) [ "`+state+`" = exited ] && echo 3 || exit 1;;
+    */pid) echo 42;;
+  esac;;
+  tail) case "$4" in */out) printf 'the out';; */err) printf 'the err';; esac;;
+  *) exit 0;;
+esac`)
+}
+
+func TestJobStatusOmitsExitCodeWhileRunning(t *testing.T) {
+	jobFake(t, "running")
+	res := callTool(t, "job_status", map[string]any{"vm": "dev", "job_id": "j-00000001"})
+	sameJSON(t, res.StructuredContent, `{"job_id":"j-00000001","state":"running"}`)
+}
+
+func TestJobStatusReportsAnExitCode(t *testing.T) {
+	jobFake(t, "exited")
+	res := callTool(t, "job_status", map[string]any{"vm": "dev", "job_id": "j-00000001"})
+	sameJSON(t, res.StructuredContent, `{"job_id":"j-00000001","state":"exited","exit_code":3}`)
+}
+
+func TestJobKillOnAnExitedJobReportsItsState(t *testing.T) {
+	calls := jobFake(t, "exited")
+	res := callTool(t, "job_kill", map[string]any{"vm": "dev", "job_id": "j-00000001"})
+	if res.IsError {
+		t.Fatalf("job_kill failed: %+v", res.Content)
+	}
+	sameJSON(t, res.StructuredContent, `{"job_id":"j-00000001","state":"exited","exit_code":3,"signaled":false}`)
+	for _, c := range calls.Calls() {
+		if strings.Contains(c.Remote, "'kill'") {
+			t.Fatalf("an exited job was signaled: %q", c.Remote)
+		}
+	}
+}
+
+func TestJobKillSignalsARunningJob(t *testing.T) {
+	calls := jobFake(t, "running")
+	res := callTool(t, "job_kill", map[string]any{"vm": "dev", "job_id": "j-00000001", "signal": "KILL"})
+	raw, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(raw), `"signaled":true`) {
+		t.Fatalf("job_kill = %s", raw)
+	}
+	var sent bool
+	for _, c := range calls.Calls() {
+		sent = sent || strings.Contains(c.Remote, "'kill' '-KILL' '42'")
+	}
+	if !sent {
+		t.Fatalf("no kill -KILL 42 in %+v", calls.Calls())
+	}
+}
+
+func TestJobWaitReturnsTheExitCodeAndTails(t *testing.T) {
+	jobFake(t, "exited")
+	res := callTool(t, "job_wait", map[string]any{"vm": "dev", "job_id": "j-00000001"})
+	if res.IsError {
+		t.Fatalf("job_wait failed: %+v", res.Content)
+	}
+	sameJSON(t, res.StructuredContent, `{"job_id":"j-00000001","state":"exited","exit_code":3,"stdout":"the out","stderr":"the err"}`)
+}
+
+func TestJobWaitTimesOutOnARunningJob(t *testing.T) {
+	old := jobPollInterval
+	jobPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { jobPollInterval = old })
+	jobFake(t, "running")
+	res := callTool(t, "job_wait", map[string]any{"vm": "dev", "job_id": "j-00000001", "timeout_seconds": 1})
+	if res.IsError {
+		t.Fatalf("a job outliving the wait is not an error: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(raw), `"state":"running"`) || !strings.Contains(string(raw), `"timed_out":true`) {
+		t.Fatalf("job_wait = %s", raw)
+	}
+}
+
+func TestListJobsCarriesState(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	for _, id := range []string{"j-00000001", "j-00000002"} {
+		if err := saveJob("dev", job{ID: id, Argv: []string{"true"}, User: "stoat", Dir: "/run/stoat/jobs/" + id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only the first job's directory survived a reboot.
+	testutil.FakeSSH(t, `shift 4; for d; do case "$d" in *1) printf '%s\texited\t3\n' "$d";; esac; done`)
+	res := callTool(t, "list_jobs", map[string]any{"vm": "dev"})
+	if res.IsError {
+		t.Fatalf("list_jobs failed: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out struct {
+		Jobs []struct {
+			ID       string `json:"job_id"`
+			State    string `json:"state"`
+			ExitCode *int   `json:"exit_code"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Jobs) != 2 ||
+		out.Jobs[0].State != "exited" || out.Jobs[0].ExitCode == nil || *out.Jobs[0].ExitCode != 3 ||
+		out.Jobs[1].State != "unknown" || out.Jobs[1].ExitCode != nil {
+		t.Fatalf("list_jobs = %s", raw)
+	}
+}
+
+func TestListJobsOnAStoppedVMIsUnknown(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "exec")
+	if err := saveJob("dev", job{ID: "j-00000001", Argv: []string{"true"}, User: "stoat", Dir: "/run/stoat/jobs/j-00000001"}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.FakeSSH(t, `exit 255`)
+	res := callTool(t, "list_jobs", map[string]any{"vm": "dev"})
+	raw, _ := json.Marshal(res.StructuredContent)
+	if res.IsError || !strings.Contains(string(raw), `"state":"unknown"`) {
+		t.Fatalf("list_jobs = %s", raw)
 	}
 }

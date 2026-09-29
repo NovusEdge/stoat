@@ -2,9 +2,12 @@ package mcpsrv
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/testutil"
 )
 
@@ -77,7 +80,7 @@ func TestListDirKeepsANameWithASpace(t *testing.T) {
 	writeVM(t, "dev", "observe")
 	testutil.FakeSSH(t, `case "$1" in
   ls) printf 'my file\nplain\n';;
-  stat) shift 3; for p do printf '%s\tregular file\t3\t81a4\t1\n' "$p"; done;;
+  stat) shift 3; for p do printf '%s\tregular file\t3\t81a4\t1\tstoat\n' "$p"; done;;
 esac`)
 	res := callTool(t, "list_dir", map[string]any{"vm": "dev", "path": "/d"})
 	if res.IsError {
@@ -86,14 +89,152 @@ esac`)
 	raw, _ := json.Marshal(res.StructuredContent)
 	var out struct {
 		Entries []struct {
-			Name string `json:"name"`
+			Name  string `json:"name"`
+			Mode  string `json:"mode"`
+			Owner string `json:"owner"`
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Entries) != 2 || out.Entries[0].Name != "/d/my file" {
-		t.Fatalf("got %+v, want two entries the first of which is /d/my file", out.Entries)
+	if len(out.Entries) != 2 || out.Entries[0].Name != "my file" {
+		t.Fatalf("got %+v, want two entries the first of which is my file", out.Entries)
+	}
+	if e := out.Entries[0]; e.Mode != "0644" || e.Owner != "stoat" {
+		t.Fatalf("mode = %q owner = %q, want 0644 and stoat", e.Mode, e.Owner)
+	}
+}
+
+func TestOctalMode(t *testing.T) {
+	for in, want := range map[string]string{"81a4": "0644", "41ed": "0755", "89ff": "4777", "zz": "zz"} {
+		if got := octalMode(in); got != want {
+			t.Errorf("octalMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGuestFailureClassifies(t *testing.T) {
+	for _, c := range []struct {
+		code   int
+		stderr string
+		want   error
+	}{
+		{1, "stat: can't stat '/x': No such file or directory", core.ErrNotFound},
+		{1, "tee: /root/x: Permission denied", wire.ErrAccessDenied},
+		{255, "user@host: Permission denied (publickey).", nil},
+		{1, "tee: /x: Is a directory", nil},
+	} {
+		err := guestFailure("dev", c.code, []byte(c.stderr))
+		if c.want == nil {
+			if wire.MapError(err).Code != wire.CodeInternal {
+				t.Errorf("%q mapped to %s, want internal", c.stderr, wire.MapError(err).Code)
+			}
+			continue
+		}
+		if !errors.Is(err, c.want) {
+			t.Errorf("%q did not map to %v", c.stderr, c.want)
+		}
+	}
+}
+
+func TestReadFileMissingIsNotFound(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "observe")
+	testutil.FakeSSH(t, `echo "stat: can't stat '/nope': No such file or directory" >&2; exit 1`)
+	res := callTool(t, "read_file", map[string]any{"vm": "dev", "path": "/nope"})
+	if !res.IsError {
+		t.Fatal("read_file of a missing path succeeded")
+	}
+	if meta, _ := decodeErrorContract(t, res); meta.Code != "not_found" {
+		t.Fatalf("missing file answered %q, want not_found", meta.Code)
+	}
+}
+
+func TestWriteFileRunsAsTheSSHUserByDefault(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	setSSHUser(t, "dev", "stoat")
+	calls := testutil.FakeSSH(t, `cat > /dev/null; true`)
+	res := callTool(t, "write_file", map[string]any{"vm": "dev", "path": "/home/stoat/a/b", "content": "hello", "parents": true})
+	if res.IsError {
+		t.Fatalf("write_file failed: %+v", res.Content)
+	}
+	got := calls.Calls()
+	if len(got) != 3 {
+		t.Fatalf("want mkdir, tee, chmod; got %d calls", len(got))
+	}
+	if !strings.Contains(got[0].Remote, "'mkdir' '-p' '/home/stoat/a'") {
+		t.Fatalf("parents call = %q", got[0].Remote)
+	}
+	for _, c := range got {
+		if strings.Contains(c.Remote, "sudo") {
+			t.Fatalf("write_file escalated without as_root: %q", c.Remote)
+		}
+	}
+	sameJSON(t, res.StructuredContent, `{"path":"/home/stoat/a/b","bytes":5,"mode":"0644"}`)
+}
+
+func TestWriteFileAsRootNeedsExec(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	writeVM(t, "adm", "exec")
+	setSSHUser(t, "dev", "stoat")
+	setSSHUser(t, "adm", "stoat")
+	calls := testutil.FakeSSH(t, `cat > /dev/null; true`)
+
+	res := callTool(t, "write_file", map[string]any{"vm": "dev", "path": "/etc/x", "content": "x", "as_root": true})
+	if !res.IsError {
+		t.Fatal("as_root ran at agent_access = manage")
+	}
+	if meta, _ := decodeErrorContract(t, res); meta.Code != "access_denied" {
+		t.Fatalf("as_root at manage answered %q, want access_denied", meta.Code)
+	}
+	if n := len(calls.Calls()); n != 0 {
+		t.Fatalf("refused as_root still reached the guest with %d calls", n)
+	}
+
+	res = callTool(t, "write_file", map[string]any{"vm": "adm", "path": "/etc/x", "content": "x", "as_root": true})
+	if res.IsError {
+		t.Fatalf("as_root at exec failed: %+v", res.Content)
+	}
+	for _, c := range calls.Calls() {
+		if !strings.Contains(c.Remote, "sudo") {
+			t.Fatalf("as_root call did not escalate: %q", c.Remote)
+		}
+	}
+}
+
+func TestWriteFileAppendKeepsTheMode(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	calls := testutil.FakeSSH(t, `cat > /dev/null; true`)
+	res := callTool(t, "write_file", map[string]any{"vm": "dev", "path": "/tmp/log", "content": "x", "append": true})
+	if res.IsError {
+		t.Fatalf("write_file failed: %+v", res.Content)
+	}
+	if n := len(calls.Calls()); n != 1 {
+		t.Fatalf("append without a mode made %d calls, want only the write", n)
+	}
+}
+
+func TestSvcStatusReportsActiveAndEnabled(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "observe")
+	// writeVM's guest is alpine, which is openrc: the status verb is
+	// rc-service, the enabled query is rc-update.
+	testutil.FakeSSH(t, `case "$1" in
+  sh) case "$*" in *stoat_enabled*) exit 0;; *) echo " * status: started"; exit 0;; esac;;
+  *) exit 0;;
+esac`)
+	res := callTool(t, "svc_status", map[string]any{"vm": "dev", "name": "sshd"})
+	if res.IsError {
+		t.Fatalf("svc_status failed: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	for _, want := range []string{`"active":true`, `"enabled":true`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("svc_status = %s, want %s", raw, want)
+		}
 	}
 }
 

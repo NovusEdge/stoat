@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **MCP `write_file` now writes as the guest ssh user, not as root.** A file
+  under the ssh user's home now belongs to that user. A path only root can
+  write fails with `access_denied`. Pass `as_root=true` to write as root; it
+  needs `agent_access = exec`, and `manage` is refused with `access_denied`.
+- MCP `job_status` omits `exit_code` until the job has exited. It was `0`
+  while the job ran.
+- MCP `job_kill` returns `{job_id, state, exit_code, signaled}` instead of the
+  command result. A job that is not running is not signaled.
+- MCP `destroy` returns `{name, destroyed}`. `write_file` returns
+  `{path, bytes, mode}`. `wait` reports `healthy` only after `healthy=true`.
+- MCP `stat` and `list_dir` report `mode` in octal, such as `0644`, and add
+  `owner`. `list_dir` names entries by basename. `logs` removes terminal
+  escape sequences and carriage returns. `list_recipes` and the recipe index
+  tools return `has_health` in place of the health-check script.
+- MCP `update` works on a running VM and lists the fields that wait for the
+  next start in `pending_restart`. It refuses an unknown recipe name with
+  `not_found`.
+
+### Added
+
+- MCP `job_wait` blocks until a background job exits, and returns its state,
+  exit code, and the tail of stdout and stderr.
+- MCP `list_jobs` reports each job's state. MCP `write_file` takes `parents`.
+  `svc_status` reports `active` and `enabled`.
+
+### Fixes
+
+- MCP guest tools answer `not_found` for a missing path and `access_denied`
+  for a path the ssh user cannot use, where they answered `internal`. An
+  unknown job id answers `not_found` and a malformed one answers `usage`.
+- A VM's `health` is no longer `ok` while a configured recipe is unapplied.
+- The MCP `create` description states the `mode` values and the ram, cpu and
+  disk defaults.
+
 ## v0.6.2
 
 The recipe index gets its first entry, plus two fixes found by driving the

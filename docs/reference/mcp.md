@@ -150,7 +150,7 @@ permissions below them:
 | `none` | No guest operation. Host-side status, lifecycle, snapshots, logs, forwarding, recipe management and project operations remain available. |
 | `observe` | `read_file`, `list_dir`, `stat`, `ps`, `svc_status`, and `tail_log`. |
 | `manage` | Observe operations plus `write_file`, `copy_to`, `copy_from`, `pkg_install`, `svc`, `useradd`, and `apply_recipes`. |
-| `exec` | Manage operations plus `exec`, `exec_bg`, `job_status`, `job_output`, `job_kill`, and `list_jobs`. |
+| `exec` | Manage operations plus `exec`, `exec_bg`, `job_status`, `job_wait`, `job_output`, `job_kill`, and `list_jobs`. |
 
 `create` defaults to `manage`. The CLI and TUI can raise or lower a VM's
 level. The MCP `update` tool can lower a level but refuses to raise it. The
@@ -176,13 +176,13 @@ unavailable fork and continuation proposals. Discovery does not mutate a VM.
 |---|---|
 | `list_vms`, `vm_status` | List VMs or inspect one VM, including recipe state and health. |
 | `list_images` | List catalog and downloaded images. |
-| `list_recipes`, `check_recipes`, `recipe_schema`, `search_recipes` | Inspect recipe availability, contract, or index entries. |
+| `list_recipes`, `check_recipes`, `recipe_schema`, `search_recipes` | Inspect recipe availability, contract, or index entries. `list_recipes` sets `has_health` for a recipe with a health check and leaves out the check script. `recipe_schema` returns the script. |
 | `plan_recipes` | Show what `apply_recipes` would run or skip without running it. |
 | `add_recipe`, `update_recipe`, `remove_recipe` | Add, repin, or remove remote recipes. `add_recipe` accepts curated index names only; it refuses Git URLs. `remove_recipe` has no force option. |
 | `list_guests`, `guest_info` | Inspect loaded guest definitions and their package/service commands. |
-| `doctor`, `logs` | Check host prerequisites or tail a VM's console/apply log. |
+| `doctor`, `logs` | Check host prerequisites or tail a VM's console/apply log. `logs` removes terminal escape sequences and carriage returns from the lines. |
 | `capabilities` | Read host checks and optional stored VM metadata; report current capabilities and limits. |
-| `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM, its disk and its shared directory. |
+| `create`, `start`, `stop`, `destroy`, `update`, `clone` | Manage VM definitions and lifecycle. `destroy` deletes the VM, its disk and its shared directory, and returns `{name, destroyed}`. |
 | `snapshot`, `list_snapshots`, `restore`, `delete_snapshot`, `forward`, `wait`, `prune` | Manage disk-only snapshots, port forwards, state waits, and stale files. `snapshot` and `delete_snapshot` work on a running VM; `restore` needs a stopped VM. `prune` is dry-run unless `apply=true`. |
 | `project_status`, `project_up`, `project_down`, `project_apply`, `project_wait` | Inspect or operate on every VM declared by the server working directory's `stoat.toml`, in declaration order. A failure stops the run and later VMs are marked skipped. |
 
@@ -195,7 +195,8 @@ to start the VM with `stoat up -y`. Inputs with a fixed set of values
 
 `wait` accepts `reachable`, `applied`, or `stopped`; `healthy=true` waits for
 the applied recipes' health checks. Its `timeout_seconds` is a count of
-seconds, not a duration string. It defaults to 300 and is capped at 600.
+seconds, not a duration string. It defaults to 300 and is capped at 600. The
+result has `healthy` only after a `healthy=true` wait.
 
 Call `wait` after `start` or `create` and before any guest tool. sshd needs
 tens of seconds to come up, and a guest tool called earlier fails with
@@ -206,15 +207,33 @@ output collected so far with `timed_out: true` and a message that points at
 `exec_bg`. The guest kills the command through its own `timeout` when the guest
 has one.
 
+`create` fills `ram_mb`, `cpus`, and `disk` from the defaults in its tool
+description when you omit them. `mode` is `live` or `disk` for an image that
+offers both. A cloud image is always `cloud`, an installer image is always
+`disk`, and a `mode` that contradicts the image is refused.
+
+`update` works on a running VM. `ram_mb`, `cpus`, and `ssh_port` take effect
+at the next start, and the result lists the ones a running VM has not picked up
+in `pending_restart`. `update` refuses a recipe name that no recipe root
+declares, with the code `not_found`. A VM's `health` is not `ok` while a
+configured recipe is unapplied.
+
 ### Guest tools
 
 | Tool | Required level | Purpose |
 |---|---:|---|
 | `apply_recipes` | `manage` | Run the VM's configured recipe scripts, optionally with a named subset. |
-| `read_file`, `list_dir`, `stat`, `ps`, `svc_status`, `tail_log` | `observe` | Read guest files, directories, process state, service state, or logs. Guest paths are absolute. |
+| `read_file`, `list_dir`, `stat`, `ps`, `svc_status`, `tail_log` | `observe` | Read guest files, directories, process state, service state, or logs. Guest paths are absolute. `mode` is octal permission bits such as `0644`, and `list_dir` names entries by basename. `svc_status` adds `active` and `enabled`. |
 | `write_file`, `copy_to`, `copy_from`, `pkg_install`, `svc`, `useradd` | `manage` | Modify files, copy data under the VM's shared directory, install packages, manage services, or add a user. |
-| `exec`, `exec_bg`, `job_kill` | `exec` | Run or signal arbitrary guest commands. `argv` is an argument array, not a shell string. |
-| `job_status`, `job_output`, `list_jobs` | `exec` | Inspect background jobs created by `exec_bg`. A job reads `starting` until the guest records its pid, then `running`, then `exited`. A guest reboot clears the job files and a job becomes `unknown`. |
+| `exec`, `exec_bg`, `job_kill` | `exec` | Run or signal arbitrary guest commands. `argv` is an argument array, not a shell string. `job_kill` does not signal a job that is not running. It returns the job's state with `signaled` false. |
+| `job_status`, `job_wait`, `job_output`, `list_jobs` | `exec` | Inspect background jobs created by `exec_bg`. A job reads `starting` until the guest records its pid, then `running`, then `exited`, and `exit_code` appears only then. A guest reboot clears the job files and a job becomes `unknown`. `job_wait` blocks until the job exits or `timeout_seconds` passes, and returns the state with the tail of stdout and stderr. `list_jobs` includes each job's state. |
+
+`write_file` writes as the guest ssh user, so the file belongs to that user.
+`as_root=true` writes as root and needs the `exec` level. At `manage` it is
+refused with `access_denied`. `parents=true` creates missing parent
+directories as the same user. It returns `{path, bytes, mode}`. A missing
+path answers `not_found` and a path the user cannot write answers
+`access_denied`. Earlier versions always wrote as root.
 
 Guest operations require a running VM. `copy_to` and `copy_from` restrict the
 host side to the VM's configured shared directory. `pkg_install` uses the

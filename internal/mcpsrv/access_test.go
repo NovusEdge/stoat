@@ -88,7 +88,7 @@ func accessArgsFor(tool, vm string) map[string]any {
 		args["name"] = "bob"
 	case "exec", "exec_bg":
 		args["argv"] = []string{"true"}
-	case "job_status", "job_output", "job_kill":
+	case "job_status", "job_wait", "job_output", "job_kill":
 		args["job_id"] = "j-00000000"
 	}
 	return args

@@ -2,9 +2,13 @@ package mcpsrv
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/core"
 )
 
 func TestWaitClampsTimeout(t *testing.T) {
@@ -40,6 +44,62 @@ func TestCreateTakesCatalogImageIDOnly(t *testing.T) {
 	raw, _ := json.Marshal(res.Content)
 	if !strings.Contains(string(raw), "catalog image ids") {
 		t.Fatalf("refusal did not name the rule: %s", raw)
+	}
+}
+
+func TestUpdateRefusesAnUnknownRecipe(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	res := callTool(t, "update", map[string]any{"vm": "dev", "recipes": []string{"no-such-recipe"}})
+	if !res.IsError {
+		t.Fatal("update accepted a recipe that does not exist")
+	}
+	if meta, _ := decodeErrorContract(t, res); meta.Code != "not_found" {
+		t.Fatalf("code = %q, want not_found", meta.Code)
+	}
+}
+
+func TestPendingRestart(t *testing.T) {
+	before := core.VM{State: core.StateRunning, RAM: 2048, CPUs: 2, SSHPort: 2201}
+	after := core.VM{RAM: 3072, CPUs: 2, SSHPort: 2202}
+	got := pendingRestart(before, after)
+	if len(got) != 2 || got[0] != "ram_mb" || got[1] != "ssh_port" {
+		t.Fatalf("pendingRestart = %v, want ram_mb and ssh_port", got)
+	}
+	before.State = core.StateStopped
+	if got := pendingRestart(before, after); got != nil {
+		t.Fatalf("a stopped VM has nothing pending, got %v", got)
+	}
+}
+
+func TestDestroyReturnsALeanResult(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	writeVM(t, "dev", "manage")
+	res := callTool(t, "destroy", map[string]any{"vm": "dev"})
+	if res.IsError {
+		t.Fatalf("destroy failed: %+v", res.Content)
+	}
+	sameJSON(t, res.StructuredContent, `{"name":"dev","destroyed":true}`)
+}
+
+func TestCreateDescriptionStatesTheDefaults(t *testing.T) {
+	for _, want := range []string{
+		fmt.Sprint(core.DefaultRAM), fmt.Sprint(core.DefaultCPUs), core.DefaultDisk, "cloud",
+	} {
+		if !strings.Contains(createDescription, want) {
+			t.Errorf("create description does not mention %q", want)
+		}
+	}
+}
+
+func TestWaitResultOmitsHealthyUnlessAsked(t *testing.T) {
+	raw, _ := json.Marshal(wire.WaitResult{VM: "dev", Until: "reachable"})
+	if strings.Contains(string(raw), "healthy") {
+		t.Fatalf("a reachable wait reports health: %s", raw)
+	}
+	raw, _ = json.Marshal(wire.WaitResult{VM: "dev", Until: "healthy", Healthy: true})
+	if !strings.Contains(string(raw), `"healthy":true`) {
+		t.Fatalf("a healthy wait does not report it: %s", raw)
 	}
 }
 

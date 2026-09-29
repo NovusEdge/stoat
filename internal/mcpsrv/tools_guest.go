@@ -44,10 +44,12 @@ type tailLogIn struct {
 
 type writeFileIn struct {
 	VM      string `json:"vm" jsonschema:"name of the VM"`
-	Path    string `json:"path" jsonschema:"absolute path in the guest; the parent directory must already exist"`
+	Path    string `json:"path" jsonschema:"absolute path in the guest; the parent directory must already exist unless parents is set"`
 	Content string `json:"content" jsonschema:"the file's new content"`
 	Mode    string `json:"mode,omitempty" jsonschema:"octal file mode such as 0644, which is the default"`
 	Append  bool   `json:"append,omitempty" jsonschema:"append instead of replacing the file"`
+	Parents bool   `json:"parents,omitempty" jsonschema:"create missing parent directories, as the same user that writes the file"`
+	AsRoot  bool   `json:"as_root,omitempty" jsonschema:"write as root instead of the ssh user; needs agent_access exec"`
 }
 
 type copyIn struct {
@@ -104,12 +106,12 @@ func guestVM(name string, need Level) (*config.VM, error) {
 // encodes it for the wire. read_file and job_output share this: both clamp
 // and encode identically, and only differ in where path comes from.
 func readGuestFile(ctx context.Context, v *config.VM, path string, offset, maxBytes int) (wire.FileContent, error) {
-	sizeOut, _, code, err := sshx.Run(ctx, v, false, []string{"stat", "-c", "%s", path}, nil)
+	sizeOut, statErr, code, err := sshx.Run(ctx, v, false, []string{"stat", "-c", "%s", path}, nil)
 	if err != nil {
 		return wire.FileContent{}, err
 	}
 	if code != 0 {
-		return wire.FileContent{}, fmt.Errorf("%s: cannot stat %s", v.Name, path)
+		return wire.FileContent{}, guestFailure(v.Name, code, statErr)
 	}
 	size, _ := strconv.ParseInt(strings.TrimSpace(string(sizeOut)), 10, 64)
 	n := readSize(maxBytes)
@@ -127,7 +129,7 @@ func readGuestFile(ctx context.Context, v *config.VM, path string, offset, maxBy
 		return wire.FileContent{}, err
 	}
 	if code != 0 {
-		return wire.FileContent{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
+		return wire.FileContent{}, guestFailure(v.Name, code, errb)
 	}
 	out := wire.FileContent{
 		Size:      size,
@@ -158,7 +160,7 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 		})
 
 	register(server, "list_dir", classRead,
-		"List one directory in a VM's guest filesystem: name, type, size, mode and mtime for each entry. The path must be absolute. The listing is capped at 2000 entries and truncated is set when it hits the cap. It needs agent_access observe or higher. Read-only in the guest.",
+		"List one directory in a VM's guest filesystem: name (the basename), type, size, mode, owner and mtime for each entry. mode is the permission bits in octal, such as 0644. The path must be absolute. The listing is capped at 2000 entries and truncated is set when it hits the cap. It needs agent_access observe or higher. Read-only in the guest.",
 		func(ctx context.Context, in pathIn) (wire.DirListing, error) {
 			v, err := guestVM(in.VM, LevelObserve)
 			if err != nil {
@@ -175,25 +177,29 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 				return wire.DirListing{}, err
 			}
 			if code != 0 {
-				return wire.DirListing{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
+				return wire.DirListing{}, guestFailure(v.Name, code, errb)
 			}
 			names := capNames(splitNames(nameOut))
 			if len(names) == 0 {
 				return wire.DirListing{Entries: []wire.DirEntry{}}, nil
 			}
-			argv := append([]string{"stat", "-c", "%n\t%F\t%s\t%f\t%Y"}, joinDir(path, names)...)
+			argv := append([]string{"stat", "-c", statFormat}, joinDir(path, names)...)
 			statOut, _, _, err := sshx.Run(ctx, v, false, argv, nil)
 			if err != nil {
 				return wire.DirListing{}, err
 			}
+			entries := parseStat(statOut)
+			for i := range entries {
+				entries[i].Name = baseName(entries[i].Name)
+			}
 			return wire.DirListing{
-				Entries:   wire.NonNil(parseStat(statOut)),
+				Entries:   wire.NonNil(entries),
 				Truncated: len(names) == maxDirEntries,
 			}, nil
 		})
 
 	register(server, "stat", classRead,
-		"Report one path's type, size, mode and mtime in a VM's guest filesystem. The path must be absolute. It needs agent_access observe or higher. Read-only in the guest.",
+		"Report one path's type, size, mode, owner and mtime in a VM's guest filesystem. mode is the permission bits in octal, such as 0644. The path must be absolute. It needs agent_access observe or higher. Read-only in the guest.",
 		func(ctx context.Context, in pathIn) (wire.DirEntry, error) {
 			v, err := guestVM(in.VM, LevelObserve)
 			if err != nil {
@@ -203,12 +209,12 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 			if err != nil {
 				return wire.DirEntry{}, err
 			}
-			out, errb, code, err := sshx.Run(ctx, v, false, []string{"stat", "-c", "%n\t%F\t%s\t%f\t%Y", path}, nil)
+			out, errb, code, err := sshx.Run(ctx, v, false, []string{"stat", "-c", statFormat, path}, nil)
 			if err != nil {
 				return wire.DirEntry{}, err
 			}
 			if code != 0 {
-				return wire.DirEntry{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
+				return wire.DirEntry{}, guestFailure(v.Name, code, errb)
 			}
 			entries := parseStat(out)
 			if len(entries) == 0 {
@@ -246,21 +252,31 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 		})
 
 	register(server, "svc_status", classRead,
-		"Report one service's status in a VM, using the init system's own status verb from the guest definition. It needs agent_access observe or higher. Read-only in the guest.",
-		func(ctx context.Context, in svcStatusIn) (wire.CommandResult, error) {
+		"Report one service's status in a VM, using the init system's own status verb from the guest definition. active is true when that verb exits 0. enabled says whether the service starts at boot, and it is absent on a guest whose init system is neither systemd nor openrc. stdout and stderr carry the init system's own text. It needs agent_access observe or higher. Read-only in the guest.",
+		func(ctx context.Context, in svcStatusIn) (wire.ServiceStatus, error) {
 			v, err := guestVM(in.VM, LevelObserve)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.ServiceStatus{}, err
 			}
 			name, err := checkSvcName(in.Name)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.ServiceStatus{}, err
 			}
 			argv, err := svcArgv(v, "status", name)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.ServiceStatus{}, err
 			}
-			return runToResult(ctx, v, false, argv)
+			res, err := runToResult(ctx, v, false, argv)
+			if err != nil {
+				return wire.ServiceStatus{}, err
+			}
+			out := wire.ServiceStatus{CommandResult: res, Active: res.ExitCode == 0}
+			if enabled, known, err := svcEnabled(ctx, v, name); err != nil {
+				return wire.ServiceStatus{}, err
+			} else if known {
+				out.Enabled = &enabled
+			}
+			return out, nil
 		})
 
 	register(server, "tail_log", classRead,
@@ -307,7 +323,7 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 				return wire.LogTail{}, err
 			}
 			if code != 0 {
-				return wire.LogTail{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
+				return wire.LogTail{}, guestFailure(v.Name, code, errb)
 			}
 			return wire.LogTail{Lines: strings.Split(strings.TrimRight(string(out), "\n"), "\n")}, nil
 		})
@@ -315,22 +331,49 @@ func (s *srv) registerGuestRead(server *mcp.Server) {
 
 func (s *srv) registerGuestWrite(server *mcp.Server) {
 	register(server, "write_file", classExec,
-		"Write a file inside a VM's guest filesystem over ssh. The path must be absolute and its parent directory must already exist. mode defaults to 0644. With append=true the content is added to the end instead of replacing the file. It needs agent_access manage or higher, and it refuses when the VM is not running. It overwrites whatever was there, and that is not reversible from here. It reaches outside this process.",
-		func(ctx context.Context, in writeFileIn) (wire.CommandResult, error) {
+		"Write a file inside a VM's guest filesystem over ssh, as the guest ssh user, so the file belongs to that user. The path must be absolute. Its parent directory must already exist unless parents=true, which creates missing parents as the same user. mode defaults to 0644. With append=true the content is added to the end instead of replacing the file, and the mode is left alone unless you pass one. as_root=true writes as root instead, for a path the ssh user cannot write; it needs agent_access exec, and manage is refused with access_denied. Earlier versions always wrote as root. It returns the path, the number of bytes written and the mode. It needs agent_access manage or higher, and it refuses when the VM is not running. It overwrites whatever was there, and that is not reversible from here. It reaches outside this process.",
+		func(ctx context.Context, in writeFileIn) (wire.FileWritten, error) {
 			v, err := guestVM(in.VM, LevelManage)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.FileWritten{}, err
 			}
 			path, err := checkGuestPath(in.Path)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.FileWritten{}, err
+			}
+			if in.AsRoot {
+				if err := requireAccess(v.Name, LevelExec); err != nil {
+					return wire.FileWritten{}, fmt.Errorf("as_root: %w", err)
+				}
 			}
 			mode := in.Mode
-			if mode == "" {
+			if mode == "" && !in.Append {
 				mode = "0644"
 			}
-			if !modeRE.MatchString(mode) {
-				return wire.CommandResult{}, badInput("invalid mode %q: three or four octal digits", mode)
+			if mode != "" {
+				if !modeRE.MatchString(mode) {
+					return wire.FileWritten{}, badInput("invalid mode %q: three or four octal digits", mode)
+				}
+				if len(mode) == 3 {
+					mode = "0" + mode
+				}
+			}
+			// fail turns a guest failure into the tool's error. A stopped VM
+			// gets not_running, which is the more useful answer than ssh's.
+			fail := func(code int, errb []byte) error {
+				if runErr := requireRunning(v); runErr != nil {
+					return runErr
+				}
+				return guestFailure(v.Name, code, errb)
+			}
+			if in.Parents {
+				_, errb, code, err := sshx.Run(ctx, v, in.AsRoot, []string{"mkdir", "-p", parentDir(path)}, nil)
+				if err != nil {
+					return wire.FileWritten{}, err
+				}
+				if code != 0 {
+					return wire.FileWritten{}, fail(code, errb)
+				}
 			}
 			// tee rather than a redirect: a redirect is shell syntax the
 			// tool would have to build around the path.
@@ -338,17 +381,23 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 			if in.Append {
 				argv = []string{"tee", "-a", path}
 			}
-			_, errb, code, err := sshx.Run(ctx, v, true, argv, strings.NewReader(in.Content))
+			_, errb, code, err := sshx.Run(ctx, v, in.AsRoot, argv, strings.NewReader(in.Content))
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.FileWritten{}, err
 			}
 			if code != 0 {
-				if runErr := requireRunning(v); runErr != nil {
-					return wire.CommandResult{}, runErr
-				}
-				return wire.CommandResult{}, fmt.Errorf("%s: %s", v.Name, strings.TrimSpace(string(errb)))
+				return wire.FileWritten{}, fail(code, errb)
 			}
-			return runToResult(ctx, v, true, []string{"chmod", mode, path})
+			if mode != "" {
+				_, errb, code, err := sshx.Run(ctx, v, in.AsRoot, []string{"chmod", mode, path}, nil)
+				if err != nil {
+					return wire.FileWritten{}, err
+				}
+				if code != 0 {
+					return wire.FileWritten{}, fmt.Errorf("%s: written, but chmod %s failed: %s", v.Name, mode, strings.TrimSpace(string(errb)))
+				}
+			}
+			return wire.FileWritten{Path: path, Bytes: len(in.Content), Mode: mode}, nil
 		})
 
 	register(server, "copy_to", classExec,
@@ -442,6 +491,30 @@ func svcArgv(v *config.VM, action, name string) ([]string, error) {
 	return []string{"sh", "-c", renderVerb(tmpl), "stoat_svc", name}, nil
 }
 
+// svcEnabled asks the init system whether name starts at boot. The guest
+// definition has no verb for it, so the two bundled init systems are spelled
+// here. known is false for any other init system.
+func svcEnabled(ctx context.Context, v *config.VM, name string) (enabled, known bool, err error) {
+	o, ok := guest.Lookup(v.OS)
+	if !ok {
+		return false, false, nil
+	}
+	var argv []string
+	switch o.Init {
+	case "systemd":
+		argv = []string{"systemctl", "is-enabled", "--quiet", name}
+	case "openrc":
+		argv = []string{"sh", "-c", `rc-update show | awk -v n="$1" '$1 == n { f = 1 } END { exit !f }'`, "stoat_enabled", name}
+	default:
+		return false, false, nil
+	}
+	_, _, code, err := sshx.Run(ctx, v, false, argv, nil)
+	if err != nil {
+		return false, false, err
+	}
+	return code == 0, true, nil
+}
+
 // renderVerb turns a guest-file template into a shell body: {name} becomes
 // "$1", and a template with no {name} gets "$@" appended. It repeats
 // internal/guest's own shTemplate, which is unexported. The two must stay
@@ -486,22 +559,68 @@ func joinDir(dir string, names []string) []string {
 	return out
 }
 
-// parseStat reads the tab separated rows stat -c produced. A name with a tab
-// in it is not representable here and stat itself has the same limit.
+// statFormat is parseStat's input: name, type, size, raw mode in hex, mtime
+// and owner. busybox stat supports every one of these.
+const statFormat = "%n\t%F\t%s\t%f\t%Y\t%U"
+
+// parseStat reads the tab separated rows stat -c statFormat produced. A name
+// with a tab in it is not representable here and stat itself has the same
+// limit.
 func parseStat(raw []byte) []wire.DirEntry {
 	var out []wire.DirEntry
 	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) != 5 {
+		if len(f) != 6 {
 			continue
 		}
 		size, _ := strconv.ParseInt(f[2], 10, 64)
 		mtime, _ := strconv.ParseInt(f[4], 10, 64)
 		out = append(out, wire.DirEntry{
-			Name: f[0], Type: f[1], Size: size, Mode: f[3], MTime: mtime,
+			Name: f[0], Type: f[1], Size: size, Mode: octalMode(f[3]), Owner: f[5], MTime: mtime,
 		})
 	}
 	return out
+}
+
+// octalMode turns stat's %f, the raw st_mode in hex with the file type bits
+// on top, into the permission bits an agent reads and passes to write_file.
+func octalMode(hex string) string {
+	m, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil {
+		return hex
+	}
+	return fmt.Sprintf("%04o", m&0o7777)
+}
+
+func baseName(p string) string {
+	return p[strings.LastIndex(p, "/")+1:]
+}
+
+// parentDir is the directory part of an absolute guest path.
+func parentDir(p string) string {
+	if i := strings.LastIndex(p, "/"); i > 0 {
+		return p[:i]
+	}
+	return "/"
+}
+
+// guestFailure classifies a guest command that ran and failed. The stderr
+// wording is coreutils' and busybox's shared strerror text. Exit 255 is ssh's
+// own failure, whose "Permission denied (publickey)" is not the caller's file
+// permissions.
+func guestFailure(vm string, code int, stderr []byte) error {
+	msg := strings.TrimSpace(string(stderr))
+	err := fmt.Errorf("%s: %s", vm, msg)
+	if code == 255 {
+		return err
+	}
+	switch {
+	case strings.Contains(msg, "No such file or directory"):
+		return wire.WithSentinel(err, core.ErrNotFound)
+	case strings.Contains(msg, "Permission denied"), strings.Contains(msg, "Operation not permitted"):
+		return wire.WithSentinel(err, wire.ErrAccessDenied)
+	}
+	return err
 }
 
 func parsePS(raw []byte) []wire.Process {

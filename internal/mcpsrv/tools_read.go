@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"regexp"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/capabilities"
@@ -101,13 +103,13 @@ func (s *srv) registerRead(server *mcp.Server) {
 		})
 
 	register(server, "list_recipes", classRead,
-		"List recipes stoat knows about, optionally filtered to the ones applicable to a guest OS or a backend. It reads the recipe directories only, and runs nothing in any VM. Read-only.",
-		func(ctx context.Context, in listRecipesIn) (wire.RecipeCatalog, error) {
+		"List recipes stoat knows about, optionally filtered to the ones applicable to a guest OS or a backend. Each entry has its params and outputs, and has_health says whether it declares a health check; the check script itself is in recipe_schema. It reads the recipe directories only, and runs nothing in any VM. Read-only.",
+		func(ctx context.Context, in listRecipesIn) (wire.RecipeBriefList, error) {
 			rs, err := core.Recipes(core.RecipeFilter{OS: in.OS, Backend: in.Backend})
 			if err != nil {
-				return wire.RecipeCatalog{}, err
+				return wire.RecipeBriefList{}, err
 			}
-			return wire.RecipeCatalog{Recipes: wire.FromRecipes(rs)}, nil
+			return wire.FromRecipeBriefs(rs), nil
 		})
 
 	register(server, "check_recipes", classRead,
@@ -124,7 +126,7 @@ func (s *srv) registerRead(server *mcp.Server) {
 		})
 
 	register(server, "logs", classRead,
-		"Tail one VM's log: its qemu console output by default, or its most recent recipe apply log. It is always scoped to one named VM, and there is no way to read stoat's own global log through this tool. The line count is capped at 2000. Read-only.",
+		"Tail one VM's log: its qemu console output by default, or its most recent recipe apply log. Terminal escape sequences and carriage returns are stripped from the lines. It is always scoped to one named VM, and there is no way to read stoat's own global log through this tool. The line count is capped at 2000. Read-only.",
 		func(ctx context.Context, in logsIn) (wire.LogTail, error) {
 			name, err := checkVMName(in.VM)
 			if err != nil {
@@ -241,6 +243,15 @@ func (s *srv) registerRead(server *mcp.Server) {
 		})
 }
 
+// termEscapeRE matches CSI sequences (colours, cursor moves) and OSC
+// sequences (window titles), which a serial console emits and an agent
+// cannot use.
+var termEscapeRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+
+func cleanLogLine(s string) string {
+	return strings.ReplaceAll(termEscapeRE.ReplaceAllString(s, ""), "\r", "")
+}
+
 // tailLines returns the last n lines of r. core.Logs streams the whole file,
 // and the tail comes back in one response, so clamping beats handing an
 // agent a payload it cannot read.
@@ -252,7 +263,7 @@ func tailLines(r io.Reader, n int) (wire.LogTail, error) {
 		if len(ring) == n {
 			ring = ring[1:]
 		}
-		ring = append(ring, sc.Text())
+		ring = append(ring, cleanLogLine(sc.Text()))
 	}
 	if err := sc.Err(); err != nil {
 		return wire.LogTail{}, err
