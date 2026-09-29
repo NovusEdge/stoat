@@ -1,9 +1,30 @@
 # Changelog
 
-## Unreleased
+## v0.7.0
+
+A usability pass for people and for agents, driven by two audits that used
+stoat against live VMs. The CLI `--json` contract version stays **3**: its
+changes are additive. Several MCP tool results changed shape, listed under
+Changed; each tool's output schema describes the new shape.
 
 ### Changed
 
+- `stoat up` waits until the VM answers ssh, and until its recipes' health
+  checks pass, when stdout is not a terminal or with `--json`. `--wait` opts in
+  at a terminal and `--no-wait` opts out. `stoat wait` shows elapsed time on a
+  terminal.
+- `stoat up` on a running VM and `stoat down` on a stopped VM exit 0 with
+  "already running" or "already stopped".
+- A usage error prints the error, the command's usage line and a pointer to
+  `--help`, instead of the whole root help.
+- One not-found message for every command: `no VM "x" (did you mean "y"?);
+  see stoat ls`. It no longer shows internal paths.
+- `stoat create` without a terminal on stdin, or with `--json`, records
+  `display = "vnc"`, so it no longer opens a QEMU window. The VNC endpoint is a
+  unix socket, never a network port.
+- `stoat logs` takes `--lines` (`-n` still works) and logs stoat's own output
+  at INFO. `STOAT_LOG_LEVEL=debug` restores the trace.
+- `stoat doctor` prints one line per check; `-q` prints only failures.
 - **MCP `write_file` now writes as the guest ssh user, not as root.** A file
   under the ssh user's home now belongs to that user. A path only root can
   write fails with `access_denied`. Pass `as_root=true` to write as root; it
@@ -21,9 +42,32 @@
 - MCP `update` works on a running VM and lists the fields that wait for the
   next start in `pending_restart`. It refuses an unknown recipe name with
   `not_found`.
+- MCP `wait` defaults to 300 seconds when `timeout_seconds` is omitted. It
+  waited 1 second.
+- Snapshots of a running VM are disk-only and crash-consistent. Restoring
+  needs a stopped VM.
 
 ### Added
 
+- `stoat completion bash|zsh|fish` completes commands, flags, VM names, image
+  ids and recipe names.
+- `stoat ssh <vm> <cmd...>` runs one command. `stoat logs -f` follows a log.
+  `stoat help <cmd>` and `stoat exec --help` show that command's help.
+- A new error code, `limit_reached`, with `needed_mb` and `available_mb`, for a
+  start the host's memory cannot fit.
+- A new error code, `cannot_reach`, for a guest command that failed because
+  ssh could not connect, as opposed to the command's own exit status. The CLI
+  says "`<vm>` is booting; run stoat wait `<vm>`", and MCP says "call wait
+  first".
+- MCP `exec` returns the output collected so far with `timed_out: true` when
+  it times out, and the guest ends the command with its own `timeout`.
+- MCP `list_snapshots` and `delete_snapshot`. Snapshot results carry `created`
+  (RFC 3339, UTC) and `size_bytes`; `created_display` and `size_display` stay
+  and are deprecated.
+- The VM result carries `shared_dir` and `shared_mount`, the shared directory
+  that `copy_to` and `copy_from` use.
+- MCP tool schemas list the allowed values of `until`, `mode`,
+  `agent_access`, `stream`, `action` and `which`.
 - MCP `job_wait` blocks until a background job exits, and returns its state,
   exit code, and the tail of stdout and stderr.
 - MCP `list_jobs` reports each job's state. MCP `write_file` takes `parents`.
@@ -37,6 +81,21 @@
 - A VM's `health` is no longer `ok` while a configured recipe is unapplied.
 - The MCP `create` description states the `mode` values and the ram, cpu and
   disk defaults.
+- `stoat snapshot` failed on every running VM, because QEMU refuses a full
+  snapshot while the shared directory is mounted. Snapshot sizes read `0 B`;
+  they show `-` when QEMU records none.
+- MCP guest tools called before sshd answered returned success with exit code
+  255. They answer `cannot_reach` now.
+- Input mistakes such as a bad `agent_access` answered `internal`; they answer
+  `usage`. An invalid `until` no longer names a Go field.
+- An unknown image id suggests the closest catalog id and `stoat images`.
+  `create --help` showed an image id that does not exist.
+- `stoat cp` repeated `scp:` in its errors. The TUI broke pane borders on tab
+  characters and cut off its help and footer; they wrap now, and the logo hides
+  on terminals under 30 rows.
+- Adding a recipe by URL at a terminal cloned the repository twice.
+- `create --help` shows the ram, cpu and disk defaults, and `stoat init`
+  writes the same disk default as `create`.
 
 ## v0.6.2
 
