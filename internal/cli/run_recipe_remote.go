@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -30,18 +31,18 @@ func runRecipeAdd(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	source, gitRef, isURL := recipes.ParseRef(a.Ref)
+	previewDir := ""
 	if isURL && !a.Yes {
 		if a.JSON || !terminal(stdin) || !terminal(stdout) {
 			_, code := confirm(a, stdin, stdout, stderr, "install this recipe; pass -y to confirm")
 			return code
 		}
-		m, tmp, previewErr := recipes.Preview(source, gitRef)
+		m, tmp, previewErr := recipes.Preview(source, gitRef, filepath.Dir(s.CachePath))
 		if previewErr != nil {
 			return a.fail(stdout, stderr, previewErr)
 		}
-		if removeErr := os.RemoveAll(tmp); removeErr != nil {
-			return a.fail(stdout, stderr, removeErr)
-		}
+		defer func() { _ = os.RemoveAll(tmp) }()
+		previewDir = tmp
 		fmt.Fprintf(stdout, "name: %s\n", m.Name)
 		fmt.Fprintf(stdout, "os: %s\n", strings.Join(m.OS, ", "))
 		fmt.Fprintf(stdout, "requires: %s\n", strings.Join(m.Requires, ", "))
@@ -52,7 +53,12 @@ func runRecipeAdd(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 			return code
 		}
 	}
-	e, err := recipes.Add(s, a.Ref, a.Force)
+	var e recipes.LockEntry
+	if previewDir != "" {
+		e, err = recipes.AddPreviewed(s, a.Ref, a.Force, previewDir)
+	} else {
+		e, err = recipes.Add(s, a.Ref, a.Force)
+	}
 	if err != nil {
 		return a.fail(stdout, stderr, recipeGitError(err, "add"))
 	}
