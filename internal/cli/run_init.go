@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/project"
 )
 
@@ -29,9 +30,9 @@ name = %q
 # Required. An id from "stoat images", or a path to your own image.
 image = "ubuntu-24.04"
 # Delete a line below to get the default.
-cpus = 4
-ram = 4096
-disk = "20G"
+cpus = %d
+ram = %d
+disk = %q
 # Recipe names. Applied on every "stoat up".
 recipes = []
 # Dirs to share with the VM, under /work. "." is this repo.
@@ -42,7 +43,7 @@ agent_access = "manage"
 # Recipe settings. Put secrets in .stoat/secrets.toml, and do not commit it.
 # [vms.dev.params.docker]
 # user = "dev"
-`, name, name)
+`, name, name, core.DefaultCPUs, core.DefaultRAM, core.DefaultDisk)
 }
 
 // runInit writes stoat.toml and gitignores the cache directory.

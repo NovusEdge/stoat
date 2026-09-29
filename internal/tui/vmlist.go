@@ -163,10 +163,10 @@ const (
 	listWidth       = 66
 	listVisibleRows = 6
 	listMinRows     = 2
-	// banner, pane frame, search line, status line, footer. The search and
-	// status lines are always-present slots (see viewList), so they cost a
-	// line whether or not either has anything to show.
-	listRowsHeadroom = 16
+	// pane frame, search line, status line, footer. The search and status
+	// lines are always-present slots (see viewList), so they cost a line
+	// whether or not either has anything to show.
+	listRowsHeadroom = 9
 )
 
 // newVMList builds the list component with stoat's styling: the component's
@@ -225,8 +225,8 @@ func (m model) selectedItem() (vmItem, bool) {
 // terminal, or the rows there actually are. bubbles/list pads its viewport
 // to whatever height it is given, so sizing it to the terminal alone left a
 // tall column of blank lines under three VMs.
-func listHeight(items, termHeight int, paginated bool) int {
-	n := listRows(termHeight)
+func listHeight(items, termHeight, footerExtra int, paginated bool) int {
+	n := listRows(termHeight, footerExtra)
 	if items < n {
 		n = items
 	}
@@ -254,12 +254,18 @@ func listHeight(items, termHeight int, paginated bool) int {
 // listRows is how many rows fit the terminal, so a tall window shows more
 // VMs instead of paginating early. Clamped at the bottom so a short terminal
 // still shows something rather than an empty pane.
-func listRows(height int) int {
+//
+// footerExtra is how many lines the wrapped footer takes beyond its first.
+func listRows(height, footerExtra int) int {
 	if height <= 0 {
 		return listVisibleRows
 	}
 	// Each row costs its own line plus the delegate's blank spacer.
-	n := (height - listRowsHeadroom) / 2
+	headroom := listRowsHeadroom + footerExtra
+	if showBanner(height) {
+		headroom += bannerRows
+	}
+	n := (height - headroom) / 2
 	if n < listMinRows {
 		return listMinRows
 	}
@@ -281,9 +287,10 @@ func (m *model) syncListHeight() {
 	}
 	// Pagination dots only earn their two lines when there is more than one
 	// page; otherwise they leave dead space at the bottom of the pane.
-	paginated := n > listRows(m.height)
+	extra := lipgloss.Height(renderFooter(listHelp{sshAvailable: true}, m.width, false)) - 1
+	paginated := n > listRows(m.height, extra)
 	m.list.SetShowPagination(paginated)
-	m.list.SetHeight(listHeight(n, m.height, paginated))
+	m.list.SetHeight(listHeight(n, m.height, extra, paginated))
 }
 
 // filterActive reports whether the filter input owns the keyboard. While it

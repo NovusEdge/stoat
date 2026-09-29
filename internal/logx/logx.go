@@ -29,11 +29,21 @@ var (
 	path   string
 )
 
+// level is INFO so the CLI's per-command trace, which includes the `stoat
+// logs` call that reads this file, stays out of it. STOAT_LOG_LEVEL=debug
+// brings it back.
+func level() log.Level {
+	if l, err := log.ParseLevel(os.Getenv("STOAT_LOG_LEVEL")); err == nil {
+		return l
+	}
+	return log.InfoLevel
+}
+
 func newLogger(w io.Writer) *log.Logger {
 	return log.NewWithOptions(w, log.Options{
 		ReportTimestamp: true,
 		TimeFormat:      time.Kitchen,
-		Level:           log.DebugLevel,
+		Level:           level(),
 	})
 }
 

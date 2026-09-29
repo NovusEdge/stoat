@@ -206,6 +206,9 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 	failedRequired := false
 	for _, c := range checks {
 		if c.OK {
+			if !a.Quiet {
+				fmt.Fprintf(stdout, "ok: %s: %s\n", c.Name, c.Detail)
+			}
 			continue
 		}
 		label := c.Name
@@ -222,7 +225,6 @@ func runDoctor(a *Args, stdout, stderr io.Writer) int {
 		}
 	}
 	if !failedRequired {
-		fmt.Fprintln(stdout, "ok")
 		return ExitOK
 	}
 	return ExitFail

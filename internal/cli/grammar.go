@@ -49,7 +49,7 @@ type grammar struct {
 	Clone  cloneCmd  `cmd:"" group:"vm" help:"copy a VM: overlay disk, fresh ssh port, no forwards"`
 
 	Exec    execCmd    `cmd:"" group:"access" help:"run a command in a VM; exits with the GUEST's status"`
-	SSH     sshCmd     `cmd:"" name:"ssh" group:"access" help:"ssh into a VM, replacing this process"`
+	SSH     sshCmd     `cmd:"" name:"ssh" group:"access" help:"ssh into a VM, or run a command over ssh; replaces this process"`
 	SSHCmd  sshCmdCmd  `cmd:"" name:"ssh-command" group:"access" help:"print the ssh argv instead of running it"`
 	CP      cpCmd      `cmd:"" name:"cp" group:"access" help:"copy a file in or out; one side is <vm>:<path>"`
 	Forward forwardCmd `cmd:"" group:"access" help:"show, set or clear host:guest port forwards"`
@@ -74,6 +74,7 @@ type grammar struct {
 	Screenshot screenshotCmd `cmd:"" group:"diag" help:"write the VM's screen to a PNG"`
 	Doctor     doctorCmd     `cmd:"" group:"diag" help:"check host prerequisites"`
 	Version    versionCmd    `cmd:"" group:"diag" help:"print the stoat version"`
+	Completion completionCmd `cmd:"" group:"diag" help:"print a shell completion script"`
 	Help       helpCmd       `cmd:"" group:"diag" help:"show this message"`
 }
 
@@ -130,7 +131,7 @@ type gceCmd struct {
 }
 
 type gceExtendCmd struct {
-	VM       string `arg:"" help:"vm name"`
+	VM       string `arg:"" complete:"vm" help:"vm name"`
 	Duration string `arg:"" help:"how far to move the soft deadline forward, from now (e.g. 4h)"`
 }
 
@@ -148,40 +149,47 @@ type initCmd struct {
 type imagesCmd struct{}
 type doctorCmd struct{}
 type capabilitiesCmd struct {
-	VM string `arg:"" optional:"" help:"vm name; omit for host scope"`
+	VM string `arg:"" optional:"" complete:"vm" help:"vm name; omit for host scope"`
 }
 type versionCmd struct{}
 
+type completionCmd struct {
+	Shell string `arg:"" enum:"bash,zsh,fish" help:"shell to generate the script for"`
+}
+
 type getCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM string `arg:"" complete:"vm" help:"vm name"`
 }
 
 type upCmd struct {
-	VM      string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
+	VM      string `arg:"" optional:"" complete:"vm" help:"vm name; omit at project scope for every declared VM"`
 	NoApply bool   `name:"no-apply" aliases:"no-provision" help:"start only; skip the automatic post-boot apply"`
 	Yes     bool   `short:"y" help:"start even when the host reports less free memory than the VM asks for"`
 }
 
 type downCmd struct {
-	VM string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
+	VM string `arg:"" optional:"" complete:"vm" help:"vm name; omit at project scope for every declared VM"`
 }
 
 type sshCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM string `arg:"" complete:"vm" help:"vm name"`
+	// Parse takes the run-a-command form before kong sees it, for the reason
+	// parseExec exists. The field is here so --help documents it.
+	Command []string `arg:"" optional:"" passthrough:"" help:"command to run instead of a login shell"`
 }
 
 type sshCmdCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM string `arg:"" complete:"vm" help:"vm name"`
 }
 
 type rmCmd struct {
-	VM  string `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
+	VM  string `arg:"" optional:"" complete:"vm" help:"vm name; omit at project scope for every declared VM"`
 	Yes bool   `short:"y" help:"skip the delete confirmation"`
 }
 
 type createCmd struct {
 	Name    string `arg:"" help:"new vm name"`
-	Image   string `required:"" help:"catalog image id, or a path to your own image"`
+	Image   string `required:"" complete:"image" help:"catalog image id, or a path to your own image"`
 	OS      string `help:"override the guest OS inferred from a byo image's filename (see stoat guest ls)"`
 	Backend string `help:"override the backend inferred from a byo image's filename (see stoat guest ls)"`
 	// Mode carries no enum tag. kong applies an enum to a plain string only
@@ -189,14 +197,14 @@ type createCmd struct {
 	// change what an omitted --mode means: core picks the mode from the
 	// image, which "" is what tells it to do.
 	Mode string `help:"live or disk (alpine iso only; every other image has one mode)"`
-	RAM  int    `help:"memory in MB"`
+	RAM  int    `help:"memory in MB (default ${default_ram})"`
 	// name:"cpus" is required: kong's camelCase splitter reads "CPUs" as
 	// "CP"+"Us" and would otherwise name the flag --cp-us.
-	CPUs            int      `name:"cpus" help:"vcpu count"`
-	Disk            string   `help:"disk size, absolute only (8G, 512M)"`
+	CPUs            int      `name:"cpus" help:"vcpu count (default ${default_cpus})"`
+	Disk            string   `help:"disk size, absolute only (default ${default_disk})"`
 	Share           string   `help:"host directory to expose in the guest"`
 	ConsolePassword string   `help:"console password; \"random\" generates one"`
-	Recipes         []string `help:"recipe names to record on the VM"`
+	Recipes         []string `complete:"recipe" help:"recipe names to record on the VM"`
 	Set             []string `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Secret          []string `help:"set a secret recipe param"`
 	// AllowExec is a hidden alias of --agent-access, and both are pointers
@@ -261,13 +269,13 @@ Examples:
 
 // updateCmd's pointers are the point: see the type comment on grammar.
 type updateCmd struct {
-	VM      string    `arg:"" help:"vm name"`
+	VM      string    `arg:"" complete:"vm" help:"vm name"`
 	RAM     *int      `help:"memory in MB"`
 	CPUs    *int      `name:"cpus" help:"vcpu count"`
 	SSHPort *int      `name:"ssh-port" help:"host port forwarded to the guest's sshd"`
 	Disk    *string   `help:"disk size, absolute only and grow-only (16G)"`
 	Share   *string   `help:"host directory to expose in the guest; empty clears it"`
-	Recipes *[]string `help:"replace the recipe list; empty clears it"`
+	Recipes *[]string `complete:"recipe" help:"replace the recipe list; empty clears it"`
 	Set     []string  `help:"set a recipe param: <recipe>.<param>=<value>"`
 	Unset   []string  `help:"clear a recipe param back to its manifest default"`
 	Secret  []string  `help:"set a secret recipe param"`
@@ -279,12 +287,12 @@ type updateCmd struct {
 }
 
 type cloneCmd struct {
-	Source string `arg:"" help:"vm to copy"`
+	Source string `arg:"" complete:"vm" help:"vm to copy"`
 	Name   string `arg:"" help:"new vm name"`
 }
 
 type execCmd struct {
-	VM string `arg:"" help:"vm name"`
+	VM string `arg:"" complete:"vm" help:"vm name"`
 	// passthrough on the POSITIONAL, never on the command. See grammar's
 	// type comment.
 	Command []string `arg:"" passthrough:"" help:"the guest command, verbatim"`
@@ -315,17 +323,17 @@ type cpCmd struct {
 }
 
 type forwardCmd struct {
-	VM    string   `arg:"" help:"vm name"`
+	VM    string   `arg:"" complete:"vm" help:"vm name"`
 	Pairs []string `arg:"" optional:"" help:"HOST:GUEST port pairs; none prints the current ones"`
 	Clear bool     `help:"remove every forward from this VM"`
 }
 
 type pullCmd struct {
-	ID string `arg:"" help:"catalog image id (see stoat images)"`
+	ID string `arg:"" complete:"image" help:"catalog image id (see stoat images)"`
 }
 
 type snapshotCmd struct {
-	VM      string `arg:"" help:"vm name"`
+	VM      string `arg:"" complete:"vm" help:"vm name"`
 	Tag     string `arg:"" optional:"" help:"snapshot name; omit to list"`
 	Restore bool   `xor:"action" help:"roll the VM back to <tag>, discarding everything since"`
 	Delete  bool   `xor:"action" help:"remove <tag>"`
@@ -340,15 +348,15 @@ type pruneCmd struct {
 }
 
 type waitCmd struct {
-	VM      string        `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
+	VM      string        `arg:"" optional:"" complete:"vm" help:"vm name; omit at project scope for every declared VM"`
 	Until   string        `enum:"reachable,applied,stopped" default:"reachable" help:"state to wait for"`
 	Healthy bool          `help:"wait for every applied recipe's health check to pass"`
 	Timeout time.Duration `default:"2m" help:"give up after this long"`
 }
 
 type applyCmd struct {
-	VM     string   `arg:"" optional:"" help:"vm name; omit at project scope for every declared VM"`
-	Only   []string `help:"subset of the VM's own recipes"`
+	VM     string   `arg:"" optional:"" complete:"vm" help:"vm name; omit at project scope for every declared VM"`
+	Only   []string `complete:"recipe" help:"subset of the VM's own recipes"`
 	DryRun bool     `name:"dry-run" help:"print what would run without running it"`
 }
 
@@ -358,7 +366,7 @@ type recipesCmd struct {
 }
 
 type checkRecipesCmd struct {
-	Names   []string `arg:"" help:"recipe names to check"`
+	Names   []string `arg:"" complete:"recipe" help:"recipe names to check"`
 	OS      string   `required:"" help:"guest OS to check against"`
 	Backend string   `help:"backend to check against"`
 }
@@ -379,13 +387,13 @@ type recipeCmd struct {
 type recipeListCmd struct{}
 
 type recipeNewCmd struct {
-	Name    string `arg:"" help:"recipe name"`
+	Name    string `arg:"" complete:"recipe" help:"recipe name"`
 	OS      string `help:"target OS for a new shell recipe"`
 	Backend string `help:"\"cloudinit\" for a cloud-init fragment; shell otherwise"`
 }
 
 type recipeShowCmd struct {
-	Name string `arg:"" help:"recipe name"`
+	Name string `arg:"" complete:"recipe" help:"recipe name"`
 }
 
 type recipeAddCmd struct {
@@ -404,12 +412,12 @@ type recipeSyncCmd struct {
 }
 
 type recipeUpdateCmd struct {
-	Names  []string `arg:"" optional:"" help:"recipe names; omit for every remote recipe"`
+	Names  []string `arg:"" optional:"" complete:"recipe" help:"recipe names; omit for every remote recipe"`
 	Global bool     `help:"use the home scope even inside a project"`
 }
 
 type recipeRmCmd struct {
-	Name   string `arg:"" help:"recipe name"`
+	Name   string `arg:"" complete:"recipe" help:"recipe name"`
 	Yes    bool   `short:"y" help:"skip the delete confirmation"`
 	Global bool   `help:"use the home scope even inside a project"`
 	Force  bool   `help:"remove it even while a VM lists it"`
@@ -421,7 +429,7 @@ type recipeSearchCmd struct {
 }
 
 type recipeRefreshCmd struct {
-	Names []string `arg:"" optional:"" help:"bundled recipe names; omit for every bundled recipe"`
+	Names []string `arg:"" optional:"" complete:"recipe" help:"bundled recipe names; omit for every bundled recipe"`
 }
 
 type recipeGuestCmd struct {
@@ -436,13 +444,19 @@ type guestShowCmd struct {
 }
 
 type logsCmd struct {
-	VM    string `arg:"" optional:"" help:"vm name; omit to tail stoat's own log"`
-	N     int    `short:"n" default:"50" help:"number of lines to tail"`
-	Which string `enum:"console,apply" default:"console" help:"which log, with a vm name"`
+	VM     string `arg:"" optional:"" complete:"vm" help:"vm name; omit to tail stoat's own log"`
+	Lines  int    `short:"n" default:"50" help:"number of lines to show"`
+	Follow bool   `short:"f" help:"keep printing new lines until interrupted"`
+	Which  string `enum:"console,apply" default:"console" help:"which log, with a vm name"`
+
+	// N is the pre-rename spelling. It cannot be an alias of Lines: kong reads
+	// a one-character alias as a short flag, which -n already is. Drop it
+	// after one release.
+	N int `name:"n" hidden:""`
 }
 
 type screenshotCmd struct {
-	VM  string `arg:"" help:"vm name"`
+	VM  string `arg:"" complete:"vm" help:"vm name"`
 	Out string `short:"o" help:"where to write the png; default <vm dir>/screenshots/<timestamp>.png"`
 }
 
@@ -460,13 +474,19 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 	case "capabilities":
 		a.VM = g.Capabilities.VM
 
+	case "completion":
+		a.Sub = g.Completion.Shell
+
 	case "help":
 		// The `help` COMMAND has to render the text itself; only the -h/--help
 		// FLAG path gets it from kong's own buffer.
 		a.Help = helpText()
 
-	case "get", "down", "ssh", "ssh-command":
+	case "get", "down", "ssh-command":
 		a.VM = g.vmFor(path)
+
+	case "ssh":
+		a.VM, a.Command = g.SSH.VM, trimTerminator(g.SSH.Command)
 
 	case "up":
 		a.VM = g.Up.VM
@@ -717,7 +737,10 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 
 	case "logs":
 		l := g.Logs
-		a.VM, a.N, a.Which = l.VM, l.N, core.Which(l.Which)
+		a.VM, a.N, a.Which, a.Follow = l.VM, l.Lines, core.Which(l.Which), l.Follow
+		if l.N != 0 {
+			a.N = l.N
+		}
 
 	case "screenshot":
 		a.VM, a.Out = g.Screenshot.VM, g.Screenshot.Out
@@ -762,6 +785,15 @@ func (g *grammar) toArgs(path string) (*Args, error) {
 		return nil, usageError("unknown subcommand " + path)
 	}
 	return a, nil
+}
+
+// trimTerminator drops a leading "--", which anyone in the habit of writing
+// `ssh host -- cmd` will type.
+func trimTerminator(cmd []string) []string {
+	if len(cmd) > 0 && cmd[0] == "--" {
+		return cmd[1:]
+	}
+	return cmd
 }
 
 // trimList splits each element on commas and trims what is left.
@@ -856,8 +888,6 @@ func (g *grammar) vmFor(path string) string {
 		return g.Up.VM
 	case "down":
 		return g.Down.VM
-	case "ssh":
-		return g.SSH.VM
 	case "ssh-command":
 		return g.SSHCmd.VM
 	}

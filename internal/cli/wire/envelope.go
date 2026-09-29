@@ -163,6 +163,8 @@ func (e *Emitter) write(env envelope) error {
 //	stoat exec --json work ls -la   -> stoat
 //	stoat exec work ls --json       -> the guest, untouched
 //
+// ssh follows the same rule for its optional command.
+//
 // argv here excludes the program name (argv[0], "stoat" itself), matching
 // cli.Parse's own convention.
 func SplitJSONFlag(argv []string) (jsonMode bool, rest []string) {
@@ -172,11 +174,16 @@ func SplitJSONFlag(argv []string) (jsonMode bool, rest []string) {
 	// --json included. For every command, the first -- also ends this scan:
 	// everything after it is positional data for the command.
 	stop := len(argv)
-	if len(argv) > 0 && argv[0] == "exec" {
+	if len(argv) > 0 && (argv[0] == "exec" || argv[0] == "ssh") {
 		stop = 2
 		if stop > len(argv) {
 			stop = len(argv)
 		}
+	}
+	// Completion words are data, --json among them: `stoat --js<TAB>` has to
+	// reach the completer as typed.
+	if len(argv) > 0 && argv[0] == "__complete" {
+		stop = 1
 	}
 
 	rest = make([]string, 0, len(argv))

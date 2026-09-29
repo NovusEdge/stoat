@@ -1,10 +1,11 @@
 package tui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // keySpace is what tea.KeyMsg.String() returns for the space bar. Bubbletea
@@ -34,26 +35,55 @@ var footerHelp = func() help.Model {
 }()
 
 // renderFooter draws the footer for km at the given terminal width. It uses
-// the short form unless showAll is set (the "?" toggle). The short form is
-// a single line outside every pane. The full form gets its own pane, so it
-// reads as a separate help panel, not an extension of the screen above it.
+// the short form unless showAll is set (the "?" toggle). The short form sits
+// outside every pane; the full form gets its own pane, so it reads as a
+// separate help panel, not an extension of the screen above it. Either form
+// wraps onto more lines when the bindings do not fit, because a cut-off
+// binding is one the user cannot discover.
 func renderFooter(km help.KeyMap, width int, showAll bool) string {
 	h := footerHelp
-	h.ShowAll = showAll
 	if showAll {
-		inner := width - paneFrame()
-		if inner < 1 {
-			inner = 1
-		}
-		h.SetWidth(inner)
-		return pane("", h.View(km), width)
+		inner := max(width-paneFrame(), 1)
+		return pane("", wrapFull(h, km.FullHelp(), inner), width)
 	}
-	h.SetWidth(width)
-	// help.Model can only cut where an ellipsis still fits. Once its running
-	// total passes the width, it gives up and appends every remaining
-	// binding. The short footer can then come back WIDER than the terminal,
-	// wrap, and push the whole screen up. Truncate it here instead.
-	return ansi.Truncate(h.View(km), width, "…")
+	return wrapShort(h, km.ShortHelp(), width)
+}
+
+// wrapShort packs bindings into lines no wider than width. help.Model cannot
+// do this itself: once its running total passes the width it drops the rest,
+// or on a very narrow terminal appends everything and overflows.
+func wrapShort(h help.Model, bindings []key.Binding, width int) string {
+	var lines []string
+	var row []key.Binding
+	for _, b := range bindings {
+		if len(row) > 0 && lipgloss.Width(h.ShortHelpView(append(row[:len(row):len(row)], b))) > width {
+			lines = append(lines, h.ShortHelpView(row))
+			row = nil
+		}
+		row = append(row, b)
+	}
+	if len(row) > 0 {
+		lines = append(lines, h.ShortHelpView(row))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapFull is wrapShort for the "?" panel: whole columns move to the next row
+// rather than being cut.
+func wrapFull(h help.Model, groups [][]key.Binding, width int) string {
+	var lines []string
+	var row [][]key.Binding
+	for _, g := range groups {
+		if len(row) > 0 && lipgloss.Width(h.FullHelpView(append(row[:len(row):len(row)], g))) > width {
+			lines = append(lines, h.FullHelpView(row))
+			row = nil
+		}
+		row = append(row, g)
+	}
+	if len(row) > 0 {
+		lines = append(lines, h.FullHelpView(row))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // styledKey builds a key.Binding whose help text is pre-rendered in style,
