@@ -626,3 +626,55 @@ func TestParseCPResolvesLocalToAbsolutePath(t *testing.T) {
 		t.Errorf("flag form: Local = %q, want %q", got.Local, want)
 	}
 }
+
+func TestUsageErrorPrintsCommandUsageNotRootHelp(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Main([]string{"get"}, "test", nil, &out, &errOut); code != ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, ExitUsage)
+	}
+	got := errOut.String()
+	for _, want := range []string{"Usage: stoat get <vm>", `Run "stoat get --help"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stderr missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Run local QEMU VMs") || strings.Count(got, "\n") > 4 {
+		t.Errorf("stderr carries the root help:\n%s", got)
+	}
+}
+
+func TestHelpForExec(t *testing.T) {
+	for _, argv := range [][]string{{"exec", "--help"}, {"exec", "-h"}, {"help", "exec"}} {
+		var out, errOut bytes.Buffer
+		if code := Main(argv, "test", nil, &out, &errOut); code != ExitOK {
+			t.Fatalf("%v: exit = %d, stderr %q", argv, code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "Usage: stoat exec <vm> <command>") {
+			t.Errorf("%v: stdout is not exec's help:\n%s", argv, out.String())
+		}
+	}
+}
+
+func TestHelpForNestedCommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Main([]string{"help", "recipe", "new"}, "test", nil, &out, &errOut); code != ExitOK {
+		t.Fatalf("exit = %d, stderr %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Usage: stoat recipe new") {
+		t.Errorf("stdout is not recipe new's help:\n%s", out.String())
+	}
+}
+
+func TestMissingVMNamesTheFix(t *testing.T) {
+	cliRoot(t)
+	if err := (&config.VM{Name: "qol1", Mode: "live", RAM: 1024, CPUs: 1, SSHPort: 2200}).Save(); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Main([]string{"ssh", "qol"}, "test", nil, &out, &errOut); code != ExitFail {
+		t.Fatalf("exit = %d, want %d", code, ExitFail)
+	}
+	if got, want := errOut.String(), "stoat: ssh: no VM \"qol\" (did you mean \"qol1\"?); see stoat ls\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+}

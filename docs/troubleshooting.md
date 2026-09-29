@@ -239,15 +239,17 @@ deletes its directory and persistent disk. A project command without a VM
 name uses declaration order; use the key or global name when repairing one
 entry.
 
-## `stoat up` says `no VM ... in stoat.toml or ~/.stoat/vms`
+## `stoat up` says `no VM "<name>"; see stoat ls`
 
 Project scope is active only when `stoat.toml` exists in the current
 directory. Stoat does not walk up to a parent directory. A bare VM argument
 must be a declaration key, a declared `name`, or a global VM that exists in
-the data root.
+the data root. When a similar name exists, the message adds
+`(did you mean "<other>"?)`.
 
-**Fix:** change to the directory containing the intended `stoat.toml`, use the
-declaration key, or create a global VM with `stoat create --global ...`.
+**Fix:** run `stoat ls` to see the VM names. Change to the directory
+containing the intended `stoat.toml`, use the declaration key, or create a
+global VM with `stoat create --global ...`.
 
 ## `stoat recipe lock` says the lock is out of date
 

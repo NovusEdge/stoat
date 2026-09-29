@@ -89,7 +89,7 @@ func doCopy(ctx context.Context, name, localPath, remotePath string, toRemote bo
 	if errors.As(err, &ee) && stderr.Len() > 0 {
 		// scp ran and failed: its own stderr (no such file, permission
 		// denied, ...) is a far better error than a bare exit status.
-		return fmt.Errorf("%s: scp: %s", name, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("%s: %s", name, strings.TrimPrefix(strings.TrimSpace(stderr.String()), "scp: "))
 	}
 	// scp could not be started at all (not installed, not executable).
 	return fmt.Errorf("%s: scp: %w", name, err)

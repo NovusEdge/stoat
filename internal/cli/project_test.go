@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/novusedge/stoat/internal/config"
@@ -51,9 +50,9 @@ func TestBareKeyResolvesToTheGlobalName(t *testing.T) {
 	}
 }
 
-// An argument that is neither a key nor an existing VM names both places it
-// was looked for.
-func TestUnknownBareArgumentNamesBothScopes(t *testing.T) {
+// An argument that is neither a key nor an existing VM gets the same
+// not-found error as everywhere else.
+func TestUnknownBareArgumentIsNoVM(t *testing.T) {
 	projectRoot(t, twoVMs)
 	code, objs := runJSON(t, "get", "db")
 	if code != ExitFail {
@@ -61,7 +60,7 @@ func TestUnknownBareArgumentNamesBothScopes(t *testing.T) {
 	}
 	errObj, _ := result(t, objs)["error"].(map[string]any)
 	msg, _ := errObj["message"].(string)
-	if !strings.Contains(msg, `no VM "db" in stoat.toml or ~/.stoat/vms`) {
+	if msg != `no VM "db"; see stoat ls` {
 		t.Errorf("message = %q", msg)
 	}
 }

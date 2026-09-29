@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/novusedge/stoat/internal/coreerr"
 )
 
 // v2Dir is where a VM whose provider is not the local hypervisor lives.
@@ -42,6 +44,25 @@ func Exists(name string) bool {
 		}
 	}
 	return false
+}
+
+// NoVM is the not-found error for name. Load returns it for a missing
+// vm.toml so no caller prints the record's on-disk path.
+func NoVM(name string) error {
+	return &coreerr.NoVMError{Name: name, Known: knownNames}
+}
+
+func knownNames() []string {
+	var names []string
+	entries, _ := os.ReadDir(Root())
+	for _, e := range entries {
+		if e.IsDir() && !reserved(e.Name()) && e.Name() != v2Dir {
+			if _, err := os.Stat(filepath.Join(Root(), e.Name(), "vm.toml")); err == nil {
+				names = append(names, e.Name())
+			}
+		}
+	}
+	return append(names, v2Names()...)
 }
 
 // v2Names lists the VM directories under v2, or nothing when it is absent.

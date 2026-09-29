@@ -186,6 +186,13 @@ unavailable fork and continuation proposals. Discovery does not mutate a VM.
 | `snapshot`, `restore`, `forward`, `wait`, `prune` | Manage disk snapshots, port forwards, state waits, and stale files. `prune` is dry-run unless `apply=true`. |
 | `project_status`, `project_up`, `project_down`, `project_apply`, `project_wait` | Inspect or operate on every VM declared by the server working directory's `stoat.toml`, in declaration order. A failure stops the run and later VMs are marked skipped. |
 
+`start` has no force option. When the VM needs more memory than the host has
+free, or the RAM limit refuses it, the tool returns `limit_reached` with
+`needed_mb` and `available_mb`. Lower `ram_mb` with `update`, or ask a person
+to start the VM with `stoat up -y`. Inputs with a fixed set of values
+(`until`, `mode`, `agent_access`, `stream`, `action`, `which`) list them as
+`enum` in the tool schema.
+
 `wait` accepts `reachable`, `applied`, or `stopped`; `healthy=true` waits for
 the applied recipes' health checks. Its `timeout_seconds` is a count of
 seconds capped at 600, not a duration string.

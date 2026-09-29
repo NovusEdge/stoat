@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -165,7 +164,7 @@ func DownloadImage(ctx context.Context, id string, progress func(done, total int
 		}
 	}
 	if !found {
-		return DownloadResult{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+		return DownloadResult{}, noImage(id, nil)
 	}
 
 	// Checked up front so an already-cancelled ctx costs no network at all.

@@ -96,7 +96,7 @@ func TestCapabilitiesMCPMissingTargetIsNotFound(t *testing.T) {
 			message.WriteString(text.Text)
 		}
 	}
-	if !strings.Contains(message.String(), "missing") || !strings.Contains(strings.ToLower(message.String()), "not found") {
+	if !strings.Contains(message.String(), `no VM "missing"`) {
 		t.Errorf("missing target MCP error = %q, want existing not-found message", message.String())
 	}
 }

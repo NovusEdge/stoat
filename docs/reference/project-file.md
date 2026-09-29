@@ -143,4 +143,4 @@ the stop request can return while QEMU is still exiting.
 | share outside project | `stoat.toml: vms.dev.shares: "../secrets" is outside the project` |
 | immutable change | `dev: image changed (ubuntu-24 → debian-12); run stoat rm dev and stoat up` |
 | new at project scope | `a stoat.toml is present; declare the VM there and run stoat up, or pass --global` |
-| unknown key in a bare argument | `no VM "db" in stoat.toml or ~/.stoat/vms` |
+| unknown key in a bare argument | `no VM "db"; see stoat ls` |

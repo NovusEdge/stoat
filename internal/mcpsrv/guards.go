@@ -32,6 +32,12 @@ var (
 // grants an arbitrary host directory into a guest read-write.
 var forbiddenPatchKeys = []string{"share", "image", "base", "iso", "console_password"}
 
+// badInput marks an error as the caller's mistake, so it reaches the client
+// as "usage" and not "internal".
+func badInput(format string, args ...any) error {
+	return wire.WithSentinel(fmt.Errorf(format, args...), wire.ErrBadInput)
+}
+
 // checkVMName keeps an operation inside the data root: the name becomes a
 // directory there.
 func checkVMName(name string) (string, error) {
@@ -43,13 +49,13 @@ func checkVMName(name string) (string, error) {
 
 func checkImageID(image string) (string, error) {
 	if strings.TrimSpace(image) == "" {
-		return "", fmt.Errorf("image id is required")
+		return "", badInput("image id is required")
 	}
 	if strings.ContainsAny(image, `/\`) || strings.HasPrefix(image, "~") {
-		return "", fmt.Errorf("image %q looks like a path; only catalog image ids are accepted, run list_images to see them", image)
+		return "", badInput("image %q looks like a path; only catalog image ids are accepted, run list_images to see them", image)
 	}
 	if !imageIDRE.MatchString(image) {
-		return "", fmt.Errorf("image id %q is not a valid catalog id", image)
+		return "", badInput("image id %q is not a valid catalog id", image)
 	}
 	return image, nil
 }
@@ -71,10 +77,10 @@ func sharedDir(vm string) (string, error) {
 // "work".
 func checkHostPath(path, vm string) (string, error) {
 	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("path is required")
+		return "", badInput("path is required")
 	}
 	if strings.ContainsRune(path, 0) {
-		return "", fmt.Errorf("path contains a null byte")
+		return "", badInput("path contains a null byte")
 	}
 	sandbox, err := sharedDir(vm)
 	if err != nil {
@@ -107,7 +113,7 @@ func resolveExisting(p string) (string, error) {
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return "", fmt.Errorf("path %q cannot be resolved", p)
+			return "", badInput("path %q cannot be resolved", p)
 		}
 		rest = filepath.Join(filepath.Base(cur), rest)
 		cur = parent
@@ -121,10 +127,10 @@ func resolveExisting(p string) (string, error) {
 func checkFlagFree(values []string, what string) error {
 	for _, v := range values {
 		if strings.TrimSpace(v) == "" {
-			return fmt.Errorf("%s contains an empty value", what)
+			return badInput("%s contains an empty value", what)
 		}
 		if strings.HasPrefix(v, "-") {
-			return fmt.Errorf("%s value %q may not start with a dash", what, v)
+			return badInput("%s value %q may not start with a dash", what, v)
 		}
 	}
 	return nil
@@ -150,18 +156,18 @@ func stripForbidden(patch map[string]any) map[string]any {
 // "feature/topic".
 func checkIndexName(ref string) (string, string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", "", fmt.Errorf("recipe name is required")
+		return "", "", badInput("recipe name is required")
 	}
 	name, gitRef, hasRef := strings.Cut(ref, "@")
 	if strings.Contains(gitRef, "@") {
-		return "", "", fmt.Errorf("invalid recipe name %q: at most one @ref", ref)
+		return "", "", badInput("invalid recipe name %q: at most one @ref", ref)
 	}
 	if !indexNameRE.MatchString(name) {
-		return "", "", fmt.Errorf("invalid recipe name %q: index names only, not a URL, and it must match %s", ref, indexNameRE)
+		return "", "", badInput("invalid recipe name %q: index names only, not a URL, and it must match %s", ref, indexNameRE)
 	}
 	if hasRef {
 		if err := checkGitRef(gitRef); err != nil {
-			return "", "", fmt.Errorf("invalid ref %q for recipe %q: %w", gitRef, name, err)
+			return "", "", badInput("invalid ref %q for recipe %q: %w", gitRef, name, err)
 		}
 	}
 	return name, gitRef, nil
@@ -172,20 +178,20 @@ func checkIndexName(ref string) (string, string, error) {
 // git itself refuses.
 func checkGitRef(ref string) error {
 	if !gitRefRE.MatchString(ref) {
-		return fmt.Errorf("must match %s", gitRefRE)
+		return badInput("must match %s", gitRefRE)
 	}
 	if strings.Contains(ref, "..") {
-		return fmt.Errorf("contains a traversal")
+		return badInput("contains a traversal")
 	}
 	for _, part := range strings.Split(ref, "/") {
 		if part == "" {
-			return fmt.Errorf("has an empty path component")
+			return badInput("has an empty path component")
 		}
 		if strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".") {
-			return fmt.Errorf("component %q starts or ends with a dot", part)
+			return badInput("component %q starts or ends with a dot", part)
 		}
 		if strings.HasSuffix(part, ".lock") {
-			return fmt.Errorf("component %q ends with .lock", part)
+			return badInput("component %q ends with .lock", part)
 		}
 	}
 	return nil
@@ -193,7 +199,7 @@ func checkGitRef(ref string) error {
 
 func checkParamName(name string) (string, error) {
 	if !paramNameRE.MatchString(name) {
-		return "", fmt.Errorf("invalid param name %q: must match %s", name, paramNameRE)
+		return "", badInput("invalid param name %q: must match %s", name, paramNameRE)
 	}
 	return name, nil
 }
@@ -219,7 +225,7 @@ func checkGuestPath(path string) (string, error) {
 // boundary.
 func checkSvcName(name string) (string, error) {
 	if !svcNameRE.MatchString(name) {
-		return "", fmt.Errorf("invalid service name %q: must match %s", name, svcNameRE)
+		return "", badInput("invalid service name %q: must match %s", name, svcNameRE)
 	}
 	return name, nil
 }
@@ -230,7 +236,7 @@ func checkSvcName(name string) (string, error) {
 // a variable name.
 func checkEnvName(name string) (string, error) {
 	if !envNameRE.MatchString(name) {
-		return "", fmt.Errorf("invalid env name %q: must match %s", name, envNameRE)
+		return "", badInput("invalid env name %q: must match %s", name, envNameRE)
 	}
 	return name, nil
 }

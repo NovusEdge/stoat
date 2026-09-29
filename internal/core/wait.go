@@ -42,6 +42,14 @@ func Untils() []Until {
 	return []Until{UntilReachable, UntilApplied, UntilStopped, UntilHealthy}
 }
 
+func joinUntils() string {
+	names := make([]string, 0, len(Untils()))
+	for _, u := range Untils() {
+		names = append(names, string(u))
+	}
+	return strings.Join(names, ", ")
+}
+
 // Valid reports whether u is one of Untils(). Wait calls it before it loads
 // the VM, so a typo fails with the reason rather than with "not found".
 func (u Until) Valid() bool { return slices.Contains(Untils(), u) }
@@ -79,7 +87,7 @@ const InstallTimeout = 15 * time.Minute
 // instead of re-polling Get in a loop.
 func Wait(ctx context.Context, name string, until Until) error {
 	if !until.Valid() {
-		return fmt.Errorf("%w: unknown Until %q", ErrInvalidSpec, until)
+		return fmt.Errorf("%w: until must be one of %s, not %q", ErrInvalidSpec, joinUntils(), until)
 	}
 	v, err := load(name)
 	if err != nil {

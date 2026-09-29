@@ -304,6 +304,9 @@ func (v *VM) Save() error {
 
 // Load reads one VM by name.
 func Load(name string) (*VM, error) {
+	if !Exists(name) {
+		return nil, NoVM(name)
+	}
 	dir := DirFor(name)
 	path := filepath.Join(dir, "vm.toml")
 	// Absent allow_exec means true; the seed survives the decode, a written

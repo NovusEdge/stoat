@@ -10,6 +10,7 @@ import (
 
 	"github.com/novusedge/stoat/internal/cloudinit"
 	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/coreerr"
 	"github.com/novusedge/stoat/internal/iso"
 )
 
@@ -199,7 +200,17 @@ func resolveImage(spec string, remote bool) (image, error) {
 		backend, osName := iso.Infer(f)
 		return image{abs: abs, rel: f, backend: backend, osName: osName}, nil
 	}
-	return image{}, fmt.Errorf("%w: no catalog entry or local image called %q", ErrNotFound, spec)
+	return image{}, noImage(spec, files)
+}
+
+// noImage builds the not-found error, suggesting from catalog ids and any
+// local image files.
+func noImage(spec string, local []string) error {
+	known := append([]string{}, local...)
+	for _, e := range iso.Catalog() {
+		known = append(known, e.ID)
+	}
+	return &coreerr.NoImageError{Spec: spec, Known: known}
 }
 
 // apply folds a Spec's BYO overrides onto what the file itself declared,

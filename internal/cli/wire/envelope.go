@@ -57,6 +57,9 @@ type ErrorInfo struct {
 	// constants, so an agent branches on a field instead of parsing prose
 	// out of Message.
 	Reason string `json:"reason,omitempty"`
+	// NeededMB and AvailableMB are present on limit_reached for a RAM refusal.
+	NeededMB    int `json:"needed_mb,omitempty"`
+	AvailableMB int `json:"available_mb,omitempty"`
 }
 
 // WithSubject sets Subject and Kind and returns e, for a one-line call at

@@ -102,6 +102,7 @@ types can be added without a version bump.
 | `message` | string | always, human-readable, not machine-parseable |
 | `subject` | string | reserved, see below |
 | `kind` | string | reserved, see below |
+| `needed_mb`, `available_mb` | number | `limit_reached` for a RAM refusal only |
 
 Branch on `code`. Never parse `message`.
 
@@ -149,6 +150,7 @@ bump the contract version. Do not write code that requires them.
 | `confirmation_required` | a destructive command was run without `-y` |
 | `access_denied` | MCP guest access was refused because the VM's `agent_access` level is too low |
 | `rate_limited` | MCP refused a tool call because its per-tool or shared rate bucket was exhausted |
+| `limit_reached` | a configured limit or the host's free memory refuses the operation; a RAM refusal adds `needed_mb` and `available_mb` |
 | `lock_out_of_date` | a project declaration is not pinned in `stoat.lock` |
 | `host_unsupported` | this host has no qualified native VM runtime yet |
 | `capability_unavailable` | the VM's provider does not support this operation |

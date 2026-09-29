@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/novusedge/stoat/internal/capabilities"
 	"github.com/novusedge/stoat/internal/project"
 )
@@ -57,7 +55,7 @@ func resolveScope(a *Args) error {
 		return nil
 	}
 	if _, err := coreGet(a.VM); err != nil {
-		return fmt.Errorf("no VM %q in %s or ~/.stoat/vms", a.VM, project.FileName)
+		return err
 	}
 	return nil
 }

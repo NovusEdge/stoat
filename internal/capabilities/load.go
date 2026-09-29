@@ -20,7 +20,7 @@ func LoadTarget(name string) (Target, error) {
 	path := filepath.Join(config.Root(), name, "vm.toml")
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return Target{}, fmt.Errorf("%w: %s", coreerr.ErrNotFound, name)
+			return Target{}, config.NoVM(name)
 		}
 		return Target{}, fmt.Errorf("%w: %s: %v", coreerr.ErrBroken, name, err)
 	}
