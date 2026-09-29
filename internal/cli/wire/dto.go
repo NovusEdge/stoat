@@ -745,6 +745,28 @@ type VMList struct {
 	VMs []VM `json:"vms"`
 }
 
+// VMResult is the data of up, down, create and the other commands that report
+// one VM's new state.
+type VMResult struct {
+	VM VM `json:"vm"`
+}
+
+// VMDeleted is `rm` data. Fields stay in key order: these results used to be
+// maps, which encode sorted, and consumers may compare the bytes.
+type VMDeleted struct {
+	Deleted bool   `json:"deleted"`
+	Name    string `json:"name"`
+}
+
+// VMCloned is `clone` data. ForwardsCopied is always false: the dropped port
+// forwards are the surprise in this command. Fields stay in key order, as in
+// VMDeleted.
+type VMCloned struct {
+	ForwardsCopied bool   `json:"forwards_copied"`
+	Source         string `json:"source"`
+	VM             VM     `json:"vm"`
+}
+
 // ImageList is the list_images tool's output.
 type ImageList struct {
 	Images []Image `json:"images"`

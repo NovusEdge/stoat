@@ -91,7 +91,7 @@ func TestAddFromURLReturnsNameAndPinsTheRequestedTag(t *testing.T) {
 		"recipe.toml": "schema = 3\nname = \"demo\"\nscript = \"install.sh\"\n\n[params.channel]\ntype = \"enum\"\nvalues = [\"stable\", \"test\"]\ndefault = \"stable\"\n",
 		"install.sh":  "#!/bin/sh\nset -e\necho v2\n",
 	}, "v1.2")
-	preview, previewDir, err := Preview(src, "v1.2")
+	preview, previewDir, err := Preview(src, "v1.2", "")
 	if previewDir != "" {
 		defer func() {
 			if err := os.RemoveAll(previewDir); err != nil {
@@ -130,6 +130,40 @@ func TestAddFromURLReturnsNameAndPinsTheRequestedTag(t *testing.T) {
 	path, scope, ok, err := ResolvePath("demo")
 	if err != nil || !ok || scope != "global" || filepath.Base(path) != "demo" {
 		t.Fatalf("ResolvePath(demo) = %q, %q, %v, %v", path, scope, ok, err)
+	}
+}
+
+// The source is deleted after Preview, so a second clone in AddPreviewed
+// would fail. It must install the checkout the user was shown.
+func TestAddPreviewedInstallsThePreviewCheckoutWithoutCloningAgain(t *testing.T) {
+	remoteRoot(t)
+	src := namedRecipeRepo(t, "demo", "demo")
+	s, err := ScopeFor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, previewDir, err := Preview(src, "", filepath.Dir(s.CachePath))
+	if err != nil {
+		t.Fatalf("Preview() = %v", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(previewDir); err != nil {
+			t.Errorf("remove Preview temp dir: %v", err)
+		}
+	}()
+	if err := os.RemoveAll(src); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := AddPreviewed(s, src, false, previewDir)
+	if err != nil {
+		t.Fatalf("AddPreviewed() = %v", err)
+	}
+	if entry.Name != "demo" || len(entry.Commit) != 40 {
+		t.Fatalf("entry = %+v, want demo pinned to the previewed commit", entry)
+	}
+	if _, _, ok, err := ResolvePath("demo"); err != nil || !ok {
+		t.Fatalf("ResolvePath(demo) = %v, %v; want the installed recipe", ok, err)
 	}
 }
 

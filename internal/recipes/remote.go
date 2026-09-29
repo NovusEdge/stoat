@@ -88,10 +88,19 @@ func resolveSource(in string) (name, source, gitRef string, err error) {
 	return entry.Name, entry.Source, gitRef, nil
 }
 
-// Preview clones a source into a temporary directory and parses its manifest.
-// The returned directory remains available to the caller until it removes it.
-func Preview(source, gitRef string) (Manifest, string, error) {
-	tmp, err := os.MkdirTemp("", "stoat-preview-")
+// Preview clones a source into a temporary directory under parent and parses
+// its manifest. An empty parent means the system temp directory. The returned
+// directory remains available to the caller until it removes it. Pass it to
+// AddPreviewed to install the checkout that was shown; the parent must then be
+// on the same filesystem as the scope's cache, so the checkout can be renamed
+// into place.
+func Preview(source, gitRef, parent string) (Manifest, string, error) {
+	if parent != "" {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return Manifest{}, "", err
+		}
+	}
+	tmp, err := os.MkdirTemp(parent, ".stoat-preview-")
 	if err != nil {
 		return Manifest{}, "", err
 	}
@@ -147,6 +156,18 @@ func refLabel(source string) string {
 // Add stages a validated checkout and all related files before replacing the
 // active cache, lock, declaration, and gitignore entries.
 func Add(s Scope, in string, force bool) (LockEntry, error) {
+	return add(s, in, force, "")
+}
+
+// AddPreviewed is Add for a checkout that Preview already cloned: it moves
+// that checkout into the stage instead of cloning the source again, so the
+// tree the user confirmed is the tree that gets installed. previewDir is the
+// directory Preview returned; the caller still removes it.
+func AddPreviewed(s Scope, in string, force bool, previewDir string) (LockEntry, error) {
+	return add(s, in, force, filepath.Join(previewDir, "recipe"))
+}
+
+func add(s Scope, in string, force bool, checkout string) (LockEntry, error) {
 	name, source, gitRef, err := resolveSource(in)
 	if err != nil {
 		return LockEntry{}, err
@@ -174,7 +195,11 @@ func Add(s Scope, in string, force bool) (LockEntry, error) {
 	if err != nil {
 		return LockEntry{}, err
 	}
-	if err := gitx.Clone(source, gitRef, stageCache); err != nil {
+	if checkout != "" {
+		if err := os.Rename(checkout, stageCache); err != nil {
+			return LockEntry{}, err
+		}
+	} else if err := gitx.Clone(source, gitRef, stageCache); err != nil {
 		return LockEntry{}, refError(source, gitRef, err)
 	}
 	if err := ValidateTree(stageCache, name); err != nil {

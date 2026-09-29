@@ -224,7 +224,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 				if started, err := core.Get(a.VM); err == nil {
 					v = started
 				}
-				return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+				return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
 			}
 			a.prose(stdout).Warn("install did not finish")
 			a.prose(stdout).Hint("see: stoat logs %s", a.VM)
@@ -242,7 +242,7 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 		if started, err := core.Get(a.VM); err == nil {
 			v = started
 		}
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+		return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
 	}
 	return code
 }
@@ -427,7 +427,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		if stopped, err := core.Get(a.VM); err == nil {
 			v = stopped
 		}
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+		return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
 	}
 	fmt.Fprintf(stdout, "%s stopped\n", a.VM)
 	return ExitOK
@@ -465,7 +465,7 @@ func runRM(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"name": a.VM, "deleted": true})
+		return a.ok(stdout, wire.VMDeleted{Name: a.VM, Deleted: true})
 	}
 	fmt.Fprintf(stdout, "%s deleted\n", a.VM)
 	return ExitOK
@@ -494,7 +494,7 @@ func runCreate(a *Args, stdout, stderr io.Writer) int {
 		return ExitFail
 	}
 	if a.JSON {
-		return a.ok(stdout, map[string]any{"vm": wire.FromVM(v, core.GraphicalSession())})
+		return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
 	}
 	if !a.Quiet {
 		fmt.Fprintf(stdout, "created %s (%s, %s, ssh port %d)\n", v.Name, v.OS, v.Mode, v.SSHPort)
@@ -515,12 +515,9 @@ func runClone(a *Args, stdout, stderr io.Writer) int {
 		return a.fail(stdout, stderr, err)
 	}
 	if a.JSON {
-		// forwards_copied is emitted rather than left for the consumer to
-		// notice: the dropped forwards are the surprise in this command.
-		return a.ok(stdout, map[string]any{
-			"vm":              wire.FromVM(v, core.GraphicalSession()),
-			"source":          a.VM,
-			"forwards_copied": false,
+		return a.ok(stdout, wire.VMCloned{
+			VM:     wire.FromVM(v, core.GraphicalSession()),
+			Source: a.VM,
 		})
 	}
 	if !a.Quiet {
