@@ -183,6 +183,15 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	if v.State == core.StateBroken {
 		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
+	if v.State == core.StateRunning {
+		if !a.Quiet {
+			fmt.Fprintf(stdout, "%s is already running\n", a.VM)
+		}
+		if code := waitAfterUp(a, stdout, stderr); code != ExitOK {
+			return code
+		}
+		return a.upResult(stdout, v)
+	}
 	warnDeadline(stderr, v)
 	a.prose(stdout).Step("starting %s...", a.VM)
 	start := core.Start
@@ -236,15 +245,51 @@ func runUp(a *Args, stdout, stderr io.Writer) int {
 	}
 
 	code := afterStart(a, v, stdout, stderr)
+	if code == ExitOK {
+		code = waitAfterUp(a, stdout, stderr)
+	}
 	if a.JSON && code == ExitOK {
 		// Re-read again: afterStart is what runs the boot-time apply, and
 		// state is the field this result must be authoritative about.
 		if started, err := core.Get(a.VM); err == nil {
 			v = started
 		}
-		return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
+		return a.upResult(stdout, v)
 	}
 	return code
+}
+
+func (a *Args) upResult(stdout io.Writer, v core.VM) int {
+	return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
+}
+
+// waitsAfterUp reports whether up blocks until the guest is usable. A script
+// or agent reading stdout has nothing else to poll with, so it waits unless it
+// passed --no-wait; a person at a terminal opts in with --wait.
+func (a *Args) waitsAfterUp(stdout io.Writer) bool {
+	if a.NoWait {
+		return false
+	}
+	return a.Wait || a.JSON || !terminal(stdout)
+}
+
+// waitAfterUp blocks until a.VM answers ssh, and until its applied recipes'
+// health checks pass unless --no-apply skipped them.
+func waitAfterUp(a *Args, stdout, stderr io.Writer) int {
+	if !a.waitsAfterUp(stdout) {
+		return ExitOK
+	}
+	until, budget := core.UntilReachable, sshx.WaitTimeout
+	if cfg, err := config.Load(a.VM); err == nil && !a.NoApply {
+		until, budget = core.UntilHealthy, budget+core.HealthTimeout(cfg)
+	}
+	a.prose(stdout).Step("waiting for %s to answer ssh...", a.VM)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	if err := core.Wait(ctx, a.VM, until); err != nil {
+		return a.fail(stdout, stderr, err)
+	}
+	return ExitOK
 }
 
 // afterStart runs v's pending recipes once it answers ssh, the same
@@ -348,7 +393,8 @@ func reconcileOne(a *Args, key string, stdout io.Writer) error {
 func upOne(a *Args, name string, stdout, stderr io.Writer) error {
 	sub := *a
 	sub.VM = name
-	sub.JSON = false // the fan-out emits the single terminal result line
+	sub.Wait = a.Wait || a.JSON // --json implies a wait, and the next line clears it
+	sub.JSON = false            // the fan-out emits the single terminal result line
 	if code := runUp(&sub, stdout, stderr); code != ExitOK {
 		return fmt.Errorf("%s: up failed", name)
 	}
@@ -408,7 +454,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		return a.failMsg(stdout, stderr, core.ErrBroken, v.Error)
 	}
 	if v.State != core.StateRunning {
-		return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
+		return a.alreadyStopped(stdout, v)
 	}
 	warnDeadline(stderr, v)
 	if !a.Quiet {
@@ -419,7 +465,7 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		// prints. This handles the race: a VM stopped between the check and
 		// this call.
 		if errors.Is(err, core.ErrNotRunning) {
-			return a.failMsg(stdout, stderr, core.ErrNotRunning, a.VM+" is not running")
+			return a.alreadyStopped(stdout, v)
 		}
 		return a.fail(stdout, stderr, err)
 	}
@@ -430,6 +476,16 @@ func runDown(a *Args, stdout, stderr io.Writer) int {
 		return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
 	}
 	fmt.Fprintf(stdout, "%s stopped\n", a.VM)
+	return ExitOK
+}
+
+func (a *Args) alreadyStopped(stdout io.Writer, v core.VM) int {
+	if a.JSON {
+		return a.ok(stdout, wire.VMResult{VM: wire.FromVM(v, core.GraphicalSession())})
+	}
+	if !a.Quiet {
+		fmt.Fprintf(stdout, "%s is already stopped\n", a.VM)
+	}
 	return ExitOK
 }
 

@@ -22,13 +22,13 @@ type ExecResult struct {
 
 // Exec runs a command inside a VM and returns its output and exit status.
 //
-// Exit status 255 is ambiguous. ssh itself reports 255 for its own errors
-// (refused connection, failed handshake, unreachable host), and a remote
-// command that exits 255 arrives through the same channel. Exec does not
-// resolve that ambiguity. It removes the common causes instead: it refuses
-// a VM that is not running, and sshx.Args sets ConnectTimeout=5 and
-// BatchMode=yes so a wedged network fails fast and a password prompt never
-// blocks forever. When 255 does surface, ssh's own message is on Stderr.
+// Exit status 255 is ambiguous. ssh itself reports 255 for its own errors,
+// and a remote command that exits 255 arrives through the same channel.
+// sshx.Run tells them apart by ssh's stderr: a refused connection, failed
+// handshake or unreachable host returns sshx.ErrUnreachable, and any other
+// 255 is the command's own status. Exec also refuses a VM that is not
+// running, and sshx.Args sets ConnectTimeout=5 and BatchMode=yes so a
+// wedged network fails fast and a password prompt never blocks forever.
 //
 // cmd is an argv, not a shell string. sshx.Run quotes each element for the
 // guest's shell before sending it. ssh concatenates its trailing arguments
@@ -73,6 +73,9 @@ func Exec(ctx context.Context, name string, cmd []string) (ExecResult, error) {
 		// going to finish.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return res, fmt.Errorf("%s: %w", name, err)
+		}
+		if errors.Is(err, sshx.ErrUnreachable) {
+			return ExecResult{}, err
 		}
 		// ssh could not be started at all (not installed, not executable).
 		// Nothing ran in the guest, so there is no exit status to report.

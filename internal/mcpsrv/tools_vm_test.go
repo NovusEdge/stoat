@@ -12,7 +12,8 @@ func TestWaitClampsTimeout(t *testing.T) {
 		in   int
 		want time.Duration
 	}{
-		{0, time.Second},
+		{0, defaultWaitSecs * time.Second},
+		{1, time.Second},
 		{120, 120 * time.Second},
 		{9000, maxWaitSecs * time.Second},
 	} {

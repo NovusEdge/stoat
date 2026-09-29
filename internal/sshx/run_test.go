@@ -2,6 +2,7 @@ package sshx_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -87,6 +88,27 @@ func TestRunDoesNotEscalateForRoot(t *testing.T) {
 	want := strings.Join(sshx.Args(sshx.LocalEndpoint(v), sshx.Quote([]string{"id"})), " ")
 	if got := calls.Calls()[0].Remote; got != want {
 		t.Fatalf("ssh argv = %q, want %q (root must not escalate)", got, want)
+	}
+}
+
+func TestRunReportsAConnectionFailureAsUnreachable(t *testing.T) {
+	testutil.FakeSSH(t, `echo "kex_exchange_identification: Connection closed by remote host" >&2; exit 255`)
+	v := &config.VM{Name: "work", SSHPort: 2222, SSHUser: "root"}
+	_, errb, code, err := sshx.Run(context.Background(), v, false, []string{"true"}, nil)
+	if !errors.Is(err, sshx.ErrUnreachable) {
+		t.Fatalf("err = %v, want ErrUnreachable", err)
+	}
+	if code != 255 || !strings.Contains(string(errb), "kex_exchange") {
+		t.Fatalf("code=%d stderr=%q", code, errb)
+	}
+}
+
+func TestRunKeepsARemote255AsData(t *testing.T) {
+	testutil.FakeSSH(t, `echo "my tool failed" >&2; exit 255`)
+	v := &config.VM{Name: "work", SSHPort: 2222, SSHUser: "root"}
+	_, _, code, err := sshx.Run(context.Background(), v, false, []string{"tool"}, nil)
+	if err != nil || code != 255 {
+		t.Fatalf("code=%d err=%v; a command's own 255 is a result", code, err)
 	}
 }
 

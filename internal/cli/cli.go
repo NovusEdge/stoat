@@ -66,6 +66,11 @@ type Args struct {
 	// behavior existed.
 	NoApply bool
 
+	// Wait and NoWait belong to "up". Neither set means wait unless stdout is
+	// a terminal; see waitsAfterUp.
+	Wait   bool
+	NoWait bool
+
 	// DryRun belongs to "apply": it prints the plan (core.PlanApply) and runs
 	// nothing.
 	DryRun bool

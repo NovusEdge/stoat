@@ -195,7 +195,16 @@ to start the VM with `stoat up -y`. Inputs with a fixed set of values
 
 `wait` accepts `reachable`, `applied`, or `stopped`; `healthy=true` waits for
 the applied recipes' health checks. Its `timeout_seconds` is a count of
-seconds capped at 600, not a duration string.
+seconds, not a duration string. It defaults to 300 and is capped at 600.
+
+Call `wait` after `start` or `create` and before any guest tool. sshd needs
+tens of seconds to come up, and a guest tool called earlier fails with
+`cannot_reach` and the text `call wait first`.
+
+`exec` stops after `timeout_seconds` (default 60, cap 600). It then returns the
+output collected so far with `timed_out: true` and a message that points at
+`exec_bg`. The guest kills the command through its own `timeout` when the guest
+has one.
 
 ### Guest tools
 

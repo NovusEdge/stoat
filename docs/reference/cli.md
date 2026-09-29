@@ -255,6 +255,10 @@ display: no qemu window. the screen is on /home/user/.stoat/work/vnc.sock
 
 `-q`/`--quiet`/`--no-interactive` suppresses the `starting <name>...` line; the final result line always prints.
 
+`--wait` blocks until sshd answers, and then until the health checks of the applied recipes pass. It is the default when stdout is not a terminal and under `--json`, so a script that runs `stoat up` can run `stoat exec` next. `--no-wait` turns it off. On a terminal, `up` still returns as soon as the VM starts unless you pass `--wait`. `--no-apply` also skips the health checks.
+
+`up` on a VM that is already running prints `<name> is already running` and exits 0. It still honors `--wait`, so it can wait for a VM that is booting.
+
 At project scope, `<name>` is optional. A named VM is reconciled against its `stoat.toml` declaration before it starts, the same change `stoat update` would make. With no name, every declared VM is reconciled, then started, in declaration order; a VM that fails to reconcile or start stops the run, and every later VM is reported skipped.
 
 On a Debian cloud VM, `shares` do not mount; see [the project file](project-file.md#shares).
@@ -292,11 +296,11 @@ display: no qemu window. the screen is on /home/user/.stoat/alpinedisk/vnc.sock
 
 The check looks at `DISPLAY`, `WAYLAND_DISPLAY` and `$XDG_RUNTIME_DIR/wayland-0` (GTK's own fallback when `WAYLAND_DISPLAY` is unset). `STOAT_GRAPHICAL=0` forces the VNC path and `STOAT_GRAPHICAL=1` forces the window, for every command and for the TUI. Use `0` when a host has a session QEMU cannot draw on, which surfaces as `OpenGL is not supported by display backend 'gtk'`; see [troubleshooting](../troubleshooting.md).
 
-**Exit codes:** 0 on success; 1 if the VM can't be loaded or fails to start (including a broken VM, which is refused before the `starting...` line is even printed).
+**Exit codes:** 0 on success or when the VM is already running; 1 if the VM can't be loaded, fails to start, or does not become reachable within the wait (including a broken VM, which is refused before the `starting...` line is even printed).
 
 ## `stoat down <name>`
 
-Stops a VM gracefully. Refuses if the VM isn't already running.
+Stops a VM gracefully. On a VM that is already stopped it prints `<name> is already stopped` and exits 0.
 
 ```
 $ stoat down work
@@ -313,7 +317,7 @@ The stop request can return while QEMU is still exiting. Use
 Under project fan-out, add the VM name to keep the JSON output machine-readable;
 no-name `down --json` can include progress prose before its result.
 
-**Exit codes:** 0 on success; 1 if the VM can't be loaded, is broken, isn't running, or fails to stop.
+**Exit codes:** 0 on success or when the VM is already stopped; 1 if the VM can't be loaded, is broken, or fails to stop.
 
 ## `stoat wait <name>`
 
@@ -325,6 +329,8 @@ work reached reachable (1240ms)
 ```
 
 `--until` is one of `reachable` (sshd answering on the VM's forwarded port, default), `applied` (the most recent recipe run finished), or `stopped` (qemu no longer running). `--healthy` waits for reachability and then every applied recipe's declared health check; it cannot be combined with an explicit `--until`. `--timeout` (default `2m`) is a Go duration (`30s`, `5m`).
+
+On a terminal, `wait` rewrites one line on stderr each second with the elapsed time. Nothing is printed to stderr when it is not a terminal, under `--json`, or with `-q`.
 
 A request that cannot ever be satisfied fails immediately rather than waiting out the timeout: `--until applied` on a VM with no recipes configured, or `--until reachable` on a VM that isn't running.
 
@@ -378,6 +384,8 @@ $ stoat exec work echo --json
 The second line prints `--json` in the guest, it does not turn on stoat's JSON mode; `--json` only has that effect when it appears *before* the VM name (`stoat --json exec work ...` or `stoat exec --json work ...`). An optional leading `--` before the command is accepted and dropped, but not required.
 
 Because the guest's status and stoat's own share one exit-code range, a guest command exiting 2 is indistinguishable, on the shell, from a stoat usage error; that trade is accepted rather than remapped, the same one `ssh` itself makes. stoat's own failures (no such VM, not running) still exit 1 and print to stderr, distinguishable from guest output.
+
+A VM that is running but whose sshd does not answer yet, which is the first 30 to 60 seconds after `up --no-wait`, fails with `<name> is booting; run stoat wait <name>` and error code `cannot_reach`. `stoat cp` and `stoat ssh` fail the same way. A command that itself exits 255 is not affected: stoat tells the two apart by ssh's own error text.
 
 **Exit codes:** without `--json`, the guest's own exit status (0-255) on success, or 1 for a stoat-side failure before the command ever ran. With `--json`, the process always exits 0 once the guest command ran at all; the guest's real status is in the JSON `exit_code` field instead, so a consumer parsing the line can always tell a guest failure from a stoat one. `--json` still exits 1 if stoat itself failed to run the command.
 

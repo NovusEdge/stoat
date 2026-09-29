@@ -25,7 +25,12 @@ func runWait(a *Args, stdout, stderr io.Writer) int {
 	defer cancel()
 
 	start := time.Now()
+	stopProgress := func() {}
+	if !a.JSON && !a.Quiet && terminal(stderr) {
+		stopProgress = waitProgress(stderr, a.VM, a.Until, start)
+	}
 	err := core.Wait(ctx, a.VM, a.Until)
+	stopProgress()
 	waited := time.Since(start)
 
 	if err != nil {
@@ -43,4 +48,26 @@ func runWait(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s reached %s (%dms)\n", a.VM, a.Until, waited.Milliseconds())
 	}
 	return ExitOK
+}
+
+// waitProgress rewrites one stderr line every second so a wait that takes
+// most of a minute does not look hung. The returned func stops it and clears
+// the line before any result prints.
+func waitProgress(w io.Writer, vm string, until core.Until, start time.Time) (stop func()) {
+	done, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			fmt.Fprintf(w, "\rwaiting for %s to be %s... %ds", vm, until, int(time.Since(start).Seconds()))
+			select {
+			case <-done:
+				fmt.Fprint(w, "\r\033[K")
+				return
+			case <-t.C:
+			}
+		}
+	}()
+	return func() { close(done); <-stopped }
 }

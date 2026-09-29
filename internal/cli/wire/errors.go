@@ -11,6 +11,7 @@ import (
 	"github.com/novusedge/stoat/internal/iso"
 	"github.com/novusedge/stoat/internal/qemu"
 	"github.com/novusedge/stoat/internal/recipes"
+	"github.com/novusedge/stoat/internal/sshx"
 )
 
 // Code is a stable, machine-readable error code. Codes are only ever ADDED:
@@ -168,6 +169,7 @@ var codeTable = []struct {
 	{CodeImmutableField, core.ErrImmutableField},
 	{CodeDiskShrink, core.ErrDiskShrink},
 	{CodeCannotReach, core.ErrCannotReach},
+	{CodeCannotReach, sshx.ErrUnreachable},
 	{CodeUnknownLog, core.ErrUnknownWhich},
 	{CodeTimeout, context.DeadlineExceeded},
 	{CodeCanceled, context.Canceled},

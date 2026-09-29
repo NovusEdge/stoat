@@ -100,7 +100,7 @@ func TestJSONEnvelopeEveryCommand(t *testing.T) {
 		{name: "mcp doctor", argv: []string{"mcp", "doctor"}, ok: true, exit: ExitOK},
 
 		{name: "up unknown", argv: []string{"up", "nope"}, code: wire.CodeNotFound, exit: ExitFail},
-		{name: "down stopped", argv: []string{"down", "work"}, code: wire.CodeNotRunning, exit: ExitFail},
+		{name: "down stopped", argv: []string{"down", "work"}, ok: true, exit: ExitOK},
 		// --json never prompts: rm without -y is an error, not a question.
 		{name: "rm no -y", argv: []string{"rm", "work"}, code: wire.CodeConfirmationRequired, exit: ExitFail},
 		{name: "unknown subcommand", argv: []string{"frobnicate"}, code: wire.CodeUsage, exit: ExitUsage},

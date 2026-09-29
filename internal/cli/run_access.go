@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,16 @@ import (
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
+// failGuest is fail for a command that talks to the guest. core refuses a VM
+// that is not running before it dials, so a connection that still fails means
+// sshd is not up yet.
+func (a *Args) failGuest(stdout, stderr io.Writer, err error) int {
+	if errors.Is(err, sshx.ErrUnreachable) {
+		return a.failMsg(stdout, stderr, sshx.ErrUnreachable, a.VM+" is booting; run stoat wait "+a.VM)
+	}
+	return a.fail(stdout, stderr, err)
+}
+
 // runCopy moves one file between host and guest. Direction was already
 // decided by Parse, from which side carried the "<vm>:" prefix.
 func runCopy(a *Args, stdout, stderr io.Writer) int {
@@ -28,7 +39,7 @@ func runCopy(a *Args, stdout, stderr io.Writer) int {
 		err = core.CopyFrom(context.Background(), a.VM, a.Remote, a.Local)
 	}
 	if err != nil {
-		return a.fail(stdout, stderr, err)
+		return a.failGuest(stdout, stderr, err)
 	}
 	if a.JSON {
 		direction := "from_guest"
@@ -64,7 +75,7 @@ func runExec(a *Args, stdout, stderr io.Writer) int {
 	// limit nobody asked for.
 	res, err := core.Exec(context.Background(), a.VM, a.Command)
 	if err != nil {
-		return a.fail(stdout, stderr, err)
+		return a.failGuest(stdout, stderr, err)
 	}
 	if a.JSON {
 		// Under --json the process exits 0 whenever the command RAN, whatever it
@@ -104,6 +115,13 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
+	}
+	// syscall.Exec below leaves no chance to explain a refused connection, so
+	// a running VM whose sshd does not answer is caught here.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := core.Wait(ctx, a.VM, core.UntilReachable); errors.Is(err, context.DeadlineExceeded) {
+		return a.failMsg(stdout, stderr, sshx.ErrUnreachable, a.VM+" is booting; run stoat wait "+a.VM)
 	}
 	path, err := exec.LookPath("ssh")
 	if err != nil {

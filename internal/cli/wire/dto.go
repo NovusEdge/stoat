@@ -934,6 +934,11 @@ type CommandResult struct {
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
 	ExitCode int    `json:"exit_code"`
+	// TimedOut is set by exec when the deadline cut the command off; Stdout
+	// and Stderr then hold what arrived before it, and ExitCode is not the
+	// command's.
+	TimedOut bool   `json:"timed_out,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 // CopyResult is the copy_to and copy_from tools' output.
