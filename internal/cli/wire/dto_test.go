@@ -19,6 +19,30 @@ func TestVMGolden(t *testing.T) {
 	}
 }
 
+// up, down, create, rm and clone emitted map literals before these structs
+// existed. The maps encode with sorted keys, so the structs must produce the
+// same bytes.
+func TestVMResultShapesMatchTheMapsTheyReplaced(t *testing.T) {
+	vm := FromVM(sampleVM(), true)
+	cases := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"VMResult", VMResult{VM: vm}, map[string]any{"vm": vm}},
+		{"VMDeleted", VMDeleted{Name: "work", Deleted: true}, map[string]any{"name": "work", "deleted": true}},
+		{"VMCloned", VMCloned{VM: vm, Source: "src"}, map[string]any{"vm": vm, "source": "src", "forwards_copied": false}},
+	}
+	for _, tc := range cases {
+		if got, want := marshal(t, tc.got), marshal(t, tc.want); got != want {
+			t.Errorf("%s:\ngot  %s\nwant %s", tc.name, got, want)
+		}
+	}
+	if got, want := marshal(t, VMDeleted{Name: "work", Deleted: true}), `{"deleted":true,"name":"work"}`; got != want {
+		t.Errorf("VMDeleted = %s, want %s", got, want)
+	}
+}
+
 // display names the surface, never the socket. The socket is an absolute host
 // path and those do not reach the wire; a rendered attach command would only
 // embed the same path behind a friendlier name.
