@@ -228,7 +228,8 @@ Image       {"id":"alpine-virt","os":"alpine","variant":"virt",
              "downloaded":true,"bytes":62914560,"bytes_exact":true,"byo":false}
 
 Snapshot    {"tag":"clean","vm_state":false,"size_bytes":0,
-             "created":"2026-08-04T12:00:00Z"}
+             "created":"2026-08-04T12:00:00Z","size_display":"0 B",
+             "created_display":"2026-08-04 12:00:00"}
 
 Check       {"name":"qemu-img","ok":false,"detail":"not found",
              "fix":["sudo","pacman","-S","qemu-img"],"optional":false}
@@ -358,6 +359,9 @@ below it. An explicitly stored `allow_exec = true` maps to `exec`. An explicit
 `false` value or an absent key maps to `manage`. For compatibility, an absent
 key still appears as `allow_exec:true` in the VM DTO. MCP permissions must use
 `agent_access`; direct `stoat exec` and `stoat cp` commands do not enforce it.
+
+`Snapshot.size_display` and `created_display` are deprecated. They are opaque
+strings in the host's local time. Use `size_bytes` and `created` instead.
 
 `Snapshot.created` is RFC 3339 in UTC. `Snapshot.size_bytes` is the size of the
 saved memory state. It is 0 for a disk-only snapshot, and `stoat` takes only
@@ -636,8 +640,8 @@ The `default_from` addition to `RecipeParam` is the same kind of change: a
 new optional field on an existing object, absent unless a param declares it.
 The contract stays 3.
 
-`Snapshot` lost `size_display` and `created_display`, which the contract already
-declared opaque, and gained `size_bytes` and `created`. `VM` gained `shared_dir`
+`Snapshot` gained `size_bytes` and `created`, and deprecated `size_display` and
+`created_display`, which stay. `VM` gained `shared_dir`
 and `shared_mount`. The MCP server gained `list_snapshots` and `delete_snapshot`.
 The contract stays 3.
 

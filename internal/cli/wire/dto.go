@@ -2,6 +2,7 @@ package wire
 
 import (
 	"encoding/base64"
+	"fmt"
 	"sort"
 	"time"
 	"unicode/utf8"
@@ -321,20 +322,39 @@ func FromDownloadResult(r core.DownloadResult) DownloadResult {
 
 // Snapshot is core.Snapshot for the wire. Created is RFC 3339 in UTC.
 // SizeBytes is the saved memory state and is 0 for a disk-only snapshot.
+// SizeDisplay and CreatedDisplay are the deprecated pre-contract-3 fields,
+// kept so existing readers do not break; they are opaque (§6).
 type Snapshot struct {
-	Tag       string `json:"tag"`
-	VMState   bool   `json:"vm_state"`
-	SizeBytes int64  `json:"size_bytes"`
-	Created   string `json:"created"`
+	Tag            string `json:"tag"`
+	VMState        bool   `json:"vm_state"`
+	SizeBytes      int64  `json:"size_bytes"`
+	Created        string `json:"created"`
+	SizeDisplay    string `json:"size_display"`
+	CreatedDisplay string `json:"created_display"`
 }
 
 func FromSnapshot(s core.Snapshot) Snapshot {
 	return Snapshot{
-		Tag:       s.Tag,
-		VMState:   s.VMState,
-		SizeBytes: s.SizeBytes,
-		Created:   s.Created.UTC().Format(time.RFC3339),
+		Tag:            s.Tag,
+		VMState:        s.VMState,
+		SizeBytes:      s.SizeBytes,
+		Created:        s.Created.UTC().Format(time.RFC3339),
+		SizeDisplay:    sizeDisplay(s.SizeBytes),
+		CreatedDisplay: s.Created.Local().Format("2006-01-02 15:04:05"),
 	}
+}
+
+func sizeDisplay(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit && exp < 4; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.0f %ciB", float64(n)/float64(div), "KMGTP"[exp])
 }
 
 func FromSnapshots(ss []core.Snapshot) []Snapshot {

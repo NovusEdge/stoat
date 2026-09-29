@@ -112,7 +112,7 @@ func TestSnapshotGolden(t *testing.T) {
 	at := time.Date(2026, 8, 4, 14, 0, 0, 0, time.FixedZone("CEST", 2*3600))
 	s := core.Snapshot{Tag: "clean", SizeBytes: 1 << 20, Created: at}
 	got := marshal(t, FromSnapshot(s))
-	want := `{"tag":"clean","vm_state":false,"size_bytes":1048576,"created":"2026-08-04T12:00:00Z"}`
+	want := `{"tag":"clean","vm_state":false,"size_bytes":1048576,"created":"2026-08-04T12:00:00Z","size_display":"1 MiB","created_display":"` + at.Local().Format("2006-01-02 15:04:05") + `"}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
