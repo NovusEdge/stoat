@@ -127,7 +127,7 @@ func argsFor(name string) map[string]any {
 		return map[string]any{"vm": "dev", "name": "sshd"}
 	case "exec", "exec_bg":
 		return map[string]any{"vm": "dev", "argv": []string{"true"}}
-	case "job_status", "job_output", "job_kill":
+	case "job_status", "job_wait", "job_output", "job_kill":
 		return map[string]any{"vm": "dev", "job_id": "j-00000001"}
 	}
 	if strings.Contains(name, "vm") || name == "logs" || name == "wait" ||

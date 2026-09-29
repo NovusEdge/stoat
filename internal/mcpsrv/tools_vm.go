@@ -9,6 +9,7 @@ import (
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/core"
+	"github.com/novusedge/stoat/internal/recipes"
 )
 
 type createIn struct {
@@ -16,13 +17,16 @@ type createIn struct {
 	Image       string   `json:"image" jsonschema:"catalog image id, see list_images"`
 	OS          string   `json:"os,omitempty" jsonschema:"guest OS override"`
 	Backend     string   `json:"backend,omitempty" jsonschema:"backend override"`
-	Mode        string   `json:"mode,omitempty" jsonschema:"live or disk"`
-	RAMMB       int      `json:"ram_mb,omitempty" jsonschema:"memory in MEGABYTES"`
-	CPUs        int      `json:"cpus,omitempty" jsonschema:"vcpu count"`
-	Disk        string   `json:"disk,omitempty" jsonschema:"disk size such as 8G"`
+	Mode        string   `json:"mode,omitempty" jsonschema:"live or disk, for an image that offers both; a cloud image is always cloud and an installer image always disk, and a value that contradicts the image is refused"`
+	RAMMB       int      `json:"ram_mb,omitempty" jsonschema:"memory in MEGABYTES; see the tool description for the default"`
+	CPUs        int      `json:"cpus,omitempty" jsonschema:"vcpu count; see the tool description for the default"`
+	Disk        string   `json:"disk,omitempty" jsonschema:"disk size such as 8G; see the tool description for the default"`
 	Recipes     []string `json:"recipes,omitempty" jsonschema:"recipe names to record on the VM"`
 	AgentAccess string   `json:"agent_access,omitempty" jsonschema:"what an agent may do in this VM: none, observe, manage or exec; manage is the default"`
 }
+
+var createDescription = fmt.Sprintf("Create a new VM from a catalog image, without starting it. Only catalog image ids are accepted, see list_images; a bring-your-own image path, a console password and a host share cannot be set through this tool. Memory is ram_mb and is in MEGABYTES. When omitted, ram_mb is %d, cpus is %d, and disk is %s unless the catalog image sets its own default; a live-mode VM has no disk. mode is live or disk for an image that offers both, live being the default. A cloud image is always cloud mode and an installer image is always disk mode, and a mode that contradicts the image is refused. Reversible: destroy deletes the VM. Mutating: it creates a VM directory and a disk under the stoat data root.",
+	core.DefaultRAM, core.DefaultCPUs, core.DefaultDisk)
 
 type updateIn struct {
 	VM          string                       `json:"vm" jsonschema:"name of the VM"`
@@ -108,7 +112,7 @@ func patchFromUpdate(in updateIn) map[string]any {
 
 func (s *srv) registerVM(server *mcp.Server) {
 	register(server, "create", classMutate,
-		"Create a new VM from a catalog image, without starting it. Only catalog image ids are accepted, see list_images; a bring-your-own image path, a console password and a host share cannot be set through this tool. Memory is ram_mb and is in MEGABYTES. Reversible: destroy deletes the VM. Mutating: it creates a VM directory and a disk under the stoat data root.",
+		createDescription,
 		func(ctx context.Context, in createIn) (wire.VM, error) {
 			name, err := checkVMName(in.Name)
 			if err != nil {
@@ -149,24 +153,43 @@ func (s *srv) registerVM(server *mcp.Server) {
 
 	register(server, "destroy", classDestructive,
 		"Permanently delete a VM's directory, its disk, and its shared directory (shared_dir in vm_status, so files in it are lost too). It refuses while the VM is running. This is NOT reversible: there is no undo, and a snapshot taken before the deletion goes with it.",
-		s.byName(core.Destroy))
-
-	register(server, "update", classMutate,
-		"Change a stopped VM's RAM, CPU count, ssh port, disk size (grow only), recipe list, recipe params or recipe secrets, or lower its agent access level. Only the fields you pass change. A share cannot be set through this tool. Raising agent_access is refused here; raise it from the CLI or the TUI. Mutating; most fields take effect at the VM's next start.",
-		func(ctx context.Context, in updateIn) (wire.VM, error) {
+		func(ctx context.Context, in vmIn) (wire.Destroyed, error) {
 			name, err := checkVMName(in.VM)
 			if err != nil {
-				return wire.VM{}, err
+				return wire.Destroyed{}, err
+			}
+			if err := core.Destroy(name); err != nil {
+				return wire.Destroyed{}, err
+			}
+			return wire.Destroyed{Name: name, Destroyed: true}, nil
+		})
+
+	register(server, "update", classMutate,
+		"Change a VM's RAM, CPU count, ssh port, disk size (grow only, stopped VM only), recipe list, recipe params or recipe secrets, or lower its agent access level. Only the fields you pass change. Recipe names must exist, and an unknown one is refused with not_found. It works on a running VM, but ram_mb, cpus and ssh_port only take effect at the next start: the response lists the ones a running VM has not picked up in pending_restart, and its ram_mb, cpus and ssh_port show the saved values, not what qemu is running with. A share cannot be set through this tool. Raising agent_access is refused here; raise it from the CLI or the TUI. Mutating.",
+		func(ctx context.Context, in updateIn) (wire.VMUpdated, error) {
+			name, err := checkVMName(in.VM)
+			if err != nil {
+				return wire.VMUpdated{}, err
+			}
+			before, err := core.Get(name)
+			if err != nil {
+				return wire.VMUpdated{}, err
+			}
+			if err := checkRecipesExist(before, in.Recipes); err != nil {
+				return wire.VMUpdated{}, err
 			}
 			patch, err := corePatch(name, in)
 			if err != nil {
-				return wire.VM{}, err
+				return wire.VMUpdated{}, err
 			}
 			v, err := core.Update(name, patch)
 			if err != nil {
-				return wire.VM{}, err
+				return wire.VMUpdated{}, err
 			}
-			return wire.FromVM(v, core.GraphicalSession()), nil
+			return wire.VMUpdated{
+				VM:             wire.FromVM(v, core.GraphicalSession()),
+				PendingRestart: pendingRestart(before, v),
+			}, nil
 		})
 
 	register(server, "clone", classMutate,
@@ -328,8 +351,8 @@ func (s *srv) registerVM(server *mcp.Server) {
 }
 
 // byName builds a handler for a tool whose only input is a VM name and
-// whose result is the VM afterwards. start, stop and destroy differ only by
-// the core call.
+// whose result is the VM afterwards. start and stop differ only by the core
+// call.
 func (s *srv) byName(fn func(string) error) func(context.Context, vmIn) (wire.VM, error) {
 	return func(ctx context.Context, in vmIn) (wire.VM, error) {
 		name, err := checkVMName(in.VM)
@@ -341,12 +364,50 @@ func (s *srv) byName(fn func(string) error) func(context.Context, vmIn) (wire.VM
 		}
 		v, err := core.Get(name)
 		if err != nil {
-			// destroy removes the VM, so a not-found read afterwards is the
-			// expected outcome and not a failure of the tool.
-			return wire.VM{Name: name, State: "gone"}, nil
+			return wire.VM{}, err
 		}
 		return wire.FromVM(v, core.GraphicalSession()), nil
 	}
+}
+
+// checkRecipesExist refuses a recipe name no recipe root declares. core.Update
+// stores whatever list it is given, so a typo would otherwise sit in vm.toml
+// as a recipe that can never apply.
+func checkRecipesExist(v core.VM, names []string) error {
+	for _, n := range names {
+		if _, ok, err := recipes.ManifestFor(n); err != nil {
+			return err
+		} else if !ok {
+			return wire.WithSentinel(fmt.Errorf("no recipe named %q; list_recipes shows the known ones", n), core.ErrNotFound)
+		}
+	}
+	issues, err := core.CheckRecipes(v.OS, v.Backend, names)
+	if err != nil {
+		return err
+	}
+	if len(issues) > 0 {
+		return wire.WithSentinel(fmt.Errorf("%s", issues[0].Reason), core.ErrRecipeNotApplicable)
+	}
+	return nil
+}
+
+// pendingRestart names the update fields a running VM has saved but not
+// picked up. qemu reads memory, vcpus and the ssh forward once, at launch.
+func pendingRestart(before, after core.VM) []string {
+	if before.State != core.StateRunning {
+		return nil
+	}
+	var out []string
+	if before.RAM != after.RAM {
+		out = append(out, "ram_mb")
+	}
+	if before.CPUs != after.CPUs {
+		out = append(out, "cpus")
+	}
+	if before.SSHPort != after.SSHPort {
+		out = append(out, "ssh_port")
+	}
+	return out
 }
 
 // corePatch converts the tool input to core.Patch. agent_access is checked

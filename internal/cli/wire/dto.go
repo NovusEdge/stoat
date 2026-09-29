@@ -812,6 +812,39 @@ type RecipeCatalog struct {
 	Recipes []Recipe `json:"recipes"`
 }
 
+// RecipeBrief is one recipe as the MCP listing tools return it. It leaves out
+// the health-check script, which is most of a Recipe's bytes; recipe_schema
+// returns the full contract for one recipe.
+type RecipeBrief struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Schema      int            `json:"schema"`
+	Params      []RecipeParam  `json:"params"`
+	Outputs     []RecipeOutput `json:"outputs"`
+	HasHealth   bool           `json:"has_health"`
+	Reboot      bool           `json:"reboot"`
+	Depends     []string       `json:"depends"`
+	Runtime     string         `json:"runtime"`
+}
+
+// RecipeBriefList is the recipe listing tools' output.
+type RecipeBriefList struct {
+	Recipes []RecipeBrief `json:"recipes"`
+}
+
+func FromRecipeBriefs(rs []core.Recipe) RecipeBriefList {
+	out := make([]RecipeBrief, len(rs))
+	for i, r := range rs {
+		out[i] = RecipeBrief{
+			Name: r.Name, Description: r.Description, Schema: r.Schema,
+			Params: fromRecipeParams(r.Params), Outputs: fromRecipeOutputs(r.Outputs),
+			HasHealth: r.Health != nil, Reboot: r.Reboot,
+			Depends: nonNil(r.Depends), Runtime: r.Runtime,
+		}
+	}
+	return RecipeBriefList{Recipes: nonNil(out)}
+}
+
 // RecipeIssueList is the check_recipes tool's output.
 type RecipeIssueList struct {
 	Issues []RecipeIssue `json:"issues"`
@@ -871,10 +904,13 @@ type PruneList struct {
 }
 
 // WaitResult is the wait tool's output.
+//
+// Healthy is set only after an until=healthy wait: every other wait says
+// nothing about recipe health, and a false there read as a failed check.
 type WaitResult struct {
 	VM      string `json:"vm"`
 	Until   string `json:"until"`
-	Healthy bool   `json:"healthy"`
+	Healthy bool   `json:"healthy,omitempty"`
 }
 
 // ApplyResult is what an apply left behind, so a caller does not have to
@@ -898,11 +934,21 @@ type FileContent struct {
 
 // DirEntry is the list_dir and stat tools' per-file output.
 type DirEntry struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	Size  int64  `json:"size"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int64  `json:"size"`
+	// Mode is the permission bits in octal, such as "0644".
 	Mode  string `json:"mode"`
+	Owner string `json:"owner"`
 	MTime int64  `json:"mtime"`
+}
+
+// FileWritten is the write_file tool's output. Mode is empty for an append
+// that did not set one, which leaves the file's mode alone.
+type FileWritten struct {
+	Path  string `json:"path"`
+	Bytes int    `json:"bytes"`
+	Mode  string `json:"mode,omitempty"`
 }
 
 // DirListing is the list_dir tool's output.
@@ -949,26 +995,69 @@ type CopyResult struct {
 	ToRemote bool   `json:"to_remote"`
 }
 
+// ServiceStatus is the svc_status tool's output: the init system's own status
+// output, plus what a caller would otherwise parse out of it. Enabled is nil
+// for a guest whose init system has no boot-enabled query here.
+type ServiceStatus struct {
+	CommandResult
+	Active  bool  `json:"active"`
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// Destroyed is the destroy tool's output.
+type Destroyed struct {
+	Name      string `json:"name"`
+	Destroyed bool   `json:"destroyed"`
+}
+
+// VMUpdated is the update tool's output. PendingRestart names the fields that
+// were saved but that a running VM only picks up at its next start.
+type VMUpdated struct {
+	VM
+	PendingRestart []string `json:"pending_restart,omitempty"`
+}
+
 // JobStarted is the exec_bg tool's output.
 type JobStarted struct {
 	JobID string `json:"job_id"`
 	Dir   string `json:"dir"`
 }
 
-// JobStatus is the job_status tool's output.
+// JobStatus is the job_status tool's output. ExitCode is set only once the
+// job has exited; a running job has no exit code, and a zero there read as
+// success.
 type JobStatus struct {
 	JobID    string `json:"job_id"`
 	State    string `json:"state"`
-	ExitCode int    `json:"exit_code"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+}
+
+// JobWait is the job_wait tool's output. TimedOut is true when the job was
+// still starting or running at the deadline. Stdout and Stderr are the tail
+// of each stream.
+type JobWait struct {
+	JobStatus
+	TimedOut bool   `json:"timed_out,omitempty"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+}
+
+// JobKill is the job_kill tool's output. State is what the job was in when
+// the tool looked, and Signaled is false when nothing was left to signal.
+type JobKill struct {
+	JobStatus
+	Signaled bool `json:"signaled"`
 }
 
 // Job is one list_jobs row.
 type Job struct {
-	JobID   string    `json:"job_id"`
-	Argv    []string  `json:"argv"`
-	User    string    `json:"user"`
-	CWD     string    `json:"cwd,omitempty"`
-	Started time.Time `json:"started"`
+	JobID    string    `json:"job_id"`
+	State    string    `json:"state"`
+	ExitCode *int      `json:"exit_code,omitempty"`
+	Argv     []string  `json:"argv"`
+	User     string    `json:"user"`
+	CWD      string    `json:"cwd,omitempty"`
+	Started  time.Time `json:"started"`
 }
 
 // MCPInstall is the `mcp install` command's output.

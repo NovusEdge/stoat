@@ -14,10 +14,19 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/config"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/sshx"
 )
 
-const jobRoot = "/run/stoat/jobs"
+const (
+	jobRoot      = "/run/stoat/jobs"
+	jobTailBytes = 4096
+)
+
+// jobPollInterval is how often job_wait re-reads a job's state. A variable so
+// a test does not wait a second per poll.
+var jobPollInterval = time.Second
 
 type execIn struct {
 	VM             string            `json:"vm" jsonschema:"name of the VM"`
@@ -46,6 +55,12 @@ type jobOutputIn struct {
 	Stream   string `json:"stream,omitempty" jsonschema:"stdout or stderr; stdout is the default"`
 	Offset   int    `json:"offset,omitempty" jsonschema:"byte offset to start at"`
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"how many bytes to read, capped at 1048576"`
+}
+
+type jobWaitIn struct {
+	VM             string `json:"vm" jsonschema:"name of the VM"`
+	JobID          string `json:"job_id" jsonschema:"job id returned by exec_bg"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema:"a plain count of seconds, capped at 600; 60 is the default"`
 }
 
 type jobKillIn struct {
@@ -187,7 +202,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 		})
 
 	register(server, "job_status", classRead,
-		"Report a background job's state: starting between exec_bg and the guest recording the command's pid, running while that process is alive, exited with the command's exit code once it finished, or unknown when the guest side is gone, which is what a reboot leaves. It needs agent_access exec.",
+		"Report a background job's state: starting between exec_bg and the guest recording the command's pid, running while that process is alive, exited with exit_code set once it finished (exit_code is absent before that), or unknown when the guest side is gone, which is what a reboot leaves. It needs agent_access exec.",
 		func(ctx context.Context, in jobIn) (wire.JobStatus, error) {
 			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
@@ -197,42 +212,51 @@ func (s *srv) registerExec(server *mcp.Server) {
 			if err != nil {
 				return wire.JobStatus{}, err
 			}
-			out, _, code, err := sshx.Run(ctx, v, false, []string{"cat", path.Join(j.Dir, "exit")}, nil)
+			st, _, err := jobState(ctx, v, j)
+			return st, err
+		})
+
+	register(server, "job_wait", classRead,
+		"Block until a background job exits or timeout_seconds passes, then return its state, its exit code once it has one, and the last 4096 bytes of its stdout and stderr. timeout_seconds is a plain count of seconds, 60 by default and capped at 600. A job still running at the deadline is not an error: the result has timed_out set, so call job_wait again. It needs agent_access exec.",
+		func(ctx context.Context, in jobWaitIn) (wire.JobWait, error) {
+			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
-				return wire.JobStatus{}, err
+				return wire.JobWait{}, err
 			}
-			if code == 0 {
-				exit, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-				return wire.JobStatus{JobID: j.ID, State: "exited", ExitCode: exit}, nil
-			}
-			pidOut, _, pidCode, err := sshx.Run(ctx, v, false, []string{"cat", path.Join(j.Dir, "pid")}, nil)
+			j, err := findJob(v.Name, in.JobID)
 			if err != nil {
-				return wire.JobStatus{}, err
+				return wire.JobWait{}, err
 			}
-			if pidCode != 0 {
-				// No pid file has two causes, and a caller acts on them
-				// differently. The job directory still being there means the
-				// wrapper has not written the pid yet, which is where a
-				// job_status call right after exec_bg lands. A directory that
-				// is gone is what a reboot leaves.
-				_, _, dirCode, err := sshx.Run(ctx, v, false, []string{"test", "-d", j.Dir}, nil)
+			wctx, cancel := context.WithTimeout(ctx, jobWaitTimeout(in.TimeoutSeconds))
+			defer cancel()
+			st := wire.JobStatus{JobID: j.ID, State: "unknown"}
+			for {
+				cur, _, err := jobState(wctx, v, j)
 				if err != nil {
-					return wire.JobStatus{}, err
+					// The deadline killing an in-flight ssh call is how this
+					// loop ends for a job that outlives it.
+					if wctx.Err() != nil && ctx.Err() == nil {
+						break
+					}
+					return wire.JobWait{}, err
 				}
-				if dirCode == 0 {
-					return wire.JobStatus{JobID: j.ID, State: "starting"}, nil
+				st = cur
+				if st.State == "exited" || st.State == "unknown" {
+					break
 				}
-				return wire.JobStatus{JobID: j.ID, State: "unknown"}, nil
+				select {
+				case <-wctx.Done():
+				case <-time.After(jobPollInterval):
+					continue
+				}
+				break
 			}
-			pid := strings.TrimSpace(string(pidOut))
-			_, _, aliveCode, err := sshx.Run(ctx, v, false, []string{"kill", "-0", pid}, nil)
-			if err != nil {
-				return wire.JobStatus{}, err
-			}
-			if aliveCode == 0 {
-				return wire.JobStatus{JobID: j.ID, State: "running"}, nil
-			}
-			return wire.JobStatus{JobID: j.ID, State: "unknown"}, nil
+			return wire.JobWait{
+				JobStatus: st,
+				TimedOut:  st.State == "starting" || st.State == "running",
+				Stdout:    jobTail(ctx, v, path.Join(j.Dir, "out")),
+				Stderr:    jobTail(ctx, v, path.Join(j.Dir, "err")),
+			}, nil
 		})
 
 	register(server, "job_output", classRead,
@@ -258,35 +282,46 @@ func (s *srv) registerExec(server *mcp.Server) {
 		})
 
 	register(server, "job_kill", classExec,
-		"Send a signal to a background job's process. TERM is the default. It needs agent_access exec.",
-		func(ctx context.Context, in jobKillIn) (wire.CommandResult, error) {
+		"Send a signal to a running background job's process. TERM is the default. A job that is not running, because it already exited or a reboot cleared it, is not signaled: the result carries its state and signaled false. A signaled job may need a moment to exit, so follow with job_wait. It needs agent_access exec.",
+		func(ctx context.Context, in jobKillIn) (wire.JobKill, error) {
 			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.JobKill{}, err
 			}
 			j, err := findJob(v.Name, in.JobID)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.JobKill{}, err
 			}
 			sig := in.Signal
 			if sig == "" {
 				sig = "TERM"
 			}
 			if !signalRE.MatchString(sig) {
-				return wire.CommandResult{}, badInput("invalid signal %q: a name such as TERM, HUP or KILL", sig)
+				return wire.JobKill{}, badInput("invalid signal %q: a name such as TERM, HUP or KILL", sig)
 			}
-			pidOut, _, code, err := sshx.Run(ctx, v, false, []string{"cat", path.Join(j.Dir, "pid")}, nil)
+			st, pid, err := jobState(ctx, v, j)
 			if err != nil {
-				return wire.CommandResult{}, err
+				return wire.JobKill{}, err
 			}
-			if code != 0 {
-				return wire.CommandResult{}, fmt.Errorf("job %s has no pid on the guest; a reboot clears it", j.ID)
+			if st.State != "running" {
+				return wire.JobKill{JobStatus: st}, nil
 			}
-			return runToResult(ctx, v, false, []string{"kill", "-" + sig, strings.TrimSpace(string(pidOut))})
+			res, err := runToResult(ctx, v, false, []string{"kill", "-" + sig, pid})
+			if err != nil {
+				return wire.JobKill{}, err
+			}
+			if res.ExitCode != 0 {
+				// The job can exit between reading its state and the signal.
+				if again, _, err := jobState(ctx, v, j); err == nil && again.State != "running" {
+					return wire.JobKill{JobStatus: again}, nil
+				}
+				return wire.JobKill{}, fmt.Errorf("%s: kill %s: %s", v.Name, sig, strings.TrimSpace(res.Stderr))
+			}
+			return wire.JobKill{JobStatus: st, Signaled: true}, nil
 		})
 
 	register(server, "list_jobs", classRead,
-		"List the background jobs this server started in a VM: id, argv, guest user, working directory and start time. It reads the host's own registry, so it answers without ssh and works on a stopped VM. It needs agent_access exec. Read-only.",
+		"List the background jobs this server started in a VM: id, state, exit code once exited, argv, guest user, working directory and start time. The registry is the host's own, so the list works on a stopped VM, but state needs one ssh call: state is unknown for a job whose guest files are gone, which is what a reboot leaves, and for every job when the guest does not answer. It needs agent_access exec. Read-only.",
 		func(ctx context.Context, in vmIn) (wire.JobList, error) {
 			v, err := guestVM(in.VM, LevelExec)
 			if err != nil {
@@ -296,10 +331,19 @@ func (s *srv) registerExec(server *mcp.Server) {
 			if err != nil {
 				return wire.JobList{}, err
 			}
+			states, err := jobStates(ctx, v, jobs)
+			if err != nil {
+				return wire.JobList{}, err
+			}
 			out := wire.JobList{Jobs: []wire.Job{}}
 			for _, j := range jobs {
+				st, ok := states[j.Dir]
+				if !ok {
+					st.State = "unknown"
+				}
 				out.Jobs = append(out.Jobs, wire.Job{
-					JobID: j.ID, Argv: j.Argv, User: j.User, CWD: j.CWD, Started: j.Started,
+					JobID: j.ID, State: st.State, ExitCode: st.ExitCode,
+					Argv: j.Argv, User: j.User, CWD: j.CWD, Started: j.Started,
 				})
 			}
 			slices.SortFunc(out.Jobs, func(a, b wire.Job) int { return strings.Compare(a.JobID, b.JobID) })
@@ -318,7 +362,116 @@ func findJob(vm, id string) (job, error) {
 	}
 	j, ok := jobs[jid]
 	if !ok {
-		return job{}, fmt.Errorf("no job %q on vm %q", jid, vm)
+		return job{}, wire.WithSentinel(fmt.Errorf("no job %q on vm %q; list_jobs shows the ones this server started", jid, vm), core.ErrNotFound)
 	}
 	return j, nil
+}
+
+// jobState reads one job's guest-side state and, while it runs, its pid.
+// The exit file is written last by the wrapper, so it outranks a pid whose
+// process is already gone.
+func jobState(ctx context.Context, v *config.VM, j job) (wire.JobStatus, string, error) {
+	out, _, code, err := sshx.Run(ctx, v, false, []string{"cat", path.Join(j.Dir, "exit")}, nil)
+	if err != nil {
+		return wire.JobStatus{}, "", err
+	}
+	if code == 0 {
+		exit, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+		return wire.JobStatus{JobID: j.ID, State: "exited", ExitCode: &exit}, "", nil
+	}
+	pidOut, _, pidCode, err := sshx.Run(ctx, v, false, []string{"cat", path.Join(j.Dir, "pid")}, nil)
+	if err != nil {
+		return wire.JobStatus{}, "", err
+	}
+	if pidCode != 0 {
+		// No pid file has two causes, and a caller acts on them
+		// differently. The job directory still being there means the
+		// wrapper has not written the pid yet, which is where a
+		// job_status call right after exec_bg lands. A directory that
+		// is gone is what a reboot leaves.
+		_, _, dirCode, err := sshx.Run(ctx, v, false, []string{"test", "-d", j.Dir}, nil)
+		if err != nil {
+			return wire.JobStatus{}, "", err
+		}
+		if dirCode == 0 {
+			return wire.JobStatus{JobID: j.ID, State: "starting"}, "", nil
+		}
+		return wire.JobStatus{JobID: j.ID, State: "unknown"}, "", nil
+	}
+	pid := strings.TrimSpace(string(pidOut))
+	_, _, aliveCode, err := sshx.Run(ctx, v, false, []string{"kill", "-0", pid}, nil)
+	if err != nil {
+		return wire.JobStatus{}, "", err
+	}
+	if aliveCode == 0 {
+		return wire.JobStatus{JobID: j.ID, State: "running"}, pid, nil
+	}
+	return wire.JobStatus{JobID: j.ID, State: "unknown"}, "", nil
+}
+
+// jobStatesScript is jobState in one guest round trip for every job
+// directory, which are its positional arguments. It prints dir, state and
+// exit code per line, tab separated.
+const jobStatesScript = `for d in "$@"; do
+  if [ -f "$d/exit" ]; then printf '%s\texited\t%s\n' "$d" "$(cat "$d/exit")"
+  elif [ -f "$d/pid" ]; then
+    if kill -0 "$(cat "$d/pid")" 2>/dev/null; then printf '%s\trunning\t\n' "$d"
+    else printf '%s\tunknown\t\n' "$d"; fi
+  elif [ -d "$d" ]; then printf '%s\tstarting\t\n' "$d"
+  else printf '%s\tunknown\t\n' "$d"; fi
+done`
+
+// jobStates returns the state of every job, keyed by job directory. A guest
+// that does not answer leaves the map empty, which the caller reads as
+// unknown: list_jobs has to work on a stopped VM.
+func jobStates(ctx context.Context, v *config.VM, jobs map[string]job) (map[string]wire.JobStatus, error) {
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+	argv := []string{"sh", "-c", jobStatesScript, "stoat_jobs"}
+	for _, j := range jobs {
+		argv = append(argv, j.Dir)
+	}
+	out, _, code, err := sshx.Run(ctx, v, false, argv, nil)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, nil
+	}
+	return parseJobStates(out), nil
+}
+
+func parseJobStates(raw []byte) map[string]wire.JobStatus {
+	out := map[string]wire.JobStatus{}
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 3 {
+			continue
+		}
+		st := wire.JobStatus{State: f[1]}
+		if st.State == "exited" {
+			exit, _ := strconv.Atoi(strings.TrimSpace(f[2]))
+			st.ExitCode = &exit
+		}
+		out[f[0]] = st
+	}
+	return out
+}
+
+// jobTail returns the end of one job stream. A stream that cannot be read is
+// empty, since a job that never wrote or a cleared guest has nothing to show.
+func jobTail(ctx context.Context, v *config.VM, file string) string {
+	out, _, code, err := sshx.Run(ctx, v, false, []string{"tail", "-c", strconv.Itoa(jobTailBytes), file}, nil)
+	if err != nil || code != 0 {
+		return ""
+	}
+	return strings.ToValidUTF8(string(out), "\uFFFD")
+}
+
+func jobWaitTimeout(seconds int) time.Duration {
+	if seconds == 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(clampInt(seconds, 1, maxWaitSecs)) * time.Second
 }

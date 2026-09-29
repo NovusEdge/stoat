@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/novusedge/stoat/internal/core"
 )
 
 func TestListGuestsReturnsTheBundledSet(t *testing.T) {
@@ -109,6 +111,43 @@ func TestSearchRecipesRefusesAFlagTerm(t *testing.T) {
 	t.Setenv("STOAT_HOME", t.TempDir())
 	if res := callTool(t, "search_recipes", map[string]any{"term": "--refresh"}); !res.IsError {
 		t.Fatal("search_recipes accepted a term that reads as a flag")
+	}
+}
+
+func TestListRecipesOmitsTheHealthScript(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	if err := core.EnsureRecipes(); err != nil {
+		t.Fatal(err)
+	}
+	res := callTool(t, "list_recipes", map[string]any{"os": "debian"})
+	if res.IsError {
+		t.Fatalf("list_recipes failed: %+v", res.Content)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	var out struct {
+		Recipes []map[string]any `json:"recipes"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	var withHealth int
+	for _, r := range out.Recipes {
+		if _, ok := r["health"]; ok {
+			t.Fatalf("recipe %v carries a health body: %s", r["name"], raw)
+		}
+		if r["has_health"] == true {
+			withHealth++
+		}
+	}
+	if withHealth == 0 {
+		t.Fatalf("no bundled recipe reports has_health: %s", raw)
+	}
+}
+
+func TestCleanLogLineStripsTerminalNoise(t *testing.T) {
+	in := "\x1b[0m\x1b[1;32mOK\x1b[0m started\r\x1b]0;title\x07 done\x1b[2K"
+	if got := cleanLogLine(in); got != "OK started done" {
+		t.Fatalf("cleanLogLine = %q", got)
 	}
 }
 

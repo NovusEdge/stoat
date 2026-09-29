@@ -62,6 +62,7 @@ var toolTable = []toolSpec{
 	{"exec_bg", classExec, LevelExec},
 	{"job_status", classRead, LevelExec},
 	{"job_output", classRead, LevelExec},
+	{"job_wait", classRead, LevelExec},
 	{"job_kill", classExec, LevelExec},
 	{"list_jobs", classRead, LevelExec},
 

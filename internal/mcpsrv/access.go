@@ -15,7 +15,7 @@ import (
 //	observe read_file, list_dir, stat, ps, svc_status, tail_log
 //	manage  write_file, copy_to, copy_from, pkg_install, svc, useradd,
 //	        apply_recipes
-//	exec    exec, exec_bg, job_status, job_output, job_kill, list_jobs
+//	exec    exec, exec_bg, job_status, job_wait, job_output, job_kill, list_jobs
 type Level int
 
 const (

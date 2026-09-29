@@ -400,6 +400,17 @@ func fromConfigChecked(v *config.VM) (VM, error) {
 		verdicts = append(verdicts, RecipeHealth{Name: state.Name, Status: status})
 	}
 	out.Health = VMHealth(verdicts)
+	// VMHealth lets one ok verdict outweigh unknown ones, which is right for
+	// a wait over applied recipes. A configured recipe that never applied,
+	// or that does not exist, has no verdict at all and must not read as ok.
+	if out.Health == HealthOK {
+		for _, state := range states {
+			if !state.Applied {
+				out.Health = HealthUnknown
+				break
+			}
+		}
+	}
 	return out, nil
 }
 

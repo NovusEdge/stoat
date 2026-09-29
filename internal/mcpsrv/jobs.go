@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
 	"github.com/novusedge/stoat/internal/tomlx"
 )
@@ -42,7 +43,7 @@ func newJobID() string {
 
 func checkJobID(id string) (string, error) {
 	if !jobIDRE.MatchString(id) {
-		return "", fmt.Errorf("invalid job id %q: must match %s", id, jobIDRE)
+		return "", wire.WithSentinel(fmt.Errorf("invalid job id %q: must match %s", id, jobIDRE), wire.ErrBadInput)
 	}
 	return id, nil
 }
