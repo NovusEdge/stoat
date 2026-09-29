@@ -264,6 +264,11 @@ func commandPath(ctx *kong.Context) string {
 // as a pure function: kong.Parse populates the grammar and returns, and no
 // Run() method exists for it to call.
 func Parse(args []string) (*Args, error) {
+	if len(args) > 1 && args[0] == "help" {
+		// `help <cmd>` is `<cmd> --help`, which is also the only spelling kong
+		// and parseExec both understand.
+		args = append(append([]string{}, args[1:]...), "--help")
+	}
 	if len(args) > 0 && args[0] == "exec" {
 		return parseExec(args[1:])
 	}
@@ -348,6 +353,9 @@ func preserveRecipeSearchTerm(args []string) []string {
 // requires to arrive untouched. wire.SplitJSONFlag stops its own argv scan
 // at exec's VM name for the same reason.
 func parseExec(rest []string) (*Args, error) {
+	if len(rest) > 0 && (rest[0] == "-h" || rest[0] == "--help") {
+		return &Args{Cmd: "help", Help: kongHelp("exec", "--help")}, nil
+	}
 	if len(rest) == 0 {
 		return nil, usageError("exec: missing vm name")
 	}
@@ -361,6 +369,47 @@ func parseExec(rest []string) (*Args, error) {
 		return nil, usageError("exec: missing command")
 	}
 	return &Args{Cmd: "exec", VM: name, Command: cmd}, nil
+}
+
+// kongHelp returns the text kong prints for argv, which must end in --help.
+func kongHelp(argv ...string) string {
+	var g grammar
+	var help bytes.Buffer
+	p, err := newParser(&g, &help)
+	if err != nil {
+		return "cli grammar: " + err.Error()
+	}
+	_, _ = p.Parse(argv)
+	return help.String()
+}
+
+// usageTail is what follows a usage error: the failing command's usage line
+// and a pointer to its help. The whole root help is 60 lines and buries the
+// error above it.
+func usageTail(argv []string) string {
+	var g grammar
+	var buf bytes.Buffer
+	p, err := newParser(&g, &buf)
+	if err != nil {
+		return ""
+	}
+	if len(argv) > 0 && argv[0] == "exec" {
+		// parseExec bypasses kong, so trace only the command name.
+		argv = argv[:1]
+	}
+	ctx, err := kong.Trace(p, argv)
+	if err != nil {
+		return ""
+	}
+	_ = ctx.PrintUsage(true)
+	// The summary carries the description and its own hint after the usage
+	// line; only the line is wanted.
+	usage, _, _ := strings.Cut(buf.String(), "\n")
+	cmd := commandPath(ctx)
+	if cmd == "" {
+		return usage + "\nRun \"stoat --help\" for the command list.\n"
+	}
+	return usage + "\nRun \"stoat " + cmd + " --help\" for more information.\n"
 }
 
 // helpText renders the same text `stoat --help` prints, for the `help`
@@ -460,7 +509,7 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 			return ExitUsage
 		}
 		fmt.Fprintln(stderr, "stoat:", err)
-		fmt.Fprintln(stderr, helpText())
+		fmt.Fprint(stderr, usageTail(argv))
 		return ExitUsage
 	}
 	a.JSON = jsonMode

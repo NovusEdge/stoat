@@ -2,6 +2,7 @@ package mcpsrv
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/config"
@@ -46,7 +47,7 @@ func ParseLevel(s string) (Level, error) {
 			return Level(i), nil
 		}
 	}
-	return 0, fmt.Errorf("invalid agent_access %q: one of none, observe, manage, exec", s)
+	return 0, badInput("invalid agent_access %q: one of %s", s, strings.Join(levelNames[:], ", "))
 }
 
 // currentLevel reads vm's agent_access straight off vm.toml.

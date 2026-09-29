@@ -2,7 +2,6 @@ package mcpsrv
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
@@ -53,7 +52,7 @@ func (s *srv) registerRecipe(server *mcp.Server) {
 					return wire.RecipeCatalog{}, err
 				}
 				if ref != "" {
-					return wire.RecipeCatalog{}, fmt.Errorf("update_recipe takes a plain recipe name; pin a ref with add_recipe")
+					return wire.RecipeCatalog{}, badInput("update_recipe takes a plain recipe name; pin a ref with add_recipe")
 				}
 				name = n
 			}
@@ -71,7 +70,7 @@ func (s *srv) registerRecipe(server *mcp.Server) {
 				return wire.RecipeCatalog{}, err
 			}
 			if ref != "" {
-				return wire.RecipeCatalog{}, fmt.Errorf("remove_recipe takes a plain recipe name, without @ref")
+				return wire.RecipeCatalog{}, badInput("remove_recipe takes a plain recipe name, without @ref")
 			}
 			// force is deliberately absent rather than false-by-default: a
 			// parameter that exists is eventually reachable.

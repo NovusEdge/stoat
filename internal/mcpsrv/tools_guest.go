@@ -330,7 +330,7 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 				mode = "0644"
 			}
 			if !modeRE.MatchString(mode) {
-				return wire.CommandResult{}, fmt.Errorf("invalid mode %q: three or four octal digits", mode)
+				return wire.CommandResult{}, badInput("invalid mode %q: three or four octal digits", mode)
 			}
 			// tee rather than a redirect: a redirect is shell syntax the
 			// tool would have to build around the path.
@@ -367,21 +367,21 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 				return wire.CommandResult{}, err
 			}
 			if len(in.Packages) == 0 {
-				return wire.CommandResult{}, fmt.Errorf("packages is required")
+				return wire.CommandResult{}, badInput("packages is required")
 			}
 			if err := checkFlagFree(in.Packages, "packages"); err != nil {
 				return wire.CommandResult{}, err
 			}
 			os, ok := guest.Lookup(v.OS)
 			if !ok {
-				return wire.CommandResult{}, fmt.Errorf("unknown guest %q; run stoat guest ls", v.OS)
+				return wire.CommandResult{}, fmt.Errorf("unknown guest %q; call list_guests", v.OS)
 			}
 			// pkg.setup is the distro's own index refresh and carries no
 			// tool input, so running it as the guest file wrote it is safe.
-			if _, _, code, err := sshx.Run(ctx, v, true, []string{"sh", "-c", os.Pkg.Setup}, nil); err != nil {
+			if _, errb, code, err := sshx.Run(ctx, v, true, []string{"sh", "-c", os.Pkg.Setup}, nil); err != nil {
 				return wire.CommandResult{}, err
 			} else if code != 0 {
-				return wire.CommandResult{}, fmt.Errorf("%s: package index refresh exited %d", v.Name, code)
+				return wire.CommandResult{}, fmt.Errorf("%s: package index refresh exited %d: %s", v.Name, code, strings.TrimSpace(string(errb)))
 			}
 			return runToResult(ctx, v, true, append(append([]string{}, os.Pkg.Install...), in.Packages...))
 		})
@@ -394,7 +394,7 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 				return wire.CommandResult{}, err
 			}
 			if !slices.Contains(svcActions, in.Action) {
-				return wire.CommandResult{}, fmt.Errorf("invalid action %q: one of enable, start, stop, restart", in.Action)
+				return wire.CommandResult{}, badInput("invalid action %q: one of %s", in.Action, strings.Join(svcActions, ", "))
 			}
 			name, err := checkSvcName(in.Name)
 			if err != nil {
@@ -433,7 +433,7 @@ func (s *srv) registerGuestWrite(server *mcp.Server) {
 func svcArgv(v *config.VM, action, name string) ([]string, error) {
 	os, ok := guest.Lookup(v.OS)
 	if !ok {
-		return nil, fmt.Errorf("unknown guest %q; run stoat guest ls", v.OS)
+		return nil, fmt.Errorf("unknown guest %q; call list_guests", v.OS)
 	}
 	tmpl := os.Svc.Get(action)
 	if tmpl == "" {

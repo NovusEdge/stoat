@@ -260,7 +260,7 @@ type VM struct {
 // broken VM a real error instead of a raw TOML parse message.
 func load(name string) (*config.VM, error) {
 	if !config.Exists(name) {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
+		return nil, config.NoVM(name)
 	}
 	v, err := config.Load(name)
 	if err != nil {

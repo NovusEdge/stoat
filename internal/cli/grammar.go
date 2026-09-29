@@ -227,7 +227,7 @@ type createCmd struct {
 func (createCmd) Help() string {
 	return `Examples:
   stoat create dev --image debian-13 --ram 2048 --cpus 2
-  stoat create lab --image alpine-3.21 --mode live --agent-access observe
+  stoat create lab --image alpine-standard --mode live --agent-access observe
   stoat create web --image ubuntu-24.04 --recipes nginx --set nginx.port=8080`
 }
 

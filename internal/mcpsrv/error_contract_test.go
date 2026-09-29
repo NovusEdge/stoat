@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
 )
 
@@ -284,5 +285,81 @@ func TestMCPErrorContractEscapedMessages(t *testing.T) {
 	metadata, first = decodeErrorContract(t, res)
 	if metadata.Message != first.Message {
 		t.Fatalf("metadata message %q differs from redacted human message %q", metadata.Message, first.Message)
+	}
+}
+
+func TestMCPErrorSaysMCPToolsNotCLICommands(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	res := callTool(t, "vm_status", map[string]any{"vm": "nope"})
+	if !res.IsError {
+		t.Fatal("missing VM did not fail")
+	}
+	meta, first := decodeErrorContract(t, res)
+	if meta.Code != "not_found" || first.Message != `no VM "nope"; see list_vms` || meta.Message != first.Message {
+		t.Errorf("error = %+v, first = %+v", meta, first)
+	}
+
+	limit := toolError(&core.LimitError{NeededMB: 4096, AvailableMB: 1500})
+	text := limit.Content[0].(*mcp.TextContent).Text
+	if strings.Contains(text, "-y") || !strings.Contains(text, "lower ram_mb with update, or ask a person to start it") {
+		t.Errorf("limit message = %q", text)
+	}
+	if !strings.Contains(limit.Content[1].(*mcp.TextContent).Text, `"needed_mb":4096`) {
+		t.Errorf("envelope lacks needed_mb: %v", limit.Content[1])
+	}
+}
+
+func TestMCPInputErrorsAreUsage(t *testing.T) {
+	t.Setenv("STOAT_HOME", t.TempDir())
+	// The schema enum rejects a bad level before the handler runs, so the
+	// handler's own check is exercised directly.
+	_, err := ParseLevel("root")
+	if info := wire.MapError(err); info.Code != wire.CodeUsage || !strings.Contains(info.Message, "none, observe, manage, exec") {
+		t.Errorf("ParseLevel error = %+v, want usage naming the valid levels", info)
+	}
+	res := callTool(t, "create", map[string]any{"name": "a", "image": "alpine-virt", "agent_access": "root"})
+	if !res.IsError || !strings.Contains(fmt.Sprint(res.Content[0].(*mcp.TextContent).Text), "observe") {
+		t.Errorf("schema did not reject the level and list the valid ones: %+v", res.Content)
+	}
+}
+
+func TestMCPToolSchemasListEnums(t *testing.T) {
+	ctx := context.Background()
+	srv := New(Options{Version: "test", Limits: DefaultLimits()})
+	ct, st := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	tools, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"wait": "until", "create": "agent_access", "job_output": "stream", "svc": "action", "logs": "which"}
+	for _, tool := range tools.Tools {
+		field, ok := want[tool.Name]
+		if !ok {
+			continue
+		}
+		raw, _ := json.Marshal(tool.InputSchema)
+		var schema struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if len(schema.Properties[field].Enum) == 0 {
+			t.Errorf("%s.%s has no enum in %s", tool.Name, field, raw)
+		}
+		delete(want, tool.Name)
+	}
+	if len(want) != 0 {
+		t.Errorf("tools not found: %v", want)
 	}
 }

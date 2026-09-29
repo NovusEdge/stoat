@@ -17,6 +17,23 @@ import (
 // limit, or would ask the host for memory it does not have.
 var ErrLimit = errors.New("limit reached")
 
+// LimitError is the RAM refusal from CheckStart. It carries the numbers so a
+// machine caller reads them from fields instead of the message.
+type LimitError struct {
+	NeededMB, AvailableMB int
+	msg                   string
+}
+
+func (e *LimitError) Error() string { return e.msg }
+
+func (e *LimitError) Is(target error) bool { return target == ErrLimit }
+
+// MCPText is Error without the CLI's -y escape hatch, which an agent cannot
+// use.
+func (e *LimitError) MCPText() string {
+	return fmt.Sprintf("limit reached: needs %d MB and %d MB is available; lower ram_mb with update, or ask a person to start it", e.NeededMB, e.AvailableMB)
+}
+
 // limitsFor resolves the account limits, lowered by the limits of the project
 // that declared this VM. A VM created by `stoat new` has no project, so the
 // account limits stand alone.
@@ -76,8 +93,12 @@ func CheckStart(v *config.VM, force bool) error {
 		if len(running) > 0 {
 			held = fmt.Sprintf("%d MB already runs (%s)", total, strings.Join(running, ", "))
 		}
-		return fmt.Errorf("%w: %s needs %d MB, %s, and limits.max_ram_mb is %d",
-			ErrLimit, v.Name, v.RAM, held, l.MaxRAMMB)
+		return &LimitError{
+			NeededMB:    v.RAM,
+			AvailableMB: max(l.MaxRAMMB-total, 0),
+			msg: fmt.Sprintf("%v: %s needs %d MB, %s, and limits.max_ram_mb is %d",
+				ErrLimit, v.Name, v.RAM, held, l.MaxRAMMB),
+		}
 	}
 
 	// The host check runs even with no limits configured. It is the floor that
@@ -87,8 +108,12 @@ func CheckStart(v *config.VM, force bool) error {
 	}
 	avail := hostcheck.AvailableMB()
 	if avail > 0 && v.RAM > avail {
-		return fmt.Errorf("%w: %s needs %d MB and the host has %d MB available; `-y` starts it anyway",
-			ErrLimit, v.Name, v.RAM, avail)
+		return &LimitError{
+			NeededMB:    v.RAM,
+			AvailableMB: avail,
+			msg: fmt.Sprintf("%v: %s needs %d MB and the host has %d MB available; `-y` starts it anyway",
+				ErrLimit, v.Name, v.RAM, avail),
+		}
 	}
 	return nil
 }

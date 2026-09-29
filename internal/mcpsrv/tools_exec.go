@@ -50,7 +50,7 @@ type jobOutputIn struct {
 type jobKillIn struct {
 	VM     string `json:"vm" jsonschema:"name of the VM"`
 	JobID  string `json:"job_id" jsonschema:"job id returned by exec_bg"`
-	Signal string `json:"signal,omitempty" jsonschema:"signal name without the SIG prefix; TERM is the default"`
+	Signal string `json:"signal,omitempty" jsonschema:"signal name such as TERM, HUP or KILL, with or without the SIG prefix; TERM is the default"`
 }
 
 var signalRE = regexp.MustCompile(`^[A-Z]{2,10}[0-9]?$`)
@@ -97,7 +97,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 				return wire.CommandResult{}, err
 			}
 			if len(in.Argv) == 0 {
-				return wire.CommandResult{}, fmt.Errorf("argv is required")
+				return wire.CommandResult{}, badInput("argv is required")
 			}
 			argv, err := envArgv(in.Env, in.CWD, in.Argv)
 			if err != nil {
@@ -129,7 +129,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 				return wire.JobStarted{}, err
 			}
 			if len(in.Argv) == 0 {
-				return wire.JobStarted{}, fmt.Errorf("argv is required")
+				return wire.JobStarted{}, badInput("argv is required")
 			}
 			argv, err := envArgv(in.Env, in.CWD, in.Argv)
 			if err != nil {
@@ -233,7 +233,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 			case "stderr":
 				file = "err"
 			default:
-				return wire.FileContent{}, fmt.Errorf("invalid stream %q: stdout or stderr", in.Stream)
+				return wire.FileContent{}, badInput("invalid stream %q: stdout or stderr", in.Stream)
 			}
 			return readGuestFile(ctx, v, path.Join(j.Dir, file), in.Offset, in.MaxBytes)
 		})
@@ -254,7 +254,7 @@ func (s *srv) registerExec(server *mcp.Server) {
 				sig = "TERM"
 			}
 			if !signalRE.MatchString(sig) {
-				return wire.CommandResult{}, fmt.Errorf("invalid signal %q: a name such as TERM or KILL, without the SIG prefix", sig)
+				return wire.CommandResult{}, badInput("invalid signal %q: a name such as TERM, HUP or KILL", sig)
 			}
 			pidOut, _, code, err := sshx.Run(ctx, v, false, []string{"cat", path.Join(j.Dir, "pid")}, nil)
 			if err != nil {

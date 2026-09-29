@@ -300,3 +300,14 @@ func TestEveryISOSentinelHasOneRow(t *testing.T) {
 		}
 	}
 }
+
+func TestMapErrorLimitReachedCarriesTheNumbers(t *testing.T) {
+	err := fmt.Errorf("start: %w", &core.LimitError{NeededMB: 4096, AvailableMB: 1500})
+	got := MapError(err)
+	if got.Code != CodeLimitReached || got.NeededMB != 4096 || got.AvailableMB != 1500 {
+		t.Errorf("MapError = %+v, want limit_reached with 4096 needed and 1500 available", got)
+	}
+	if plain := MapError(fmt.Errorf("%w: 3 vms exist", core.ErrLimit)); plain.Code != CodeLimitReached || plain.NeededMB != 0 {
+		t.Errorf("count limit = %+v, want limit_reached without MB fields", plain)
+	}
+}

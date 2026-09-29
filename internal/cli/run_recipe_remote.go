@@ -34,7 +34,7 @@ func runRecipeAdd(a *Args, stdin io.Reader, stdout, stderr io.Writer) int {
 	previewDir := ""
 	if isURL && !a.Yes {
 		if a.JSON || !terminal(stdin) || !terminal(stdout) {
-			_, code := confirm(a, stdin, stdout, stderr, "install this recipe; pass -y to confirm")
+			_, code := confirm(a, stdin, stdout, stderr, "install this recipe")
 			return code
 		}
 		m, tmp, previewErr := recipes.Preview(source, gitRef, filepath.Dir(s.CachePath))

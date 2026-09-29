@@ -45,6 +45,7 @@ const (
 	CodeConfirmationRequired Code = "confirmation_required"
 	CodeAccessDenied         Code = "access_denied"
 	CodeRateLimited          Code = "rate_limited"
+	CodeLimitReached         Code = "limit_reached"
 	CodeInternal             Code = "internal"
 
 	CodeQemuMissing        Code = "qemu_missing"
@@ -83,7 +84,7 @@ func Codes() []Code {
 		CodeAlreadyRunning, CodeNoDisk, CodeImmutableField, CodeDiskShrink,
 		CodeCannotReach, CodeUnknownLog, CodeTimeout, CodeCanceled,
 		CodeUsage, CodeConfirmationRequired, CodeInternal,
-		CodeAccessDenied, CodeRateLimited,
+		CodeAccessDenied, CodeRateLimited, CodeLimitReached,
 		CodeQemuMissing, CodeKVMUnusable, CodeQemuStartFailed,
 		CodeMonitorUnreachable, CodeMonitorRejected, CodeNoConsolePassword,
 		CodeShareInvalid, CodeNoXattr,
@@ -173,6 +174,7 @@ var codeTable = []struct {
 	{CodeConfirmationRequired, ErrConfirmationRequired},
 	{CodeAccessDenied, ErrAccessDenied},
 	{CodeRateLimited, ErrRateLimited},
+	{CodeLimitReached, core.ErrLimit},
 	{CodeUsage, ErrBadInput},
 	{CodeQemuMissing, qemu.ErrBinaryMissing},
 	{CodeKVMUnusable, qemu.ErrKVMUnusable},
@@ -219,7 +221,12 @@ func MapError(err error) *ErrorInfo {
 	}
 	for _, e := range codeTable {
 		if errors.Is(err, e.err) {
-			return &ErrorInfo{Code: e.code, Message: err.Error()}
+			info := &ErrorInfo{Code: e.code, Message: err.Error()}
+			var limit *core.LimitError
+			if errors.As(err, &limit) {
+				info.NeededMB, info.AvailableMB = limit.NeededMB, limit.AvailableMB
+			}
+			return info
 		}
 	}
 	return &ErrorInfo{Code: CodeInternal, Message: err.Error()}

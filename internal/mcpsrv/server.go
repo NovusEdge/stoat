@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/novusedge/stoat/internal/cli/wire"
+	"github.com/novusedge/stoat/internal/core"
 	"github.com/novusedge/stoat/internal/logx"
 	"github.com/novusedge/stoat/internal/project"
 )
@@ -129,6 +132,9 @@ func annotationsFor(c class) *mcp.ToolAnnotations {
 // import) assigns this tool's name; TestAnnotationsMatchTable checks that.
 func register[In, Out any](server *mcp.Server, name string, c class, description string, h func(context.Context, In) (Out, error)) {
 	tool := &mcp.Tool{Name: name, Description: description, Annotations: annotationsFor(c)}
+	if s := inputSchema[In](); s != nil {
+		tool.InputSchema = s
+	}
 	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		out, err := h(ctx, in)
 		if err != nil {
@@ -136,6 +142,46 @@ func register[In, Out any](server *mcp.Server, name string, c class, description
 		}
 		return nil, out, nil
 	})
+}
+
+// inputEnums lists the accepted values of each closed-set string input, keyed
+// by input type and JSON field. The jsonschema struct tag carries only a
+// description, so the enum goes onto the schema after it is generated.
+var inputEnums = map[string][]string{
+	"createIn.mode":         {"live", "disk"},
+	"createIn.agent_access": levelNames[:],
+	"updateIn.agent_access": levelNames[:],
+	"waitIn.until":          {string(core.UntilReachable), string(core.UntilApplied), string(core.UntilStopped)},
+	"jobOutputIn.stream":    {"stdout", "stderr"},
+	"svcIn.action":          svcActions,
+	"logsIn.which":          {string(core.WhichConsole), string(core.WhichApply)},
+}
+
+// inputSchema is the schema the SDK would generate for In, plus inputEnums.
+// It returns nil for an In with no enum, which leaves the SDK to generate it.
+func inputSchema[In any]() *jsonschema.Schema {
+	typ := reflect.TypeFor[In]().Name()
+	var schema *jsonschema.Schema
+	for key, values := range inputEnums {
+		owner, field, _ := strings.Cut(key, ".")
+		if owner != typ {
+			continue
+		}
+		if schema == nil {
+			var err error
+			if schema, err = jsonschema.For[In](nil); err != nil {
+				panic(fmt.Sprintf("input schema for %s: %v", typ, err))
+			}
+		}
+		prop := schema.Properties[field]
+		if prop == nil {
+			panic(fmt.Sprintf("inputEnums: %s has no field %q", typ, field))
+		}
+		for _, v := range values {
+			prop.Enum = append(prop.Enum, v)
+		}
+	}
+	return schema
 }
 
 // zeroOut builds Out's zero value with every nil map and slice field
@@ -177,6 +223,11 @@ func fillEmpty(v reflect.Value) {
 // failure and a user reading the CLI see one message.
 func toolError(err error) *mcp.CallToolResult {
 	info := wire.MapError(err)
+	// An error that names a CLI command for the fix has an MCP spelling.
+	var mcpText interface{ MCPText() string }
+	if errors.As(err, &mcpText) {
+		info.Message = mcpText.MCPText()
+	}
 	// Keep the redaction that receiving middleware applies to the human block
 	// before copying the message into metadata and the JSON fallback.
 	info.Message = redactText(info.Message)

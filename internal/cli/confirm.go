@@ -18,11 +18,18 @@ func confirm(a *Args, stdin io.Reader, stdout, stderr io.Writer, prompt string) 
 	if a.Yes {
 		return true, ExitOK
 	}
-	if a.JSON {
-		return false, a.failMsg(stdout, stderr, wire.ErrConfirmationRequired, prompt+"; pass -y to confirm")
+	why := ""
+	switch {
+	case a.JSON:
+		why = "--json never prompts"
+	case a.Quiet:
+		why = "--quiet never prompts"
+	case !terminal(stdin) || !terminal(stdout):
+		why = "no terminal"
 	}
-	if a.Quiet || !terminal(stdin) || !terminal(stdout) {
-		return false, a.failMsg(stdout, stderr, wire.ErrConfirmationRequired, prompt+"; pass -y to confirm")
+	if why != "" {
+		msg := "refusing to " + strings.TrimSuffix(prompt, "?") + " without confirmation (" + why + "); pass -y"
+		return false, a.failMsg(stdout, stderr, wire.ErrConfirmationRequired, msg)
 	}
 	fmt.Fprintf(stdout, "%s [y/N] ", prompt)
 	line, _ := bufio.NewReader(stdin).ReadString('\n')
