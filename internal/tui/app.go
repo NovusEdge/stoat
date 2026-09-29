@@ -489,7 +489,7 @@ func (m model) View() tea.View {
 	// body already carries its own pane title, so it needs no separate
 	// banner.
 	s := body
-	if m.screen == screenList {
+	if m.screen == screenList && showBanner(m.height) {
 		s = lipgloss.JoinVertical(lipgloss.Center, banner(), "", body)
 	}
 

@@ -8,7 +8,10 @@ Global rules that hold on every screen:
 
 - **ctrl+c** quits immediately from any screen or confirmation prompt.
 - **?** toggles the footer between its short form and full help panel. When a
-  text field has focus, it enters a question mark in that field.
+  text field has focus, it enters a question mark in that field. A footer or
+  help panel wider than the terminal wraps onto more lines. It is never cut off.
+- The list screen hides the logo when the terminal is shorter than 30 rows, so
+  the list gets the space.
 - The list screen uses fixed row and pane widths.
 
 ## Screens

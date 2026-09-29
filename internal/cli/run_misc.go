@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
@@ -17,66 +21,96 @@ func oneLine(s string) string {
 }
 
 func runLogs(a *Args, stdout, stderr io.Writer) int {
-	if a.VM != "" {
-		rc, err := core.Logs(a.VM, a.Which)
-		if err != nil {
-			return a.fail(stdout, stderr, err)
-		}
-		lines, err := tailReader(rc, a.N)
-		closeErr := rc.Close()
-		if err != nil {
-			return a.fail(stdout, stderr, err)
-		}
-		if closeErr != nil {
-			return a.fail(stdout, stderr, closeErr)
-		}
-		if a.JSON {
-			if lines == nil {
-				lines = []string{} // never null: a consumer iterates this
-			}
-			return a.ok(stdout, map[string]any{"vm": a.VM, "which": string(a.Which), "lines": lines})
-		}
-		for _, l := range lines {
-			fmt.Fprintln(stdout, l)
-		}
-		return ExitOK
+	if a.Follow && a.JSON {
+		return a.failUsage(stdout, stderr, "--follow streams until interrupted and cannot emit one result; use --json without it")
 	}
-
-	if err := logx.Init(); err != nil {
+	read := func() ([]byte, error) { return os.ReadFile(logx.Path()) }
+	if a.VM != "" {
+		read = func() ([]byte, error) {
+			rc, err := core.Logs(a.VM, a.Which)
+			if err != nil {
+				return nil, err
+			}
+			b, err := io.ReadAll(rc)
+			if closeErr := rc.Close(); err == nil {
+				err = closeErr
+			}
+			return b, err
+		}
+	} else if err := logx.Init(); err != nil {
 		return a.fail(stdout, stderr, err)
 	}
-	lines, err := tailLines(logx.Path(), a.N)
+
+	b, err := read()
 	if err != nil {
 		return a.fail(stdout, stderr, err)
 	}
+	if a.Follow {
+		b = completeLines(b)
+	}
+	lines := splitTail(b, a.N)
 	if a.JSON {
 		if lines == nil {
 			lines = []string{} // never null: a consumer iterates this
 		}
-		return a.ok(stdout, map[string]any{"lines": lines})
+		if a.VM == "" {
+			return a.ok(stdout, map[string]any{"lines": lines})
+		}
+		return a.ok(stdout, map[string]any{"vm": a.VM, "which": string(a.Which), "lines": lines})
 	}
 	for _, l := range lines {
 		fmt.Fprintln(stdout, l)
 	}
+	if a.Follow {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		if err := followLog(ctx, read, stdout, len(b), logFollowInterval); err != nil {
+			return a.fail(stdout, stderr, err)
+		}
+		return ExitOK
+	}
+	if len(lines) == 0 && a.VM != "" {
+		fmt.Fprintf(stderr, "no %s log yet for %s\n", a.Which, a.VM)
+	}
 	return ExitOK
 }
 
-func tailLines(path string, n int) ([]string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return splitTail(b, n), nil
+const logFollowInterval = 500 * time.Millisecond
+
+// completeLines cuts b after its last newline. Follow emits whole lines only:
+// core.Logs redacts secrets per read, and a secret cut in half by a partial
+// write would slip past the redaction.
+func completeLines(b []byte) []byte {
+	return b[:bytes.LastIndexByte(b, '\n')+1]
 }
 
-// tailReader is tailLines for an already-open reader, the shape core.Logs
-// hands back rather than a path.
-func tailReader(r io.Reader, n int) ([]string, error) {
-	b, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
+// followLog prints what read returns beyond the first printed bytes, every
+// interval, until ctx ends. A shorter read means the file was truncated (the
+// apply log restarts on every run), so it starts over from the top.
+func followLog(ctx context.Context, read func() ([]byte, error), w io.Writer, printed int, interval time.Duration) error {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+		b, err := read()
+		if err != nil {
+			return err
+		}
+		b = completeLines(b)
+		if len(b) < printed {
+			printed = 0
+		}
+		if len(b) > printed {
+			if _, err := w.Write(b[printed:]); err != nil {
+				return err
+			}
+			printed = len(b)
+		}
 	}
-	return splitTail(b, n), nil
 }
 
 func splitTail(b []byte, n int) []string {

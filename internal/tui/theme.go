@@ -2,6 +2,7 @@ package tui
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 
@@ -101,7 +102,9 @@ func pane(title, body string, maxWidth int) string {
 			style = style.Width(inner)
 		}
 	}
-	return style.Render(content)
+	// A literal tab has no width to lipgloss but moves the cursor to the next
+	// tab stop in the terminal, which pushes the border out of line.
+	return style.Render(strings.ReplaceAll(content, "\t", "    "))
 }
 
 // Glyphs are named here for the same reason colours are: a symbol means one
@@ -173,5 +176,15 @@ func paneAt(title, body string, width, maxWidth int) string {
 	}
 	return pane(title, lipgloss.NewStyle().Width(width).Render(body), maxWidth)
 }
+
+// bannerRows is the logo plus the blank line under it.
+const bannerRows = 7
+
+// bannerMinHeight is the terminal height below which the list screen drops the
+// logo. At 24 rows, the classic default, the logo would take a quarter of the
+// screen and cut the list to two VMs.
+const bannerMinHeight = 30
+
+func showBanner(termHeight int) bool { return termHeight >= bannerMinHeight }
 
 func banner() string { return accentStyle.Render(theme.BannerArt) }

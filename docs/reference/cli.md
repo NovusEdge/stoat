@@ -62,7 +62,7 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`rm`](#stoat-rm-name--y) | Delete a VM | 0, 1 |
 | [`clone`](#stoat-clone-source-name) | Copy a VM: overlay disk, fresh ssh port, no forwards | 0, 1 |
 | [`exec`](#stoat-exec-name-command) | Run a command in a VM, verbatim | 0-255, see below |
-| [`ssh`](#stoat-ssh-name) | ssh into a VM, replacing this process | 0, 1, 2 |
+| [`ssh`](#stoat-ssh-name-command) | ssh into a VM, or run a command over ssh; replaces this process | 0, 1, 2 |
 | [`ssh-command`](#stoat-ssh-command-name) | Print the ssh argv instead of running it | 0, 1 |
 | [`cp`](#stoat-cp-source-dest) | Copy a file in or out; one side is `<vm>:<path>` | 0, 1, 2 |
 | [`forward`](#stoat-forward-name-pairs) | Show, set or clear host:guest port forwards | 0, 1, 2 |
@@ -85,12 +85,13 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`recipe refresh`](#stoat-recipe-refresh-names) | Rewrite bundled recipe files from the embedded copies | 0, 1 |
 | [`guest ls`](#stoat-guest-ls) | List loaded guest OS definitions | 0 |
 | [`guest show`](#stoat-guest-show-name) | Print one guest's merged definition | 0, 1 |
-| [`logs`](#stoat-logs-name--n-n) | Tail a VM's log, or stoat's own | 0, 1 |
+| [`logs`](#stoat-logs-name--n-n--f) | Tail a VM's log, or stoat's own | 0, 1, 2 |
 | [`screenshot`](#stoat-screenshot-name--o-path) | Write the VM's screen to a PNG | 0, 1 |
 | [`capabilities`](#stoat-capabilities-vm) | Report current agent capabilities | 0, 1 |
 | [`doctor`](#stoat-doctor) | Check host prerequisites | 0, 1 |
 | [`gce extend`](#stoat-gce-extend-name-duration) | Move a gce VM's soft deadline forward | 0, 1, 2 |
 | [`mcp`](mcp.md) | Serve MCP, run it in the background, or configure and inspect a client entry | 0, 1, 2 |
+| [`completion`](#stoat-completion-shell) | Print a shell completion script | 0, 2 |
 | [`version`](#stoat-version) | Print the stoat version | 0 |
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
@@ -191,7 +192,7 @@ created work (alpine, live, ssh port 2222)
 start it with: stoat up work
 ```
 
-Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB), `--cpus`, `--disk` (absolute size, e.g. `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--agent-access` (`none`, `observe`, `manage`, or `exec`; default `manage`, controls MCP guest access), `--provider` (`qemu`, the default, or `gce`), `--gcp-project` and `--gcp-zone` (honored only with `--provider gce`; each falls back to `config.toml`, then gcloud's active configuration). The hidden `--allow-exec` flag remains as a compatibility alias: true maps to `exec`, false to `manage`.
+Flags: `--image` (required; catalog id or a path to your own image), `--os`, `--backend` (override what a bring-your-own image's filename would otherwise infer), `--mode` (`live` or `disk`; only meaningful for the alpine iso, every other image has one mode), `--ram` (MB, default 4096), `--cpus` (default 4), `--disk` (absolute size, default `8G`), `--share` (host directory to expose), `--console-password` (`random` generates one), `--recipes` (comma-separated or repeated), `--set recipe.param=value` (set a non-secret recipe parameter), `--secret recipe.param` (read a secret from the environment or prompt), `--agent-access` (`none`, `observe`, `manage`, or `exec`; default `manage`, controls MCP guest access), `--provider` (`qemu`, the default, or `gce`), `--gcp-project` and `--gcp-zone` (honored only with `--provider gce`; each falls back to `config.toml`, then gcloud's active configuration). The hidden `--allow-exec` flag remains as a compatibility alias: true maps to `exec`, false to `manage`.
 
 A `--provider gce` create prints a second line naming where it landed and where the project and zone came from:
 
@@ -201,6 +202,8 @@ created cloudy (ubuntu, cloud, ssh port 22)
 gcp project engrammic, zone europe-west4-a, from ~/.stoat/config.toml
 start it with: stoat up cloudy
 ```
+
+A `create` without a terminal on stdin, or with `--json`, records `display = "vnc"`, so a script never opens a QEMU window on the host. From a terminal the VM keeps the default `auto`. Change it later with `stoat update <name> --display`.
 
 `create` (alias `new`) refuses at project scope: `a stoat.toml is present; declare the VM there and run stoat up, or pass --global`. `--global` creates the VM outside the project.
 
@@ -378,16 +381,23 @@ Because the guest's status and stoat's own share one exit-code range, a guest co
 
 **Exit codes:** without `--json`, the guest's own exit status (0-255) on success, or 1 for a stoat-side failure before the command ever ran. With `--json`, the process always exits 0 once the guest command ran at all; the guest's real status is in the JSON `exit_code` field instead, so a consumer parsing the line can always tell a guest failure from a stoat one. `--json` still exits 1 if stoat itself failed to run the command.
 
-## `stoat ssh <name>`
+## `stoat ssh <name> [command...]`
 
 Looks up `ssh` on `$PATH` and **replaces the current process** with it. Signals
 and terminal behavior therefore match a direct `ssh` invocation.
 
 ```
 $ stoat ssh work
+$ stoat ssh work uptime
+$ stoat ssh work ls -la /etc
 ```
 
-`-q` is accepted but has no effect (there is no chatter to suppress before the process is replaced). `--json` is refused outright: `syscall.Exec` destroys the process image, so there is no "after" in which to write a result line; the error message points at `stoat --json exec` for a single command, or `ssh_port`/`ssh_user` from `stoat --json ls` to build your own connection.
+Words after the VM name go to `ssh` as the remote command, and the remote shell
+parses them, as with `ssh host command`. An optional leading `--` is dropped. Use
+[`stoat exec`](#stoat-exec-name-command) when the command must reach the guest
+unparsed, or when you need `--json`.
+
+`-q` is accepted but has no effect (there is no chatter to suppress before the process is replaced). `--json` is refused outright: `syscall.Exec` destroys the process image, so there is no "after" in which to write a result line; the error message points at `stoat --json exec <name> -- <cmd>` for a single command, or `ssh_port`/`ssh_user` from `stoat --json ls` to build your own connection.
 
 **Exit codes:** 0 is not actually observed on success: the process image is gone. 1 if the VM can't be loaded, `ssh` isn't found on `$PATH`, or `exec` itself fails to launch. 2 under `--json`, always (see above).
 
@@ -455,13 +465,13 @@ Lists what stoat can build a VM from: the catalog, plus anything else already do
 
 ```
 $ stoat images
-ID               OS        VARIANT     SIZE       STATE
-ubuntu-24.04     ubuntu    24.04 LTS   595.2MiB   downloaded
-debian-13        debian    13 (trixie) 326.2MiB   downloaded
-fedora-cloud     fedora    44          556.3MiB   downloaded
+ID            OS      VARIANT      SIZE      STATE
+ubuntu-24.04  ubuntu  24.04 LTS    595.2MiB  downloaded
+debian-13     debian  13 (trixie)  326.2MiB  downloaded
+fedora-cloud  fedora  44           556.3MiB  downloaded
 ```
 
-SIZE is exact for a downloaded image and approximate (prefixed `~`) for a catalog entry not yet pulled. A bring-your-own image already on disk (no catalog id) shows its filename as ID and state `byo`.
+Each column is as wide as its longest value. SIZE is exact for a downloaded image and approximate (prefixed `~`) for a catalog entry not yet pulled. A bring-your-own image already on disk (no catalog id) shows its filename as ID and state `byo`.
 
 **Exit codes:** 0 on success; 1 if the catalog or local image list can't be read.
 
@@ -794,7 +804,7 @@ svc status:       rc-service {name} status
 
 **Exit codes:** 0 on success; 1 if no guest by that name is loaded.
 
-## `stoat logs [name] [-n N]`
+## `stoat logs [name] [-n N] [-f]`
 
 With a VM name, tails that VM's own log (`--which console` for the qemu console, the default, or `--which apply` for its apply log). With no name, tails stoat's own log file.
 
@@ -803,11 +813,19 @@ $ stoat logs work -n 20
 ...
 $ stoat logs -n 20
 ...
+$ stoat logs work --which apply -f
+...
 ```
 
-`-n` sets how many lines from the end to print (default 50; `0` or negative prints the whole file).
+`-n`, `--lines` sets how many lines from the end to print (default 50; `0` or negative prints the whole file). `--n` still works as a hidden alias and will be removed in the next release.
 
-**Exit codes:** 0 on success (including an empty log, which prints nothing); 1 if the log can't be opened or read.
+`-f`, `--follow` keeps running after the tail and prints each new line as it is written, until you press Ctrl+C. It prints complete lines only. When the file gets shorter (the apply log restarts on every run), it prints the new file from the top. `--follow` cannot be combined with `--json`, because a stream has no single result line.
+
+A log that does not exist yet prints `no apply log yet for <name>` (or `console`) to stderr.
+
+stoat's own log records INFO and above. Set `STOAT_LOG_LEVEL=debug` before a command to record its trace as well.
+
+**Exit codes:** 0 on success (including an empty log); 1 if the log can't be opened or read; 2 for `--follow` with `--json`.
 
 ## `stoat screenshot <name> [-o path]`
 
@@ -863,25 +881,45 @@ is missing, unparseable, or not positive.
 Checks the same host prerequisites as the installer: QEMU/KVM, `qemu-img`,
 `ssh`, `xorriso`, and `/dev/kvm` access.
 
-```
-$ stoat doctor
-ok
-```
-
-or, with problems:
+Prints one line per check: `ok:`, `WARN:` for an optional tool that is missing, or `FAIL:`.
 
 ```
 $ stoat doctor
-FAIL: /dev/kvm not accessible
+ok: qemu-system-x86_64: /usr/bin/qemu-system-x86_64
+ok: qemu-img: /usr/bin/qemu-img
+FAIL: /dev/kvm: permission denied
       try: sudo usermod -aG kvm $USER
-FAIL: ssh not found in PATH
 ```
 
-A failed check that has a known fix prints a `try:` line under it.
+A failed check that has a known fix prints a `try:` line under it. `-q` prints only the failed checks.
 
 **Exit codes:** without `--json`, 0 if every check passes and 1 if any check
 fails. With `--json`, always 0 after a completed check; use the JSON `healthy`
 field for host readiness.
+
+## `stoat completion <shell>`
+
+Prints a completion script for `bash`, `zsh` or `fish`. The script completes subcommands, flags, enum values, VM names, image ids and recipe names. VM names come from the data root and, inside a project, from the keys in `stoat.toml`.
+
+Load it for the current shell:
+
+```sh
+source <(stoat completion bash)      # bash
+source <(stoat completion zsh)       # zsh, after compinit
+stoat completion fish | source       # fish
+```
+
+To load it in every shell, write the output to a file the shell reads at startup:
+
+```sh
+stoat completion bash > ~/.local/share/bash-completion/completions/stoat
+stoat completion zsh  > "${fpath[1]}/_stoat"
+stoat completion fish > ~/.config/fish/completions/stoat.fish
+```
+
+Each completion runs `stoat __complete` with the words typed so far. That command is hidden, prints one candidate per line, and reads the data root without changing it.
+
+**Exit codes:** 0 on success; 2 for an unsupported shell.
 
 ## `stoat version`
 

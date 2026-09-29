@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/novusedge/stoat/internal/cli/wire"
 	"github.com/novusedge/stoat/internal/core"
@@ -22,7 +23,8 @@ func runImages(a *Args, stdout, stderr io.Writer) int {
 	if a.JSON {
 		return a.ok(stdout, map[string]any{"images": wire.FromCatalogImages(imgs)})
 	}
-	fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", "ID", "OS", "VARIANT", "SIZE", "STATE")
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tOS\tVARIANT\tSIZE\tSTATE")
 	for _, i := range imgs {
 		size := humanSize(i.Bytes)
 		if !i.Exact {
@@ -37,7 +39,10 @@ func runImages(a *Args, stdout, stderr io.Writer) int {
 			id = i.File // a byo file has no catalog id
 			state = "byo"
 		}
-		fmt.Fprintf(stdout, "%-16s %-9s %-11s %-10s %s\n", id, i.OS, i.Variant, size, state)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", id, i.OS, i.Variant, size, state)
+	}
+	if err := tw.Flush(); err != nil {
+		return a.fail(stdout, stderr, err)
 	}
 	return ExitOK
 }

@@ -51,7 +51,7 @@ type Args struct {
 	VM    string
 	Quiet bool
 	Yes   bool
-	N     int // logs -n
+	N     int // logs --lines
 
 	// w caches the ui.Writer prose() hands out, and wOut is the stream it
 	// was built for. Parse leaves both nil; only prose() sets them.
@@ -136,13 +136,14 @@ type Args struct {
 	// what a VM is.
 	Spec core.Spec
 
-	// Until and Timeout belong to "wait"; Which belongs to "logs"; Only
+	// Until and Timeout belong to "wait"; Which and Follow belong to "logs"; Only
 	// belongs to "apply" and carries the names for "check-recipes".
 	Until         core.Until
 	UntilExplicit bool
 	Timeout       time.Duration
 	Which         core.Which
 	Only          []string
+	Follow        bool
 
 	// Duration belongs to "gce extend": how far to move the soft deadline
 	// forward, from now.
@@ -216,6 +217,11 @@ func newParser(g *grammar, help *bytes.Buffer) (*kong.Kong, error) {
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true, FlagsLast: true, NoExpandSubcommands: true}),
 		kong.ExplicitGroups(commandGroups),
 		kong.ValueFormatter(helpValue),
+		kong.Vars{
+			"default_ram":  fmt.Sprint(core.DefaultRAM),
+			"default_cpus": fmt.Sprint(core.DefaultCPUs),
+			"default_disk": core.DefaultDisk,
+		},
 	)
 }
 
@@ -266,6 +272,13 @@ func commandPath(ctx *kong.Context) string {
 func Parse(args []string) (*Args, error) {
 	if len(args) > 0 && args[0] == "exec" {
 		return parseExec(args[1:])
+	}
+	// The words being completed are data: a flag among them must not be parsed.
+	if len(args) > 0 && args[0] == "__complete" {
+		return &Args{Cmd: "__complete", Command: args[1:]}, nil
+	}
+	if len(args) >= 3 && args[0] == "ssh" && !strings.HasPrefix(args[1], "-") {
+		return &Args{Cmd: "ssh", VM: args[1], Command: trimTerminator(args[2:])}, nil
 	}
 	args = preserveRecipeSearchTerm(args)
 
@@ -464,6 +477,12 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		return ExitUsage
 	}
 	a.JSON = jsonMode
+	// A script has nobody to look at a QEMU window, so a VM created without a
+	// terminal records vnc. create has no display flag, so "" here is always
+	// "auto"; `update --display` sets it explicitly afterwards.
+	if a.Cmd == "create" && a.Spec.Display == "" && (jsonMode || !streamIsTTY(stdin)) {
+		a.Spec.Display = core.DisplayVNC
+	}
 	if jsonMode {
 		// --json is non-interactive by definition, and -q under it is a no-op
 		// rather than an error. Forcing Quiet here is what suppresses the prose
@@ -493,6 +512,10 @@ func Main(args []string, version string, stdin io.Reader, stdout, stderr io.Writ
 		}
 		fmt.Fprintln(stdout, "stoat", version)
 		return ExitOK
+	case "completion":
+		return runCompletion(a, stdout)
+	case "__complete":
+		return runComplete(a, stdout)
 	case "doctor":
 		// Doctor is read-only by design: it may report an unqualified native
 		// host before root setup or parameter resolution.

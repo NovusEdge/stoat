@@ -97,7 +97,7 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 		// faking one would break the "exactly one terminal result" guarantee
 		// for every consumer that ever calls it.
 		_ = wire.NewEmitter(stdout).ResultErr(a.Cmd,
-			wire.UsageError("ssh replaces the stoat process and cannot emit a result; use `stoat --json exec "+a.VM+" ...` for a command, or ssh_port/ssh_user from `stoat --json ls`"))
+			wire.UsageError("ssh replaces the stoat process and cannot emit a result; use `stoat --json exec "+a.VM+" -- <cmd>` for a command, or ssh_port/ssh_user from `stoat --json ls`"))
 		return ExitUsage
 	}
 	v, err := config.Load(a.VM)
@@ -110,7 +110,7 @@ func runSSH(a *Args, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
 	}
-	argv := append([]string{"ssh"}, sshx.Args(sshx.LocalEndpoint(v))...)
+	argv := append([]string{"ssh"}, sshx.Args(sshx.LocalEndpoint(v), a.Command...)...)
 	if err := syscall.Exec(path, argv, os.Environ()); err != nil {
 		fmt.Fprintln(stderr, "stoat: ssh:", err)
 		return ExitFail
