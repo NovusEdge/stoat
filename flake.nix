@@ -38,7 +38,7 @@
             src = self;
 
             # Recompute when go.mod or go.sum changes.
-            vendorHash = "sha256-I3cYDT3RCVqD87IYqGgaI0EwvLn5WpUPaHoC8c5PN48=";
+            vendorHash = "sha256-FDNhtle3sILmi2ionRvWMwD+Fkbe2ZE4qsRdxrarUAY=";
 
             subPackages = [ "cmd/stoat" ];
 
