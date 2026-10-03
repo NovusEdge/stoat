@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.1
+
+Documentation only; no code changes from v0.7.0 apart from a bubbletea bump
+(2.0.9 to 2.0.10).
+
+### Fixes
+
+- The CLI reference said a usage error prints the full usage text. It prints
+  the error, the command's usage line and a pointer to `--help`, as it has
+  since v0.7.0. `stoat help <command>` is documented.
+- The exit-code table listed `stoat down` on a stopped VM as exit 1. It exits
+  0, as the `down` section says.
+- `stoat ssh` documents exit 1 for a VM whose sshd does not answer yet.
+- The JSON reference describes `not_found`, `cannot_reach` and
+  `access_denied` with the cases v0.7.0 added, and its History section records
+  `limit_reached`, `needed_mb` and `available_mb`.
+- Two corrections to the v0.7.0 notes below. `cannot_reach` was not a new
+  code: it existed for `wait`, and v0.7.0 extended it to a guest command whose
+  ssh connection failed. For `stoat logs`, `-n` is the short form of
+  `--lines`; the spelling kept as a hidden alias is `--n`.
+
 ## v0.7.0
 
 A usability pass for people and for agents, driven by two audits that used

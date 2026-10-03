@@ -116,7 +116,7 @@ bump the contract version. Do not write code that requires them.
 
 | Code | Meaning |
 |---|---|
-| `not_found` | no such VM |
+| `not_found` | no such VM, or no such snapshot, guest, image, recipe, background job, guest path, or `stoat.toml` entry |
 | `broken` | the VM's `vm.toml` will not parse |
 | `name_taken` | a VM by that name already exists |
 | `invalid_spec` | the request itself is malformed |
@@ -129,7 +129,7 @@ bump the contract version. Do not write code that requires them.
 | `no_disk` | the VM has no qcow2 (a live VM has none) |
 | `immutable_field` | `update` was asked to change a field that cannot change |
 | `disk_shrink` | a disk can only grow |
-| `cannot_reach` | `wait` was asked for a state this VM can never reach |
+| `cannot_reach` | `wait` was asked for a state this VM can never reach, or a guest command could not connect because the running VM's sshd does not answer yet (it is booting; `wait` first) |
 | `unknown_log` | bad `--which` |
 | `qemu_missing` | `qemu-system-x86_64` is not on `PATH` |
 | `kvm_unusable` | `/dev/kvm` cannot be opened; the user is usually not in the `kvm` group |
@@ -148,7 +148,7 @@ bump the contract version. Do not write code that requires them.
 | `canceled` | the context was cancelled |
 | `usage` | a bad flag, a missing argument, an unknown subcommand |
 | `confirmation_required` | a destructive command was run without `-y` |
-| `access_denied` | MCP guest access was refused because the VM's `agent_access` level is too low |
+| `access_denied` | MCP guest access was refused because the VM's `agent_access` level is too low (including `write_file` with `as_root` below `exec`), or the guest refused a path the ssh user cannot read or write |
 | `rate_limited` | MCP refused a tool call because its per-tool or shared rate bucket was exhausted |
 | `limit_reached` | a configured limit or the host's free memory refuses the operation; a RAM refusal adds `needed_mb` and `available_mb` |
 | `lock_out_of_date` | a project declaration is not pinned in `stoat.lock` |
@@ -646,6 +646,15 @@ The contract stays 3.
 `created_display`, which stay. `VM` gained `shared_dir`
 and `shared_mount`. The MCP server gained `list_snapshots` and `delete_snapshot`.
 The contract stays 3.
+
+v0.7.0 added the `limit_reached` code and the `needed_mb` and `available_mb`
+error fields, which appear only on a RAM refusal. The same release widened
+three existing codes: `not_found` covers missing guest paths, job ids,
+recipes and images as well as VMs; `cannot_reach` covers a guest command
+whose ssh connection failed while the VM boots; and `access_denied` covers a
+guest path the ssh user cannot use. Before v0.7.0 those cases answered
+`internal`, or reported success with exit code 255. No code changed its
+meaning for a case it already covered, so the contract stays 3.
 
 ## Capability discovery
 

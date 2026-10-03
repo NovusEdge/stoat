@@ -96,7 +96,8 @@ order, when given no VM argument. A bare VM argument resolves against
 | [`help`](#stoat-help) | Show the usage message | 0 |
 
 An unknown command, missing VM name, or extra argument is a **usage error**
-(exit 2). Stoat prints the error and full usage text to stderr. The
+(exit 2). Stoat prints the error, the command's usage line, and a pointer to
+its `--help` to stderr. The
 client-specific `mcp` flags are documented in [the MCP reference](mcp.md).
 
 ## `stoat ls`
@@ -407,7 +408,7 @@ unparsed, or when you need `--json`.
 
 `-q` is accepted but has no effect (there is no chatter to suppress before the process is replaced). `--json` is refused outright: `syscall.Exec` destroys the process image, so there is no "after" in which to write a result line; the error message points at `stoat --json exec <name> -- <cmd>` for a single command, or `ssh_port`/`ssh_user` from `stoat --json ls` to build your own connection.
 
-**Exit codes:** 0 is not actually observed on success: the process image is gone. 1 if the VM can't be loaded, `ssh` isn't found on `$PATH`, or `exec` itself fails to launch. 2 under `--json`, always (see above).
+**Exit codes:** 0 is not actually observed on success: the process image is gone. 1 if the VM can't be loaded, its sshd doesn't answer within 3 seconds (stoat prints `<name> is booting; run stoat wait <name>`), `ssh` isn't found on `$PATH`, or `exec` itself fails to launch. 2 under `--json`, always (see above).
 
 ## `stoat ssh-command <name>`
 
@@ -941,7 +942,7 @@ Prints the build's version string as `stoat <version>`. Equivalent to the top-le
 
 ## `stoat help`
 
-Prints the full usage message (subcommands, global flags, exit codes) to stdout. The same text is printed to stderr, alongside the specific error, whenever a usage error occurs.
+Prints the full usage message (subcommands, global flags, exit codes) to stdout. `stoat help <command>` prints that command's help instead, the same text as `stoat <command> --help`.
 
 **Exit codes:** always 0.
 
@@ -950,10 +951,11 @@ Prints the full usage message (subcommands, global flags, exit codes) to stdout.
 | Code | Meaning | Examples |
 |---|---|---|
 | `0` | Success | VM started/stopped, provisioned, deleted; `doctor` found nothing wrong |
-| `1` | Runtime failure | Unknown VM name, VM already stopped for `down`, VM running for `rm`, ssh unreachable during provision, `doctor` found an issue, `rm` confirmation declined |
+| `1` | Runtime failure | Unknown VM name, VM running for `rm`, ssh unreachable during provision, `doctor` found an issue, `rm` confirmation declined |
 | `2` | Usage error | Unknown subcommand, missing/extra arguments, an unparseable flag, `update` given no flags, `check-recipes` given no names |
 
-A usage error (2) prints the complaint and full usage text to stderr. A runtime
+A usage error (2) prints the complaint, the command's usage line, and a pointer
+to its `--help` to stderr. A runtime
 failure (1) prints `stoat: <command>: <error>` to stderr. Without `--json`,
 `exec` instead returns the guest command's status from 0 through 255. See
 [`stoat exec`](#stoat-exec-name-command).
