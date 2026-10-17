@@ -11,7 +11,7 @@ require (
 	cloud.google.com/go/compute v1.70.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/alecthomas/kong v1.16.1
-	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/diskfs/go-diskfs v1.9.4
 	github.com/google/jsonschema-go v0.4.3
